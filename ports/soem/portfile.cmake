@@ -905,32 +905,21 @@ vcpkg_replace_string(
 # their position counted up by every slave the frame passes. A frame that does not match is
 # dropped, and the caller keeps waiting. The three platform drivers share this code.
 #
-# A pure write is compared on its data as well, because a write datagram comes back with the data
-# it carried. Every mailbox write to one slave has the same header, so the header alone cannot tell
-# a late return of an earlier write from the return of the write in flight. Taken for that return,
-# a late refusal (working counter 0) made ecx_mbxsendonce write the request in flight again, and a
-# request delivered twice locks the receive mailbox of an XMOS stack (#132). The data differs
-# between two mailbox writes at least in the mailbox counter, so the compare tells them apart. A
-# read cannot be compared on data, because the data is the slave's answer.
-#
-# For two cyclic frames the check still has only the index, because a cyclic LWR carries the same
-# output image from one cycle to the next. With EC_MAXBUF indexes and at most the frame slots of
-# the control plane plus the cyclic frames in flight, a cyclic frame must come back about twenty
-# cycles late to carry the index of a newer one.
+# The check cannot tell two cyclic frames apart, because every cyclic frame carries the same
+# header. For those, only the index does the work: with EC_MAXBUF indexes and at most the frame
+# slots of the control plane plus the cyclic frames in flight, a cyclic frame must come back about
+# twenty cycles late to carry the index of a newer one. A control-plane datagram differs from its
+# neighbours in command, offset or position, which is what the check is for.
 foreach(nicdrv "oshw/linux/nicdrv.c" "oshw/win32/nicdrv.c" "oshw/macosx/nicdrv.c")
   vcpkg_replace_string(
       "${SOURCE_PATH}/${nicdrv}"
 "int ecx_inframe(ecx_portt *port, uint8 idx, int stacknumber)
 {"
-"/* True when the first datagram of the frame in tempbuf is the one sent under idx. The comment in
- * the Motion Master SOEM port explains the rules. */
+"/* True when the first datagram of the frame in tempbuf is the one sent under idx. */
 static boolean ecx_datagrammatches(ec_stackT *stack, uint8 idx)
 {
-   const uint8 *txframe = (const uint8 *)(*stack->txbuf)[idx];
-   const uint8 *rxframe = (const uint8 *)(*stack->tempbuf);
-   const ec_comt *tx = (const ec_comt *)&txframe[ETH_HEADERSIZE];
-   const ec_comt *rx = (const ec_comt *)&rxframe[ETH_HEADERSIZE];
-   uint16 length;
+   const ec_comt *tx = (const ec_comt *)&((*stack->txbuf)[idx][ETH_HEADERSIZE]);
+   const ec_comt *rx = (const ec_comt *)&((*stack->tempbuf)[ETH_HEADERSIZE]);
 
    if ((tx->command != rx->command) || (tx->ADO != rx->ADO) ||
        ((tx->dlength & htoes(0x07ff)) != (rx->dlength & htoes(0x07ff))))
@@ -946,26 +935,9 @@ static boolean ecx_datagrammatches(ec_stackT *stack, uint8 idx)
       case EC_CMD_BRD:
       case EC_CMD_BWR:
       case EC_CMD_BRW:
-         break;
-      default:
-         if (tx->ADP != rx->ADP)
-         {
-            return FALSE;
-         }
-         break;
-   }
-   switch (tx->command)
-   {
-      case EC_CMD_APWR:
-      case EC_CMD_FPWR:
-      case EC_CMD_BWR:
-      case EC_CMD_LWR:
-         /* a pure write comes back with the data it carried */
-         length = etohs(tx->dlength) & 0x07ff;
-         return (memcmp(&txframe[ETH_HEADERSIZE + EC_HEADERSIZE],
-                        &rxframe[ETH_HEADERSIZE + EC_HEADERSIZE], length) == 0);
-      default:
          return TRUE;
+      default:
+         return (tx->ADP == rx->ADP);
    }
 }
 

@@ -19,6 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Plant identification, as one procedure.** `plant-identification` on a SOMANET drive enables it in cyclic synchronous torque mode with a zero target, excites it with the chirp, records its velocity and torque, has the auto-tuning program fit the plant model, and writes the model to `plant_model.csv` on the drive. The run refuses a recording the chirp did not excite or in which the motor did not move, warns when the motion was small, and refuses an unstable model. On every way out, a cancel included, it disarms the chirp, engages again a brake it released, returns the drive to Switched On and puts the operation mode back. The result carries the model, its inertia and friction, the chirp and the Bode data. A chirp that does not fit in the drive's recording with its 200 ms of padding is refused before anything moves.
+- **`GET /api/devices/{slavePosition}/plant-model`** reads the stored model back. A drive that was never identified answers 404.
+
 ## [6.0.0-alpha.110] - 2026-10-22
 
 No change to the server, the web apps or the client against 6.0.0-alpha.99. The repository gained `hil/foe_read_abort`, the reproduction of a Circulo firmware fault, which is not in the packages. The numbers 100 to 109 are skipped: the version library of the build refuses a prerelease number with a zero after its first digit, and 6.0.0-alpha.100 did not build.

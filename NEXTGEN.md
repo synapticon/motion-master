@@ -4886,3 +4886,71 @@ regression bar for the next change to the port.
 
 **What is not done.** A Jasper under any of this. The Windows and macOS builds under netem. A CI
 leg with netem, which the Belgrade bench is for. `#129` and `#130` on the master side.
+
+## Session 2026-10-22 — Plant identification is one procedure, and the registry has a door (as-built)
+
+Issue #18. Four commits on `18-plant-identification`, one per step of the plan.
+
+**The procedure registry takes its outside dependencies through a config.** The plant model fit
+runs in the auto-tuning program, whose client lives in `libs/auto_tuning`, and `libs/node` may not
+depend on it. The procedure table was a static free function with no way to receive anything. It
+is now `ProcedureRegistry`, a class built once in `main.cc` from the device manager, the procedure
+manager and a `ProcedureRegistryConfig`: a struct of `std::function` callbacks, the shape
+`HttpServer::Config` already has. The four operations a client performs are its methods, so
+`HttpServer` holds the registry and passes no collaborators per call. A setter on a global was the
+quicker alternative and was rejected: a hidden dependency that no signature names, that a test
+forgets, and that breaks the rule that the composition root instantiates every collaborator in the
+open. `libs/node` names only the callback type, `PlantModelFitFn`. `plant_model_fit.cc` in the app
+binds it to the client, or to a refusal that names the missing program, and is the one place that
+knows the program's request and reply formats.
+
+**It is a registry, not a catalogue.** The class resolves a name and starts a run. A catalogue is a
+static list, the word the repository uses for the register, unit and Integro option tables, and
+those stay. #20 and #21 add their callbacks beside `fitPlantModel`.
+
+**The pure functions came first, and the file format is the one already on drives.** Conversion
+from the recording's units, the amplitude checks, the stability check, the duration bound, and
+`plant_model.csv` in both directions, each tested without a device. The parser reads what older
+writers produced: exponent notation from a stream at default precision, a Windows line ending, a
+missing chirp row. The writer emits every digit that reads back to the same double, because a
+rounded coefficient moves the model's poles. The last two denominator coefficients are the inertia
+and the friction, which is how the program reads them (`sncn_auto_tuning_library.py`), and the
+model carries them by name so no client has to know that.
+
+**The run restores the drive before the fit, not after it.** The body is split in two scopes. The
+first holds the restorer and does the excitation and the recording; when it ends, the chirp is
+disarmed, a brake the run released is engaged again, the drive is in Switched On and the mode is
+back. Only then does the fit run, however long the program takes. The step order says so: restore
+sits between record and fit. The alternative, restore last, left a drive enabled in CST while a
+numerical fit ran on another process.
+
+**The restorer grew two things and a name.** `DiagnosticsRestorer` became `DriveRestorer`: a
+resting state, because the diagnostics procedures rest in Switch On Disabled and this one rests in
+Switched On as #18 asks; and a chirp disarm, because a cancelled or failed run must leave no armed
+chirp behind for the next recording to trigger. The disarm runs without the stop token, since a
+cancelled run is the case it exists for.
+
+**The brake rule is per strategy, taken from #16.** A brake the drive controls, strategy 1 or 2, is
+released by the drive when it enables in a motion mode and engaged again when it leaves Operation
+Enabled, so the procedure writes nothing and restores nothing. A manual brake, strategy 0, is a
+voltage the firmware does not manage: the procedure writes the release after the enable, waits the
+pull time plus the margin `releaseBrake` uses, and the restorer engages it again before the drive
+leaves Operation Enabled. A drive whose brake status reads "not configured" is skipped. The
+measurement procedures still call `releaseBrake`, which is a no-op on strategy 0, and nobody has
+reconciled the two readings of a manual brake yet; this session followed the issue.
+
+**Units stay the system identification procedure's.** #18 says the request takes Hz. The procedure
+takes millihertz under the same five names as `system-identification`, because two procedures on one
+drive that name the same chirp in different units is worse, and because the parameter vocabulary has
+no decimal type. The stored file and the fit take Hz, and the conversion is one division.
+
+**Every path runs against the fake driver.** The happy path, a manual brake, a refused fit, an
+unstable model, a small motion, a recording the chirp did not excite, a fault during the chirp, a
+zero rated torque, an empty fit and a cancellation. The fake needed nothing new: the rated torque
+and the target torque are programmed per test, and the recording is two files like the HRD tests
+use.
+
+**Not yet done.** The hardware run on the bench drive, which the chirp moves. `kChirpPaddingMs` is
+200 ms as v5 used, split by the drive into 100 ms on each side, and nothing measured whether that
+rest is enough for the fit; the first bench run should look at the first and last rows of the
+recording.

@@ -16,7 +16,8 @@
 //   5. Wait 3 s, and read the file in full once more.
 //
 // The program ends with WEDGED when the last read gets FoE error 0x800B "File System is busy",
-// with OK when it gets the file of step 1, and with FAIL for anything else. A wedged drive needs a
+// with WRONG BYTES when it gets a file whose bytes are not those of step 1, with OK when it gets
+// the file of step 1, and with FAIL for anything else. A wedged drive needs a
 // power cycle. The drive is left in PRE-OP.
 //
 // The sequence of issue #131, seen on a Circulo under late frames. Measured on a Circulo with
@@ -103,6 +104,7 @@ struct ReadResult {
   std::chrono::milliseconds duration{0};
   std::vector<std::string> errors;
   uint32_t foeErrorCode = 0;
+  std::vector<uint8_t> bytes;
 };
 
 // Reads one file in full and collects the errors SOEM queued for the read.
@@ -115,6 +117,9 @@ ReadResult readFile(ecx_contextt* ctx, uint16_t slave, const std::string& file) 
   result.wkc = ecx_FOEread(ctx, slave, name.data(), 0, &result.size, buffer.data(), kReadTimeoutUs);
   result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - start);
+  if (result.wkc > 0) {
+    result.bytes.assign(buffer.begin(), buffer.begin() + result.size);
+  }
   ec_errort err{};
   while (ecx_poperror(ctx, &err)) {
     if (err.Etype == EC_ERR_TYPE_MBX_ERROR) {
@@ -130,10 +135,16 @@ ReadResult readFile(ecx_contextt* ctx, uint16_t slave, const std::string& file) 
   return result;
 }
 
-void printRead(std::string_view step, const ReadResult& result) {
+// Prints one read. When a baseline is given, says whether the bytes are the baseline's, because a
+// drive can serve a file of the right size with the wrong content: the first packet as zeros.
+void printRead(std::string_view step, const ReadResult& result,
+               const ReadResult* baseline = nullptr) {
   std::cout << std::format("{}: wkc {}, {} ms", step, result.wkc, result.duration.count());
   if (result.wkc > 0) {
     std::cout << std::format(", {} bytes", result.size);
+    if (baseline != nullptr) {
+      std::cout << (result.bytes == baseline->bytes ? ", same bytes" : ", WRONG BYTES");
+    }
   }
   for (const std::string& error : result.errors) {
     std::cout << ", " << error;
@@ -280,15 +291,17 @@ int main(int argc, char** argv) {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(options.pauseMs));
   const ReadResult first = readFile(ctx.get(), slave, options.file);
-  printRead(std::format("4. read after {} ms", options.pauseMs), first);
+  printRead(std::format("4. read after {} ms", options.pauseMs), first, &baseline);
 
   std::this_thread::sleep_for(std::chrono::seconds(3));
   const ReadResult second = readFile(ctx.get(), slave, options.file);
-  printRead("5. read after 3 s", second);
+  printRead("5. read after 3 s", second, &baseline);
 
   std::string verdict = "FAIL";
-  if (second.wkc > 0 && second.size == baseline.size) {
+  if (second.wkc > 0 && second.bytes == baseline.bytes) {
     verdict = "OK";
+  } else if (second.wkc > 0) {
+    verdict = "WRONG BYTES";
   } else if (second.foeErrorCode == kFoeErrorFileSystemBusy) {
     verdict = "WEDGED";
   }

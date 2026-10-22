@@ -1,7 +1,6 @@
 #include "node/plant_identification.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <format>
@@ -10,7 +9,6 @@
 #include <numeric>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -55,13 +53,14 @@ std::expected<std::vector<double>, std::string> parseRow(std::string_view row, i
            (field.back() == ' ' || field.back() == '\t' || field.back() == '\r')) {
       field.remove_suffix(1);
     }
-    double value = 0.0;
-    const auto [end, ec] = std::from_chars(field.data(), field.data() + field.size(), value);
-    if (ec != std::errc() || end != field.data() + field.size()) {
+    // The JSON parser rather than std::from_chars, which libc++ does not offer for a double
+    // before macOS 26. Every form a writer of this file produces is a JSON number.
+    const auto value = nlohmann::json::parse(field, nullptr, false);
+    if (!value.is_number()) {
       return std::unexpected(std::format("row {} field {} is not a number: '{}'", rowNumber,
                                          values.size() + 1, field));
     }
-    values.push_back(value);
+    values.push_back(value.get<double>());
     if (comma == std::string_view::npos) {
       break;
     }

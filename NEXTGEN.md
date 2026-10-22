@@ -4814,9 +4814,19 @@ are #130, and 150 ms is past the 100 ms design point. The two wrong files are th
 after a failed read, #129 and synapticon/somanet_software#5817, and the drive served the file again
 from round 6 without a power cycle.
 
-**Not tested.** A Circulo with this build. Its rule did not change: `mbxwriteonce` and
-`mbxnorepeat` are both set for it, as the one flag was before. A Jasper, which has no device on
-the bench. The Windows and macOS builds.
+**Measured on the Circulo, the released build v6.0.0-alpha.99**, product 0x301, firmware v5.6.11,
+10 rounds each. The scan logged `ESC type 0xC0, mailbox writes go out once`, and `GET /api/devices`
+gave `"escType":192,"mailboxWriteOnce":true`.
+
+| Frames | Late writes | Reads asked once more | Reads failed | Lock | Files correct |
+| --- | --- | --- | --- | --- | --- |
+| none | 0 | 0 | 0 | none | 10 of 10 |
+| 2 % late by 150 ms | 81 | 25, 24 recovered | 1 | none | 10 of 10 |
+
+One file read failed on a late frame and the second attempt served the file, byte for byte. That is
+the Circulo row of Session 2026-10-20 again, with the lock gone.
+
+**Not tested.** A Jasper, which has no device on the bench. The Windows and macOS builds.
 
 **Open.** A read that got a reply for another object is not asked again, because `uploadSdo` asks
 again on no answer only. A fresh transfer would serve it. Decide with #130, which owns the stale

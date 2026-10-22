@@ -4660,5 +4660,35 @@ Against the tables of Session 2026-10-20 on the same drive:
   read. If that is the cause, it is the limit the port comment now states, met on a register read
   instead of a cyclic frame.
 
-**Not tested.** A Circulo, which is not on the bench today; two drives; the Windows and macOS
-builds. The Circulo rows of the done-when list stay open until one is connected.
+**Measured on the bench Circulo** later the same day, product 0x301, revision 0x11000003, firmware
+v5.6.11, alone on the bus, the same loop:
+
+| Frames | Rounds | Late writes | Counter-0 recoveries | Reads asked once more | Reads failed | Files correct |
+| --- | --- | --- | --- | --- | --- | --- |
+| none | 10 | 0 | 0 | 0 | 0 | 10 of 10 |
+| 2 % late by 150 ms | 10 | not counted, the log rotated | | | locked in round 6 | 5 of 10 |
+| 2 % late by 150 ms, capture | 10 | 48 | 0 | 33, 32 recovered | 1 | 10 of 10 |
+| 2 % late by 150 ms, capture | 20 | 143 | 0 | 58, 57 recovered | 1 | 4 of 20 |
+| 1 % lost | 10 | 54 | 54 | 52, 51 recovered | 1 | 10 of 10 |
+
+`hil/mailbox_duplicate` on the same drive: LOCKED, SM0 status 0x48, and INIT frees it.
+
+Two things happened on the Circulo at 150 ms that this branch does not cause and does not fix.
+
+- **The first 150 ms run locked the receive mailbox in round 6**, the lock of #100: SM0 status 0x48,
+  every later request refused with "the slave's receive mailbox is full", and INIT frees it. The
+  log shows a file read whose last ACK got no frame back, the next SDO sent with counter 0 and
+  answered, and the SDO after it, with the reused counter, unanswered. By the firmware's check that
+  order cannot lock, so a request reached the drive twice. The one place the port writes twice is
+  after a refusal, and a refusal frame that comes back late can be matched to a newer write, because
+  every mailbox write to one drive carries the same header. That is a reading of the code. Two
+  capture runs of 10 and 20 rounds showed no refusal, no duplicate counter and no lock. Issue #132
+  carries the defence, a write's returned frame matched on its data, and the capture to catch it.
+- **The 20-round run wedged the drive's file system from round 5.** A read of data packet 5 came
+  back later than 100 ms, the abort went out, the retry's READ was accepted and served two packets,
+  the drive answered the ACK of packet 2 with FoE error 0x8004 "Illegal", and every READ after it
+  got 0x800B "File System is busy". INIT then PRE-OP did not clear it; a power cycle did. The
+  capture has the whole exchange, and the firmware's `foe.c` and `foe_buffer.c` show the storage
+  task left busy by the abort's erase. Issue #131, with the firmware issue beside it.
+
+**Not tested.** Two drives, and the Windows and macOS builds.

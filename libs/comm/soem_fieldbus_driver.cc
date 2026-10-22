@@ -1762,9 +1762,14 @@ AddressState restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
 // new request without reading it. SM0 then stays full, and only a power cycle recovers the device.
 //
 // The firmware never ignores a request with counter 0, and it stores 0 as the last counter. So
-// this sends one SDO upload of 0x1000:00 with counter 0 and reads the answer. SOEM never uses
-// counter 0, so the device accepts the next request whatever its counter is. ETG1000.4 reserves
-// counter 0, which is why only Synapticon and Sensodrive devices get this request.
+// this sends one SDO upload of 0x1000:00 with counter 0 and reads the answer. SOEM's own requests
+// carry counters 1 to 7, so the device accepts the next request whatever its counter is. ETG1000.4
+// reserves counter 0, which is why only Synapticon and Sensodrive devices get this request.
+//
+// A request that gets no answer is sent once more. Both SOMANET stacks accept counter 0 twice in a
+// row (hil/mailbox_counter0, pattern `double`), so the second copy is safe. Without it, a lost
+// reset on firmware before v5.6.0 leaves about one chance in seven that the next request repeats
+// the stored counter and locks the mailbox.
 bool resetMailboxCounter(ecx_contextt* ctx, uint16_t slave) {
   OSAL_PACKED_BEGIN
   struct OSAL_PACKED SdoUploadRequest {
@@ -1777,34 +1782,44 @@ bool resetMailboxCounter(ecx_contextt* ctx, uint16_t slave) {
   };
   OSAL_PACKED_END
 
-  // The answer read below must belong to this request.
-  drainMailbox(ctx, slave);
+  constexpr int kAttempts = 2;
+  for (int attempt = 1; attempt <= kAttempts; ++attempt) {
+    // The answer read below must belong to this request.
+    drainMailbox(ctx, slave);
 
-  ec_mbxbuft* out = ecx_getmbx(ctx);
-  if (out == nullptr) {
-    return false;
-  }
-  ec_clearmbx(out);
-  auto* request = reinterpret_cast<SdoUploadRequest*>(out);
-  request->header.length = htoes(sizeof(SdoUploadRequest) - sizeof(ec_mbxheadert));
-  request->header.address = htoes(0x0000);
-  request->header.priority = 0x00;
-  request->header.mbxtype = ECT_MBXT_COE + MBX_HDR_SET_CNT(0);
-  request->canOpen = htoes(0x000 + (ECT_COES_SDOREQ << 12));
-  request->command = ECT_SDO_UP_REQ;
-  request->index = htoes(0x1000);
-  request->subIndex = 0x00;
+    ec_mbxbuft* out = ecx_getmbx(ctx);
+    if (out == nullptr) {
+      return false;
+    }
+    ec_clearmbx(out);
+    auto* request = reinterpret_cast<SdoUploadRequest*>(out);
+    request->header.length = htoes(sizeof(SdoUploadRequest) - sizeof(ec_mbxheadert));
+    request->header.address = htoes(0x0000);
+    request->header.priority = 0x00;
+    request->header.mbxtype = ECT_MBXT_COE + MBX_HDR_SET_CNT(0);
+    request->canOpen = htoes(0x000 + (ECT_COES_SDOREQ << 12));
+    request->command = ECT_SDO_UP_REQ;
+    request->index = htoes(0x1000);
+    request->subIndex = 0x00;
 
-  // ecx_mbxsend returns the buffer to the pool whatever the outcome.
-  if (ecx_mbxsend(ctx, slave, out, EC_TIMEOUTTXM) <= 0) {
-    return false;
+    // ecx_mbxsend returns the buffer to the pool whatever the outcome. A refused write means SM0
+    // is full, and a second copy would be refused too.
+    if (ecx_mbxsend(ctx, slave, out, EC_TIMEOUTTXM) <= 0) {
+      return false;
+    }
+    ec_mbxbuft* in = nullptr;
+    const int wkc = ecx_mbxreceive(ctx, slave, &in, EC_TIMEOUTRXM);
+    if (in != nullptr) {
+      ecx_dropmbx(ctx, in);
+    }
+    if (wkc > 0) {
+      return true;
+    }
+    if (attempt < kAttempts) {
+      spdlog::info("Device {}: the mailbox counter reset got no answer; sent once more", slave);
+    }
   }
-  ec_mbxbuft* in = nullptr;
-  const int wkc = ecx_mbxreceive(ctx, slave, &in, EC_TIMEOUTRXM);
-  if (in != nullptr) {
-    ecx_dropmbx(ctx, in);
-  }
-  return wkc > 0;
+  return false;
 }
 
 }  // namespace

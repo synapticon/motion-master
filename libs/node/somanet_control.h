@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "node/device_manager.h"
+#include "node/plant_identification.h"
 #include "node/somanet_drive.h"
 
 namespace mm::node {
@@ -102,6 +103,17 @@ std::expected<void, std::string> removeFile(DeviceManager& deviceManager, uint16
 /// @return The parsed description, or why it could not be read.
 std::expected<HardwareDescription, std::string> readHardwareDescription(
     DeviceManager& deviceManager, uint16_t slavePosition);
+
+/// @brief Reads and parses a device's @c plant_model.csv.
+///
+/// Thin forward to @c SomanetDrive::readPlantModel. An empty optional means the drive was never
+/// identified, which is not a failure.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @return The model, nothing if the drive has none, or why the read failed.
+std::expected<std::optional<PlantModel>, std::string> readPlantModel(DeviceManager& deviceManager,
+                                                                     uint16_t slavePosition);
 
 /// @brief Reads and parses a device's @c .variant file.
 ///

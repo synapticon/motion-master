@@ -951,6 +951,37 @@ export type IntegroVariantFileOption = UtilRequiredKeys<
 >;
 
 /**
+ * A plant model as plant identification stored it on the drive: the transfer function from torque in Nm to velocity in rad/s, coefficients highest order first and normalised so that the numerator's last coefficient is 1, and the chirp it was identified with. The last two denominator coefficients are the effective inertia and the effective viscous friction of the reduced model, which is how auto-tuning reads them.
+ * @example {"numerator":[1],"denominator":[0.000123,0.0456],"inertia":0.000123,"friction":0.0456,"chirp":{"startFrequencyHz":1,"endFrequencyHz":100,"amplitudePermil":300,"durationMs":3000,"signalType":"logarithmic"}}
+ */
+export interface IdentifiedPlantModel {
+  numerator: number[];
+  denominator: number[];
+  /**
+   * The denominator coefficient before the last; null when there are fewer than two
+   * @format double
+   */
+  inertia: number | null;
+  /**
+   * The last denominator coefficient; null when the denominator is empty
+   * @format double
+   */
+  friction: number | null;
+  /** What excited the plant. A file written without a chirp row reads back with zeros and the logarithmic type. */
+  chirp: {
+    /** @format double */
+    startFrequencyHz: number;
+    /** @format double */
+    endFrequencyHz: number;
+    /** Peak excitation, in per mille of rated torque */
+    amplitudePermil: number;
+    /** How long the sweep took */
+    durationMs: number;
+    signalType: "logarithmic" | "linear";
+  };
+}
+
+/**
  * A decoded `.variant` file: which features a SOMANET Integro was licensed with.
  *
  * Only Integro drives carry one. Its layout comes from the firmware that reads it rather than from a specification — there is none — and the one thing on it that matters beyond inspection is `fieldbusProtocol`, which the hardware description deliberately does not carry and a full firmware descriptor ends with.

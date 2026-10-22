@@ -19,6 +19,7 @@
 #include "comm/object_data_types.h"
 #include "node/cia402.h"
 #include "node/device.h"
+#include "node/plant_identification.h"
 #include "node/synapticon.h"
 
 namespace {
@@ -2854,6 +2855,65 @@ TEST(GeneralOsError, OpenPhaseDetectionExplainsItsRefusalToo) {
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("the drive is in Fault"), std::string::npos) << result.error();
   EXPECT_NE(result.error().find("PuUv"), std::string::npos) << result.error();
+}
+
+// --- Plant model read-back ----------------------------------------------------------------------
+
+TEST(ReadPlantModel, ReadsTheFileTheProcedureWrote) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::string csv = "1\n0.001,0.0123,0.45\n1,100,300,3,1\n";
+  driver.files["plant_model.csv"] = std::vector<uint8_t>(csv.begin(), csv.end());
+
+  auto model = drive->readPlantModel();
+  ASSERT_TRUE(model.has_value()) << model.error();
+  ASSERT_TRUE(model->has_value());
+  EXPECT_EQ((*model)->denominator, (std::vector<double>{0.001, 0.0123, 0.45}));
+  EXPECT_DOUBLE_EQ(*(*model)->inertia(), 0.0123);
+  EXPECT_EQ((*model)->chirp.durationMs, 3000u);
+  EXPECT_EQ((*model)->chirp.signalType, somanet::ChirpSignalType::kLinear);
+}
+
+TEST(ReadPlantModel, NothingWhenTheDriveWasNeverIdentified) {
+  // A missing file is a state, not a failure: the only writer of the file is the procedure.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto model = drive->readPlantModel();
+  ASSERT_TRUE(model.has_value()) << model.error();
+  EXPECT_FALSE(model->has_value());
+}
+
+TEST(ReadPlantModel, AReadFailureOtherThanNotFoundIsAnError) {
+  // Unlike the variant file, where any failure reads as "none": a bus that answers nothing must
+  // not be reported as a drive that was never identified.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.readFailure = mm::comm::FoeErrorKind::NoResponse;
+  auto model = drive->readPlantModel();
+  ASSERT_FALSE(model.has_value());
+  EXPECT_NE(model.error().find("plant_model.csv"), std::string::npos) << model.error();
+}
+
+TEST(ReadPlantModel, AFileThatDoesNotParseIsAnError) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::string csv = "not,a\nmodel\n";
+  driver.files["plant_model.csv"] = std::vector<uint8_t>(csv.begin(), csv.end());
+  auto model = drive->readPlantModel();
+  ASSERT_FALSE(model.has_value());
+  EXPECT_NE(model.error().find("could not be read"), std::string::npos) << model.error();
 }
 
 }  // namespace

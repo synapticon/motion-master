@@ -82,6 +82,12 @@ std::expected<HardwareDescription, std::string> readHardwareDescription(
                           [](SomanetDrive& drive) { return drive.readHardwareDescription(); });
 }
 
+std::expected<std::optional<PlantModel>, std::string> readPlantModel(DeviceManager& deviceManager,
+                                                                     uint16_t slavePosition) {
+  return withSomanetDrive(deviceManager, slavePosition,
+                          [](SomanetDrive& drive) { return drive.readPlantModel(); });
+}
+
 std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant(
     DeviceManager& deviceManager, uint16_t slavePosition) {
   return withSomanetDrive(deviceManager, slavePosition,

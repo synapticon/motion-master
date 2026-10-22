@@ -1671,6 +1671,29 @@ void HttpServer::run() {
                    "409 Conflict");
              });
 
+  // A 404 for a drive that carries no plant_model.csv: never identified is a state, and the message
+  // names the procedure that produces the file.
+  router.get("/api/devices/:slavePosition/plant-model",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               auto model = mm::node::readPlantModel(deviceManager_, *position);
+               if (!model) {
+                 return mm::api::error("409 Conflict", model.error());
+               }
+               if (!model->has_value()) {
+                 return mm::api::notFound(
+                     "this device carries no plant_model.csv; run the plant-identification "
+                     "procedure to identify one");
+               }
+               return mm::api::json(nlohmann::json(**model));
+             });
+
   // A 404 for a device that carries no .variant, because that is what the resource is: absent. Only
   // Integro drives have one, so this answering 404 is the ordinary case rather than a problem.
   router.get("/api/devices/:slavePosition/variant",

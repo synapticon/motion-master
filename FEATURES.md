@@ -84,7 +84,7 @@ A procedure is an operation that takes longer than a request should. It runs on 
   - **The motor measurements** — open phase detection, pole pair detection, phase resistance, and phase inductance.
   - **Motor phase order detection** and **commutation offset measurement**.
   - **Offset detection** — the whole commissioning sequence in one prepared session.
-  - **Plant identification** — excites the drive with the chirp in cyclic synchronous torque mode, records its velocity and torque, has the auto-tuning program fit the plant model, and writes the model to `plant_model.csv` on the drive. The result carries the model, its inertia and friction, the chirp, and the Bode data.
+  - **Plant identification** — excites the drive with the chirp in cyclic synchronous torque mode, records its velocity and torque, has the auto-tuning program fit the plant model, and writes the model to `plant_model.csv` on the drive. The result carries the model, its inertia and friction, the chirp, and the Bode data. `GET /api/devices/{slavePosition}/plant-model` reads the stored model back.
 - **What a procedure leaves behind** — the measurement procedures prepare the drive themselves, putting it into diagnostics mode and Operation Enabled and handling the brake where the command requires it, and they restore everything on every path out, a failure or a cancellation included. The two encoder procedures prepare nothing, because their commands need nothing prepared. **iC-MU calibration mode is the one procedure that leaves the drive changed**, because the mode it sets is a mode the encoder stays in.
 
 ## Auto-tuning

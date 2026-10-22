@@ -22,6 +22,7 @@
 #include "core/util.h"
 #include "node/firmware_package.h"
 #include "node/kuebler_registers.h"
+#include "node/plant_identification.h"
 #include "node/synapticon.h"
 
 namespace mm::node {
@@ -1263,6 +1264,24 @@ std::expected<HardwareDescription, std::string> SomanetDrive::readHardwareDescri
                                        kHardwareDescriptionName, description.error()));
   }
   return description;
+}
+
+std::expected<std::optional<PlantModel>, std::string> SomanetDrive::readPlantModel() const {
+  auto content = device().readFile(std::string(kPlantModelFile));
+  if (!content) {
+    if (content.error().kind == mm::comm::FoeErrorKind::FileNotFound) {
+      return std::nullopt;
+    }
+    return std::unexpected(
+        std::format("reading '{}' failed: {}", kPlantModelFile, content.error().message));
+  }
+  auto model = parsePlantModelCsv(
+      std::string_view(reinterpret_cast<const char*>(content->data()), content->size()));
+  if (!model) {
+    return std::unexpected(
+        std::format("'{}' on the device could not be read: {}", kPlantModelFile, model.error()));
+  }
+  return *model;
 }
 
 std::expected<std::optional<IntegroVariant>, std::string> SomanetDrive::readIntegroVariant() const {

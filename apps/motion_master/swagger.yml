@@ -2983,6 +2983,41 @@ paths:
           description: >
             The device is not a SOMANET drive, the file could not be read, or its content is not a
             variant file
+  /api/devices/{slavePosition}/plant-model:
+    get:
+      summary: Read the plant model stored on a drive
+      operationId: getDevicePlantModel
+      description: >
+        Reads and decodes the drive's `plant_model.csv` over FoE: the transfer function from torque
+        in Nm to velocity in rad/s that the `plant-identification` procedure fitted, and the chirp it
+        was identified with. Controller and notch filter auto-tuning compute from this model.
+
+
+        **A 404 is the answer for a drive that was never identified.** The file is written by the
+        procedure and by nothing else, so its absence is a state rather than a problem. The Bode
+        data is not in the file; it is in the result of the run that produced the model.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The decoded file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentifiedPlantModel"
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition, or the drive carries no `plant_model.csv`
+        "409":
+          description: >
+            The device is not a SOMANET drive, the file could not be read, or its content is not a
+            plant model
   /api/devices/{slavePosition}/firmware-compatibility:
     get:
       summary: Check whether a firmware package belongs on a device
@@ -6009,6 +6044,69 @@ components:
         missing properties rather than the string `unknown`.
       required: [id]
       allOf: [{ $ref: "#/components/schemas/IntegroVariantOption" }]
+    IdentifiedPlantModel:
+      type: object
+      description: >
+        A plant model as plant identification stored it on the drive: the transfer function from
+        torque in Nm to velocity in rad/s, coefficients highest order first and normalised so that
+        the numerator's last coefficient is 1, and the chirp it was identified with. The last two
+        denominator coefficients are the effective inertia and the effective viscous friction of the
+        reduced model, which is how auto-tuning reads them.
+      required: [numerator, denominator, inertia, friction, chirp]
+      properties:
+        numerator:
+          type: array
+          items:
+            type: number
+            format: double
+        denominator:
+          type: array
+          items:
+            type: number
+            format: double
+        inertia:
+          type: number
+          format: double
+          nullable: true
+          description: The denominator coefficient before the last; null when there are fewer than two
+        friction:
+          type: number
+          format: double
+          nullable: true
+          description: The last denominator coefficient; null when the denominator is empty
+        chirp:
+          type: object
+          description: >
+            What excited the plant. A file written without a chirp row reads back with zeros and the
+            logarithmic type.
+          required: [startFrequencyHz, endFrequencyHz, amplitudePermil, durationMs, signalType]
+          properties:
+            startFrequencyHz:
+              type: number
+              format: double
+            endFrequencyHz:
+              type: number
+              format: double
+            amplitudePermil:
+              type: integer
+              description: Peak excitation, in per mille of rated torque
+            durationMs:
+              type: integer
+              description: How long the sweep took
+            signalType:
+              type: string
+              enum: [logarithmic, linear]
+      example:
+        numerator: [1.0]
+        denominator: [0.000123, 0.0456]
+        inertia: 0.000123
+        friction: 0.0456
+        chirp:
+          startFrequencyHz: 1.0
+          endFrequencyHz: 100.0
+          amplitudePermil: 300
+          durationMs: 3000
+          signalType: logarithmic
     IntegroVariant:
       type: object
       description: >

@@ -1052,9 +1052,10 @@ Managed by vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add one:
 | `gtest` | 1.17.0 | test targets | `GTest::gtest`, `GTest::gtest_main` |
 | `neargye-semver` | 1.0.0-rc | `mm_core` | `semver::semver` |
 
-`neargye-semver` comes from `ports/neargye-semver`, the registry port with one patch: upstream
-refuses a prerelease number with a zero after its first digit, such as `6.0.0-alpha.100`. The
-patch applies the leading-zero rule to the first character of an identifier only.
+**`neargye-semver` 1.0.0-rc refuses a prerelease number with a zero after its first digit**, so
+`6.0.0-alpha.100` to `.109`, `.200` to `.209` and so on fail the static assertion in
+`version.h.in`, while `.110` to `.199` pass. The library is wrong against SemVer 2.0 and is not
+patched here. Skip those numbers when bumping.
 | `nlohmann-json` | 3.12.0 | `motion_master` | `nlohmann_json::nlohmann_json` |
 | `pugixml` | 1.15 | `mm_etg` | `pugixml::pugixml` |
 | `spdlog` | 1.17.0 | `motion_master` | `spdlog::spdlog` |

@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.97] - 2026-10-22
+
 ### Fixed
 
 - **The step to SAFE-OP maps all the process data a device assigns, also when a frame comes back late.** SOEM took a read of the PDO mapping that got no usable answer for a mapping of nothing, and mapped the device short with no error. On a fresh process Motion Master refused the step with "the driver reserved only 0 bytes". On a re-map it published an image with no outputs and reported no error, because its check compared against the byte count of the map before. Now a failed read inside the map fails the map, the check uses the bit counts of the current map, and the step tries the map up to three times before it refuses. (#119)
@@ -916,7 +918,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.96...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.97...HEAD
+[6.0.0-alpha.97]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.96...v6.0.0-alpha.97
 [6.0.0-alpha.96]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.95...v6.0.0-alpha.96
 [6.0.0-alpha.95]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.94...v6.0.0-alpha.95
 [6.0.0-alpha.94]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.93...v6.0.0-alpha.94

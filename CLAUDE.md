@@ -1142,6 +1142,14 @@ sudo ./build/x64-linux-debug/hil/mailbox_counter0/mailbox_counter0 --ifname <int
   [--rounds 50] [--pattern after|double|first|init|skip|all]
 ```
 
+### foe_read_abort
+
+Wedges the file system of a Circulo on purpose, which is the reproduction of synapticon/somanet_software#5820. It reads a file in PRE-OP, reads it again and acknowledges `--packets` data packets, stops with the next one unacknowledged, sends the FoE abort (not with `--no-abort`), and reads the file twice more, comparing bytes with the first read. With the last packet of the file unacknowledged the drive answers "Illegal" and then "File System is busy" until a power cycle (WEDGED); with a packet in the middle unacknowledged it serves every file with its first packet as zeros (WRONG BYTES). A mid-file abort on other firmware ends OK. It leaves the drive in PRE-OP. It needs raw socket access, and no other master may use the adapter.
+
+```bash
+sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interface> [--slave 1]   [--file config.csv] [--packets 2] [--pause 200] [--no-abort]
+```
+
 ### api
 
 TypeScript integration tests (Vitest) for the HTTP API and the WebSocket. They drive the

@@ -30,6 +30,7 @@ add_executable(
   concurrency_test.cc
   profile_device_test.cc
   profile_procedures_test.cc
+  plant_identification_test.cc
   somanet_drive_test.cc
   somanet_procedures_test.cc)
 

@@ -179,6 +179,9 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
     }
     const bool somanet = isSomanetDevice(s.eep_man);
     s.mbxwriteonce = somanet && escTypes_[slave] != kNetxEscType;
+    // Every SOMANET device, the netX included: it answers a Repeat Request with the message before
+    // the last one (#113).
+    s.mbxnorepeat = somanet;
     if (somanet) {
       spdlog::info("Slave {}: ESC type 0x{:02X}, mailbox writes {}", slave,
                    escTypes_[slave].value_or(0), s.mbxwriteonce ? "go out once" : "are sent again");

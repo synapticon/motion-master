@@ -568,6 +568,8 @@ vcpkg_replace_string(
    uint8 mbx_cnt;
    /** write each mailbox message once, never repeat it */
    boolean mbxwriteonce;
+   /** never send a Repeat Request: the slave answers it with the message before the last one */
+   boolean mbxnorepeat;
    /** mailbox writes that got no frame back */
    uint32 mbxwriteunknowns;")
 
@@ -728,9 +730,11 @@ vcpkg_replace_string(
 # next read of the file serves its tail with no error (issue #113). With the read sent once, a late
 # frame is awaited and used. No frame within EC_TIMEOUTLATE and SM1 still full means the read did
 # not reach the slave, and the read is sent again. An empty SM1 means the message is gone, and only
-# a repeat request can bring it back, as upstream does. A slave with mbxwriteonce set gets no
-# repeat request at all: the Integro answers it with the wrong message, and the XMOS stack of a
-# Circulo was not tested. The read fails instead, and the caller reports it.
+# a repeat request can bring it back, as upstream does. A slave with mbxnorepeat set, which the
+# driver sets for every SOMANET device, gets no repeat request at all: the Integro answers it with
+# the wrong message, and the XMOS stack of a Circulo was not tested. The read fails instead, and
+# the caller reports it. The flag is separate from mbxwriteonce because an Integro is written the
+# upstream way and still must not get a repeat request.
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_main.c"
 "         mbxro = slavelist->mbx_ro;
@@ -774,7 +778,7 @@ vcpkg_replace_string(
 "            else /* read mailbox lost */
             {
                do /* read extended mailbox status */"
-"            else if (slavelist->mbxwriteonce) /* read mailbox lost, and a repeat request would bring the wrong message */
+"            else if (slavelist->mbxnorepeat) /* read mailbox lost, and a repeat request would bring the wrong message */
             {
                break;
             }

@@ -54,7 +54,6 @@ constexpr int kStateTimeoutUs = 10'000'000;
 constexpr uint8_t kFoeOpcodeRead = 0x01;
 constexpr uint8_t kFoeOpcodeData = 0x03;
 constexpr uint8_t kFoeOpcodeAck = 0x04;
-constexpr uint8_t kFoeOpcodeError = 0x05;
 constexpr uint32_t kFoeErrorFileSystemBusy = 0x800B;
 
 struct Options {

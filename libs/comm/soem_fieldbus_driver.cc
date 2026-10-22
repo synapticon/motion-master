@@ -903,6 +903,46 @@ std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::r
   return result;
 }
 
+namespace {
+
+// How many transfers an SDO upload makes before it fails: the first, and one more when the slave
+// gave no answer.
+constexpr int kSdoUploadAttempts = 2;
+
+// True when a failed transfer ended without any answer: the slave never answered (EC_TIMEOUT), or
+// the frame of the mailbox read never came back (EC_NOFRAME). An abort, a mailbox error and a
+// refused write all return 0 with the reason queued, and a second transfer gets the same answer.
+bool isNoAnswer(int wkc) { return wkc == EC_TIMEOUT || wkc == EC_NOFRAME; }
+
+// Runs one SDO upload, and one more when the first got no answer. Returns the last transfer's
+// working counter, and leaves *size at the bytes read when it is positive.
+//
+// A fresh transfer after a no-answer failure is safe on both SOMANET stacks: the counter-0
+// recovery of ports/soem covers a write the slave may have received, and an upload changes nothing
+// on the slave. A download is never asked again here. A write to 0x1023:01 starts an OS command,
+// and a second copy would start it again. Called with the drive's lock held.
+int uploadSdo(ecx_contextt* ctx, uint16_t slavePosition, uint16_t index, uint8_t subindex,
+              bool completeAccess, uint8_t* data, int* size, spdlog::level::level_enum level) {
+  const int capacity = *size;
+  int wkc = 0;
+  for (int attempt = 1; attempt <= kSdoUploadAttempts; ++attempt) {
+    *size = capacity;
+    wkc = ecx_SDOread(ctx, slavePosition, index, subindex, completeAccess ? TRUE : FALSE, size,
+                      data, EC_TIMEOUTRXM);
+    if (wkc > 0 || !isNoAnswer(wkc) || attempt == kSdoUploadAttempts) {
+      break;
+    }
+    spdlog::log(level, "SDOread slave {} 0x{:04X}:{:02X} got no answer (wkc {}); asked once more",
+                slavePosition, index, subindex, wkc);
+    // What the first transfer queued is not the second's to report. This also logs a write of the
+    // first transfer that got no frame back, so the log shows the cause before the second attempt.
+    discardSlaveErrors(ctx, slavePosition);
+  }
+  return wkc;
+}
+
+}  // namespace
+
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
@@ -923,8 +963,8 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   constexpr int kSdoBufferBytes = 4096;
   std::vector<uint8_t> data(kSdoBufferBytes, 0);
   int size = static_cast<int>(data.size());
-  int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
-                        EC_TIMEOUTRXM);
+  const int wkc =
+      uploadSdo(ctx_.get(), slavePosition, index, subindex, false, data.data(), &size, sdoLevel);
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOread slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
@@ -977,8 +1017,8 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
   // bit and the slave returns every subindex in one transfer (segmented internally if it exceeds
   // the mailbox). The blob is sub0 as a 16-bit value (1 data byte + 1 pad) followed by sub1..N at
   // their native widths — the node layer slices it back using the object's known entry layout.
-  int wkc =
-      ecx_SDOread(ctx_.get(), slavePosition, index, 0x00, TRUE, &size, data.data(), EC_TIMEOUTRXM);
+  const int wkc =
+      uploadSdo(ctx_.get(), slavePosition, index, 0x00, true, data.data(), &size, sdoLevel);
   if (wkc <= 0) {
     std::string msg = std::format("SDOread(CA) slave {} 0x{:04X} failed", slavePosition, index);
     msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);

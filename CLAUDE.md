@@ -882,17 +882,20 @@ the XMOS stack stores it as the last counter, and the netX stack does not count 
 what both remember. `hil/mailbox_counter0` measures this on a drive. See `NEXTGEN.md`, Session
 2026-10-20, and synapticon/somanet_software#5817.
 
-**A late frame is not a lost frame, and the port treats the two apart.** A write with no frame back
-reads the SyncManager status: a message in SM0 or an answer in SM1 proves delivery, and so does the
-answer that `ecx_mbxreceive` reads for it. When nothing proves it, the next request goes out with
-counter 0 and the one after it reuses the uncertain counter. That never repeats a counter the XMOS
-stack can hold, and never leaves a gap the netX stack would drop. A mailbox write and a mailbox
-read each go out once and wait `EC_TIMEOUTLATE`, 100 ms, for their own frame; a read with no frame
-and SM1 still full goes out again. Register datagrams keep `EC_TIMEOUTRET` and are sent again. A
-SOMANET device never gets a Repeat Request, because the Integro answers it with the message before
-the last one. Every returned frame must match the sent datagram header, not only its 8-bit index,
-because a late frame on a reused index was taken for the newer datagram's answer. The warnings
-"got no frame back" and "went out with mailbox counter 0" in a support log count these cases.
+**A late frame is not a lost frame, and a write the port gave up on can still arrive.** A mailbox
+write and a mailbox read each go out once and wait `EC_TIMEOUTLATE`, 100 ms, for their own frame; a
+read with no frame and SM1 still full goes out again. A write with no frame back is not sent again,
+the caller waits for the answer, and **the counter of that write is never used again**: the next
+request takes the next counter. A write held in the host for longer than the wait still reaches the
+drive, and a counter sent again after it locks the XMOS stack. That is why the port does not reuse
+it, and why it sends no counter 0 to get it back. The cost falls on the netX stack: a write that was
+truly lost leaves it a gap of one, and it drops the requests after it until the sequence comes
+round, up to six. A late write costs it nothing, and #124 removes the cost by sending a write again
+on a netX. Register datagrams keep `EC_TIMEOUTRET` and are sent again. A SOMANET device never gets a
+Repeat Request, because the Integro answers it with the message before the last one. Every returned
+frame must match the sent datagram header, not only its 8-bit index, because a late frame on a
+reused index was taken for the newer datagram's answer. The warning "got no frame back" in a
+support log counts these writes. See `NEXTGEN.md`, Session 2026-10-22.
 
 ### ESI Parsing (`libs/etg`)
 

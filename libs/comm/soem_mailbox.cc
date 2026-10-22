@@ -33,14 +33,6 @@ void reportUnknownMailboxWrites(ecx_contextt* ctx, uint16_t slavePosition) {
         slavePosition, unknowns);
     unknowns = 0;
   }
-  uint32& recovers = ctx->slavelist[slavePosition].mbxwriterecovers;
-  if (recovers != 0) {
-    spdlog::warn(
-        "Slave {}: {} request(s) went out with mailbox counter 0, because the write before them "
-        "got no frame back and no answer",
-        slavePosition, recovers);
-    recovers = 0;
-  }
 }
 
 std::vector<uint8_t> makeFoeAbortRequest(uint8_t counter) {

@@ -103,8 +103,6 @@ count() { grep -c "$1" "$out/server.log"; }
 echo "== $label: server log during the rounds"
 printf 'writes without a frame back:   %s\n' \
   "$(grep -o '[0-9]* mailbox write(s) got no frame back' "$out/server.log" | awk '{s+=$1} END {print s+0}')"
-printf 'requests sent with counter 0:  %s\n' \
-  "$(grep -o '[0-9]* request(s) went out with mailbox counter 0' "$out/server.log" | awk '{s+=$1} END {print s+0}')"
 printf 'no response (mailbox timeout): %s\n' "$(count 'no response')"
 printf 'no frame returned:             %s\n' "$(count 'no frame returned')"
 printf 'packet error:                  %s\n' "$(count 'packet/timeout error')"

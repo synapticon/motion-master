@@ -903,6 +903,46 @@ std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::r
   return result;
 }
 
+namespace {
+
+// How many transfers an SDO upload makes before it fails: the first, and one more when the slave
+// gave no answer.
+constexpr int kSdoUploadAttempts = 2;
+
+// True when a failed transfer ended without any answer: the slave never answered (EC_TIMEOUT), or
+// the frame of the mailbox read never came back (EC_NOFRAME). An abort, a mailbox error and a
+// refused write all return 0 with the reason queued, and a second transfer gets the same answer.
+bool isNoAnswer(int wkc) { return wkc == EC_TIMEOUT || wkc == EC_NOFRAME; }
+
+// Runs one SDO upload, and one more when the first got no answer. Returns the last transfer's
+// working counter, and leaves *size at the bytes read when it is positive.
+//
+// A fresh transfer after a no-answer failure is safe on both SOMANET stacks: the counter-0
+// recovery of ports/soem covers a write the slave may have received, and an upload changes nothing
+// on the slave. A download is never asked again here. A write to 0x1023:01 starts an OS command,
+// and a second copy would start it again. Called with the drive's lock held.
+int uploadSdo(ecx_contextt* ctx, uint16_t slavePosition, uint16_t index, uint8_t subindex,
+              bool completeAccess, uint8_t* data, int* size, spdlog::level::level_enum level) {
+  const int capacity = *size;
+  int wkc = 0;
+  for (int attempt = 1; attempt <= kSdoUploadAttempts; ++attempt) {
+    *size = capacity;
+    wkc = ecx_SDOread(ctx, slavePosition, index, subindex, completeAccess ? TRUE : FALSE, size,
+                      data, EC_TIMEOUTRXM);
+    if (wkc > 0 || !isNoAnswer(wkc) || attempt == kSdoUploadAttempts) {
+      break;
+    }
+    spdlog::log(level, "SDOread slave {} 0x{:04X}:{:02X} got no answer (wkc {}); asked once more",
+                slavePosition, index, subindex, wkc);
+    // What the first transfer queued is not the second's to report. This also logs a write of the
+    // first transfer that got no frame back, so the log shows the cause before the second attempt.
+    discardSlaveErrors(ctx, slavePosition);
+  }
+  return wkc;
+}
+
+}  // namespace
+
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
@@ -923,8 +963,8 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   constexpr int kSdoBufferBytes = 4096;
   std::vector<uint8_t> data(kSdoBufferBytes, 0);
   int size = static_cast<int>(data.size());
-  int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
-                        EC_TIMEOUTRXM);
+  const int wkc =
+      uploadSdo(ctx_.get(), slavePosition, index, subindex, false, data.data(), &size, sdoLevel);
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOread slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
@@ -977,8 +1017,8 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
   // bit and the slave returns every subindex in one transfer (segmented internally if it exceeds
   // the mailbox). The blob is sub0 as a 16-bit value (1 data byte + 1 pad) followed by sub1..N at
   // their native widths — the node layer slices it back using the object's known entry layout.
-  int wkc =
-      ecx_SDOread(ctx_.get(), slavePosition, index, 0x00, TRUE, &size, data.data(), EC_TIMEOUTRXM);
+  const int wkc =
+      uploadSdo(ctx_.get(), slavePosition, index, 0x00, true, data.data(), &size, sdoLevel);
   if (wkc <= 0) {
     std::string msg = std::format("SDOread(CA) slave {} 0x{:04X} failed", slavePosition, index);
     msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);
@@ -1762,9 +1802,14 @@ AddressState restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
 // new request without reading it. SM0 then stays full, and only a power cycle recovers the device.
 //
 // The firmware never ignores a request with counter 0, and it stores 0 as the last counter. So
-// this sends one SDO upload of 0x1000:00 with counter 0 and reads the answer. SOEM never uses
-// counter 0, so the device accepts the next request whatever its counter is. ETG1000.4 reserves
-// counter 0, which is why only Synapticon and Sensodrive devices get this request.
+// this sends one SDO upload of 0x1000:00 with counter 0 and reads the answer. SOEM's own requests
+// carry counters 1 to 7, so the device accepts the next request whatever its counter is. ETG1000.4
+// reserves counter 0, which is why only Synapticon and Sensodrive devices get this request.
+//
+// A request that gets no answer is sent once more. Both SOMANET stacks accept counter 0 twice in a
+// row (hil/mailbox_counter0, pattern `double`), so the second copy is safe. Without it, a lost
+// reset on firmware before v5.6.0 leaves about one chance in seven that the next request repeats
+// the stored counter and locks the mailbox.
 bool resetMailboxCounter(ecx_contextt* ctx, uint16_t slave) {
   OSAL_PACKED_BEGIN
   struct OSAL_PACKED SdoUploadRequest {
@@ -1777,34 +1822,44 @@ bool resetMailboxCounter(ecx_contextt* ctx, uint16_t slave) {
   };
   OSAL_PACKED_END
 
-  // The answer read below must belong to this request.
-  drainMailbox(ctx, slave);
+  constexpr int kAttempts = 2;
+  for (int attempt = 1; attempt <= kAttempts; ++attempt) {
+    // The answer read below must belong to this request.
+    drainMailbox(ctx, slave);
 
-  ec_mbxbuft* out = ecx_getmbx(ctx);
-  if (out == nullptr) {
-    return false;
-  }
-  ec_clearmbx(out);
-  auto* request = reinterpret_cast<SdoUploadRequest*>(out);
-  request->header.length = htoes(sizeof(SdoUploadRequest) - sizeof(ec_mbxheadert));
-  request->header.address = htoes(0x0000);
-  request->header.priority = 0x00;
-  request->header.mbxtype = ECT_MBXT_COE + MBX_HDR_SET_CNT(0);
-  request->canOpen = htoes(0x000 + (ECT_COES_SDOREQ << 12));
-  request->command = ECT_SDO_UP_REQ;
-  request->index = htoes(0x1000);
-  request->subIndex = 0x00;
+    ec_mbxbuft* out = ecx_getmbx(ctx);
+    if (out == nullptr) {
+      return false;
+    }
+    ec_clearmbx(out);
+    auto* request = reinterpret_cast<SdoUploadRequest*>(out);
+    request->header.length = htoes(sizeof(SdoUploadRequest) - sizeof(ec_mbxheadert));
+    request->header.address = htoes(0x0000);
+    request->header.priority = 0x00;
+    request->header.mbxtype = ECT_MBXT_COE + MBX_HDR_SET_CNT(0);
+    request->canOpen = htoes(0x000 + (ECT_COES_SDOREQ << 12));
+    request->command = ECT_SDO_UP_REQ;
+    request->index = htoes(0x1000);
+    request->subIndex = 0x00;
 
-  // ecx_mbxsend returns the buffer to the pool whatever the outcome.
-  if (ecx_mbxsend(ctx, slave, out, EC_TIMEOUTTXM) <= 0) {
-    return false;
+    // ecx_mbxsend returns the buffer to the pool whatever the outcome. A refused write means SM0
+    // is full, and a second copy would be refused too.
+    if (ecx_mbxsend(ctx, slave, out, EC_TIMEOUTTXM) <= 0) {
+      return false;
+    }
+    ec_mbxbuft* in = nullptr;
+    const int wkc = ecx_mbxreceive(ctx, slave, &in, EC_TIMEOUTRXM);
+    if (in != nullptr) {
+      ecx_dropmbx(ctx, in);
+    }
+    if (wkc > 0) {
+      return true;
+    }
+    if (attempt < kAttempts) {
+      spdlog::info("Device {}: the mailbox counter reset got no answer; sent once more", slave);
+    }
   }
-  ec_mbxbuft* in = nullptr;
-  const int wkc = ecx_mbxreceive(ctx, slave, &in, EC_TIMEOUTRXM);
-  if (in != nullptr) {
-    ecx_dropmbx(ctx, in);
-  }
-  return wkc > 0;
+  return false;
 }
 
 }  // namespace

@@ -4600,3 +4600,95 @@ reused index, and the reply check in `ecx_SDOread` refuses a reply for another o
   frames in flight, a cyclic frame must come back about 20 cycles late to be taken for a newer one.
   That is not a practical risk. It belongs in the port comment, so a reader does not expect more from
   the check than it gives.
+
+## Session 2026-10-22 — The four mailbox gaps are closed, measured on an Integro (as-built)
+
+Issue #127, the four gaps of the review session above. Each is one commit on the branch, and
+the port comment on the frame-header check is a fifth.
+
+- **The SyncManager status read after an unknown write waits `EC_TIMEOUTLATE`.** Port-version 9.
+- **An emergency does not settle an unknown write.** `gotmsg` is set in the mailbox error branch and
+  in the three branches that hand a message to the caller, and not in the emergency branch.
+  Port-version 10.
+- **`resetMailboxCounter` sends the counter-0 request once more when the first got no answer.**
+- **`readSdo` and `readSdoComplete` make one more transfer after a no-answer failure.** The rule is
+  `uploadSdo` in `soem_fieldbus_driver.cc`: `EC_TIMEOUT` and `EC_NOFRAME` are asked again, a
+  working counter of 0 is not, and `writeSdo` is untouched. The second attempt first discards what
+  the first queued, which also logs the write that got no frame back.
+
+**Measured on the bench Integro**, product 0x401, alone on the bus, `tools/flaky-bus.sh`, 10 rounds
+of a full parameter read and a read of `config.csv`, netem on during the rounds only, on the bench
+PC without a real-time kernel:
+
+| Frames | Late writes | Counter-0 recoveries | Reads asked once more | Reads failed | Files correct |
+| --- | --- | --- | --- | --- | --- |
+| none | 0 | 0 | 1 | 1, the 0x1600:08 silence | 10 of 10 |
+| 2 % late by 25 ms | 0 | 0 | 1 | the same 1 | 10 of 10 |
+| 2 % late by 150 ms | 109 | 0 | 36, 31 recovered | 4 | 6 of 10 |
+| 1 % lost | 57 | 57 | 56, 55 recovered | the same 1 | 9 of 10 |
+
+Against the tables of Session 2026-10-20 on the same drive:
+
+- **At 25 ms there are no late writes any more**, where that table had 129. The write waits 100 ms
+  since #114, and the table was measured when it waited 20 ms. The row now exercises nothing, as that
+  session predicted.
+- **At 150 ms no request went out with counter 0.** Every unknown write was settled by the status
+  read or by the answer. 29 of the 36 reads asked again had `EC_NOFRAME`: a mailbox read whose frame
+  came back later than 100 ms, the cost past the design point that session named. The second
+  transfer recovered 31 of 36, and 10 of 10 parameter reads came back with no stale value.
+- **Under 1 % loss every lost write cost one second attempt instead of one failed read.** That
+  table had 117 mailbox timeouts, one per lost write, and 3 failed file reads with the drive wedged.
+  This run had 56 reads asked again, 55 of them recovered, 1 short file, and the drive served the
+  full file on three plain reads after the run. That the drive did not wedge this time proves
+  nothing about the wedge: which frame is lost decides it, and the firmware issue stays open.
+
+**Two things at 150 ms are not from this branch.**
+
+- **The Integro served a short file with status 200, three times at 150 ms and once under loss.** A
+  file read whose frame came back late failed, `abortFoeTransfer` sent the FoE ERROR, and the next
+  attempt got the rest of the file as a complete file: 3726, 2218, 3030 and 4074 bytes of 4422. That
+  is synapticon/somanet_software#5817, the Integro keeps its file position after a failed read and
+  ignores the abort. The drive serves the full file again once that position reaches the end, which
+  is why a plain read after the run is correct. The master-side guard that session weighed, a check
+  of the bytes received against the size in the file list, is now worth its own issue: the short
+  file reaches the client as a success, and nothing in the response says it is short.
+- **Three reads failed with "the slave did not accept the mailbox write; SM0 status 0x32".** The ESC
+  refused the write twice, although `ecx_mbxempty` had just read SM0 as empty, and the refusal
+  suffix read it as empty again. A guess, not verified: a late status frame taken for a newer one.
+  The status reads of `ecx_mbxempty` go out every 200 µs with the same header, so the header check
+  cannot tell them apart, and only the index does. A 150 ms-late one can carry the index of a newer
+  read. If that is the cause, it is the limit the port comment now states, met on a register read
+  instead of a cyclic frame.
+
+**Measured on the bench Circulo** later the same day, product 0x301, revision 0x11000003, firmware
+v5.6.11, alone on the bus, the same loop:
+
+| Frames | Rounds | Late writes | Counter-0 recoveries | Reads asked once more | Reads failed | Files correct |
+| --- | --- | --- | --- | --- | --- | --- |
+| none | 10 | 0 | 0 | 0 | 0 | 10 of 10 |
+| 2 % late by 150 ms | 10 | not counted, the log rotated | | | locked in round 6 | 5 of 10 |
+| 2 % late by 150 ms, capture | 10 | 48 | 0 | 33, 32 recovered | 1 | 10 of 10 |
+| 2 % late by 150 ms, capture | 20 | 143 | 0 | 58, 57 recovered | 1 | 4 of 20 |
+| 1 % lost | 10 | 54 | 54 | 52, 51 recovered | 1 | 10 of 10 |
+
+`hil/mailbox_duplicate` on the same drive: LOCKED, SM0 status 0x48, and INIT frees it.
+
+Two things happened on the Circulo at 150 ms that this branch does not cause and does not fix.
+
+- **The first 150 ms run locked the receive mailbox in round 6**, the lock of #100: SM0 status 0x48,
+  every later request refused with "the slave's receive mailbox is full", and INIT frees it. The
+  log shows a file read whose last ACK got no frame back, the next SDO sent with counter 0 and
+  answered, and the SDO after it, with the reused counter, unanswered. By the firmware's check that
+  order cannot lock, so a request reached the drive twice. The one place the port writes twice is
+  after a refusal, and a refusal frame that comes back late can be matched to a newer write, because
+  every mailbox write to one drive carries the same header. That is a reading of the code. Two
+  capture runs of 10 and 20 rounds showed no refusal, no duplicate counter and no lock. Issue #132
+  carries the defence, a write's returned frame matched on its data, and the capture to catch it.
+- **The 20-round run wedged the drive's file system from round 5.** A read of data packet 5 came
+  back later than 100 ms, the abort went out, the retry's READ was accepted and served two packets,
+  the drive answered the ACK of packet 2 with FoE error 0x8004 "Illegal", and every READ after it
+  got 0x800B "File System is busy". INIT then PRE-OP did not clear it; a power cycle did. The
+  capture has the whole exchange, and the firmware's `foe.c` and `foe_buffer.c` show the storage
+  task left busy by the abort's erase. Issue #131, with the firmware issue beside it.
+
+**Not tested.** Two drives, and the Windows and macOS builds.

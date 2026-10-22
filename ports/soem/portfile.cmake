@@ -544,9 +544,10 @@ vcpkg_replace_string(
 #     value the slave accepted last.
 #   - No frame within EC_TIMEOUTLATE: it is not known whether the slave got the message, so it is
 #     not sent again. The call returns 1, and the caller waits for the answer. A late frame is the
-#     usual cause, and in that case the slave answers. The SyncManager status is read first: a message in SM0 or an
-#     answer in SM1 shows that the slave has the message, and nothing more is needed. Otherwise the
-#     write is recorded as unknown, and an answer that ecx_mbxreceive reads for it settles it.
+#     usual cause, and in that case the slave answers. The SyncManager status is read first, with
+#     the same wait for a late frame: a message in SM0 or an answer in SM1 shows that the slave has
+#     the message, and nothing more is needed. Otherwise the write is recorded as unknown, and an
+#     answer that ecx_mbxreceive reads for it settles it.
 #   - After a write that stayed unknown, the next request goes out with counter 0, and the request
 #     after that takes the unknown counter again. The two SOMANET stacks need this. The XMOS stack
 #     of a Circulo ignores a request whose counter equals the last one it accepted, and that is
@@ -729,8 +730,11 @@ static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx,
       return 1;
    }
    /* The status byte of SM0 is at offset 5 of the 16 bytes from ECT_REG_SM0, and that of SM1 at
-    * offset 13. Bit 3 is set while the mailbox holds a message. */
-   if ((ecx_FPRD(&context->port, slaveitem->configadr, ECT_REG_SM0, sizeof(sm), sm, EC_TIMEOUTRET3) > 0) &&
+    * offset 13. Bit 3 is set while the mailbox holds a message. The read waits EC_TIMEOUTLATE,
+    * because it decides between a settled write and a recovery, and on the host that makes an
+    * unknown write it comes back as late as any other datagram. A register read is safe to send
+    * again, so ecx_FPRD sends it again every EC_TIMEOUTRET until then. */
+   if ((ecx_FPRD(&context->port, slaveitem->configadr, ECT_REG_SM0, sizeof(sm), sm, EC_TIMEOUTLATE) > 0) &&
        (((sm[5] & 0x08) != 0) || ((sm[13] & 0x08) != 0)))
    {
       return 1;
@@ -770,7 +774,10 @@ vcpkg_replace_string(
 #
 # A message read in this loop is the slave's answer to the request in flight, because every CoE
 # and FoE transfer empties the mailbox before it writes. When that request is a write whose
-# outcome was unknown (mbxunknownpending, see ecx_mbxsendonce), the answer settles it.
+# outcome was unknown (mbxunknownpending, see ecx_mbxsendonce), the answer settles it. A mailbox
+# error reply is such an answer. An emergency is not: it is the slave's own event, and it can come
+# while a lost write waits, so it settles nothing. Without that rule a lost write followed by an
+# emergency continued the counter sequence, and a netX dropped the requests of the gap.
 #
 # The mailbox read is sent once, and its frame is awaited for up to EC_TIMEOUTLATE, the same wait
 # as a mailbox write gets in ecx_mbxsendonce. Upstream
@@ -812,11 +819,7 @@ vcpkg_replace_string(
                mbxh = (ec_mbxheadert *)mbxin;
             }
             wkc = ecx_FPRDonce(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTLATE); /* get mailbox */
-            if (wkc > 0)
-            {
-               gotmsg = TRUE;
-            }
-            else if ((wkc == EC_NOFRAME) && (ecx_readmbxstatus(context, slave, &SMstat) > 0) && ((SMstat & 0x08) != 0))
+            if ((wkc == EC_NOFRAME) && (ecx_readmbxstatus(context, slave, &SMstat) > 0) && ((SMstat & 0x08) != 0))
             {
                continue; /* the read did not reach the slave: read again */
             }")
@@ -829,6 +832,40 @@ vcpkg_replace_string(
 "            else if ((wkc > 0) && ((mbxh->mbxtype & 0x0f) == ECT_MBXT_COE)) /* CoE response? */
             {
                EMp = (ec_emcyt *)mbxin;")
+
+# The answer branches record that the slave answered. The mailbox error branch and the three that
+# hand the message to the caller are answers. The emergency branch is left out on purpose.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"               MBXEp = (ec_mbxerrort *)mbxin;
+               ecx_mbxerror(context, slave, etohs(MBXEp->Detail));"
+"               MBXEp = (ec_mbxerrort *)mbxin;
+               gotmsg = TRUE;
+               ecx_mbxerror(context, slave, etohs(MBXEp->Detail));")
+
+# Two matches: the CoE reply and the EoE reply.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"                  *mbx = mbxin;
+                  mbxin = NULL;"
+"                  gotmsg = TRUE;
+                  *mbx = mbxin;
+                  mbxin = NULL;")
+
+# Every other mailbox type.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"            else if (wkc > 0)
+            {
+               *mbx = mbxin;
+               mbxin = NULL;
+            }"
+"            else if (wkc > 0)
+            {
+               gotmsg = TRUE;
+               *mbx = mbxin;
+               mbxin = NULL;
+            }")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_main.c"
@@ -867,6 +904,12 @@ vcpkg_replace_string(
 # commands whose position the slaves leave alone. The auto increment and broadcast commands have
 # their position counted up by every slave the frame passes. A frame that does not match is
 # dropped, and the caller keeps waiting. The three platform drivers share this code.
+#
+# The check cannot tell two cyclic frames apart, because every cyclic frame carries the same
+# header. For those, only the index does the work: with EC_MAXBUF indexes and at most the frame
+# slots of the control plane plus the cyclic frames in flight, a cyclic frame must come back about
+# twenty cycles late to carry the index of a newer one. A control-plane datagram differs from its
+# neighbours in command, offset or position, which is what the check is for.
 foreach(nicdrv "oshw/linux/nicdrv.c" "oshw/win32/nicdrv.c" "oshw/macosx/nicdrv.c")
   vcpkg_replace_string(
       "${SOURCE_PATH}/${nicdrv}"

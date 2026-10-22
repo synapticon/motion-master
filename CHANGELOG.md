@@ -19,6 +19,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **After a mailbox write that got no frame back, the check of the drive's mailbox now waits for a late frame too.** That check reads the SyncManager status to learn whether the drive has the request. It waited 6 ms, so on a PC that returns frames late it failed like the write before it, the request was marked unknown, and an Integro dropped the one request after the recovery. The check now waits up to 100 ms, the same as the write. (#127)
+- **An emergency from a drive no longer counts as the answer to a mailbox write that got no frame back.** When such a write was in fact lost and the drive sent an emergency while the master waited, the master took the emergency as proof that the drive had the request, and the next request continued the counter sequence. An Integro then dropped the requests of the gap, up to six, at the 700 ms mailbox timeout each. Only a reply to the request now settles it. (#127)
+- **The mailbox counter reset is sent once more when it gets no answer.** Motion Master sends one request with counter 0 each time a Synapticon or Sensodrive device goes from INIT to PRE-OP. On firmware older than v5.6.0 the drive keeps its counter across INIT, so a reset lost on the wire left about one chance in seven that the next request repeated that counter and locked the drive's mailbox. The drive accepts counter 0 twice in a row, so the second copy is safe. (#127)
+- **An SDO read that got no answer is asked once more.** Over SOEM, a read whose request was lost on the wire, or whose reply never came back, failed after the 700 ms mailbox timeout and reported the failure. Motion Master now makes one more transfer before it reports it, so one lost frame no longer loses a value in `POST /api/devices/{slavePosition}/parameters/read` or a monitoring's SDO objects. A read the drive refused is not asked again, and a write is never asked again, because a write to `0x1023:01` starts an OS command and a second copy would start it again. The second attempt costs one more 700 ms when the drive does not answer it either. (#127)
+
 ## [6.0.0-alpha.98] - 2026-10-22
 
 ### Added

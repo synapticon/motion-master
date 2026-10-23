@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.111] - 2026-10-23
+
 ### Added
 
 - **`POST /api/devices/restart`** takes every device, or the `positions` given, to INIT and then up one AL state at a time to `target`, OP by default. A target of BOOT is INIT and then BOOT. The walk stops at the first step a device does not reach, and the response names that step beside the settled state of every device. The Console's Fieldbus Control page has a Restart button with a target select beside Refresh.
@@ -947,7 +949,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.110...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.111...HEAD
+[6.0.0-alpha.111]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.110...v6.0.0-alpha.111
 [6.0.0-alpha.110]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.99...v6.0.0-alpha.110
 [6.0.0-alpha.99]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.98...v6.0.0-alpha.99
 [6.0.0-alpha.98]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.97...v6.0.0-alpha.98

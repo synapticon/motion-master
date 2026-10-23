@@ -43,7 +43,21 @@ SoemFieldbusDriver::SoemFieldbusDriver(SoemFieldbusDriverConfig config)
       // driver accepts indexes this too. make_unique value-initialises, so every entry starts at 0:
       // "no state known", which is exactly true before the first scan.
       slaveStates_(std::make_unique<std::atomic<uint16_t>[]>(EC_MAXSLAVE)),
-      slaveStatesSize_(EC_MAXSLAVE) {}
+      slaveStatesSize_(EC_MAXSLAVE),
+      lateMailboxReads_(std::make_unique<std::atomic<uint32_t>[]>(EC_MAXSLAVE)) {}
+
+class SoemFieldbusDriver::LateReadScope {
+ public:
+  LateReadScope(SoemFieldbusDriver& driver, uint16_t position)
+      : driver_(driver), position_(position) {}
+  LateReadScope(const LateReadScope&) = delete;
+  LateReadScope& operator=(const LateReadScope&) = delete;
+  ~LateReadScope() { driver_.publishLateMailboxReads(position_); }
+
+ private:
+  SoemFieldbusDriver& driver_;
+  uint16_t position_;
+};
 
 SoemFieldbusDriver::~SoemFieldbusDriver() { closeContext(); }
 
@@ -167,6 +181,9 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   // read waits for a late frame, because the rule a slave is under for the whole session depends
   // on it.
   escTypes_.assign(static_cast<size_t>(ctx_->slavecount) + 1, std::nullopt);
+  for (std::size_t position = 0; position < slaveStatesSize_; ++position) {
+    lateMailboxReads_[position].store(0, std::memory_order_relaxed);
+  }
   for (int slave = 1; slave <= ctx_->slavecount; ++slave) {
     ec_slavet& s = ctx_->slavelist[slave];
     uint16_t escType = 0;
@@ -357,6 +374,19 @@ void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
   ec_errort discarded{};
   while (ecx_popslaveerror(ctx, slavePosition, &discarded)) {
   }
+}
+
+// The end of the error message of a failed mailbox transfer when one of its mailbox reads came back
+// late, and empty otherwise. @p before is the count of the slave before the transfer. A late frame
+// fails the transfer the same way as a lost one, and only this text tells the two apart.
+std::string lateMailboxReadSuffix(const ec_slavet& slave, uint32_t before) {
+  if (slave.mbxlatereads == before) {
+    return {};
+  }
+  return std::format(
+      "; a mailbox read came back {:.1f} ms after it was sent, after the wait of {} ms, so the "
+      "frame was late and not lost",
+      slave.mbxlatereadus / 1000.0, kLateFrameTimeoutUs / 1000);
 }
 
 // Pops every error SOEM queued for one slave's failed transfer, returning the decoded reason of the
@@ -755,6 +785,28 @@ uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
   return position < slaveStatesSize_ ? slaveStates_[position].load(std::memory_order_relaxed) : 0;
 }
 
+uint32_t SoemFieldbusDriver::lateMailboxReads(uint16_t position) const {
+  return position < slaveStatesSize_ ? lateMailboxReads_[position].load(std::memory_order_relaxed)
+                                     : 0;
+}
+
+void SoemFieldbusDriver::publishLateMailboxReads(uint16_t position) {
+  if (!ctx_ || position >= slaveStatesSize_) {
+    return;
+  }
+  ec_slavet& s = ctx_->slavelist[position];
+  if (s.mbxlatereads == 0) {
+    return;
+  }
+  spdlog::warn(
+      "Slave {}: {} mailbox read(s) came back only after the wait of {} ms, together with the "
+      "frame after them, the last {:.1f} ms after it was sent. The slave answered, and the host or "
+      "the network held the frame",
+      position, s.mbxlatereads, kLateFrameTimeoutUs / 1000, s.mbxlatereadus / 1000.0);
+  lateMailboxReads_[position].fetch_add(s.mbxlatereads, std::memory_order_relaxed);
+  s.mbxlatereads = 0;
+}
+
 void SoemFieldbusDriver::publishSlaveStates() {
   const int count = ctx_ ? ctx_->slavecount : 0;
   for (std::size_t position = 0; position < slaveStatesSize_; ++position) {
@@ -981,6 +1033,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
   const auto lock = controlPlane_.lockDrive(slavePosition);
+  const LateReadScope lateReads(*this, slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -990,6 +1043,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
   // Left over from an earlier transfer, and not this one's to report.
   discardSlaveErrors(ctx_.get(), slavePosition);
+  const uint32_t lateBefore = ctx_->slavelist[slavePosition].mbxlatereads;
   // 4096-byte upload buffer: ample for every scalar/string parameter a SOMANET drive exposes at a
   // single subindex. ecx_SDOread clamps the transfer to the buffer and reports the bytes read with
   // a positive wkc, giving no truncation flag — so rather than hand back silently-short data for an
@@ -1003,6 +1057,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
     std::string msg =
         std::format("SDOread slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
     msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);
+    msg += lateMailboxReadSuffix(ctx_->slavelist[slavePosition], lateBefore);
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
@@ -1031,6 +1086,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComplete(
     uint16_t slavePosition, uint16_t index) {
   const auto lock = controlPlane_.lockDrive(slavePosition);
+  const LateReadScope lateReads(*this, slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1038,6 +1094,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
   spdlog::log(sdoLevel, "SDOread(CA) slave {} 0x{:04X}", slavePosition, index);
   // Left over from an earlier transfer, and not this one's to report.
   discardSlaveErrors(ctx_.get(), slavePosition);
+  const uint32_t lateBefore = ctx_->slavelist[slavePosition].mbxlatereads;
   // 64 KiB upload buffer. Complete Access returns *every* subindex of an object in one (internally
   // segmented) transfer, so unlike the single-subindex readSdo this must hold a whole ARRAY/RECORD
   // — potentially hundreds of entries. 64 KiB covers every object a SOMANET drive exposes with wide
@@ -1056,6 +1113,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
   if (wkc <= 0) {
     std::string msg = std::format("SDOread(CA) slave {} 0x{:04X} failed", slavePosition, index);
     msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);
+    msg += lateMailboxReadSuffix(ctx_->slavelist[slavePosition], lateBefore);
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
@@ -1075,6 +1133,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
                                                               uint16_t index, uint8_t subindex,
                                                               std::span<const uint8_t> data) {
   const auto lock = controlPlane_.lockDrive(slavePosition);
+  const LateReadScope lateReads(*this, slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1082,6 +1141,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
                 data.size());
   // Left over from an earlier transfer, and not this one's to report.
   discardSlaveErrors(ctx_.get(), slavePosition);
+  const uint32_t lateBefore = ctx_->slavelist[slavePosition].mbxlatereads;
   // ecx_SDOwrite takes void*, not const void*.
   int wkc =
       ecx_SDOwrite(ctx_.get(), slavePosition, index, subindex, FALSE, static_cast<int>(data.size()),
@@ -1090,6 +1150,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
     std::string msg =
         std::format("SDOwrite slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
     msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);
+    msg += lateMailboxReadSuffix(ctx_->slavelist[slavePosition], lateBefore);
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }
@@ -1588,12 +1649,15 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
     std::optional<FailedFoeTransfer> failed;
     {
       const auto lock = controlPlane_.lockDrive(slavePosition);
+      const LateReadScope lateReads(*this, slavePosition);
       if (!ctx_) {
         return std::unexpected(
             FoeError{FoeErrorKind::Protocol, Retry::Permanent, "no driver — call init() first"});
       }
       drainMailbox(ctx_.get(), slavePosition);
       drainFoeErrors(ctx_.get(), slavePosition);
+      // The count before this transfer, so that only a late read of this transfer is reported.
+      const uint32_t lateBefore = ctx_->slavelist[slavePosition].mbxlatereads;
       int size = kMaxSize;
       const int wkc =
           ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), timeoutUs);
@@ -1602,7 +1666,9 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
         spdlog::debug("FOEread slave {} '{}' ok ({} bytes)", slavePosition, filename, data.size());
         return data;
       }
+      const std::string late = lateMailboxReadSuffix(ctx_->slavelist[slavePosition], lateBefore);
       failed = endFailedFoeTransfer(ctx_.get(), wkc, "FOEread", slavePosition, filename);
+      failed->error.message += late;
     }
     if (failed->refused || failed->error.retry == Retry::Permanent || attempt == kFoeReadAttempts) {
       spdlog::debug("{}", failed->error.message);
@@ -1617,6 +1683,7 @@ std::expected<void, FoeError> SoemFieldbusDriver::writeFile(uint16_t slavePositi
                                                             const std::string& filename,
                                                             std::span<const uint8_t> data) {
   const auto lock = controlPlane_.lockDrive(slavePosition);
+  const LateReadScope lateReads(*this, slavePosition);
   if (!ctx_) {
     return std::unexpected(
         FoeError{FoeErrorKind::Protocol, Retry::Permanent, "no driver — call init() first"});

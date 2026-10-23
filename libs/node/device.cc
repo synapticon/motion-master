@@ -72,6 +72,7 @@ uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
 std::optional<uint8_t> Device::escType() const { return escType_; }
 bool Device::mailboxWriteOnce() const { return mailboxWriteOnce_; }
+uint32_t Device::lateMailboxReads() const { return driver_.lateMailboxReads(slavePosition_); }
 
 bool Device::isCia402() const {
   // Same offline-safe discriminator as createCia402Drive: a CiA402 drive exposes both the
@@ -1453,6 +1454,7 @@ void to_json(nlohmann::json& j, const Device& d) {
       {"supportsLocate", d.supportsLocate()},
       {"escType", d.escType() ? nlohmann::json(*d.escType()) : nlohmann::json(nullptr)},
       {"mailboxWriteOnce", d.mailboxWriteOnce()},
+      {"lateMailboxReads", d.lateMailboxReads()},
       {"parametersUnavailable", d.parametersUnavailable()},
   };
 }

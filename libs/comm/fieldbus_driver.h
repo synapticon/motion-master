@@ -511,6 +511,16 @@ class FieldbusDriver {
   /// somewhere a reader can take it lock-free instead.
   virtual uint16_t slaveState(uint16_t position) const = 0;
 
+  /// @brief Returns how many mailbox reads of the slave came back only after the driver gave up
+  /// on them, since the last scan.
+  ///
+  /// Such a frame was late, not lost: the slave answered, and something between the slave and the
+  /// driver held the frame. Each one also failed its transfer. The count is reported per device,
+  /// so a support log can name a host that holds frames without a capture.
+  ///
+  /// @note **Must not block**, for the reason given at @c slaveState.
+  virtual uint32_t lateMailboxReads(uint16_t /*position*/) const { return 0; }
+
   /// @brief Returns the slave's advertised mailbox-protocol bits without any bus I/O.
   ///
   /// The same EEPROM-derived value @c busConfig() reports in @c MailboxConfig::protocols (SOEM's

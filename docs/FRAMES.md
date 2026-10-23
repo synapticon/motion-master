@@ -118,6 +118,9 @@ did not read, because one write is the safe side.
     - No frame, and SM1 is empty: the slave gave the message away, and the message is lost. The
       master does not ask a SOMANET drive to repeat it, because an Integro then sends the message
       before the last one. The transfer fails.
+    - In both cases the master keeps the index of the read until the SM1 status read comes back. A
+      frame that comes back in that time was late, not lost. The master counts it and logs a
+      warning, but does not use it.
 - **The counter starts from a known point.** When a SOMANET drive reaches PRE-OP from INIT, the
   master sends it a request with counter 0. Both stacks accept counter 0, whatever came before it.
 
@@ -164,3 +167,18 @@ Issue #138 shows how these rules work together on a PC that holds a returned fra
    short, as at the end of every file, so the master took the rest for the whole file.
 
 The cause on the drive is filed as synapticon/somanet_software#5817.
+
+### How to see a held frame
+
+A host that holds a frame hands it up together with the next frame that comes back. In step 2,
+that next frame is the SM1 status read. So the master finds the held frame under the kept index
+and reports it in three places:
+
+- A warning in the server log:
+  `Slave 1: 1 mailbox read(s) came back only after the wait of 100 ms, together with the frame after them, ...`
+- The error of the FoE read, which ends with `a mailbox read came back ... ms after it was sent`.
+- The field `lateMailboxReads` of the device in `GET /api/devices`. It counts since the last scan.
+
+A frame that a switch or the network delays past the status read is not counted, because nothing
+waits for it then. A capture with `POST /api/captures` still tells a delay in the host from a delay
+on the wire.

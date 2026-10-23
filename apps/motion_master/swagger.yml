@@ -617,6 +617,15 @@ paths:
                       request twice. False for a netX, which discards a repeat, and for every other
                       vendor, where a write with no frame back is sent again.
                     example: true
+                  lateMailboxReads:
+                    type: integer
+                    format: int64
+                    description: >
+                      How many mailbox reads of this device came back only after Motion Master stopped
+                      waiting for them, since the scan. The device answered, and the host or the network
+                      held the frame. Motion Master counts a read when its frame comes back together with
+                      the frame sent after it. Always 0 over SPoE.
+                    example: 0
                   supportsEsc:
                     type: boolean
                     description: >
@@ -4329,6 +4338,15 @@ paths:
                         request twice. False for a netX, which discards a repeat, and for every other
                         vendor, where a write with no frame back is sent again.
                       example: true
+                    lateMailboxReads:
+                      type: integer
+                      format: int64
+                      description: >
+                        How many mailbox reads of this device came back only after Motion Master stopped
+                        waiting for them, since the scan. The device answered, and the host or the network
+                        held the frame. Motion Master counts a read when its frame comes back together with
+                        the frame sent after it. Always 0 over SPoE.
+                      example: 0
                     supportsEsc:
                       type: boolean
                       description: >

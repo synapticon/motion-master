@@ -154,6 +154,9 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::expected<void, std::string> writeSii(uint16_t slavePosition,
                                             std::span<const uint8_t> data) override;
 
+  /// @copydoc FieldbusDriver::lateMailboxReads
+  uint32_t lateMailboxReads(uint16_t position) const override;
+
   /// @copydoc FieldbusDriver::readFile
   std::expected<std::vector<uint8_t>, FoeError> readFile(
       uint16_t slavePosition, const std::string& filename,
@@ -242,6 +245,18 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// slaves its operation touched.
   void publishSlaveStates();
 
+  /// @brief Logs the mailbox reads of a slave that came back late, and adds them to its count.
+  ///
+  /// The SOEM port counts them in the slave list, which only the holder of the drive's lock may
+  /// touch. This moves the count into @c lateMailboxReads_, which a reader takes without a lock,
+  /// and resets the count in the slave list. Call with the drive's lock held, after each mailbox
+  /// transfer.
+  void publishLateMailboxReads(uint16_t position);
+
+  /// Calls publishLateMailboxReads when the transfer that holds the drive's lock ends, on every
+  /// return path. Construct it after the lock, so it runs before the lock is released.
+  class LateReadScope;
+
   std::string ifname_;
   // One lock for the bus and one per position. Sized to slavelist in the constructor, so every
   // position the driver accepts has a lock.
@@ -274,6 +289,10 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::unique_ptr<std::atomic<uint16_t>[]> slaveStates_;
   // Immutable after construction, so it needs no synchronisation of its own.
   std::size_t slaveStatesSize_ = 0;
+  // The mailbox reads of each slave that came back late, since the last scan, indexed like
+  // slaveStates_ and allocated the same way. publishLateMailboxReads writes it with the drive's
+  // lock held, and lateMailboxReads reads it without a lock.
+  std::unique_ptr<std::atomic<uint32_t>[]> lateMailboxReads_;
   // 1-based positions whose context currently holds BOOT-sized mailbox sync
   // managers (set when we drive a slave into BOOT). ecx_config_init programs the
   // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan

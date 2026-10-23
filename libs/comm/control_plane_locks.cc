@@ -6,9 +6,11 @@
 
 namespace mm::comm {
 
-// The RT thread needs the indexes the control plane does not take. A SOEM build with fewer indexes
-// would make the two share one index, and ecx_getindex does not report that.
-static_assert(ControlPlaneLocks::kFrameSlots < EC_MAXBUF,
+// The RT thread needs the indexes the control plane does not take. A slot holds up to two indexes:
+// the port keeps the index of a mailbox read that got no frame while the status read after it is in
+// flight. A SOEM build with fewer indexes would make the two share one index, and ecx_getindex does
+// not report that.
+static_assert(2 * ControlPlaneLocks::kFrameSlots < EC_MAXBUF,
               "the frame slots must leave frame indexes for the RT thread");
 
 void BusLock::lock() {

@@ -436,6 +436,12 @@ export class Api<
          */
         mailboxWriteOnce?: boolean;
         /**
+         * How many mailbox reads of this device came back only after Motion Master stopped waiting for them, since the scan. The device answered, and the host or the network held the frame. Motion Master counts a read when its frame comes back together with the frame sent after it. Always 0 over SPoE.
+         * @format int64
+         * @example 0
+         */
+        lateMailboxReads?: number;
+        /**
          * Whether the device has an EtherCAT Slave Controller: SII, ESC registers, distributed clocks and the ESC diagnostics. False over SPoE, where those endpoints answer 409.
          * @example true
          */
@@ -2536,6 +2542,12 @@ export class Api<
          * @example true
          */
         mailboxWriteOnce?: boolean;
+        /**
+         * How many mailbox reads of this device came back only after Motion Master stopped waiting for them, since the scan. The device answered, and the host or the network held the frame. Motion Master counts a read when its frame comes back together with the frame sent after it. Always 0 over SPoE.
+         * @format int64
+         * @example 0
+         */
+        lateMailboxReads?: number;
         /**
          * Whether the device has an EtherCAT Slave Controller: SII, ESC registers, distributed clocks and the ESC diagnostics. False over SPoE, where those endpoints answer 409.
          * @example true

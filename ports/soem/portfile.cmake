@@ -571,14 +571,18 @@ vcpkg_replace_string(
    /** never send a Repeat Request: the slave answers it with the message before the last one */
    boolean mbxnorepeat;
    /** mailbox writes that got no frame back */
-   uint32 mbxwriteunknowns;")
+   uint32 mbxwriteunknowns;
+   /** mailbox reads whose frame came back only after the wait, beside the next frame */
+   uint32 mbxlatereads;
+   /** how late the last of them came back, in us after it was sent */
+   uint32 mbxlatereadus;")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/include/soem/ec_base.h"
 "int ecx_FPWR(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);"
 "int ecx_FPWR(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);
 int ecx_FPWRonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);
-int ecx_FPRDonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);")
+int ecx_FPRDonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout, uint8 *keptidx);")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_base.c"
@@ -623,9 +627,13 @@ int ecx_FPWRonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *d
  * ecx_FPRD sends the datagram again when no frame comes back within EC_TIMEOUTRET. This one
  * sends it once and waits up to timeout for that frame.
  *
+ * When no frame comes back and keptidx is not NULL, the index stays in use and is returned
+ * through keptidx, so that a frame that comes back later is still stored under it. The caller
+ * must free it with ecx_setbufstat.
+ *
  * @return Workcounter, or EC_NOFRAME when no frame came back
  */
-int ecx_FPRDonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout)
+int ecx_FPRDonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout, uint8 *keptidx)
 {
    int wkc;
    uint8 idx;
@@ -637,6 +645,11 @@ int ecx_FPRDonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *d
    if (wkc > 0)
    {
       memcpy(data, &(port->rxbuf[idx][EC_HEADERSIZE]), length);
+   }
+   if ((wkc <= EC_NOFRAME) && (keptidx != NULL))
+   {
+      *keptidx = idx;
+      return wkc;
    }
    ecx_setbufstat(port, idx, EC_BUF_EMPTY);
 
@@ -651,6 +664,24 @@ vcpkg_replace_string(
  * wait this long for their own frame, because a datagram sent again reaches a slave that already
  * has the first one. A register datagram keeps EC_TIMEOUTRET, because it is safe to send again. */
 #define EC_TIMEOUTLATE 100000
+
+/* Looks under the kept index of a mailbox read that got no frame for a frame that came back since,
+ * counts it in mbxlatereads, and frees the index. The comment in the Motion Master SOEM port
+ * explains why. */
+static void ecx_mbxlateread(ecx_contextt *context, uint16 slave, uint8 idx, const ec_timet *sent)
+{
+   ec_timet now;
+   ec_timet late;
+
+   if (ecx_waitinframe(&context->port, idx, 0) > EC_NOFRAME)
+   {
+      osal_get_monotonic_time(&now);
+      osal_timespecsub(&now, sent, &late);
+      context->slavelist[slave].mbxlatereads++;
+      context->slavelist[slave].mbxlatereadus = (uint32)(late.tv_sec * 1000000 + late.tv_nsec / 1000);
+   }
+   ecx_setbufstat(&context->port, idx, EC_BUF_EMPTY);
+}
 
 /* Writes a mailbox message to a slave that has mbxwriteonce set. The comment in the Motion Master
  * SOEM port explains the rules.
@@ -735,6 +766,16 @@ vcpkg_replace_string(
 # the wrong message, and the XMOS stack of a Circulo was not tested. The read fails instead, and
 # the caller reports it. The flag is separate from mbxwriteonce because an Integro is written the
 # upstream way and still must not get a repeat request.
+#
+# A mailbox read that got no frame keeps its index until the SyncManager 1 status read after it
+# has come back. A frame that comes back in that time is stored under the kept index, and is
+# counted in mbxlatereads with its delay in mbxlatereadus. It is not used: the transfer fails as it
+# does without the count. A host can hold a frame that came back until the next frame comes back.
+# On the PC of #138 the return of a mailbox read came up 24 µs after the status read left, 100 ms
+# after it was sent. The count shows that in the server log without a capture. A frame that a
+# switch or a network delays past the status read is not counted, because nothing waits for it
+# then. The kept index makes a frame slot of the driver hold two indexes for the time of the
+# status read.
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_main.c"
 "         mbxro = slavelist->mbx_ro;
@@ -758,10 +799,21 @@ vcpkg_replace_string(
                }
                mbxh = (ec_mbxheadert *)mbxin;
             }
-            wkc = ecx_FPRDonce(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTLATE); /* get mailbox */
-            if ((wkc == EC_NOFRAME) && (ecx_readmbxstatus(context, slave, &SMstat) > 0) && ((SMstat & 0x08) != 0))
             {
-               continue; /* the read did not reach the slave: read again */
+               ec_timet sent;
+               uint8 keptidx = 0;
+               osal_get_monotonic_time(&sent);
+               wkc = ecx_FPRDonce(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTLATE, &keptidx); /* get mailbox */
+               if (wkc == EC_NOFRAME)
+               {
+                  /* the status read is the next frame, and a held frame comes back beside it */
+                  wkc2 = ecx_readmbxstatus(context, slave, &SMstat);
+                  ecx_mbxlateread(context, slave, keptidx, &sent);
+                  if ((wkc2 > 0) && ((SMstat & 0x08) != 0))
+                  {
+                     continue; /* the read did not reach the slave: read again */
+                  }
+               }
             }")
 
 vcpkg_replace_string(

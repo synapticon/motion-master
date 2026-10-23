@@ -418,6 +418,21 @@ TEST(DeviceManagerTransport, ReportsTheEscTypeAndTheMailboxWriteRule) {
   EXPECT_FALSE(j["mailboxWriteOnce"].get<bool>());
 }
 
+TEST(DeviceManagerTransport, ReportsTheLateMailboxReadsAsTheyHappen) {
+  auto bus = mm::node::testing::makeCia402Bus();
+  auto* fake = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  const auto device = dm.deviceAt(1);
+  ASSERT_TRUE(device);
+  EXPECT_EQ(nlohmann::json(*device)["lateMailboxReads"].get<uint32_t>(), 0U);
+  // The count grows while the bus runs, so the device asks the driver each time instead of keeping
+  // what the scan saw.
+  fake->lateReads = 3;
+  EXPECT_EQ(nlohmann::json(*device)["lateMailboxReads"].get<uint32_t>(), 3U);
+}
+
 TEST(DeviceManagerTransport, ReportsAnUnreadEscTypeAsNullAndTheSafeRule) {
   auto bus = mm::node::testing::makeCia402Bus();
   bus->escType = std::nullopt;

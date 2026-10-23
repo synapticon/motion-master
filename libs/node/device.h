@@ -208,6 +208,10 @@ class Device {
   ///        @c SlaveInfo at construction. No bus I/O.
   bool mailboxWriteOnce() const;
 
+  /// @brief How many mailbox reads of this device came back only after the driver gave up on
+  ///        them, since the scan. Delegates to @c FieldbusDriver::lateMailboxReads. No bus I/O.
+  uint32_t lateMailboxReads() const;
+
   /// @brief Starts or stops blinking this device's LEDs. Delegates to @c FieldbusDriver::locate.
   std::expected<void, std::string> locate(bool on) const;
 

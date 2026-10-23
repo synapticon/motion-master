@@ -149,6 +149,9 @@ class FakeBus : public FieldbusDriver {
   }
   std::optional<uint8_t> escType;
   bool mailboxWriteOnce = false;
+
+  uint32_t lateMailboxReads(uint16_t) const override { return lateReads; }
+  uint32_t lateReads = 0;
   void stop() override {}
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& p) override {

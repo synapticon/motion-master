@@ -95,9 +95,11 @@ class ControlPlaneLocks {
   /// full frame takes about 120 µs at 100 Mbit/s. So eight full frames delay the RT frame by about
   /// 1 ms. This was calculated, not measured.
   ///
-  /// With 32 indexes, eight slots leave the RT thread 24. A frame carries 1486 bytes, and a
-  /// SOMANET drive maps about 100, so one frame holds about 14 drives. Separate LRD and LWR
-  /// datagrams, which some devices need, double the frames. So 24 indexes serve about 168 SOMANET
+  /// A slot holds two indexes for a moment after a mailbox read that got no frame, because the
+  /// port keeps the index of that read until the status read after it comes back. So with 32
+  /// indexes, eight slots leave the RT thread 16 in the worst case. A frame carries 1486 bytes,
+  /// and a SOMANET drive maps about 100, so one frame holds about 14 drives. Separate LRD and LWR
+  /// datagrams, which some devices need, double the frames. So 16 indexes serve about 112 SOMANET
   /// drives in the worst case.
   static constexpr std::ptrdiff_t kFrameSlots = 8;
 

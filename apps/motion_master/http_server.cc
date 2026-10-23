@@ -2054,6 +2054,66 @@ void HttpServer::run() {
     return mm::api::json(nlohmann::json{{"ok", allReached}, {"devices", devices}});
   });
 
+  router.post("/api/devices/restart", [this](const mm::api::Request& req) -> mm::api::Response {
+    // The body is optional: no body restarts every device to OP.
+    nlohmann::json body = nlohmann::json::object();
+    if (!req.body().empty()) {
+      body = nlohmann::json::parse(req.body(), nullptr, false);
+      if (body.is_discarded() || !body.is_object()) {
+        return mm::api::badRequest(R"(body must be {"target": <AL state>, ...} or empty)");
+      }
+    }
+    using S = mm::comm::EtherCatState;
+    auto target = static_cast<uint16_t>(S::Op);
+    if (body.contains("target")) {
+      if (!body["target"].is_number_unsigned()) {
+        return mm::api::badRequest("'target' must be an AL state number");
+      }
+      target = body["target"].get<uint16_t>();
+    }
+    if (target != static_cast<uint16_t>(S::Init) && target != static_cast<uint16_t>(S::PreOp) &&
+        target != static_cast<uint16_t>(S::Boot) && target != static_cast<uint16_t>(S::SafeOp) &&
+        target != static_cast<uint16_t>(S::Op)) {
+      return mm::api::badRequest(
+          "invalid target: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or 8 (Op)");
+    }
+    std::vector<uint16_t> positions;
+    if (body.contains("positions")) {
+      if (!body["positions"].is_array()) {
+        return mm::api::badRequest("'positions' must be an array of bus positions");
+      }
+      positions = body["positions"].get<std::vector<uint16_t>>();
+    }
+    int timeoutMs = 5000;
+    if (body.contains("timeout")) {
+      if (!body["timeout"].is_number_integer()) {
+        return mm::api::badRequest("'timeout' must be a number of milliseconds");
+      }
+      timeoutMs = body["timeout"].get<int>();
+    }
+    if (auto refusal = deviceManager_.stateChangeRefusal(); refusal) {
+      return mm::api::error("409 Conflict", *refusal);
+    }
+    auto outcome = deviceManager_.restartToState(positions, static_cast<S>(target),
+                                                 std::chrono::milliseconds(timeoutMs));
+    if (!outcome) {
+      return mm::api::error("500 Internal Server Error", outcome.error());
+    }
+    // The same shape as POST /api/devices/state, plus the step the restart stopped at. "ok" is
+    // true only when that step is the target and every device reached it.
+    const auto step = static_cast<uint16_t>(outcome->step);
+    bool allReached = step == target;
+    nlohmann::json devices = nlohmann::json::array();
+    for (const auto& info : outcome->states) {
+      const bool reached = !info.error && info.alState == step;
+      allReached = allReached && reached;
+      nlohmann::json entry = info;
+      entry["reached"] = reached;
+      devices.push_back(std::move(entry));
+    }
+    return mm::api::json(nlohmann::json{{"ok", allReached}, {"step", step}, {"devices", devices}});
+  });
+
   // ── Monitorings and the two file stores ─────────────────────────────────────────────────────
   router.post("/api/monitorings", [this](const mm::api::Request& req) -> mm::api::Response {
     nlohmann::json body = nlohmann::json::object();

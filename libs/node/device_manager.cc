@@ -947,6 +947,45 @@ bool DeviceManager::supportsEsc() const {
   return !set->driver || set->driver->supportsEsc();
 }
 
+std::expected<RestartOutcome, std::string> DeviceManager::restartToState(
+    const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+    std::chrono::steady_clock::duration timeout) {
+  using mm::comm::EtherCatState;
+  // The AL state machine climbs one state at a time, and BOOT is a side step from INIT.
+  std::vector<EtherCatState> steps = {EtherCatState::Init};
+  if (targetState == EtherCatState::Boot) {
+    steps.push_back(EtherCatState::Boot);
+  } else {
+    for (const EtherCatState climb :
+         {EtherCatState::PreOp, EtherCatState::SafeOp, EtherCatState::Op}) {
+      if (static_cast<uint16_t>(climb) > static_cast<uint16_t>(targetState)) {
+        break;
+      }
+      steps.push_back(climb);
+    }
+  }
+  RestartOutcome outcome;
+  for (const EtherCatState step : steps) {
+    auto states = transitionToState(positions, step, timeout);
+    if (!states) {
+      return std::unexpected(
+          std::format("restart stopped at {}: {}", mm::comm::toString(step), states.error()));
+    }
+    outcome.step = step;
+    outcome.states = std::move(*states);
+    const bool allReached =
+        std::ranges::all_of(outcome.states, [step](const DeviceStateInfo& info) {
+          return !info.error && info.alState == static_cast<uint16_t>(step);
+        });
+    if (!allReached) {
+      spdlog::warn("Restart to {} stopped at {}: not every device reached it",
+                   mm::comm::toString(targetState), mm::comm::toString(step));
+      break;
+    }
+  }
+  return outcome;
+}
+
 std::optional<std::string> DeviceManager::stateChangeRefusal() const {
   const std::shared_ptr<DeviceSet> set = deviceSet();
   return set->driver ? set->driver->stateChangeRefusal() : std::nullopt;

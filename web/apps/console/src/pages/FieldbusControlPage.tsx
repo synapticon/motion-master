@@ -17,6 +17,15 @@ type TransitionTarget = {
   cls: string
   hint: string
 }
+// The targets of a restart, the end state first. A restart always starts at INIT.
+const RESTART_TARGETS: { value: 1 | 2 | 3 | 4 | 8; label: string }[] = [
+  { value: 8, label: 'Op' },
+  { value: 4, label: 'SafeOp' },
+  { value: 2, label: 'PreOp' },
+  { value: 3, label: 'Boot' },
+  { value: 1, label: 'Init' },
+]
+
 const TRANSITION_TARGETS: TransitionTarget[] = [
   {
     value: 3,
@@ -258,6 +267,22 @@ export default function FieldbusControlPage() {
     },
   })
 
+  // Restart: INIT, then one AL state at a time up to the chosen target. The server walks the
+  // steps and stops at the first one a device does not reach, so the result names that step.
+  const [restartTarget, setRestartTarget] = useState<1 | 2 | 3 | 4 | 8>(8)
+  const restartMutation = useMutation({
+    mutationFn: async (target: 1 | 2 | 3 | 4 | 8) => {
+      const start = performance.now()
+      const res = await api.restartDevices({ target })
+      return { target, res, elapsedMs: performance.now() - start }
+    },
+    onSuccess: () => refreshDevices(),
+  })
+  // The bus-wide, the per-device and the restart transitions all command the same bus, so one in
+  // flight blocks the other two.
+  const anyTransitionPending =
+    transitionMutation.isPending || deviceTransitionMutation.isPending || restartMutation.isPending
+
   // When the device list first appears without us having read states yet — a page
   // refresh that restored the session, or navigating back to the Control page — read
   // the actual AL states once so the table isn't blank until a manual refresh.
@@ -481,18 +506,71 @@ export default function FieldbusControlPage() {
                 <div className="pt-2 space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="eyebrow text-xs">Devices</p>
-                    <button
-                      onClick={refreshDevices}
-                      disabled={devicesQuery.isFetching || readingStates}
-                      className={btnOutline}
-                      title="Re-read the device list and AL states without re-scanning the bus — slaves keep their current state."
-                    >
-                      {devicesQuery.isFetching || readingStates ? 'Refreshing…' : 'Refresh'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={restartTarget}
+                        disabled={anyTransitionPending}
+                        onChange={e => setRestartTarget(Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8)}
+                        title="The AL state the restart ends in."
+                        className="border border-grey-300 px-2 h-[30px] text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      >
+                        {RESTART_TARGETS.map(t => (
+                          <option key={t.value} value={t.value}>{t.label} ({t.value})</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => restartMutation.mutate(restartTarget)}
+                        disabled={anyTransitionPending}
+                        className={`${btnOutline} h-[30px] inline-flex items-center`}
+                        title="Command every slave to INIT, then up one AL state at a time to the chosen target. Drops every slave out of process data exchange, so an enabled drive is disabled."
+                      >
+                        {restartMutation.isPending ? 'Restarting…' : 'Restart'}
+                      </button>
+                      <button
+                        onClick={refreshDevices}
+                        disabled={devicesQuery.isFetching || readingStates}
+                        className={`${btnOutline} h-[30px] inline-flex items-center`}
+                        title="Re-read the device list and AL states without re-scanning the bus — slaves keep their current state."
+                      >
+                        {devicesQuery.isFetching || readingStates ? 'Refreshing…' : 'Refresh'}
+                      </button>
+                    </div>
                   </div>
+                  {restartMutation.isSuccess && (() => {
+                    const { target, res, elapsedMs } = restartMutation.data
+                    const body = res.data
+                    const elapsed = ` in ${formatDuration(elapsedMs)}`
+                    if (body.ok) {
+                      return (
+                        <p className="text-status-good text-xs">
+                          Restarted to {AL_STATE_LABEL[target]} ({target}){elapsed}
+                        </p>
+                      )
+                    }
+                    const failed = body.devices.filter(d => !d.reached)
+                    const detail = failed.map(d => {
+                      const stateLabel = AL_STATE_LABEL[d.alState] ?? `0x${d.alState.toString(16).toUpperCase()}`
+                      const codeEntry = d.error ? (alStatusCodeMap[d.alStatusCode] ?? null) : null
+                      const code = codeEntry
+                        ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
+                        : ''
+                      return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`
+                    }).join('; ')
+                    return (
+                      <p className="text-status-bad text-xs">
+                        Restart to {AL_STATE_LABEL[target]} ({target}) stopped at{' '}
+                        {AL_STATE_LABEL[body.step]} ({body.step}){elapsed}. {detail}
+                      </p>
+                    )
+                  })()}
+                  {restartMutation.isError && (
+                    <p className="text-status-bad text-xs">{apiError(restartMutation.error)}</p>
+                  )}
                   <p className="text-xs text-grey-600">
                     Use the <span className="font-medium">Action</span> dropdown to command an individual
                     slave to an AL state. The bus-wide buttons under “Transition to State” move every slave at once.
+                    <span className="font-medium"> Restart</span> commands every slave to INIT and then up one
+                    state at a time to the chosen target, OP by default.
                   </p>
                   <div className="border border-grey-200 overflow-x-auto">
                     {devicesQuery.isFetching && !devicesQuery.data && (
@@ -519,7 +597,7 @@ export default function FieldbusControlPage() {
                               && deviceTransitionMutation.variables?.position === pos
                             // Block all per-device dropdowns while any transition (bus-wide or
                             // per-device) is in flight — they all command the same bus.
-                            const busy = transitionMutation.isPending || deviceTransitionMutation.isPending
+                            const busy = anyTransitionPending
                             const result = deviceTransitionResult[pos]
                             return (
                               <Fragment key={pos}>
@@ -663,7 +741,7 @@ export default function FieldbusControlPage() {
                     <div key={value} className="space-y-1.5">
                       <button
                         onClick={() => transitionMutation.mutate(value)}
-                        disabled={transitionMutation.isPending || deviceTransitionMutation.isPending}
+                        disabled={anyTransitionPending}
                         className={`${cls} px-4 py-2 text-xs w-full font-display uppercase tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer`}
                       >
                         {isThisPending ? 'Transitioning…' : `${label} (${value})`}

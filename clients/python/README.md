@@ -13,8 +13,7 @@ streaming live process data and tearing back down.
 
 | File | Purpose |
 | --- | --- |
-| `mm_client.py` | `MMClient` — fetches the server's spec from `GET /api/swagger.yml` (parsed with PyYAML), resolves each operation's method + URL by `operationId`, and calls it with `requests`. Holds both the HTTP and WebSocket endpoints. |
-| `common.py` | Loads `config.toml` and builds a wired `MMClient`. |
+| `motion_master_client.py` | `MotionMasterClient` — fetches the server's spec from `GET /api/swagger.yml` (parsed with PyYAML), resolves each operation's method + URL by `operationId`, and calls it with `requests`. Holds both the HTTP and WebSocket endpoints. `from_config()` builds it from `config.toml`, `init()` opens the driver, and `ensure_state()` scans when needed and moves the devices to an AL state. |
 | `config.example.toml` | Config template — copy to `config.toml`. |
 | `examples/scan.py` | `POST /api/scan` — open the driver from config when none is open, scan, and list the devices. |
 | `examples/03_transition_preop.py` | `POST /api/devices/state` — move all devices to PRE-OP. |
@@ -25,7 +24,7 @@ streaming live process data and tearing back down.
 | `examples/08_monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. |
 | `examples/09_reset.py` | `POST /api/reset` — tear the driver down, back to uninitialised. |
 
-Every request goes through one method — `MMClient.call(operationId, ...)` — with
+Every request goes through one method — `MotionMasterClient.call(operationId, ...)` — with
 `path` parameters, a JSON `body`, and/or a `query` as the operation needs:
 
 ```python
@@ -54,8 +53,8 @@ source of truth instead of duplicating them. Four things fall out of that:
   construction — point it at an older or newer Motion Master and it adapts; it
   can't be a stale client against a fresh server.
 - **It's standalone.** Because the contract is fetched live, there's no bundled
-  spec, no code generation, and no checkout of this repository — copy the two
-  client files (`mm_client.py` + `common.py`) anywhere, `pip install`, and point
+  spec, no code generation, and no checkout of this repository — copy the client
+  file (`motion_master_client.py`) anywhere, `pip install`, and point
   at a server.
 - **It reads as a teaching client.** Each call says "invoke *this named
   operation*" — a clean tour of the API surface — instead of a pile of URL
@@ -141,6 +140,6 @@ at a `cert.pem`, once you know the server is presenting the bundled cert.
 
 The config keeps `host` portless because Motion Master exposes two endpoints on
 separate loops: the HTTP API (`http_port`, 61447) used by most examples, and the
-monitoring WebSocket (`ws_port`, 62281) for live process data. `MMClient` holds
+monitoring WebSocket (`ws_port`, 62281) for live process data. `MotionMasterClient` holds
 both — `client.call(...)` hits the HTTP API, and `client.monitor(topic)` streams
 batches from the WebSocket (see `08_monitor.py`).

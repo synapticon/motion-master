@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import make_client  # noqa: E402
+from motion_master_client import MotionMasterClient  # noqa: E402
 
 TOPIC = "python-example"
 
@@ -46,7 +46,7 @@ def main():
         [args.slave, 0x2031, 1],  # Drive temperature
     ]
 
-    client = make_client()
+    client = MotionMasterClient.from_config()
 
     # Recreate cleanly in case a monitoring with this topic lingers from a prior run.
     client.call("deleteMonitoring", path={"topic": TOPIC}, check=False)

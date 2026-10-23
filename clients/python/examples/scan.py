@@ -8,16 +8,18 @@ devices, not an error.
     python scan.py
 """
 
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import STATE_NAMES, make_client, open_driver  # noqa: E402
+from motion_master_client import STATE_NAMES, MotionMasterClient  # noqa: E402
 
 
 def main():
-    client = make_client()
-    open_driver(client)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    client = MotionMasterClient.from_config()
+    client.init()
 
     found = client.call("scan").json()["slaves"]
     print(f"found {found} device(s)")

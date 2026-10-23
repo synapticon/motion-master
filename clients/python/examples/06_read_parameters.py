@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import make_client  # noqa: E402
+from motion_master_client import MotionMasterClient  # noqa: E402
 
 
 def decode_value(param):
@@ -50,7 +50,7 @@ def main():
     ap.add_argument("--slave", type=int, default=1)
     args = ap.parse_args()
 
-    client = make_client()
+    client = MotionMasterClient.from_config()
     print(f"enumerating object dictionary of slave {args.slave} (this may take a few seconds)...")
 
     params = client.call(

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import make_client  # noqa: E402
+from motion_master_client import MotionMasterClient  # noqa: E402
 
 
 def auto_int(text):
@@ -29,7 +29,7 @@ def main():
     ap.add_argument("--subindex", type=auto_int, default=0)
     args = ap.parse_args()
 
-    client = make_client()
+    client = MotionMasterClient.from_config()
     data = client.call(
         "sdoUpload",
         path={"slavePosition": args.slave, "index": args.index, "subindex": args.subindex},

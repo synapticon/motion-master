@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import make_client  # noqa: E402
+from motion_master_client import MotionMasterClient  # noqa: E402
 
 # Downloaded files land here (git-ignored) unless --output overrides.
 FILES_DIR = Path(__file__).resolve().parent.parent / "files"
@@ -30,7 +30,7 @@ def main():
     ap.add_argument("--output", help="local path to save to (default: files/<filename>)")
     args = ap.parse_args()
 
-    client = make_client()
+    client = MotionMasterClient.from_config()
     content = client.call(
         "foeReadFile", path={"slavePosition": args.slave, "filename": args.filename}
     ).content

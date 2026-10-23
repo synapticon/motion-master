@@ -12,11 +12,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import make_client  # noqa: E402
+from motion_master_client import MotionMasterClient  # noqa: E402
 
 
 def main():
-    client = make_client()
+    client = MotionMasterClient.from_config()
     client.call("reset")
     print("reset -- driver torn down, device list cleared")
 

@@ -14,14 +14,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import make_client  # noqa: E402
+from motion_master_client import MotionMasterClient  # noqa: E402
 
 # AL states to climb through, in order, up to OP.
 LADDER = [("PRE-OP", 2), ("SAFE-OP", 4), ("OP", 8)]
 
 
 def main():
-    client = make_client()
+    client = MotionMasterClient.from_config()
 
     for name, state in LADDER:
         result = client.call("transitionToState", body={"state": state}).json()

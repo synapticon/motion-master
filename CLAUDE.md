@@ -1165,6 +1165,15 @@ Wedges the file system of a Circulo on purpose, which is the reproduction of syn
 sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interface> [--slave 1]   [--file config.csv] [--packets 2] [--pause 200] [--no-abort]
 ```
 
+### held_frame
+
+Tests whether the host holds a returned frame until another frame comes back, and whether a NOP datagram makes the host hand it up (#138). It sends one 128-byte FPRD of ESC register 0x0000 at a time, sent once, in two modes that take turns by block. `plain` waits 100 ms, as the port does, and looks for a missing return beside the next frame's return. `nudge` sends a NOP after each 2 ms with no return and looks for the return right after it. It ends with THE NOP RELEASES A HELD FRAME, NO HELD FRAME SEEN, or NOT CONFIRMED. The return of #138 came once in about 100,000 frames, so a run needs about a million frames per mode. It leaves the slaves in INIT. It needs raw socket access, and no other master may use the adapter.
+
+```bash
+sudo ./build/x64-linux-debug/hil/held_frame/held_frame --ifname <interface> [--slave 1] \
+  [--frames 2000000] [--block 10000] [--gap 0]
+```
+
 ### api
 
 TypeScript integration tests (Vitest) for the HTTP API and the WebSocket. They drive the

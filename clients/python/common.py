@@ -77,6 +77,19 @@ def _satisfied(current, target, exact):
     return _LADDER.index(current) > _LADDER.index(target)
 
 
+def open_driver(client):
+    """Open the fieldbus driver from config.toml, unless one is open already.
+
+    init answers 409 when a driver is open, so a second call is harmless.
+    """
+    fieldbus = load_config()["fieldbus"]
+    r = client.call("init", body=fieldbus, check=False)
+    if r.status_code == 200:
+        print(f"opened the {fieldbus.get('driver', 'soem')} driver")
+    elif r.status_code != 409:
+        sys.exit(f"init failed ({r.status_code}): {r.text}")
+
+
 def ensure_state(client, state, positions=None, exact=False):
     """Bring the server and the devices to the state a script needs.
 
@@ -87,12 +100,7 @@ def ensure_state(client, state, positions=None, exact=False):
 
     Exits the script when a device does not answer or does not reach a state.
     """
-    fieldbus = load_config()["fieldbus"]
-    r = client.call("init", body=fieldbus, check=False)
-    if r.status_code == 200:
-        print(f"opened the {fieldbus.get('driver', 'soem')} driver")
-    elif r.status_code != 409:
-        sys.exit(f"init failed ({r.status_code}): {r.text}")
+    open_driver(client)
 
     # Over SPoE, devicesOnWire is null, so `required` stays false before the first scan.
     # devicesScanned is 0 until a scan ran on either driver.

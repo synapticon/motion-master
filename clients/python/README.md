@@ -16,8 +16,7 @@ streaming live process data and tearing back down.
 | `mm_client.py` | `MMClient` — fetches the server's spec from `GET /api/swagger.yml` (parsed with PyYAML), resolves each operation's method + URL by `operationId`, and calls it with `requests`. Holds both the HTTP and WebSocket endpoints. |
 | `common.py` | Loads `config.toml` and builds a wired `MMClient`. |
 | `config.example.toml` | Config template — copy to `config.toml`. |
-| `examples/01_init.py` | `POST /api/init` — bring up the driver from config. |
-| `examples/02_scan.py` | `POST /api/scan` — discover slaves. |
+| `examples/scan.py` | `POST /api/scan` — open the driver from config when none is open, scan, and list the devices. |
 | `examples/03_transition_preop.py` | `POST /api/devices/state` — move all devices to PRE-OP. |
 | `examples/04_read_sdo.py` | `GET .../sdo/{index}/{subindex}` — raw CoE SDO upload. |
 | `examples/05_read_file.py` | `GET .../files/{filename}` — read a file over FoE (saved into the git-ignored `files/`). |
@@ -110,8 +109,7 @@ Start Motion Master and leave it uninitialised — download a build from the
 binary (it listens on `127.0.0.1` by default). Then run the examples in order:
 
 ```bash
-python examples/01_init.py
-python examples/02_scan.py
+python examples/scan.py
 python examples/03_transition_preop.py
 python examples/04_read_sdo.py                      # Statusword 0x6041:00 by default
 python examples/04_read_sdo.py --index 0x6064 --subindex 0

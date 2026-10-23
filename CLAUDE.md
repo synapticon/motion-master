@@ -909,7 +909,8 @@ on a netX. Register datagrams keep `EC_TIMEOUTRET` and are sent again. A SOMANET
 Repeat Request, because the Integro answers it with the message before the last one. Every returned
 frame must match the sent datagram header, not only its 8-bit index, because a late frame on a
 reused index was taken for the newer datagram's answer. The warning "got no frame back" in a
-support log counts these writes. See `NEXTGEN.md`, Session 2026-10-22.
+support log counts these writes. See `NEXTGEN.md`, Session 2026-10-22. Every frame kind, repeat
+rule and timeout in one place: `docs/FRAMES.md`.
 
 ### ESI Parsing (`libs/etg`)
 

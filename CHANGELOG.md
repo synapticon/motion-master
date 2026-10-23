@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **A mailbox read that comes back after the wait is reported.** Over SOEM, a mailbox read that got no frame within 100 ms failed with "no response", although the drive answered and only the PC or the network held the frame. Motion Master now keeps the read until the next frame comes back, and counts a frame that comes back with it. The server log names the device and the delay, the error of the failed SDO or FoE transfer ends with how late the frame came back, and `GET /api/devices` reports `lateMailboxReads` for each device since the scan. A frame that comes back later than the next frame is not counted. (#138)
+
 ## [6.0.0-alpha.111] - 2026-10-23
 
 ### Added

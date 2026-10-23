@@ -16,11 +16,10 @@ streaming live process data and tearing back down.
 | `motion_master_client.py` | `MotionMasterClient` — fetches the server's spec from `GET /api/swagger.yml` (parsed with PyYAML), resolves each operation's method + URL by `operationId`, and calls it with `requests`. Holds both the HTTP and WebSocket endpoints. `from_config()` builds it from `config.toml`, `init()` opens the driver, and `ensure_state()` scans when needed and moves the devices to an AL state. |
 | `config.example.toml` | Config template — copy to `config.toml`. |
 | `examples/scan.py` | `POST /api/scan` — open the driver from config when none is open, scan, and list the devices. |
-| `examples/03_transition_preop.py` | `POST /api/devices/state` — move all devices to PRE-OP. |
+| `examples/transition-state.py` | `POST /api/devices/state` — move the devices to an AL state, one legal step at a time. |
 | `examples/04_read_sdo.py` | `GET .../sdo/{index}/{subindex}` — raw CoE SDO upload. |
 | `examples/05_read_file.py` | `GET .../files/{filename}` — read a file over FoE (saved into the git-ignored `files/`). |
 | `examples/06_read_parameters.py` | `POST .../parameters/init?readValues=true` — dump the full object dictionary with values. |
-| `examples/07_transition_op.py` | `POST /api/devices/state` — climb PRE-OP → SAFE-OP → OP. |
 | `examples/08_monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. |
 | `examples/09_reset.py` | `POST /api/reset` — tear the driver down, back to uninitialised. |
 
@@ -109,19 +108,19 @@ binary (it listens on `127.0.0.1` by default). Then run the examples in order:
 
 ```bash
 python examples/scan.py
-python examples/03_transition_preop.py
+python examples/transition-state.py --state pre-op
 python examples/04_read_sdo.py                      # Statusword 0x6041:00 by default
 python examples/04_read_sdo.py --index 0x6064 --subindex 0
 python examples/05_read_file.py --filename log.csv   # saved to files/ (git-ignored)
 python examples/06_read_parameters.py               # dump the object dictionary + values
-python examples/07_transition_op.py                 # climb to OP (exchanging state)
+python examples/transition-state.py --state op      # climb to OP (exchanging state)
 python examples/08_monitor.py --count 10            # stream 10 batches, then stop
 python examples/09_reset.py                          # tear down, back to uninitialised
 ```
 
 The per-device examples (04–06, 08) act on slave 1 by default; pass `--slave N`
 to target another. Monitoring is live-only — values read `null` until the device
-is exchanging, so `08_monitor.py` needs the bus in OP (step 07); steps 04–06 only
+is exchanging, so `08_monitor.py` needs the bus in OP (`transition-state.py --state op`); steps 04–06 only
 need PRE-OP.
 
 ## TLS

@@ -1,39 +1,46 @@
 // Measures whether the host holds a returned frame until another frame comes back, and whether a
 // NOP datagram makes the host hand up such a frame (issue #138).
 //
-// On the PC of #138 the return of one mailbox read reached SOEM 100 ms late. Its kernel timestamp
-// is that of the return of the next frame, which left the PC 24 us before it. The reading of that
-// capture is that the drive answered at once, and the return stayed in the receive path of the
-// host until another frame came back. This program tests that reading, and it tests the remedy:
-// a NOP sent after 2 ms with no return. Every slave passes a NOP on and acts on nothing in it.
+// On the PC of #138 the return of one mailbox read reached SOEM 100 ms late, during an FoE read of
+// config.csv. Its kernel timestamp is that of the return of the next frame, which left the PC 24 us
+// before it. The reading of that capture is that the drive answered at once, and the return stayed
+// in the receive path of the host until another frame came back. This program tests that reading,
+// and it tests the remedy: a NOP sent after 2 ms with no return. Every slave passes a NOP on and
+// acts on nothing in it.
 //
-// The program talks to the slave through SOEM directly, because it has to control which frames go
-// out and when. Each frame is one FPRD of 128 bytes from ESC register 0x0000, the size of the
-// mailbox read in #138. A read of those registers changes nothing on the slave. The frame is sent
-// once and never sent again, as the port sends a mailbox datagram.
+// The program reads one file over FoE again and again, with the frames Motion Master sends for it:
+// a mailbox write for the request and for each acknowledgement, a read of the SyncManager 1 status
+// every 200 us until the mailbox is full, and a read of the mailbox. The mailbox write and the
+// mailbox read go out once and are never sent again, as the SOEM port sends them. The status read
+// is a register datagram, so SOEM sends it again every EC_TIMEOUTRET, as it does in Motion Master.
+// The program talks to the slave through SOEM directly, because it has to control how it waits for
+// each frame.
 //
-// Two modes run in turns, one block of frames each, so a change on the host over the run reaches
-// both modes:
-//   plain  Wait up to 100 ms for the return, as the port does today. When no return comes, send
-//          the next frame and look for the old return beside its return. A return found there was
-//          held by the host until another frame came back.
-//   nudge  Wait 2 ms for the return. When none comes, send a NOP, wait up to 2 ms for it, and look
-//          for the return again. Repeat until 100 ms. A return found right after a NOP was
-//          released by the NOP.
+// Two modes run in turns, one block of file reads each, so a change on the host over the run
+// reaches both modes. They differ only in how they wait for the return of a mailbox write or a
+// mailbox read:
+//   plain  Wait up to 100 ms, as the port does today. When no return comes, send the SyncManager 1
+//          status read, which is the next frame Motion Master sends, and look for the old return
+//          beside its return. Motion Master gives up on the transfer at that point. The program
+//          uses the return when it came up, so the transfer goes on and the drive keeps a clean
+//          state.
+//   nudge  Wait 2 ms. When no return comes, send a NOP, wait up to 2 ms for it, and look for the
+//          return again. Repeat until 100 ms.
+//
+// Each file read is compared with the first read of the run. A read that differs is reported.
 //
 // The result is a table for each mode and one line:
-//   THE NOP RELEASES A HELD FRAME  plain mode saw returns that did not come, and in nudge mode a
-//                                  NOP released every late return.
-//   NO HELD FRAME SEEN             plain mode saw none; run longer, or with --gap.
+//   THE NOP RELEASES A HELD FRAME  in plain mode some returns came up only beside the status read,
+//                                  in nudge mode a NOP released at least one return, and every
+//                                  return came within 20 ms.
+//   NO HELD FRAME SEEN             plain mode saw none; run longer.
 //   NOT CONFIRMED                  anything else; the table says what.
 //
-// The held return of #138 came about once in 100,000 mailbox frames, so a run needs about a
-// million frames in each mode to see one. A frame takes about 30 us, so that is about a minute.
-// Whether the gaps between frames matter on the host is not known. --gap sets the pause between
-// two frames.
+// The held return of #138 came about once in 100,000 mailbox frames. A read of config.csv on an
+// Integro is about 40 packets and a few hundred frames, so a run needs a few thousand reads to see
+// a few held returns.
 //
-// ecx_config_init puts every slave into INIT. The program changes no other state, so the slaves
-// are left in INIT.
+// The program puts the drive into INIT and then PRE-OP, and leaves it in PRE-OP.
 
 #include <soem/soem.h>
 
@@ -42,35 +49,52 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <format>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
+
+#include "comm/fieldbus_driver.h"
+#include "comm/soem_mailbox.h"
 
 namespace {
 
+using mm::comm::EtherCatState;
+
 // The wait the port gives a mailbox datagram for its frame, EC_TIMEOUTLATE in ports/soem.
 constexpr int kLateUs = 100'000;
-// The wait before a NOP, EC_TIMEOUTRET.
+// The wait before a NOP, and the line above which a return counts as late.
 constexpr int kNudgeAfterUs = EC_TIMEOUTRET;
-// A return later than this is late, the wait a register datagram gets before SOEM sends it again.
-constexpr int kLateThresholdUs = EC_TIMEOUTRET;
-constexpr uint16_t kRegister = 0x0000;
-constexpr uint16_t kLength = 128;
+// In nudge mode a return later than this was not released by a NOP.
+constexpr int64_t kReleasedWithinUs = 20'000;
+// The pause between two reads of the SyncManager 1 status, EC_LOCALDELAY in SOEM.
+constexpr auto kPollInterval = std::chrono::microseconds(200);
+// How long the program waits for an answer in the mailbox, kFoeReadTimeout of the driver.
+constexpr auto kAnswerTimeout = std::chrono::seconds(6);
+// How long the program waits for the slave to empty its receive mailbox before a write.
+constexpr auto kWriteTimeout = std::chrono::milliseconds(20);
+constexpr int kStateTimeoutUs = 10'000'000;
+// Bit 3 of the SyncManager status: the mailbox holds a message.
+constexpr uint8_t kMailboxFull = 0x08;
+// The mailbox header and the FoE header, 6 bytes each.
+constexpr std::size_t kHeaders = 12;
 
 struct Options {
   std::string ifname;
   uint16_t slave = 1;
-  uint64_t frames = 2'000'000;
-  uint64_t block = 10'000;
-  int gapUs = 0;
+  std::string file = "config.csv";
+  int reads = 2000;
+  int block = 1;
 };
 
 void printUsage() {
-  std::cerr << "usage: held_frame --ifname <interface> [--slave <position>] [--frames <count>] "
-               "[--block <count>] [--gap <us>]\n";
+  std::cerr << "usage: held_frame --ifname <interface> [--slave <position>] [--file <name>] "
+               "[--reads <count>] [--block <count>]\n";
 }
 
 bool parseOptions(int argc, char** argv, Options& options) {
@@ -83,39 +107,61 @@ bool parseOptions(int argc, char** argv, Options& options) {
       options.ifname = argv[++i];
     } else if (arg == "--slave") {
       options.slave = static_cast<uint16_t>(std::stoi(argv[++i]));
-    } else if (arg == "--frames") {
-      options.frames = std::stoull(argv[++i]);
+    } else if (arg == "--file") {
+      options.file = argv[++i];
+    } else if (arg == "--reads") {
+      options.reads = std::stoi(argv[++i]);
     } else if (arg == "--block") {
-      options.block = std::stoull(argv[++i]);
-    } else if (arg == "--gap") {
-      options.gapUs = std::stoi(argv[++i]);
+      options.block = std::stoi(argv[++i]);
     } else {
       return false;
     }
   }
-  return !options.ifname.empty() && options.block > 0;
+  return !options.ifname.empty() && !options.file.empty() && options.reads > 0 && options.block > 0;
 }
 
 enum class Mode { Plain, Nudge };
 
 std::string_view modeName(Mode mode) { return mode == Mode::Plain ? "plain" : "nudge"; }
 
-struct Tally {
+// The frames a file read sends.
+enum class Kind { Write, Read, Status };
+constexpr std::size_t kKinds = 3;
+
+std::string_view kindName(Kind kind) {
+  switch (kind) {
+    case Kind::Write:
+      return "mailbox write";
+    case Kind::Read:
+      return "mailbox read";
+    case Kind::Status:
+      return "status read";
+  }
+  return "frame";
+}
+
+struct KindTally {
   uint64_t sent = 0;
-  // Returns within kLateThresholdUs.
-  uint64_t onTime = 0;
-  // Returns later than kLateThresholdUs and within kLateUs.
+  // Returns later than kNudgeAfterUs.
   uint64_t late = 0;
-  // No return within kLateUs.
-  uint64_t noReturn = 0;
-  // Plain: a missing return that came back beside the return of the next frame.
-  uint64_t heldToNext = 0;
-  // Nudge: NOPs sent.
-  uint64_t nops = 0;
-  // Nudge: late returns found right after a NOP.
-  uint64_t releasedByNop = 0;
-  // The latest return within kLateUs.
+  // Late returns that came up beside the return of another frame: the status read in plain mode,
+  // a NOP in nudge mode.
+  uint64_t released = 0;
+  // No return within kLateUs, also not beside the return of another frame.
+  uint64_t lost = 0;
   int64_t latestUs = 0;
+};
+
+struct Tally {
+  std::array<KindTally, kKinds> kinds{};
+  uint64_t nops = 0;
+  int reads = 0;
+  int same = 0;
+  int different = 0;
+  int failed = 0;
+
+  KindTally& of(Kind kind) { return kinds[static_cast<std::size_t>(kind)]; }
+  const KindTally& of(Kind kind) const { return kinds[static_cast<std::size_t>(kind)]; }
 };
 
 using Clock = std::chrono::steady_clock;
@@ -124,107 +170,256 @@ int64_t microsecondsSince(Clock::time_point start) {
   return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
 }
 
+struct Session {
+  ecx_contextt* ctx = nullptr;
+  uint16_t slave = 0;
+  Mode mode = Mode::Plain;
+  Tally* tally = nullptr;
+
+  ecx_portt* port() const { return &ctx->port; }
+  ec_slavet& device() const { return ctx->slavelist[slave]; }
+  uint16_t adp() const { return device().configadr; }
+};
+
+void record(Session& s, Kind kind, int64_t us, bool returned, bool released) {
+  KindTally& k = s.tally->of(kind);
+  if (!returned) {
+    k.lost++;
+    std::cout << std::format("  {}: {} got no return within {} ms\n", modeName(s.mode),
+                             kindName(kind), kLateUs / 1000);
+    return;
+  }
+  k.latestUs = std::max(k.latestUs, us);
+  if (released) {
+    k.released++;
+  }
+  if (us > kNudgeAfterUs) {
+    k.late++;
+    std::cout << std::format("  {}: {} returned {} us late{}\n", modeName(s.mode), kindName(kind),
+                             us, released ? ", beside the return of the frame after it" : "");
+  }
+}
+
+// Reads the SyncManager 1 status. A register datagram: SOEM sends it again every EC_TIMEOUTRET
+// until the frame comes back, as in Motion Master.
+int readSm1Status(Session& s, uint8_t& status) {
+  s.tally->of(Kind::Status).sent++;
+  const auto start = Clock::now();
+  const int wkc = ecx_FPRD(s.port(), s.adp(), ECT_REG_SM1STAT, sizeof(status), &status, kLateUs);
+  record(s, Kind::Status, microsecondsSince(start), wkc > EC_NOFRAME, false);
+  return wkc;
+}
+
 // Sends one NOP and waits up to EC_TIMEOUTRET for it. Its receive stores any other return that
-// comes up with it under that return's own index.
-void sendNop(ecx_portt* port, uint16_t adp) {
+// comes up with it under the index of that return.
+void sendNop(Session& s) {
   uint8 nothing = 0;
+  ecx_portt* port = s.port();
   const uint8 idx = ecx_getindex(port);
-  ecx_setupdatagram(port, &(port->txbuf[idx]), EC_CMD_NOP, idx, adp, 0, sizeof(nothing), &nothing);
+  ecx_setupdatagram(port, &(port->txbuf[idx]), EC_CMD_NOP, idx, s.adp(), 0, sizeof(nothing),
+                    &nothing);
   ecx_outframe_red(port, idx);
   (void)ecx_waitinframe(port, idx, EC_TIMEOUTRET);
   ecx_setbufstat(port, idx, EC_BUF_EMPTY);
+  s.tally->nops++;
 }
 
-// Sends the register read once and leaves its index in use. Returns the index.
-uint8 sendRead(ecx_portt* port, uint16_t adp, std::array<uint8_t, kLength>& data) {
+// Sends one mailbox datagram once and waits for its return the way the mode says. Returns the
+// working counter, or EC_NOFRAME. A read copies the data of its return into data.
+int sendOnce(Session& s, Kind kind, uint8 command, uint16 ado, uint16 length, void* data) {
+  ecx_portt* port = s.port();
+  s.tally->of(kind).sent++;
   const uint8 idx = ecx_getindex(port);
-  ecx_setupdatagram(port, &(port->txbuf[idx]), EC_CMD_FPRD, idx, adp, kRegister, kLength,
-                    data.data());
-  ecx_outframe_red(port, idx);
-  return idx;
-}
-
-// The index of a plain read that got no return, kept in use so its return can still be stored.
-struct Missing {
-  bool pending = false;
-  uint8 idx = 0;
-};
-
-void runPlain(ecx_portt* port, uint16_t adp, Tally& tally, Missing& missing) {
-  std::array<uint8_t, kLength> data{};
+  ecx_setupdatagram(port, &(port->txbuf[idx]), command, idx, s.adp(), ado, length, data);
   const auto start = Clock::now();
-  const uint8 idx = sendRead(port, adp, data);
-  tally.sent++;
-  const int wkc = ecx_waitinframe(port, idx, kLateUs);
-  const int64_t us = microsecondsSince(start);
-  // The wait for this frame also received the frames that came up beside it. A zero wait reads
-  // the status the receive left at the index of the missing return.
-  if (missing.pending) {
-    if (ecx_waitinframe(port, missing.idx, 0) > EC_NOFRAME) {
-      tally.heldToNext++;
-      std::cout << "  plain: the missing return came back beside the next frame's\n";
+  ecx_outframe_red(port, idx);
+  int wkc = EC_NOFRAME;
+  bool released = false;
+  if (s.mode == Mode::Plain) {
+    wkc = ecx_waitinframe(port, idx, kLateUs);
+    if (wkc <= EC_NOFRAME) {
+      // The frame Motion Master sends next. A zero wait then reads the status that its receive
+      // left at the index of the missing return.
+      uint8_t status = 0;
+      readSm1Status(s, status);
+      wkc = ecx_waitinframe(port, idx, 0);
+      released = wkc > EC_NOFRAME;
     }
-    ecx_setbufstat(port, missing.idx, EC_BUF_EMPTY);
-    missing.pending = false;
+  } else {
+    wkc = ecx_waitinframe(port, idx, kNudgeAfterUs);
+    while (wkc <= EC_NOFRAME && microsecondsSince(start) < kLateUs) {
+      sendNop(s);
+      wkc = ecx_waitinframe(port, idx, 0);
+      if (wkc > EC_NOFRAME) {
+        released = true;
+        break;
+      }
+      wkc = ecx_waitinframe(port, idx, kNudgeAfterUs);
+    }
   }
-  if (wkc <= EC_NOFRAME) {
-    tally.noReturn++;
-    std::cout << std::format("  plain: no return within {} ms\n", kLateUs / 1000);
-    missing = {.pending = true, .idx = idx};
-    return;
+  const int64_t us = microsecondsSince(start);
+  if (wkc > 0 && command == EC_CMD_FPRD) {
+    std::memcpy(data, &(port->rxbuf[idx][EC_HEADERSIZE]), length);
   }
   ecx_setbufstat(port, idx, EC_BUF_EMPTY);
-  tally.latestUs = std::max(tally.latestUs, us);
-  if (us > kLateThresholdUs) {
-    tally.late++;
-    std::cout << std::format("  plain: return {} us late\n", us);
-  } else {
-    tally.onTime++;
+  record(s, kind, us, wkc > EC_NOFRAME, released);
+  return wkc;
+}
+
+using Mailbox = std::array<uint8_t, sizeof(ec_mbxbuft)>;
+
+// Takes the next mailbox counter. Each request takes a new one, so no counter is sent twice.
+uint8_t nextCounter(const Session& s) {
+  const uint8_t counter = ec_nextmbxcnt(s.device().mbx_cnt);
+  s.device().mbx_cnt = counter;
+  return counter;
+}
+
+void setHeader(Mailbox& m, uint16_t length, uint8_t type, uint8_t counter) {
+  m[0] = static_cast<uint8_t>(length & 0xFF);
+  m[1] = static_cast<uint8_t>(length >> 8);
+  m[5] = static_cast<uint8_t>(type | MBX_HDR_SET_CNT(counter));
+}
+
+void putU32(Mailbox& m, std::size_t at, uint32_t value) {
+  for (std::size_t i = 0; i < 4; ++i) {
+    m[at + i] = static_cast<uint8_t>((value >> (8 * i)) & 0xFF);
   }
 }
 
-void runNudge(ecx_portt* port, uint16_t adp, Tally& tally) {
-  std::array<uint8_t, kLength> data{};
+uint32_t getU32(const Mailbox& m, std::size_t at) {
+  uint32_t value = 0;
+  for (std::size_t i = 0; i < 4; ++i) {
+    value |= static_cast<uint32_t>(m[at + i]) << (8 * i);
+  }
+  return value;
+}
+
+// Writes a message into the receive mailbox. A working counter of 0 means that the ESC refused
+// the write because the mailbox was still full. The slave did not get it, so it is written again.
+bool writeMailbox(Session& s, Mailbox& message) {
   const auto start = Clock::now();
-  const uint8 idx = sendRead(port, adp, data);
-  tally.sent++;
-  int wkc = ecx_waitinframe(port, idx, kNudgeAfterUs);
-  int nops = 0;
-  while (wkc <= EC_NOFRAME && microsecondsSince(start) < kLateUs) {
-    sendNop(port, adp);
-    nops++;
-    wkc = ecx_waitinframe(port, idx, 0);
-    if (wkc > EC_NOFRAME) {
-      tally.releasedByNop++;
+  for (;;) {
+    const int wkc =
+        sendOnce(s, Kind::Write, EC_CMD_FPWR, s.device().mbx_wo, s.device().mbx_l, message.data());
+    if (wkc > 0) {
+      return true;
+    }
+    if (wkc <= EC_NOFRAME || Clock::now() - start > kWriteTimeout) {
+      return false;
+    }
+    std::this_thread::sleep_for(kPollInterval);
+  }
+}
+
+// Waits until the send mailbox is full and reads it. Returns the reason when it fails.
+std::optional<std::string> readMailbox(Session& s, Mailbox& message) {
+  const auto start = Clock::now();
+  for (;;) {
+    uint8_t status = 0;
+    if (readSm1Status(s, status) > 0 && (status & kMailboxFull) != 0) {
       break;
     }
-    wkc = ecx_waitinframe(port, idx, kNudgeAfterUs);
+    if (Clock::now() - start > kAnswerTimeout) {
+      return "no answer within 6 s";
+    }
+    std::this_thread::sleep_for(kPollInterval);
   }
-  const int64_t us = microsecondsSince(start);
-  ecx_setbufstat(port, idx, EC_BUF_EMPTY);
-  tally.nops += static_cast<uint64_t>(nops);
-  if (wkc <= EC_NOFRAME) {
-    tally.noReturn++;
-    std::cout << std::format("  nudge: no return within {} ms, after {} NOPs\n", kLateUs / 1000,
-                             nops);
-    return;
+  message.fill(0);
+  const int wkc =
+      sendOnce(s, Kind::Read, EC_CMD_FPRD, s.device().mbx_ro, s.device().mbx_rl, message.data());
+  if (wkc <= 0) {
+    return std::format("the mailbox read returned wkc {}", wkc);
   }
-  tally.latestUs = std::max(tally.latestUs, us);
-  if (us > kLateThresholdUs) {
-    tally.late++;
-    std::cout << std::format("  nudge: return {} us late, after {} NOPs\n", us, nops);
-  } else {
-    tally.onTime++;
+  return std::nullopt;
+}
+
+// Reads a file over FoE. Returns the bytes, or nothing with the reason in why.
+std::optional<std::vector<uint8_t>> readFile(Session& s, std::string_view file, std::string& why) {
+  // SOEM takes a packet of this size as full and expects another one after it.
+  const std::size_t maxData = s.device().mbx_l - kHeaders;
+  Mailbox request{};
+  setHeader(request, static_cast<uint16_t>(6 + file.size()), ECT_MBXT_FOE, nextCounter(s));
+  request[6] = ECT_FOE_READ;
+  std::copy(file.begin(), file.end(), request.begin() + kHeaders);
+  if (!writeMailbox(s, request)) {
+    why = "the read request was not written";
+    return std::nullopt;
   }
+  std::vector<uint8_t> content;
+  for (uint32_t expected = 1;; ++expected) {
+    Mailbox answer{};
+    if (const auto failed = readMailbox(s, answer)) {
+      why = std::format("packet {}: {}", expected, *failed);
+      return std::nullopt;
+    }
+    const auto length = static_cast<std::size_t>(answer[0] | (answer[1] << 8));
+    if ((answer[5] & 0x0F) != ECT_MBXT_FOE) {
+      why = std::format("packet {}: a mailbox message of type {}", expected, answer[5] & 0x0F);
+      return std::nullopt;
+    }
+    if (answer[6] == ECT_FOE_ERROR) {
+      why = std::format("packet {}: FoE error 0x{:08X}", expected, getU32(answer, 8));
+      return std::nullopt;
+    }
+    const uint32_t packet = getU32(answer, 8);
+    if (answer[6] != ECT_FOE_DATA || packet != expected || length < 6 ||
+        length - 6 > answer.size() - kHeaders) {
+      why = std::format("packet {}: opcode {}, packet {}, length {}", expected, answer[6], packet,
+                        length);
+      return std::nullopt;
+    }
+    const std::size_t data = length - 6;
+    content.insert(content.end(), answer.begin() + kHeaders,
+                   answer.begin() + static_cast<std::ptrdiff_t>(kHeaders + data));
+    Mailbox ack{};
+    setHeader(ack, 6, ECT_MBXT_FOE, nextCounter(s));
+    ack[6] = ECT_FOE_ACK;
+    putU32(ack, 8, packet);
+    if (!writeMailbox(s, ack)) {
+      why = std::format("packet {}: the acknowledgement was not written", expected);
+      return std::nullopt;
+    }
+    if (data < maxData) {
+      return content;
+    }
+  }
+}
+
+bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
+  const auto raw = static_cast<uint16_t>(state);
+  ctx->slavelist[slave].state = raw;
+  ecx_writestate(ctx, slave);
+  return ecx_statecheck(ctx, slave, raw, kStateTimeoutUs) == raw;
+}
+
+// Sends an SDO upload of 0x1000:00 with counter 0 and reads the answer. Both SOMANET stacks accept
+// counter 0 whatever came before it, so the counters of the run start from a known point.
+bool resetCounter(Session& s) {
+  mm::comm::soem::drainMailbox(s.ctx, s.slave);
+  Mailbox request{};
+  // CoE header, SDO command, index 0x1000 and subindex 0, then 4 bytes of data.
+  setHeader(request, 10, ECT_MBXT_COE, 0);
+  request[7] = static_cast<uint8_t>(ECT_COES_SDOREQ << 4);
+  request[8] = ECT_SDO_UP_REQ;
+  request[9] = 0x00;
+  request[10] = 0x10;
+  s.device().mbx_cnt = 0;
+  Mailbox answer{};
+  return writeMailbox(s, request) && !readMailbox(s, answer);
 }
 
 void printTally(Mode mode, const Tally& t) {
-  std::cout << std::format("{}: sent {}, on time {}, late {}, no return {}, latest {} us",
-                           modeName(mode), t.sent, t.onTime, t.late, t.noReturn, t.latestUs);
-  if (mode == Mode::Plain) {
-    std::cout << std::format(", came back beside the next frame {}\n", t.heldToNext);
-  } else {
-    std::cout << std::format(", NOPs {}, released by a NOP {}\n", t.nops, t.releasedByNop);
+  std::cout << std::format("{}: {} reads, {} same as the first, {} different, {} failed\n",
+                           modeName(mode), t.reads, t.same, t.different, t.failed);
+  for (const Kind kind : {Kind::Write, Kind::Read, Kind::Status}) {
+    const KindTally& k = t.of(kind);
+    std::cout << std::format(
+        "  {:<13}  sent {:>9}  late {:>4}  released {:>4}  lost {:>4}  latest {:>6} us\n",
+        kindName(kind), k.sent, k.late, k.released, k.lost, k.latestUs);
+  }
+  if (mode == Mode::Nudge) {
+    std::cout << std::format("  NOPs sent {}\n", t.nops);
   }
 }
 
@@ -251,46 +446,82 @@ int main(int argc, char** argv) {
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }
-  const ec_slavet& device = ctx->slavelist[options.slave];
-  std::cout << std::format(
-      "slave {} ({}, product 0x{:08X}), {} frames in blocks of {}, gap {} us\n", options.slave,
-      device.name, device.eep_id, options.frames, options.block, options.gapUs);
+  const uint16_t slave = options.slave;
+  if (options.file.size() > ctx->slavelist[slave].mbx_l - kHeaders) {
+    std::cerr << "the file name does not fit in the mailbox\n";
+    ecx_close(ctx.get());
+    return EXIT_FAILURE;
+  }
+  // The abort after a failed read goes through ecx_mbxsend. These two flags keep it to one write
+  // and no Repeat Request, as the driver sets them for a SOMANET device.
+  ctx->slavelist[slave].mbxwriteonce = TRUE;
+  ctx->slavelist[slave].mbxnorepeat = TRUE;
+  if (!requestState(ctx.get(), slave, EtherCatState::Init) ||
+      !requestState(ctx.get(), slave, EtherCatState::PreOp)) {
+    std::cerr << "the slave did not reach PRE-OP\n";
+    ecx_close(ctx.get());
+    return EXIT_FAILURE;
+  }
 
   Tally plain;
   Tally nudge;
-  Missing missing;
-  for (uint64_t i = 0; i < options.frames; ++i) {
-    const Mode mode = (i / options.block) % 2 == 0 ? Mode::Plain : Mode::Nudge;
-    if (mode == Mode::Plain) {
-      runPlain(&ctx->port, device.configadr, plain, missing);
-    } else {
-      runNudge(&ctx->port, device.configadr, nudge);
-      // A plain read that got no return at the end of its block gets the first nudge read as its
-      // next frame. That frame came back, so the check is the same as in plain mode.
-      if (missing.pending) {
-        if (ecx_waitinframe(&ctx->port, missing.idx, 0) > EC_NOFRAME) {
-          plain.heldToNext++;
-          std::cout << "  plain: the missing return came back beside the next frame's\n";
-        }
-        ecx_setbufstat(&ctx->port, missing.idx, EC_BUF_EMPTY);
-        missing.pending = false;
-      }
-    }
-    if (options.gapUs > 0) {
-      std::this_thread::sleep_for(std::chrono::microseconds(options.gapUs));
-    }
+  Session session{.ctx = ctx.get(), .slave = slave, .mode = Mode::Plain, .tally = &plain};
+  if (!resetCounter(session)) {
+    std::cerr << "the slave did not answer a request with counter 0\n";
+    ecx_close(ctx.get());
+    return EXIT_FAILURE;
   }
-  if (missing.pending) {
-    ecx_setbufstat(&ctx->port, missing.idx, EC_BUF_EMPTY);
+  // The reset is not part of the measurement.
+  plain = Tally{};
+  const ec_slavet& device = ctx->slavelist[slave];
+  std::cout << std::format(
+      "slave {} ({}, product 0x{:08X}) in PRE-OP, '{}' read {} times in blocks of {}\n", slave,
+      device.name, device.eep_id, options.file, options.reads, options.block);
+
+  std::optional<std::vector<uint8_t>> first;
+  for (int i = 0; i < options.reads; ++i) {
+    const Mode mode = (i / options.block) % 2 == 0 ? Mode::Plain : Mode::Nudge;
+    Tally& tally = mode == Mode::Plain ? plain : nudge;
+    session.mode = mode;
+    session.tally = &tally;
+    tally.reads++;
+    std::string why;
+    const auto content = readFile(session, options.file, why);
+    if (!content) {
+      tally.failed++;
+      std::cout << std::format("  {}: read {} failed: {}\n", modeName(mode), i + 1, why);
+      // Ends the transfer on the drive, as the driver does after a failed read.
+      mm::comm::soem::abortFoeTransfer(ctx.get(), slave);
+      continue;
+    }
+    if (!first) {
+      first = *content;
+      std::cout << std::format("  the first read is {} bytes\n", first->size());
+    }
+    if (*content == *first) {
+      tally.same++;
+    } else {
+      tally.different++;
+      std::cout << std::format("  {}: read {} is {} bytes and differs from the first\n",
+                               modeName(mode), i + 1, content->size());
+    }
+    if ((i + 1) % 500 == 0) {
+      std::cout << std::format("  {} reads done\n", i + 1);
+    }
   }
   ecx_close(ctx.get());
 
   printTally(Mode::Plain, plain);
   printTally(Mode::Nudge, nudge);
-  // In plain mode nothing else sends a frame, so a held return shows as no return at all.
-  if (plain.noReturn == 0) {
+  const uint64_t heldInPlain = plain.of(Kind::Write).released + plain.of(Kind::Read).released;
+  const uint64_t releasedInNudge = nudge.of(Kind::Write).released + nudge.of(Kind::Read).released;
+  const bool nudgeInTime = releasedInNudge > 0 &&
+                           nudge.of(Kind::Write).lost + nudge.of(Kind::Read).lost == 0 &&
+                           nudge.of(Kind::Write).latestUs <= kReleasedWithinUs &&
+                           nudge.of(Kind::Read).latestUs <= kReleasedWithinUs;
+  if (heldInPlain == 0) {
     std::cout << "NO HELD FRAME SEEN\n";
-  } else if (nudge.noReturn == 0 && nudge.releasedByNop > 0 && nudge.releasedByNop == nudge.late) {
+  } else if (nudgeInTime) {
     std::cout << "THE NOP RELEASES A HELD FRAME\n";
   } else {
     std::cout << "NOT CONFIRMED\n";

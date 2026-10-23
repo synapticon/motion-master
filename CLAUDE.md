@@ -1167,11 +1167,11 @@ sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interfa
 
 ### held_frame
 
-Tests whether the host holds a returned frame until another frame comes back, and whether a NOP datagram makes the host hand it up (#138). It sends one 128-byte FPRD of ESC register 0x0000 at a time, sent once, in two modes that take turns by block. `plain` waits 100 ms, as the port does, and looks for a missing return beside the next frame's return. `nudge` sends a NOP after each 2 ms with no return and looks for the return right after it. It ends with THE NOP RELEASES A HELD FRAME, NO HELD FRAME SEEN, or NOT CONFIRMED. The return of #138 came once in about 100,000 frames, so a run needs about a million frames per mode. It leaves the slaves in INIT. It needs raw socket access, and no other master may use the adapter.
+Tests whether the host holds a returned frame until another frame comes back, and whether a NOP datagram makes the host hand it up (#138). It reads one file over FoE again and again, with the frames Motion Master sends for it: mailbox writes and mailbox reads sent once, and SyncManager 1 status reads every 200 µs. Two modes take turns by block of reads. `plain` waits 100 ms for a mailbox frame, as the port does, then sends the status read and looks for the missing return beside its return. `nudge` sends a NOP after each 2 ms with no return and looks for the return right after it. Each read is compared with the first read. It ends with THE NOP RELEASES A HELD FRAME, NO HELD FRAME SEEN, or NOT CONFIRMED. The return of #138 came once in about 100,000 mailbox frames, so a run needs a few thousand reads. It leaves the drive in PRE-OP. It needs raw socket access, and no other master may use the adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/held_frame/held_frame --ifname <interface> [--slave 1] \
-  [--frames 2000000] [--block 10000] [--gap 0]
+  [--file config.csv] [--reads 2000] [--block 1]
 ```
 
 ### api

@@ -33,6 +33,7 @@ the driver when none is open, and scans nothing.
 | Script | What it does | AL state |
 | --- | --- | --- |
 | `server-info.py` | Prints the server version, the host, the network adapters and the health of the game loop. | No bus |
+| `set-game-loop-period.py` | Changes the cycle period of the real-time game loop until the server stops. | No bus |
 | `scan.py` | Scans the bus and lists the devices it finds. A scan leaves every device in INIT. | None |
 | `transition-state.py` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
 | `diagnostics.py` | Prints the ESC (EtherCAT Slave Controller) error counters and the distributed clock sync of the devices. | None |

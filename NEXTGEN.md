@@ -4954,3 +4954,59 @@ use.
 200 ms as v5 used, split by the drive into 100 ms on each side, and nothing measured whether that
 rest is enough for the fit; the first bench run should look at the first and last rows of the
 recording.
+
+## Session 2026-10-24 — The parameter cache keys on the firmware version, and self-heal waits (design)
+
+Issue #143, from synapticon/motion_master#69: after a Jasper update, OBLAC loaded a dictionary cache
+written for older firmware and could not open the drive page. Nothing is built yet. The design is
+in #143.
+
+**The SII revision cannot key the cache.** A Jasper drive with a bootloader from the v10.0.0 era
+answers the first scan after a reset with the revision compiled into the bootloader, 1, whatever
+application is installed. So the revision the master reads does not follow the application's
+dictionary. The convention that the firmware team raises the revision when the ESI changes still
+holds for picking an ESI. It does not make the revision the master reads trustworthy.
+
+**The key is vendor ID, product code and 0x100A.** 0x100A has a fixed index and type, so one SDO
+upload reads it before the dictionary is known. On Jasper and SOMANET it holds the semver firmware
+version. The revision leaves the key, the file and the check in `load` entirely, because keeping it
+gives two files for one firmware on a Jasper drive. A device without 0x100A is not cached: a
+fallback to the revision brings the fault back. The version goes into the file name sanitized to the
+character set of `mm::core::isUrlSafeId`, and the file stores the full string, which `load`
+compares, so two strings that sanitize to one name cost a miss and never a wrong dictionary. Old
+files are not migrated, because v6 is alpha. The cost is a new dictionary read after every firmware
+update, also when the dictionary did not change.
+
+**A refusal inside `MaxSub` is an answer.** Jasper v10.0.4 removed subindices inside `MaxSub`, and
+each one cost eleven attempts and ten 50 ms waits, then blocked the cache because it counted as
+missing. The firmware source settles what each stack answers to Get Entry Description for an entry
+that does not exist. Jasper (`sdoserv.c`) and the SOMANET XMOS stack (`coe.xc`) send abort
+0x06020000 or 0x06090011 at once. The Integro's ARM application replies with success from a struct
+it never filled, so only a bit length of 0 is reliable, which `describesNoEntry` already uses past
+`MaxSub`. Over SPoE the firmware clears the descriptor first, and `decodeParameterEntries` already
+skips it. So the SOEM enumeration gets both rules inside `MaxSub`, and the SPoE enumeration needs
+none.
+
+**Self-heal is deferred, and this is the option to build when it comes back.** A cache that passes
+the 0x100A check can still be stale: a development build can change the dictionary and keep its
+version string. Deleting the cache file on a failed read was rejected first, and a warning only was
+considered next. A warning on "a cached entry does not exist" is wrong as written, because a drive
+can list an entry in its dictionary and refuse an upload of it, which is a firmware fault with a
+correct cache. The option that tells the two apart:
+
+1. A live SDO read of a parameter whose dictionary came from the cache gets abort 0x06020000 or
+   0x06090011.
+2. The master sends one Get Entry Description for that entry, once per device and cache load.
+3. If the drive says the entry does not exist, by abort or by bit length 0, the warning says the
+   cache file is stale and names its id. If the drive describes the entry, the warning says the
+   dictionary and the upload disagree, which is a firmware fault.
+
+It needs three things: a flag on `Device` that its dictionary came from the cache; the abort code
+from a read, because `readSdo` returns only a formatted string and matching that string to branch is
+what the error convention forbids; and one warning per device and cache load, because
+`ParameterRefresher` polls the same object again and again. Monitoring already marks such a
+parameter `Stale`, which is why this waits. What an Integro answers to an SDO upload of an object it
+does not have is not checked; if it stays silent, nothing triggers the check there.
+
+**Not yet done.** All of it. No Jasper v10.0.4 drive is on the bench, and the Integro on the bench
+has no gaps inside `MaxSub`, so the new path of the enumeration cannot run here.

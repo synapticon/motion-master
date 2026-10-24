@@ -5030,7 +5030,12 @@ are older than this session and are not fixed here.
 disk. `DELETE` with the new id answers 204. 0x100A comes back as 50 bytes padded with NULs and is
 trimmed to `v5.6.11`. A read from the drive gives 578 entries in 1.7 s, with nothing lost and nothing
 absent, the same count as the old file, and writes `parameters-000022d2-00000401-v5.6.11.json`.
-`POST /api/devices/1/parameters/init` then loads the 578 definitions from that file.
+`POST /api/devices/1/parameters/init` then loads the 578 definitions from that file. A second read
+from the drive gave 579 entries and 138 probes: the probe past the reported size recorded
+`0x6621:03`, named `"\x19g"`, data type 0x52BF, 500 bits, access 0x00. 0x6621 is the Safety
+statusword with two bytes, so subindex 3 is the Integro's uninitialised reply with a nonzero bit
+length left in it, and `describesNoEntry` let it through. The probe is older than this session, and
+the same check now also guards gaps inside `MaxSub`. Issue #145 tracks it.
 
 **Not yet done.** No Jasper v10.0.4 drive is on the bench, and the Integro on the bench has no gaps
 inside `MaxSub`, so the new path of the enumeration has not run on hardware.

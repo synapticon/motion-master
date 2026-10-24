@@ -16,7 +16,7 @@ second run gives the same result as the first run.
 | `motion_master_client.py` | `MotionMasterClient`. It calls the HTTP API by `operationId` and streams the monitoring WebSocket. It also has the steps that most scripts begin with: `from_config()`, `init()`, `ensure_scanned()` and `ensure_state()`. `run_procedure()` runs a procedure to its end, and `notifications()` streams the notifications. |
 | `config.example.toml` | The config template. Copy it to `config.toml`. |
 | `examples/` | One script per action. See [Scripts](#scripts). |
-| `files/` | Files that `read-file.py` saves. Git ignores this directory. |
+| `files/` | Where a script saves a file when `--output` names no other path. Git ignores this directory. |
 
 ## Scripts
 
@@ -25,17 +25,22 @@ the lowest state the script needs. A script moves the device up to that state wh
 lower. A device that is already higher stays where it is. The states, from low to high, are INIT,
 PRE-OP, SAFE-OP and OP. BOOT is separate: a device enters and leaves BOOT only through INIT.
 
+Three values in that column are not states. "None" means that the script needs the devices known,
+so it opens the driver and scans when needed, but it moves no device. "No bus" means that the
+script opens no driver and leaves the server as it is. "Driver open" means that the script opens
+the driver when none is open, and scans nothing.
+
 | Script | What it does | AL state |
 | --- | --- | --- |
 | `scan.py` | Scans the bus and lists the devices it finds. A scan leaves every device in INIT. | None |
 | `transition-state.py` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
+| `reset.py` | Closes the fieldbus driver and clears the device list. | No bus |
+| `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
 | `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PRE-OP |
 | `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PRE-OP |
-| `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
-| `offset-detection.py` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |
 | `run-procedure.py` | Lists the procedures of a device. With a name, it runs that procedure with parameters given as `name=value`, and prints each step with its result. `--describe` prints the description, caveats and parameters instead. | PRE-OP, or `--state` |
-| `reset.py` | Closes the fieldbus driver and clears the device list. | None |
+| `offset-detection.py` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |
 
 Every script that needs a bus opens the fieldbus driver from `config.toml` when no driver is
 open, and scans when no devices are known. A script that addresses one device takes `--slave`,

@@ -45,6 +45,7 @@ the driver when none is open, and scans nothing.
 | `read-hardware-description.py` | Prints what a SOMANET device says it is: the device, the assembly and their components. | PRE-OP |
 | `check-firmware-compatibility.py` | Says whether a firmware package belongs on the device, from the package filename alone. It installs nothing. | PRE-OP |
 | `read-register.py` | Reads bytes from an ESC register. | None |
+| `read-sii.py` | Prints the SII (Slave Information Interface, the configuration in the EEPROM of the device), or saves the raw image with `--output`. | None |
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
 | `run-procedure.py` | Lists the procedures of a device. With a name, it runs that procedure with parameters given as `name=value`, and prints each step with its result. `--describe` prints the description, caveats and parameters instead. | PRE-OP, or `--state` |
 | `offset-detection.py` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |

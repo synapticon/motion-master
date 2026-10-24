@@ -5089,3 +5089,26 @@ fewer subentries than are mapped, and two machines can show different counts for
 mapping itself is unaffected: `Device::readPdoMapping` and `Device::writePdoMapping` use raw SDO,
 and the Console's mapping page takes no limit from the dictionary. Leaving the mapping objects out
 of the cache was offered and declined; the firmware fix and the probe's return settle it.
+
+## Session 2026-10-24 — The probe returns for a slave that refuses an absent object (as-built)
+
+Issue #145. The removal of the probe, two sections above, took the reserved slots of the PDO mapping
+objects from every drive to protect the Integro. The slots are useful on the Parameters page, and
+the XMOS stack of Circulo and Node refuses correctly. So the probe is back, gated by the test that
+was built first and replaced: before the read, one Get Entry Description for subindex 1 of the
+highest index from 0x5FFF down that the slave does not list. A slave that refuses it within 100 ms is
+probed; one that answers is not.
+
+**Measured on the bench Circulo** (product 0x301, ESC type 0xC0, firmware v5.6.11). It refuses the
+test. 15 reads in a row gave 564 entries each, with 135 probes, none absent, none failed, about
+0.67 s each. Every 0x16xx and 0x1Axx has its ten slots and 0x1C12 and 0x1C13 have six. The Integro
+results of the first test stand: no probe, 520 entries, no phantom entry.
+
+**The widths fit command 21, and command 21 still fails, for another reason.** The 564 entries add
+up to 1770 bytes, exactly what the drive sends over `fs-buffer`. The read of 0x1023:03 right after
+the transfer fails within 0.3 ms with "packet/timeout error", in 4 runs of 4, before the decode. That
+is separate from the dictionary and has its own issue.
+
+**The PDO mapping paragraph above now applies to the Integro alone.** On Circulo and Node the
+dictionary holds every slot whatever the mapping is at the time of the read.
+

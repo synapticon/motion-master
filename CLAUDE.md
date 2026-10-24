@@ -650,9 +650,9 @@ Three rules, and none is a preference:
 values ordered by `(index, subindex)` with no lengths on the wire. It takes the widths from
 `Device::parametersOrdered()`, so **one width the master and the drive disagree about shifts every
 value after it** — the widths must sum to exactly the bytes received or the whole transfer is
-refused. **The dictionary lacks the reserved slots of PDO mapping objects** (see *Fieldbus Surface*),
-so on a drive with any unused slot the transfer is refused. Nothing uses command 21 yet. Rationale,
-with the firmware citations: `NEXTGEN.md`, Session 2026-08-25.
+refused. **On an Integro the dictionary lacks the reserved slots of PDO mapping objects** (see
+*Fieldbus Surface*), so there the transfer is refused while any slot is unused. Rationale, with the
+firmware citations: `NEXTGEN.md`, Session 2026-08-25.
 
 ### Networking and TLS
 
@@ -785,19 +785,22 @@ falling back to per-subindex reads. `parameters.useCompleteAccess` (default on) 
 `completeAccess=false` while CA works, so the runtime probe is authoritative. They are exposed
 raw on `GET /api/bus-config` and decoded client-side.
 
-**The enumeration reads each object up to the count the slave reports, and no further.** SOMANET
-firmware answers Get Object Description with the *runtime value of subindex 0* rather than the
-object's declared size. For a PDO mapping object that is the number of entries currently mapped, so
-an unmapped 0x1603 reports itself as having none while its storage holds ten, and the reserved slots
-are not in the dictionary. A probe past the count found them, and was removed: an Integro answers a
-Get Entry Description for an entry it does not have with success and stack memory
-(synapticon/somanet_software#5821), and the probe recorded that memory as entries in about half the
-reads. Nothing needs the slots except OS command 21. Bring the probe back only with that firmware
-fix. **Inside the count, an entry the slave says does not exist is an answer**: SDO Info abort
-0x06020000 or 0x06090011, or a reply with bit length 0, leaves the entry out after one attempt
-without counting it as lost. The same firmware behaviour makes a Complete Access upload of such an
-object short, which is expected and falls back per subindex rather than warning. See `NEXTGEN.md`,
-Sessions 2026-08-25 and 2026-10-24.
+**A record's declared size is not on the wire, so the enumeration probes for it, but only on a
+slave that refuses correctly.** SOMANET firmware answers Get Object Description with the *runtime
+value of subindex 0* rather than the object's declared size. For a PDO mapping object that is the
+number of entries currently mapped, so an unmapped 0x1603 reports itself as having none while its
+storage holds ten. `readObjectDictionary` therefore keeps asking past `MaxSub` until the slave
+refuses, for records and arrays only. **Each probe is a single attempt with no retries**, and the
+first refusal that takes longer than 100 ms turns probing off for that device. **Before it probes,
+it asks for subindex 1 of an object the slave does not list.** An Integro answers that with success
+and stack memory (synapticon/somanet_software#5821), and would answer every probe the same way, so a
+slave that does not refuse is not probed; its dictionary lacks the reserved slots. Circulo and Node
+refuse and get every slot. **The test object must be absent, not a subindex past 0x1018**: the netX
+of an Integro answers the standard objects itself and refuses correctly. **Inside `MaxSub`, an entry
+the slave says does not exist is an answer**: SDO Info abort 0x06020000 or 0x06090011, or a reply
+with bit length 0, leaves it out after one attempt without counting it as lost. The same firmware
+behaviour makes a Complete Access upload of such an object short, which is expected and falls back
+per subindex rather than warning. See `NEXTGEN.md`, Sessions 2026-08-25 and 2026-10-24.
 
 **A lossy enumeration is never cached.** `readObjectDictionary` returns an `OdRead` — the entries
 plus `missingEntries`, the count of subindices the slave was asked about and never answered. A

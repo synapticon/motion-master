@@ -14,11 +14,16 @@
 
 namespace mm::node {
 
-// The cache is enabled by default only for a SOMANET device (@c isSomanetDevice): for SOMANET
-// firmware the CoE object dictionary is uniquely determined by @c (productCode, revisionNumber) —
-// Synapticon bumps the revision whenever the dictionary changes, so an on-disk cache keyed on
-// identity alone can never serve definitions that do not match the device. That guarantee does not
-// hold for arbitrary third-party vendors (see @c ParameterCacheConfig::cacheAllVendors).
+// The cache is keyed on vendor ID, product code and the firmware version in 0x100A, never on the
+// SII revision. The revision the master reads can come from a bootloader rather than from the
+// application: a Jasper drive with an older bootloader reports the revision compiled into the
+// bootloader, whatever application is installed, so a revision key serves a dictionary written for
+// other firmware. 0x100A is optional in CiA 301, so a device without it is not cached at all; a
+// fallback to the revision would bring the stale dictionary back.
+//
+// The cache is enabled by default only for a SOMANET device (@c isSomanetDevice), whose firmware
+// version names its dictionary. That guarantee does not hold for arbitrary third-party vendors (see
+// @c ParameterCacheConfig::cacheAllVendors).
 
 /// @brief Policy and location for the on-disk parameter cache.
 ///
@@ -34,8 +39,8 @@ struct ParameterCacheConfig {
 /// Enumerating a drive's object dictionary over the SDO-Information service is hundreds of mailbox
 /// round-trips and takes seconds; the result — the set of @c DeviceParameter definitions (index,
 /// subindex, name, data type, bit length, access, unit, and the static default/min/max bounds) — is
-/// identical for every device of the same @c (vendorId, productCode, revisionNumber) and, for a
-/// vendor with stable revision discipline, stays valid across power cycles. This cache persists
+/// identical for every device of the same @c (vendorId, productCode, firmwareVersion) and stays
+/// valid across power cycles. This cache persists
 /// those definitions to a human-readable JSON file per identity so a later scan of the same
 /// hardware skips the round-trips.
 ///
@@ -45,10 +50,10 @@ struct ParameterCacheConfig {
 /// cached file is a definition/schema snapshot, intended to be readable and (in future) enriched
 /// with ESI-derived metadata such as descriptions and enum option labels.
 ///
-/// All operations are best-effort and never throw: a missing, unreadable, corrupt, or
-/// wrong-format-version file is a miss (the caller falls back to a live enumeration); a write
-/// failure is logged, not propagated. Owned by @c DeviceManager (it outlives the @c Device set,
-/// which is rebuilt on every scan) and handed to each @c Device by pointer.
+/// All operations are best-effort and never throw: an empty firmware version, or a missing,
+/// unreadable, corrupt, or wrong-format-version file is a miss (the caller falls back to a live
+/// enumeration); a write failure is logged, not propagated. Owned by @c DeviceManager (it outlives
+/// the @c Device set, which is rebuilt on every scan) and handed to each @c Device by pointer.
 class ParameterCache {
  public:
   /// @brief Bumped when an older file's *contents* can no longer be trusted, whatever its shape.
@@ -60,11 +65,11 @@ class ParameterCache {
   /// and is never checked against the device again.
   ///
   /// Nothing detects the second case, so it has to be remembered here. A file is keyed on vendor,
-  /// product and revision alone, so an enumeration fix that is not accompanied by a bump reaches
-  /// every host except the ones that already had the bug — where a stale file keeps being served
-  /// and the fix looks like it never shipped. That is a fault only one machine can reproduce and
-  /// nothing corrects.
-  static constexpr int kFormatVersion = 2;
+  /// product and firmware version alone, so an enumeration fix that is not accompanied by a bump
+  /// reaches every host except the ones that already had the bug — where a stale file keeps being
+  /// served and the fix looks like it never shipped. That is a fault only one machine can reproduce
+  /// and nothing corrects.
+  static constexpr int kFormatVersion = 3;
 
   ParameterCache() = default;
   explicit ParameterCache(ParameterCacheConfig config);
@@ -75,7 +80,7 @@ class ParameterCache {
   /// @brief Whether the cache is active for @p vendorId under the current policy.
   ///
   /// True when the master switch is on and either @c cacheAllVendors is set or @p vendorId is
-  /// Synapticon's. The single gate consulted by both @c load and @c store.
+  /// Synapticon's. The policy gate consulted by both @c load and @c store.
   bool enabledForVendor(uint32_t vendorId) const;
 
   /// @brief Loads the cached parameter definitions for an identity.
@@ -83,34 +88,42 @@ class ParameterCache {
   /// Each returned @c DeviceParameter has its definition fields populated, its @c value set to the
   /// type-appropriate default, and its @c syncState left @c Unknown (the caller reads live values).
   ///
+  /// @param firmwareVersion  The device's 0x100A, trimmed. Empty means the device has none, and
+  ///                         is a miss.
   /// @return The cached definitions on a hit, or @c std::nullopt when the cache is disabled for the
-  ///         vendor, no file exists, or the file is unreadable / corrupt / for a different identity
-  ///         or format version (all treated as a miss).
+  ///         vendor, the firmware version is empty, no file exists, or the file is unreadable /
+  ///         corrupt / for a different identity or format version (all treated as a miss).
   std::optional<std::vector<DeviceParameter>> load(uint32_t vendorId, uint32_t productCode,
-                                                   uint32_t revisionNumber) const;
+                                                   std::string_view firmwareVersion) const;
 
   /// @brief Persists parameter definitions for an identity (atomic temp-file + rename).
   ///
   /// The live @c value and @c syncState of each parameter are intentionally not written. No-op when
-  /// the cache is disabled for the vendor. Best-effort: directory-creation or write failures are
-  /// logged at warn level and otherwise ignored.
-  void store(uint32_t vendorId, uint32_t productCode, uint32_t revisionNumber,
+  /// the cache is disabled for the vendor or @p firmwareVersion is empty. Best-effort:
+  /// directory-creation or write failures are logged at warn level and otherwise ignored.
+  void store(uint32_t vendorId, uint32_t productCode, std::string_view firmwareVersion,
              const std::vector<DeviceParameter>& parameters) const;
 
   /// @brief Summary of one cache file on disk, for the management UI.
   struct CacheEntry {
-    std::string id;                ///< Opaque "<vendor>-<product>-<revision>" key (see @c makeId).
+    std::string id;                ///< Opaque "<vendor>-<product>-<version>" key (see @c makeId).
     uint32_t vendorId = 0;         ///< Vendor ID from the file header.
     uint32_t productCode = 0;      ///< Product code from the file header.
-    uint32_t revisionNumber = 0;   ///< Revision number from the file header.
+    std::string firmwareVersion;   ///< The full 0x100A string from the file header.
     uint32_t parameterCount = 0;   ///< Number of cached parameter definitions in the file.
     std::uintmax_t sizeBytes = 0;  ///< File size on disk, in bytes.
   };
 
   /// @brief Builds the opaque id a client uses to address one cache file, from an identity triple.
-  ///        The single place the id encoding lives; @c list reports it and @c readRaw / @c remove
-  ///        parse it back, so neither the HTTP layer nor the UI ever formats the key itself.
-  static std::string makeId(uint32_t vendorId, uint32_t productCode, uint32_t revisionNumber);
+  ///
+  /// The single place the id encoding lives; @c list reports it and @c readRaw / @c remove parse it
+  /// back, so neither the HTTP layer nor the UI ever formats the key itself. The firmware version
+  /// is reduced to the characters of @c mm::core::isUrlSafeId, every other character becoming
+  /// @c '_', and cut to 64 characters, so the id is one URL path segment and a file name on every
+  /// platform. Two versions can reduce to one id. @c load compares the full string kept in the
+  /// file, so that costs a miss, never a wrong dictionary.
+  static std::string makeId(uint32_t vendorId, uint32_t productCode,
+                            std::string_view firmwareVersion);
 
   /// @brief Lists every valid cache file in the cache directory.
   ///
@@ -139,14 +152,14 @@ class ParameterCache {
   std::filesystem::path resolveDir() const;
 
   /// @brief Absolute path of the cache file for one identity
-  ///        (@c parameters-<vendor>-<product>-<rev>.json).
+  ///        (@c parameters-<vendor>-<product>-<version>.json, see @c makeId).
   std::filesystem::path pathFor(uint32_t vendorId, uint32_t productCode,
-                                uint32_t revisionNumber) const;
+                                std::string_view firmwareVersion) const;
 
   ParameterCacheConfig config_;
 };
 
-/// @brief Serialises a CacheEntry to JSON (keys: vendorId, productCode, revisionNumber,
+/// @brief Serialises a CacheEntry to JSON (keys: id, vendorId, productCode, firmwareVersion,
 ///        parameterCount, sizeBytes). Participates in nlohmann ADL.
 void to_json(nlohmann::json& j, const ParameterCache::CacheEntry& e);
 

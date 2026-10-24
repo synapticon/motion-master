@@ -5005,8 +5005,32 @@ It needs three things: a flag on `Device` that its dictionary came from the cach
 from a read, because `readSdo` returns only a formatted string and matching that string to branch is
 what the error convention forbids; and one warning per device and cache load, because
 `ParameterRefresher` polls the same object again and again. Monitoring already marks such a
-parameter `Stale`, which is why this waits. What an Integro answers to an SDO upload of an object it
-does not have is not checked; if it stays silent, nothing triggers the check there.
+parameter `Stale`, which is why this waits. An Integro answers an SDO upload of an object it does
+not have with abort 0x08000000, "General error", measured below. It is not silent, and it is not
+"does not exist", so a check keyed on the two "does not exist" codes never fires on an Integro.
 
-**Not yet done.** All of it. No Jasper v10.0.4 drive is on the bench, and the Integro on the bench
-has no gaps inside `MaxSub`, so the new path of the enumeration cannot run here.
+**A warning at scan was built, measured, and reverted.** The idea was one line per device when the
+dictionary came from the cache and value reads of the scan failed: the count, the file id, "the
+cache may be out of sync", and how to delete the file. It counted every failed read, to need no
+abort code. The bench Integro (firmware v5.6.11, product 0x401) showed why that cannot work. Two
+reads fail on every scan with a correct cache: 0x1024:00 is write-only (access 0x38) and the scan
+still reads it, and 0x1600:08, a declared-size slot of a mapping object, is never answered and costs
+1.5 s. The warning appeared on every cached scan and blamed the cache for nothing, and deleting the
+file would bring the same dictionary and the same two failures back. Narrowing it to "does not
+exist" aborts misses the Integro, whose answer is "General error", which also covers other faults.
+Any later version of the warning needs a baseline of the reads that fail with a correct dictionary,
+not a count.
+
+**Two scan reads that fail every time, found on the way.** The value pass reads write-only entries,
+which `DeviceParameter::isReadable` already identifies, so every scan logs a refused read of
+0x1024:00. And the Integro never answers 0x1600:08, at a cost of one mailbox timeout per scan. Both
+are older than this session and are not fixed here.
+
+**Measured on the bench Integro.** Files keyed on the revision are hidden from the list and left on
+disk. `DELETE` with the new id answers 204. 0x100A comes back as 50 bytes padded with NULs and is
+trimmed to `v5.6.11`. A read from the drive gives 578 entries in 1.7 s, with nothing lost and nothing
+absent, the same count as the old file, and writes `parameters-000022d2-00000401-v5.6.11.json`.
+`POST /api/devices/1/parameters/init` then loads the 578 definitions from that file.
+
+**Not yet done.** No Jasper v10.0.4 drive is on the bench, and the Integro on the bench has no gaps
+inside `MaxSub`, so the new path of the enumeration has not run on hardware.

@@ -107,13 +107,14 @@ struct RecorderConfig {
 ///
 /// Enumerating a drive's object dictionary over SDO is hundreds of round-trips; the result (the
 /// parameter *definitions* — not live values) is identical for every device of the same vendor,
-/// product, and revision, so it is cached to disk and reused on a later scan of the same hardware.
-/// Only definitions are cached — live values are always read from the device.
+/// product, and firmware version (0x100A), so it is cached to disk and reused on a later scan of
+/// the same hardware. Only definitions are cached — live values are always read from the device.
 struct ParameterCacheConfig {
   bool enabled = true;  ///< Master switch for the whole cache.
   /// false: cache only SOMANET devices (vendor 0x22D2 or 0x063A), whose object dictionary is
-  /// uniquely determined by product + revision. true: cache every vendor — only safe when a vendor
-  /// bumps its revision whenever the dictionary changes (Motion Master cannot verify that for you).
+  /// uniquely determined by product + firmware version. true: cache every vendor — only safe when
+  /// a vendor changes its firmware version whenever the dictionary changes (Motion Master cannot
+  /// verify that for you).
   bool cacheAllVendors = false;
   std::string directory;  ///< "" = a standard per-user cache directory; set to override.
 };

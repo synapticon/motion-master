@@ -10,6 +10,38 @@ import { btnOutline } from '../utils/styles'
 
 const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`
 
+// One entry per table column. `help` is the header's tooltip: what the value is and where Motion
+// Master got it.
+const COLUMNS: { label: string; help?: string }[] = [
+  {
+    label: 'Vendor ID',
+    help:
+      "The device's vendor ID, read at scan: from the SII EEPROM over EtherCAT, from object " +
+      '0x1018:01 over SPoE. 0x22D2 is Synapticon.',
+  },
+  {
+    label: 'Product Code',
+    help:
+      "The device's product code, read at scan: from the SII EEPROM over EtherCAT, from object " +
+      '0x1018:02 over SPoE.',
+  },
+  {
+    label: 'Firmware Version',
+    help:
+      'Object 0x100A (Manufacturer software version), read from the device before the cache is ' +
+      'used. The file belongs to this version, so a firmware update reads the dictionary again.',
+  },
+  {
+    label: 'Parameters',
+    help: 'How many parameter definitions (index and subindex pairs) the file holds.',
+  },
+  {
+    label: 'Size',
+    help: 'The size of the cache file on disk.',
+  },
+  { label: '' },
+]
+
 export default function StorageParameterCachePage() {
   const { api } = useConnection()
   const queryClient = useQueryClient()
@@ -45,7 +77,7 @@ export default function StorageParameterCachePage() {
   function handleDelete(entry: ParameterCacheEntry) {
     const confirmed = window.confirm(
       `Delete the cached object dictionary for ${hex(entry.vendorId)} / ${hex(entry.productCode)} / ` +
-        `${hex(entry.revisionNumber)}?\n\nThis only removes Motion Master's saved copy — the device ` +
+        `${entry.firmwareVersion}?\n\nThis only removes Motion Master's saved copy — the device ` +
         `is untouched. The next scan of this hardware will re-enumerate it over SDO.`,
     )
     if (confirmed) {
@@ -116,12 +148,13 @@ export default function StorageParameterCachePage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['Vendor ID', 'Product Code', 'Revision', 'Parameters', 'Size', ''].map(h => (
+                  {COLUMNS.map(({ label, help }) => (
                     <th
-                      key={h}
-                      className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium"
+                      key={label}
+                      title={help}
+                      className={`text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium${help ? ' cursor-help' : ''}`}
                     >
-                      {h}
+                      {label}
                     </th>
                   ))}
                 </tr>
@@ -131,7 +164,7 @@ export default function StorageParameterCachePage() {
                   <tr key={entry.id} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{hex(entry.vendorId)}</td>
                     <td className="px-4 py-2 font-mono">{hex(entry.productCode)}</td>
-                    <td className="px-4 py-2 font-mono">{hex(entry.revisionNumber)}</td>
+                    <td className="px-4 py-2 font-mono">{entry.firmwareVersion}</td>
                     <td className="px-4 py-2">{entry.parameterCount}</td>
                     <td className="px-4 py-2">{formatBytes(entry.sizeBytes)}</td>
                     <td className="px-4 py-2">

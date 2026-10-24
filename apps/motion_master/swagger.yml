@@ -4889,8 +4889,9 @@ paths:
       summary: List on-disk parameter caches
       operationId: listParameterCacheEntries
       description: >
-        Returns one entry per cached parameter-definition file on disk, keyed by device identity
-        (vendor, product, revision). The cache stores only the object-dictionary *definitions* (not
+        Returns one entry per cached parameter-definition file on disk, keyed by vendor ID, product
+        code and firmware version (object 0x100A). A device without 0x100A is not cached. The cache
+        stores only the object-dictionary *definitions* (not
         live values), so a scan of previously-seen hardware can skip the slow SDO enumeration.
         Independent of the bus — works whether or not a driver is initialised.
       responses:
@@ -4909,7 +4910,7 @@ paths:
         required: true
         schema:
           type: string
-        description: Opaque cache id from listParameterCacheEntries ("<vendor>-<product>-<revision>").
+        description: Opaque cache id from listParameterCacheEntries ("<vendor>-<product>-<version>").
     get:
       summary: Download a parameter-cache file
       operationId: getParameterCache
@@ -4930,7 +4931,7 @@ paths:
       operationId: deleteParameterCache
       description: >
         Removes one cached file from disk. The next scan of that hardware re-enumerates it. Useful
-        when a vendor reused a revision across an object-dictionary change.
+        when a firmware changed its object dictionary and kept its version string.
       responses:
         "204":
           description: Cache file deleted.
@@ -5375,14 +5376,15 @@ components:
     ParameterCacheEntry:
       type: object
       description: Summary of one on-disk parameter-cache file (its identity, size, and count).
-      required: [id, vendorId, productCode, revisionNumber, parameterCount, sizeBytes]
+      required: [id, vendorId, productCode, firmwareVersion, parameterCount, sizeBytes]
       properties:
         id:
           type: string
           description: >
             Opaque key addressing this cache file in the download/delete endpoints
-            ("<vendor>-<product>-<revision>"). Use it verbatim — do not construct it client-side.
-          example: "000022d2-00000201-0000000a"
+            ("<vendor>-<product>-<version>", the version reduced to URL-safe characters). Use it
+            verbatim — do not construct it client-side.
+          example: "000022d2-00000201-v5.6.6"
         vendorId:
           type: integer
           description: EtherCAT vendor ID (0x22D2 = Synapticon).
@@ -5391,10 +5393,10 @@ components:
           type: integer
           description: Product code.
           example: 513
-        revisionNumber:
-          type: integer
-          description: Revision number.
-          example: 10
+        firmwareVersion:
+          type: string
+          description: The device's firmware version (0x100A) the file was written for, in full.
+          example: "v5.6.6"
         parameterCount:
           type: integer
           description: Number of cached parameter definitions in the file.

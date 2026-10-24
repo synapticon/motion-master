@@ -5008,11 +5008,5 @@ what the error convention forbids; and one warning per device and cache load, be
 parameter `Stale`, which is why this waits. What an Integro answers to an SDO upload of an object it
 does not have is not checked; if it stays silent, nothing triggers the check there.
 
-**What ships in its place is one line at scan.** When the dictionary came from the cache and reads
-of the scan fail, the device logs one warning after the read pass: the count, the cache file id,
-that the cache may be out of sync with the device, and how to delete the file. It counts every
-failed read, so it needs no abort code, and "may" covers the firmware fault above. It deletes
-nothing and reads nothing again. The per-entry warnings stay, because they name the object.
-
 **Not yet done.** All of it. No Jasper v10.0.4 drive is on the bench, and the Integro on the bench
 has no gaps inside `MaxSub`, so the new path of the enumeration cannot run here.

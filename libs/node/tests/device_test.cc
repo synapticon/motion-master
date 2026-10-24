@@ -1,8 +1,6 @@
 #include "node/device.h"
 
 #include <gtest/gtest.h>
-#include <spdlog/sinks/ostream_sink.h>
-#include <spdlog/spdlog.h>
 
 #include <atomic>
 #include <chrono>
@@ -11,12 +9,10 @@
 #include <filesystem>
 #include <functional>
 #include <map>
-#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -1743,70 +1739,6 @@ TEST(DeviceParameterCache, LossyEnumerationIsNotCached) {
 
   EXPECT_FALSE(cache.load(driver.info.vendorId, driver.info.productCode, "10.0.4"))
       << "a short dictionary must not be written, or every later scan reads it back";
-  std::error_code ec;
-  std::filesystem::remove_all(dir, ec);
-}
-
-// Captures what the default logger writes while it lives, and puts the previous logger back.
-class LogCapture {
- public:
-  LogCapture()
-      : previous_(spdlog::default_logger()),
-        sink_(std::make_shared<spdlog::sinks::ostream_sink_mt>(text_)) {
-    spdlog::set_default_logger(std::make_shared<spdlog::logger>("capture", sink_));
-  }
-  ~LogCapture() { spdlog::set_default_logger(previous_); }
-  LogCapture(const LogCapture&) = delete;
-  LogCapture& operator=(const LogCapture&) = delete;
-
-  std::string text() const { return text_.str(); }
-
- private:
-  std::ostringstream text_;
-  std::shared_ptr<spdlog::logger> previous_;
-  std::shared_ptr<spdlog::sinks::ostream_sink_mt> sink_;
-};
-
-// A cache file that lists an entry the device no longer answers names itself as the likely cause,
-// once, with the file's id.
-TEST(DeviceParameterCache, FailedReadsFromACachedDictionaryNameTheFile) {
-  const auto dir = makeCacheDir("stale");
-  mm::node::ParameterCache cache({.directory = dir.string(), .enabled = true});
-  SdoFakeDriver driver;
-  makeCacheable(driver);
-  driver.programOd(0x6041, 0, 0x0006, 0x3F, 16);
-  driver.programRead(0x6040, 0, {0x00, 0x00});
-  driver.programRead(0x6041, 0, {0x00, 0x00});
-  {
-    Device device(1, driver, nullptr, &cache);
-    ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
-  }
-
-  driver.reads.erase(SdoFakeDriver::key(0x6041, 0));
-  LogCapture log;
-  Device device(1, driver, nullptr, &cache);
-  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
-
-  EXPECT_NE(log.text().find("1 entries from the parameter cache file 000022d2-00000301-10.0.4 "
-                            "failed to read"),
-            std::string::npos)
-      << log.text();
-  std::error_code ec;
-  std::filesystem::remove_all(dir, ec);
-}
-
-// The same failure in a dictionary read from the device is not the cache's, and says nothing of it.
-TEST(DeviceParameterCache, FailedReadsFromTheDeviceDoNotBlameTheCache) {
-  const auto dir = makeCacheDir("fresh-fail");
-  mm::node::ParameterCache cache({.directory = dir.string(), .enabled = true});
-  SdoFakeDriver driver;
-  makeCacheable(driver);
-  LogCapture log;
-  Device device(1, driver, nullptr, &cache);
-  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
-
-  EXPECT_NE(log.text().find("SDO upload 0x6040:00 failed"), std::string::npos) << log.text();
-  EXPECT_EQ(log.text().find("parameter cache file"), std::string::npos) << log.text();
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
 }

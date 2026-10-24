@@ -23,6 +23,8 @@ moves the devices to an AL state. from_config() builds a client from
 config.toml. The steps log through the "motion_master_client" logger, so a
 script that wants to see them turns on logging at INFO. run_procedure() starts a
 procedure, polls it until it ends, and cancels it when the caller stops early.
+step_changes() picks out the steps whose status changed, and format_step() turns
+one into a line.
 monitor() and notifications() stream from the WebSocket.
 """
 
@@ -63,6 +65,10 @@ class StateError(Exception):
     """A device does not answer, or does not reach the AL state it was commanded to."""
 
 
+class ProcedureError(Exception):
+    """The server refuses to start a procedure. The message is the server's reason."""
+
+
 def _next_step(current, target):
     """Return the next state on the way from current to target.
 
@@ -83,6 +89,39 @@ def _satisfied(current, target, exact):
     if exact or BOOT in (current, target):
         return False
     return _LADDER.index(current) > _LADDER.index(target)
+
+
+def step_changes(run):
+    """Yield each snapshot of a run from run_procedure(), with the steps whose status changed.
+
+    Every snapshot is yielded, as (snapshot, changed). `changed` lists the steps whose status is not
+    the one they had in the snapshot before, and it can be empty. A step not reached yet is idle,
+    so it is listed only once it starts. The last snapshot carries the final status of the run.
+    Closing this generator closes `run`, which cancels a run that is still in progress.
+    """
+    # A step that starts and ends between two polls shows only once, already finished, so a step
+    # is compared with its last status, not with the poll before.
+    seen = {}
+    try:
+        for snapshot in run:
+            changed = []
+            for step in snapshot["steps"]:
+                if seen.get(step["id"], "idle") != step["status"]:
+                    seen[step["id"]] = step["status"]
+                    changed.append(step)
+            yield snapshot, changed
+    finally:
+        run.close()
+
+
+def format_step(step):
+    """Return one line for a step of a procedure: its id, its status, and its value or error."""
+    line = f"  {step['id']:<36} {step['status']}"
+    if "value" in step:
+        line += f"  {json.dumps(step['value'], ensure_ascii=False)}"
+    if "error" in step:
+        line += f"  {step['error']}"
+    return line
 
 
 class MotionMasterClient:
@@ -243,11 +282,19 @@ class MotionMasterClient:
         ends, for example on Ctrl-C, the run is cancelled, so that the drive does not continue
         alone.
 
-        Raises requests.HTTPError when the server refuses the start, for example with 409 when
-        another procedure runs on the device.
+        Raises ProcedureError when the server refuses the start: 409 when another procedure runs
+        on the device, 404 when the device has no procedure of that name, 400 for a parameter the
+        procedure refuses.
         """
         path = {"slavePosition": position, "procedureName": name}
-        snapshot = self.call("startProcedure", path=path, body=params or {}).json()
+        r = self.call("startProcedure", path=path, body=params or {}, check=False)
+        if not r.ok:
+            try:
+                reason = r.json()["error"]
+            except (ValueError, KeyError):
+                reason = r.text
+            raise ProcedureError(f"{name} on device {position}: {reason} (HTTP {r.status_code})")
+        snapshot = r.json()
         try:
             while True:
                 yield snapshot

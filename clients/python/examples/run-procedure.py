@@ -36,7 +36,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import STATE_NAMES, MotionMasterClient  # noqa: E402
+from motion_master_client import (  # noqa: E402
+    STATE_NAMES,
+    MotionMasterClient,
+    ProcedureError,
+    format_step,
+    step_changes,
+)
 
 STATES = {name.lower(): value for value, name in STATE_NAMES.items() if value != 0}
 
@@ -146,30 +152,20 @@ def main():
 
     body = build_params(descriptor, args.params)
 
-    # A step that starts and ends between two polls shows only once, already finished, so the
-    # script prints each change of status rather than each poll. A step not reached yet is idle,
-    # and stays unprinted until it starts.
-    printed = {}
     snapshot = None
-    run = client.run_procedure(args.slave, args.name, body)
+    changes = step_changes(client.run_procedure(args.slave, args.name, body))
     try:
-        for snapshot in run:
-            for step in snapshot["steps"]:
-                if printed.get(step["id"], "idle") == step["status"]:
-                    continue
-                printed[step["id"]] = step["status"]
-                line = f"  {step['id']:<36} {step['status']}"
-                if "value" in step:
-                    line += f"  {json.dumps(step['value'], ensure_ascii=False)}"
-                if "error" in step:
-                    line += f"  {step['error']}"
-                print(line)
+        for snapshot, changed in changes:
+            for step in changed:
+                print(format_step(step))
+    except ProcedureError as e:
+        sys.exit(str(e))
     except KeyboardInterrupt:
         print("\ncancelled")
         sys.exit(1)
     finally:
         # Closing the generator cancels a run that is still in progress.
-        run.close()
+        changes.close()
 
     if snapshot.get("error"):
         print(f"error: {snapshot['error']}")

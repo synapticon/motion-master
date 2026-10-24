@@ -1135,24 +1135,18 @@ constexpr auto kSdoInfoRetryDelay = std::chrono::milliseconds(50);
 // between the two.
 constexpr auto kProbeRefusalBudget = std::chrono::milliseconds(100);
 
-// Whether an answer to Get Entry Description carries no entry. Past the size the slave reports, it
-// ends the probe exactly as a refusal does. Within that size, it is a gap the firmware left in a
-// record, and the entry is left out without counting as lost.
+// Whether an answer to Get Entry Description carries no entry, because it declares no width. An
+// entry without one could not be decoded even if the slave meant it. Past the size the slave
+// reports, it ends the probe exactly as a refusal does. Within that size, it is a gap the firmware
+// left in a record, and the entry is left out without counting as lost.
 //
-// **A refusal is not the only way a slave says "no such subindex".** The ARM stack in a SOMANET
-// Integro answers Get Entry Description for a subindex it does not have with *success* and an
-// all-zero descriptor (`Handle_Get_SubObject_Info_Ind` discards the lookup's error and replies from
-// an uninitialised struct). The XMOS stack in a SOMANET Node aborts, which is what ETG.1000.6
-// asks for. Reading only the abort therefore probes an ARM device to subindex 255 on every record
-// and array, and records thousands of rows that name nothing. Within the reported size it would
-// cache a row with no width and a name and type left over from another request.
-//
-// **The bit length is the test, and the data type cannot be part of it.** The reply is built from
-// whatever the stack left behind, so its data type is sometimes zero and sometimes a leftover from
-// an earlier request — an Integro answered seven of them with 0x1024, 0x1025 and neighbours, which
-// are indices, not data types. A bit length of zero is the field that stays trustworthy, and it is
-// enough on its own: every entry in a SOMANET dictionary declares a width, and an entry without one
-// could not be decoded even if the slave meant it.
+// **This catches only some of the replies that describe nothing.** The ARM stack in a SOMANET
+// Integro answers Get Entry Description for a subindex it does not have with *success*, built from
+// an uninitialised struct (`Handle_Get_SubObject_Info_Ind` discards the lookup's error,
+// synapticon/somanet_software#5821). Every field of that reply is whatever the stack left behind.
+// The bit length is often 0, but 30 reads of one dictionary in a row also gave 500 and 24196, with
+// names that were not text. So no field of such a reply can be trusted, and a slave that answers
+// this way is not probed at all (see refusesMissingEntries).
 bool describesNoEntry(const ec_OElistt& oeList, uint8_t sub) { return oeList.BitLength[sub] == 0; }
 
 // Object Code (ETG.1000.6 §5.6.3.2). A VAR holds one entry and the firmware reports its subindex
@@ -1375,6 +1369,47 @@ constexpr auto kFoeReadRetryDelay = std::chrono::milliseconds(100);
 // 10 s, and it installs firmware reliably in the field.
 constexpr int kFoeWriteTimeoutUs = 10'000'000;
 
+// Whether the slave refuses a Get Entry Description for an entry it does not have, which is what
+// makes probing past the size it reports safe.
+//
+// The test asks for subindex 1 of an object the slave does not list: the highest free index of the
+// manufacturer range, 0x2000 to 0x5FFF. A slave that refuses it, quickly, ends every probe with a
+// refusal: the SOMANET XMOS stack and Jasper abort with 0x06020000. A slave that answers it with
+// success also answers every probe past the end of an object with success and leftover data, as a
+// SOMANET Integro does (synapticon/somanet_software#5821). It is not probed, and its dictionary
+// lacks the slots its objects reserve beyond the count they report.
+//
+// **The object must be one the slave does not have, not a subindex past a standard object.** The
+// netX of an Integro answers the standard objects itself, 0x1018 among them, and refuses a missing
+// subindex there correctly. Only an object the netX does not know reaches the ARM application and
+// its broken reply, and an object the slave does not list is always one of those. Asking for an
+// absent object also costs the firmware a search, never a read past the end of an object's table.
+//
+// The test is the behaviour, not a product or a version, so a firmware that fixes the reply is
+// probed again with no change here. Called with no drive lock held; retrySdoInfo takes it.
+bool refusesMissingEntries(ecx_contextt* ctx, uint16_t slavePosition, ControlPlaneLocks& locks,
+                           const ec_ODlistt& odList) {
+  const std::span<const uint16_t> listed(odList.Index, odList.Entries);
+  uint16_t absent = 0x5FFF;
+  while (absent >= 0x2000 && std::ranges::find(listed, absent) != listed.end()) {
+    --absent;
+  }
+  if (absent < 0x2000) {
+    return false;  // nothing is known to be absent, so nothing shows how the slave refuses
+  }
+  // ecx_readOEsingle reads only the slave and the index of the item from the list. The list is
+  // large, so it lives on the heap.
+  auto probe = std::make_unique<ec_ODlistt>();
+  probe->Slave = odList.Slave;
+  probe->Entries = 1;
+  probe->Index[0] = absent;
+  auto scratch = std::make_unique<ec_OElistt>();
+  const auto answer = retrySdoInfo(
+      ctx, slavePosition, locks,
+      [&] { return ecx_readOEsingle(ctx, 0, 1, probe.get(), scratch.get()); }, 0);
+  return !answer.ok() && answer.elapsed <= kProbeRefusalBudget;
+}
+
 }  // namespace
 
 std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
@@ -1437,10 +1472,19 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
   std::vector<OdEntry> entries;
   entries.reserve(odList.Entries);
 
-  // Turned off by the first probe whose refusal took longer than kProbeRefusalBudget: a slave that
-  // refuses by staying silent makes probing cost a mailbox timeout per object, and a dictionary
-  // short of its unused slots is a far better outcome than a minutes-long enumeration.
-  bool probeDeclaredSize = true;
+  // Off for a slave that does not refuse a missing entry, because every probe of it would record
+  // whatever its reply was built from. Turned off later by the first probe whose refusal took
+  // longer than kProbeRefusalBudget: a slave that refuses by staying silent makes probing cost a
+  // mailbox timeout per object, and a dictionary short of its unused slots is a far better outcome
+  // than a minutes-long enumeration.
+  bool probeDeclaredSize = refusesMissingEntries(ctx_.get(), slavePosition, controlPlane_, odList);
+  if (!probeDeclaredSize) {
+    spdlog::info(
+        "Device {}: the slave answers a Get Entry Description for an object it does not have, so "
+        "subindices past the count each object reports are not read; slots an object reserves "
+        "beyond that count are missing from its dictionary",
+        slavePosition);
+  }
 
   for (uint16_t i = 0; i < odList.Entries; ++i) {
     auto description = retrySdoInfo(ctx_.get(), slavePosition, controlPlane_,
@@ -1471,7 +1515,8 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
     // Those slots are real and readable: the firmware resolves an entry description from its
     // static entry table without consulting the count, which is why asking past MaxSub answers.
     // So the loop keeps asking until the slave says there is nothing there — either by refusing,
-    // or by answering with an empty descriptor, which @c describesNoEntry explains. **Each probe is
+    // or by answering with an empty descriptor, which @c describesNoEntry explains. It asks only a
+    // slave that refuses a missing entry (refusesMissingEntries). **Each probe is
     // a single attempt**, because that answer is the one it is looking for and running it through
     // the retry budget would spend ten back-offs per object to learn the same thing.
     ec_OElistt oeList{};

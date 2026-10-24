@@ -45,7 +45,7 @@ export default function StorageParameterCachePage() {
   function handleDelete(entry: ParameterCacheEntry) {
     const confirmed = window.confirm(
       `Delete the cached object dictionary for ${hex(entry.vendorId)} / ${hex(entry.productCode)} / ` +
-        `${hex(entry.revisionNumber)}?\n\nThis only removes Motion Master's saved copy — the device ` +
+        `${entry.firmwareVersion}?\n\nThis only removes Motion Master's saved copy — the device ` +
         `is untouched. The next scan of this hardware will re-enumerate it over SDO.`,
     )
     if (confirmed) {
@@ -116,7 +116,7 @@ export default function StorageParameterCachePage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['Vendor ID', 'Product Code', 'Revision', 'Parameters', 'Size', ''].map(h => (
+                  {['Vendor ID', 'Product Code', 'Firmware Version', 'Parameters', 'Size', ''].map(h => (
                     <th
                       key={h}
                       className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium"
@@ -131,7 +131,7 @@ export default function StorageParameterCachePage() {
                   <tr key={entry.id} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{hex(entry.vendorId)}</td>
                     <td className="px-4 py-2 font-mono">{hex(entry.productCode)}</td>
-                    <td className="px-4 py-2 font-mono">{hex(entry.revisionNumber)}</td>
+                    <td className="px-4 py-2 font-mono">{entry.firmwareVersion}</td>
                     <td className="px-4 py-2">{entry.parameterCount}</td>
                     <td className="px-4 py-2">{formatBytes(entry.sizeBytes)}</td>
                     <td className="px-4 py-2">

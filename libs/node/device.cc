@@ -154,6 +154,26 @@ std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data)
   return driver_.writeSii(slavePosition_, data);
 }
 
+namespace {
+
+// The firmware version as the parameter cache keys it: 0x100A with the padding a VISIBLE_STRING
+// carries removed. A firmware pads the string to its declared size with NULs or spaces, and that
+// padding is not part of the version.
+std::string trimFirmwareVersion(std::span<const uint8_t> bytes) {
+  std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  text = text.substr(0, text.find('\0'));
+  const auto isPadding = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+  while (!text.empty() && isPadding(text.front())) {
+    text.remove_prefix(1);
+  }
+  while (!text.empty() && isPadding(text.back())) {
+    text.remove_suffix(1);
+  }
+  return std::string(text);
+}
+
+}  // namespace
+
 std::expected<void, std::string> Device::initializeParameters(bool readValues,
                                                               bool useCompleteAccess) {
   // One place to record the outcome, so every early return inside the enumeration is covered.
@@ -192,9 +212,22 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
   // 1. Obtain the parameter *definitions*: a cache hit (no bus I/O), or a live SDO-Info
   //    enumeration. The cache holds the static schema only — never live values — so on a hit each
   //    definition's value is the type default and is filled in by the value-read pass below.
+  //
+  //    The cache is keyed on the firmware version, so 0x100A is read before the dictionary is
+  //    known. A device that does not answer leaves the version empty, which the cache takes as a
+  //    miss on load and ignores on store: such a device is read from the device on every scan. A
+  //    vendor the cache does not apply to costs no extra upload.
   std::optional<std::vector<DeviceParameter>> definitions;
-  if (parameterCache_) {
-    definitions = parameterCache_->load(vendorId_, productCode_, revisionNumber_);
+  std::string firmwareVersion;
+  if (parameterCache_ && parameterCache_->enabledForVendor(vendorId_)) {
+    if (auto version = readSdo(0x100A, 0); version) {
+      firmwareVersion = trimFirmwareVersion(*version);
+    } else {
+      spdlog::debug(
+          "Device {}: no firmware version in 0x100A, so the parameter cache is not used: {}",
+          slavePosition_, version.error());
+    }
+    definitions = parameterCache_->load(vendorId_, productCode_, firmwareVersion);
   }
   if (!definitions) {
     auto read = driver_.readObjectDictionary(slavePosition_);
@@ -240,15 +273,16 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
     // Persist the freshly enumerated definitions before reading values, so the (possibly slow)
     // value pass below is never on the cache-population critical path.
     //
-    // An enumeration that lost an entry is not persisted. The cache file is keyed on the device's
-    // identity alone and is never checked against the device again, so a dictionary short of one
-    // entry would be what this host believes for as long as the file exists — and only this host,
-    // which is a fault nobody else can reproduce and nothing corrects. Reading the dictionary from
-    // the device again on the next scan costs seconds; the alternative costs a support case. The
-    // definitions in hand are still used for this session: every entry that was read is correct.
+    // An enumeration that lost an entry is not persisted. The cache file is keyed on vendor,
+    // product and firmware version alone and is never checked against the device again, so a
+    // dictionary short of one entry would be what this host believes for as long as the file exists
+    // — and only this host, which is a fault nobody else can reproduce and nothing corrects.
+    // Reading the dictionary from the device again on the next scan costs seconds; the alternative
+    // costs a support case. The definitions in hand are still used for this session: every entry
+    // that was read is correct.
     if (parameterCache_) {
       if (read->missingEntries == 0) {
-        parameterCache_->store(vendorId_, productCode_, revisionNumber_, built);
+        parameterCache_->store(vendorId_, productCode_, firmwareVersion, built);
       } else {
         spdlog::warn(
             "Device {}: the object dictionary read is short {} entry(ies), so it is not cached; "

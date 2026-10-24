@@ -3,7 +3,6 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <array>
 #include <charconv>
 #include <fstream>
 #include <iterator>
@@ -15,6 +14,7 @@
 #include <vector>
 
 #include "core/platform.h"  // userCacheDir — the shared root this cache lives under
+#include "core/util.h"      // isUrlSafeId
 
 namespace mm::node {
 
@@ -93,31 +93,50 @@ DeviceParameter definitionFromJson(const nlohmann::json& j) {
   return p;
 }
 
-/// Parses an id of the form "<vendor>-<product>-<revision>" (three hex fields, the inverse of
-/// @c makeId) into its identity triple. Returns nullopt on any malformed or extra/missing field.
-std::optional<std::array<uint32_t, 3>> parseId(std::string_view id) {
-  std::array<uint32_t, 3> parts{0, 0, 0};
-  size_t field = 0;
-  size_t start = 0;
-  for (size_t end = 0; end <= id.size(); ++end) {
-    if (end != id.size() && id[end] != '-') {
-      continue;
-    }
-    if (field >= parts.size()) {
-      return std::nullopt;  // too many fields
-    }
-    const std::string_view token = id.substr(start, end - start);
-    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), parts[field], 16);
-    if (ec != std::errc() || ptr != token.data() + token.size()) {
+/// Reduces a firmware version to a file-name and URL-safe form: the characters of
+/// @c mm::core::isUrlSafeId, every other character becoming '_', at most 64 of them. Idempotent, so
+/// the version part of a parsed id maps to the same file as the string it came from.
+std::string sanitizeVersion(std::string_view version) {
+  constexpr std::size_t kMaxLength = 64;
+  std::string out;
+  for (const char c : version.substr(0, kMaxLength)) {
+    const bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                      c == '.' || c == '_' || c == '-';
+    out.push_back(safe ? c : '_');
+  }
+  return out;
+}
+
+/// One cache file's address, parsed back from its id.
+struct ParsedId {
+  uint32_t vendorId = 0;
+  uint32_t productCode = 0;
+  std::string version;  ///< The sanitized version, as it appears in the file name.
+};
+
+/// Parses an id of the form "<vendor>-<product>-<version>", the inverse of @c makeId. Vendor and
+/// product are hex fields; the version is everything after the second '-', because a semver
+/// prerelease contains '-' itself. Returns nullopt on a malformed hex field, or a version that is
+/// empty or not URL-safe.
+std::optional<ParsedId> parseId(std::string_view id) {
+  ParsedId parsed;
+  for (uint32_t* field : {&parsed.vendorId, &parsed.productCode}) {
+    const size_t dash = id.find('-');
+    if (dash == std::string_view::npos) {
       return std::nullopt;
     }
-    ++field;
-    start = end + 1;
+    const std::string_view token = id.substr(0, dash);
+    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), *field, 16);
+    if (token.empty() || ec != std::errc() || ptr != token.data() + token.size()) {
+      return std::nullopt;
+    }
+    id.remove_prefix(dash + 1);
   }
-  if (field != parts.size()) {
-    return std::nullopt;  // too few fields
+  if (!mm::core::isUrlSafeId(id)) {
+    return std::nullopt;
   }
-  return parts;
+  parsed.version = std::string(id);
+  return parsed;
 }
 
 }  // namespace
@@ -145,23 +164,22 @@ fs::path ParameterCache::resolveDir() const {
 }
 
 std::string ParameterCache::makeId(uint32_t vendorId, uint32_t productCode,
-                                   uint32_t revisionNumber) {
-  return std::format("{:08x}-{:08x}-{:08x}", vendorId, productCode, revisionNumber);
+                                   std::string_view firmwareVersion) {
+  return std::format("{:08x}-{:08x}-{}", vendorId, productCode, sanitizeVersion(firmwareVersion));
 }
 
 fs::path ParameterCache::pathFor(uint32_t vendorId, uint32_t productCode,
-                                 uint32_t revisionNumber) const {
+                                 std::string_view firmwareVersion) const {
   return resolveDir() /
-         std::format("parameters-{}.json", makeId(vendorId, productCode, revisionNumber));
+         std::format("parameters-{}.json", makeId(vendorId, productCode, firmwareVersion));
 }
 
-std::optional<std::vector<DeviceParameter>> ParameterCache::load(uint32_t vendorId,
-                                                                 uint32_t productCode,
-                                                                 uint32_t revisionNumber) const {
-  if (!enabledForVendor(vendorId)) {
+std::optional<std::vector<DeviceParameter>> ParameterCache::load(
+    uint32_t vendorId, uint32_t productCode, std::string_view firmwareVersion) const {
+  if (!enabledForVendor(vendorId) || firmwareVersion.empty()) {
     return std::nullopt;
   }
-  const fs::path path = pathFor(vendorId, productCode, revisionNumber);
+  const fs::path path = pathFor(vendorId, productCode, firmwareVersion);
   try {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -169,11 +187,12 @@ std::optional<std::vector<DeviceParameter>> ParameterCache::load(uint32_t vendor
     }
     const nlohmann::json doc = nlohmann::json::parse(in);
     // Validate the file describes this exact identity and a format we understand; anything else is
-    // treated as a miss so the caller re-enumerates and overwrites it.
+    // treated as a miss so the caller re-enumerates and overwrites it. The full firmware version is
+    // compared, because two versions can share one file name (see makeId).
     if (doc.value("formatVersion", -1) != kFormatVersion ||
         doc.value("vendorId", uint32_t{0}) != vendorId ||
         doc.value("productCode", uint32_t{0}) != productCode ||
-        doc.value("revisionNumber", uint32_t{0}) != revisionNumber) {
+        doc.value("firmwareVersion", std::string{}) != firmwareVersion) {
       return std::nullopt;
     }
     const auto& entries = doc.at("parameters");
@@ -181,8 +200,8 @@ std::optional<std::vector<DeviceParameter>> ParameterCache::load(uint32_t vendor
     parameters.reserve(entries.size());
     std::transform(entries.begin(), entries.end(), std::back_inserter(parameters),
                    [](const nlohmann::json& entry) { return definitionFromJson(entry); });
-    spdlog::info("Parameter cache: loaded {} definitions for {:#010x}/{:#010x}/{:#010x} from {}",
-                 parameters.size(), vendorId, productCode, revisionNumber, path.string());
+    spdlog::info("Parameter cache: loaded {} definitions for {:#010x}/{:#010x}/{} from {}",
+                 parameters.size(), vendorId, productCode, firmwareVersion, path.string());
     return parameters;
   } catch (const std::exception& e) {
     // Corrupt / partial / unreadable file: log and miss so the device is re-enumerated.
@@ -191,19 +210,20 @@ std::optional<std::vector<DeviceParameter>> ParameterCache::load(uint32_t vendor
   }
 }
 
-void ParameterCache::store(uint32_t vendorId, uint32_t productCode, uint32_t revisionNumber,
+void ParameterCache::store(uint32_t vendorId, uint32_t productCode,
+                           std::string_view firmwareVersion,
                            const std::vector<DeviceParameter>& parameters) const {
-  if (!enabledForVendor(vendorId)) {
+  if (!enabledForVendor(vendorId) || firmwareVersion.empty()) {
     return;
   }
-  const fs::path path = pathFor(vendorId, productCode, revisionNumber);
+  const fs::path path = pathFor(vendorId, productCode, firmwareVersion);
   try {
     fs::create_directories(path.parent_path());
     nlohmann::json doc{
         {"formatVersion", kFormatVersion},
         {"vendorId", vendorId},
         {"productCode", productCode},
-        {"revisionNumber", revisionNumber},
+        {"firmwareVersion", firmwareVersion},
         {"parameters", nlohmann::json::array()},
     };
     for (const auto& p : parameters) {
@@ -217,8 +237,8 @@ void ParameterCache::store(uint32_t vendorId, uint32_t productCode, uint32_t rev
       out << doc.dump(2) << '\n';
     }
     fs::rename(tmp, path);
-    spdlog::debug("Parameter cache: wrote {} definitions for {:#010x}/{:#010x}/{:#010x} to {}",
-                  parameters.size(), vendorId, productCode, revisionNumber, path.string());
+    spdlog::debug("Parameter cache: wrote {} definitions for {:#010x}/{:#010x}/{} to {}",
+                  parameters.size(), vendorId, productCode, firmwareVersion, path.string());
   } catch (const std::exception& e) {
     spdlog::warn("Parameter cache: failed to write {}: {}", path.string(), e.what());
   }
@@ -246,12 +266,12 @@ std::vector<ParameterCache::CacheEntry> ParameterCache::list() const {
       }
       const uint32_t vendorId = doc.value("vendorId", uint32_t{0});
       const uint32_t productCode = doc.value("productCode", uint32_t{0});
-      const uint32_t revisionNumber = doc.value("revisionNumber", uint32_t{0});
+      std::string firmwareVersion = doc.value("firmwareVersion", std::string{});
       entries.push_back(CacheEntry{
-          .id = makeId(vendorId, productCode, revisionNumber),
+          .id = makeId(vendorId, productCode, firmwareVersion),
           .vendorId = vendorId,
           .productCode = productCode,
-          .revisionNumber = revisionNumber,
+          .firmwareVersion = std::move(firmwareVersion),
           .parameterCount =
               static_cast<uint32_t>(doc.value("parameters", nlohmann::json::array()).size()),
           .sizeBytes = dirEntry.file_size(ec),
@@ -270,7 +290,7 @@ std::expected<std::vector<uint8_t>, std::string> ParameterCache::readRaw(
   if (!parts) {
     return std::unexpected(std::format("invalid cache id '{}'", id));
   }
-  const fs::path path = pathFor((*parts)[0], (*parts)[1], (*parts)[2]);
+  const fs::path path = pathFor(parts->vendorId, parts->productCode, parts->version);
   std::ifstream in(path, std::ios::binary);
   if (!in) {
     return std::unexpected(std::format("no cache file '{}'", id));
@@ -283,7 +303,7 @@ std::expected<void, std::string> ParameterCache::remove(std::string_view id) con
   if (!parts) {
     return std::unexpected(std::format("invalid cache id '{}'", id));
   }
-  const fs::path path = pathFor((*parts)[0], (*parts)[1], (*parts)[2]);
+  const fs::path path = pathFor(parts->vendorId, parts->productCode, parts->version);
   std::error_code ec;
   if (!fs::remove(path, ec)) {
     return std::unexpected(ec ? ec.message() : std::format("no cache file '{}'", id));
@@ -297,7 +317,7 @@ void to_json(nlohmann::json& j, const ParameterCache::CacheEntry& e) {
       {"id", e.id},
       {"vendorId", e.vendorId},
       {"productCode", e.productCode},
-      {"revisionNumber", e.revisionNumber},
+      {"firmwareVersion", e.firmwareVersion},
       {"parameterCount", e.parameterCount},
       {"sizeBytes", e.sizeBytes},
   };

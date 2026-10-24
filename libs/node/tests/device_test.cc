@@ -14,6 +14,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -1675,10 +1676,10 @@ TEST(DeviceParameterLocking, CachedReadSeesTheNewValueWhileAnSdoDownloadIsInFlig
 
 // ── The object dictionary cache and a lossy enumeration ─────────────────────────────────────────
 //
-// A cache file is keyed on the device's identity alone and is never checked against the device
-// again, so whatever it holds is what this host believes for as long as it exists. An enumeration
-// that lost an entry must therefore not be written: it would leave one host short of an entry no
-// other host is missing.
+// A cache file is keyed on vendor, product and firmware version alone and is never checked against
+// the device again, so whatever it holds is what this host believes for as long as it exists. An
+// enumeration that lost an entry must therefore not be written: it would leave one host short of an
+// entry no other host is missing.
 
 // A fresh, empty temp directory unique to one test, removed first so a previous run never leaks in.
 std::filesystem::path makeCacheDir(const std::string& tag) {
@@ -1689,13 +1690,21 @@ std::filesystem::path makeCacheDir(const std::string& tag) {
   return dir;
 }
 
-// Gives the fake an identity the cache accepts: caching is on for the Synapticon vendor by default.
-// The driver is configured in place because SdoFakeDriver holds an atomic and so cannot be returned
-// by value.
+// The bytes of a VISIBLE_STRING 0x100A padded to its declared size, as a firmware sends it.
+std::vector<uint8_t> paddedVersion(std::string_view version) {
+  std::vector<uint8_t> bytes(version.begin(), version.end());
+  bytes.insert(bytes.end(), {' ', '\0', '\0', '\0'});
+  return bytes;
+}
+
+// Gives the fake an identity the cache accepts: caching is on for the Synapticon vendor by default,
+// and the key needs a firmware version in 0x100A. The driver is configured in place because
+// SdoFakeDriver holds an atomic and so cannot be returned by value.
 void makeCacheable(SdoFakeDriver& driver) {
   driver.info.vendorId = mm::node::kSynapticonVendorId;
   driver.info.productCode = 0x00000301;
   driver.info.revisionNumber = 0x00000001;
+  driver.programRead(0x100A, 0, paddedVersion("10.0.4"));
   driver.programOd(0x6040, 0, 0x0006, 0x3F, 16);
 }
 
@@ -1708,9 +1717,8 @@ TEST(DeviceParameterCache, CompleteEnumerationIsCached) {
 
   ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
 
-  const auto cached =
-      cache.load(driver.info.vendorId, driver.info.productCode, driver.info.revisionNumber);
-  ASSERT_TRUE(cached.has_value()) << "a complete enumeration must be cached";
+  const auto cached = cache.load(driver.info.vendorId, driver.info.productCode, "10.0.4");
+  ASSERT_TRUE(cached.has_value()) << "a complete enumeration must be cached, without the padding";
   EXPECT_EQ(cached->size(), 1U);
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
@@ -1729,9 +1737,49 @@ TEST(DeviceParameterCache, LossyEnumerationIsNotCached) {
   ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
   EXPECT_NE(device.findParameter(0x6040, 0), nullptr);
 
-  EXPECT_FALSE(
-      cache.load(driver.info.vendorId, driver.info.productCode, driver.info.revisionNumber))
+  EXPECT_FALSE(cache.load(driver.info.vendorId, driver.info.productCode, "10.0.4"))
       << "a short dictionary must not be written, or every later scan reads it back";
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+// 0x100A is optional, and without it there is no key. The device comes up and nothing is written.
+TEST(DeviceParameterCache, DeviceWithoutFirmwareVersionIsNotCached) {
+  const auto dir = makeCacheDir("no-version");
+  mm::node::ParameterCache cache({.directory = dir.string(), .enabled = true});
+  SdoFakeDriver driver;
+  makeCacheable(driver);
+  driver.reads.erase(SdoFakeDriver::key(0x100A, 0));
+  Device device(1, driver, nullptr, &cache);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  EXPECT_NE(device.findParameter(0x6040, 0), nullptr);
+  EXPECT_TRUE(cache.list().empty());
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+// A firmware update that keeps the SII revision, as a Jasper drive with an older bootloader reports
+// it, still reads the new dictionary: the key is the firmware version.
+TEST(DeviceParameterCache, NewFirmwareVersionReadsTheDictionaryAgain) {
+  const auto dir = makeCacheDir("new-version");
+  mm::node::ParameterCache cache({.directory = dir.string(), .enabled = true});
+  SdoFakeDriver driver;
+  makeCacheable(driver);
+  {
+    Device device(1, driver, nullptr, &cache);
+    ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  }
+
+  driver.programRead(0x100A, 0, paddedVersion("10.0.5"));
+  driver.ods.clear();
+  driver.programOd(0x6041, 0, 0x0006, 0x3F, 16);
+  Device updated(1, driver, nullptr, &cache);
+  ASSERT_TRUE(updated.initializeParameters(/*readValues=*/false).has_value());
+
+  EXPECT_EQ(updated.findParameter(0x6040, 0), nullptr) << "served from the old firmware's file";
+  EXPECT_NE(updated.findParameter(0x6041, 0), nullptr);
+  EXPECT_EQ(cache.list().size(), 2U);
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
 }

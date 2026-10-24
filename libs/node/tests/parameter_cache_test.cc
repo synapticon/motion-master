@@ -60,9 +60,9 @@ TEST(ParameterCacheTest, RoundTripsDefinitionsButNotLiveValues) {
 
   DeviceParameter plain = makeParam(0x6041, 0, kUnsigned32);
 
-  cache.store(kSynapticonVendorId, 0x0201, 0x0A, {withBounds, plain});
+  cache.store(kSynapticonVendorId, 0x0201, "5.6.6", {withBounds, plain});
 
-  auto loaded = cache.load(kSynapticonVendorId, 0x0201, 0x0A);
+  auto loaded = cache.load(kSynapticonVendorId, 0x0201, "5.6.6");
   ASSERT_TRUE(loaded.has_value());
   ASSERT_EQ(loaded->size(), 2u);
 
@@ -98,24 +98,26 @@ TEST(ParameterCacheTest, Preserves64BitBoundsExactly) {
   DeviceParameter p = makeParam(0x2000, 0, kUnsigned64);
   const uint64_t big = 0xFEDCBA9876543210ull;
   p.maxValue = DeviceParameterValue{big};
-  cache.store(kSynapticonVendorId, 1, 1, {p});
+  cache.store(kSynapticonVendorId, 1, "1.0.0", {p});
 
-  auto loaded = cache.load(kSynapticonVendorId, 1, 1);
+  auto loaded = cache.load(kSynapticonVendorId, 1, "1.0.0");
   ASSERT_TRUE(loaded.has_value());
   ASSERT_EQ(loaded->size(), 1u);
   ASSERT_TRUE((*loaded)[0].maxValue.has_value());
   EXPECT_EQ(std::get<uint64_t>(*(*loaded)[0].maxValue), big);
 }
 
-// The key is (vendor, product, revision): a different revision is a clean miss, not a wrong hit.
+// The key is (vendor, product, firmware version): a different version is a clean miss, not a wrong
+// hit.
 TEST(ParameterCacheTest, MissesOnDifferentIdentity) {
   ParameterCache cache(
       {.cacheAllVendors = false, .directory = makeTempDir("identity").string(), .enabled = true});
-  cache.store(kSynapticonVendorId, 0x0201, 0x0A, {makeParam(0x6040, 0, kUnsigned32)});
+  cache.store(kSynapticonVendorId, 0x0201, "5.6.6", {makeParam(0x6040, 0, kUnsigned32)});
 
-  EXPECT_FALSE(cache.load(kSynapticonVendorId, 0x0201, 0x0B).has_value());  // other revision
-  EXPECT_FALSE(cache.load(kSynapticonVendorId, 0x0202, 0x0A).has_value());  // other product
-  EXPECT_TRUE(cache.load(kSynapticonVendorId, 0x0201, 0x0A).has_value());   // exact match
+  EXPECT_FALSE(
+      cache.load(kSynapticonVendorId, 0x0201, "5.6.7").has_value());  // other firmware version
+  EXPECT_FALSE(cache.load(kSynapticonVendorId, 0x0202, "5.6.6").has_value());  // other product
+  EXPECT_TRUE(cache.load(kSynapticonVendorId, 0x0201, "5.6.6").has_value());   // exact match
 }
 
 // Default policy: SOMANET devices are cached, other vendors are not — store is a no-op and load
@@ -129,8 +131,8 @@ TEST(ParameterCacheTest, OtherVendorsDisabledByDefault) {
   EXPECT_TRUE(cache.enabledForVendor(mm::comm::kSensodriveVendorId));
   EXPECT_FALSE(cache.enabledForVendor(kOtherVendor));
 
-  cache.store(kOtherVendor, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
-  EXPECT_FALSE(cache.load(kOtherVendor, 1, 1).has_value());
+  cache.store(kOtherVendor, 1, "1.0.0", {makeParam(0x6040, 0, kUnsigned32)});
+  EXPECT_FALSE(cache.load(kOtherVendor, 1, "1.0.0").has_value());
 }
 
 // cacheAllVendors flips the policy on for every vendor.
@@ -139,8 +141,8 @@ TEST(ParameterCacheTest, CacheAllVendorsEnablesOtherVendors) {
       {.cacheAllVendors = true, .directory = makeTempDir("vendor-all").string(), .enabled = true});
 
   EXPECT_TRUE(cache.enabledForVendor(kOtherVendor));
-  cache.store(kOtherVendor, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
-  EXPECT_TRUE(cache.load(kOtherVendor, 1, 1).has_value());
+  cache.store(kOtherVendor, 1, "1.0.0", {makeParam(0x6040, 0, kUnsigned32)});
+  EXPECT_TRUE(cache.load(kOtherVendor, 1, "1.0.0").has_value());
 }
 
 // The master switch disables the cache for everyone, Synapticon included.
@@ -149,8 +151,8 @@ TEST(ParameterCacheTest, DisabledMasterSwitchCachesNothing) {
       {.cacheAllVendors = true, .directory = makeTempDir("disabled").string(), .enabled = false});
 
   EXPECT_FALSE(cache.enabledForVendor(kSynapticonVendorId));
-  cache.store(kSynapticonVendorId, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
-  EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, 1).has_value());
+  cache.store(kSynapticonVendorId, 1, "1.0.0", {makeParam(0x6040, 0, kUnsigned32)});
+  EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, "1.0.0").has_value());
 }
 
 // A corrupt file is treated as a miss (the caller re-enumerates), never a throw.
@@ -159,9 +161,9 @@ TEST(ParameterCacheTest, CorruptFileIsAMiss) {
   ParameterCache cache({.cacheAllVendors = false, .directory = dir.string(), .enabled = true});
 
   fs::create_directories(dir);
-  std::ofstream(dir / "parameters-000022d2-00000001-00000001.json") << "{ not valid json ]";
+  std::ofstream(dir / "parameters-000022d2-00000001-1.0.0.json") << "{ not valid json ]";
 
-  EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, 1).has_value());
+  EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, "1.0.0").has_value());
 }
 
 // list() reports each stored file's identity and a parameter count, for the management UI.
@@ -170,9 +172,9 @@ TEST(ParameterCacheTest, ListReportsStoredCaches) {
       {.cacheAllVendors = false, .directory = makeTempDir("list").string(), .enabled = true});
   EXPECT_TRUE(cache.list().empty());
 
-  cache.store(kSynapticonVendorId, 0x0201, 0x0A,
+  cache.store(kSynapticonVendorId, 0x0201, "5.6.6",
               {makeParam(0x6040, 0, kUnsigned32), makeParam(0x6041, 0, kUnsigned32)});
-  cache.store(kSynapticonVendorId, 0x0301, 0x0C, {makeParam(0x6060, 0, kUnsigned32)});
+  cache.store(kSynapticonVendorId, 0x0301, "5.7.0", {makeParam(0x6060, 0, kUnsigned32)});
 
   auto entries = cache.list();
   ASSERT_EQ(entries.size(), 2u);
@@ -183,7 +185,8 @@ TEST(ParameterCacheTest, ListReportsStoredCaches) {
   auto a = byKey(0x0201);
   ASSERT_NE(a, entries.end());
   EXPECT_EQ(a->vendorId, kSynapticonVendorId);
-  EXPECT_EQ(a->revisionNumber, 0x0Au);
+  EXPECT_EQ(a->firmwareVersion, "5.6.6");
+  EXPECT_EQ(a->id, "000022d2-00000201-5.6.6");
   EXPECT_EQ(a->parameterCount, 2u);
   EXPECT_GT(a->sizeBytes, 0u);
   EXPECT_EQ(byKey(0x0301)->parameterCount, 1u);
@@ -194,7 +197,7 @@ TEST(ParameterCacheTest, ListReportsStoredCaches) {
 TEST(ParameterCacheTest, ListIgnoresPolicy) {
   const fs::path dir = makeTempDir("list-policy");
   ParameterCache writer({.cacheAllVendors = false, .directory = dir.string(), .enabled = true});
-  writer.store(kSynapticonVendorId, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
+  writer.store(kSynapticonVendorId, 1, "1.0.0", {makeParam(0x6040, 0, kUnsigned32)});
 
   ParameterCache disabled({.cacheAllVendors = false, .directory = dir.string(), .enabled = false});
   EXPECT_EQ(disabled.list().size(), 1u);
@@ -205,8 +208,8 @@ TEST(ParameterCacheTest, ListIgnoresPolicy) {
 TEST(ParameterCacheTest, ReadRawAndRemove) {
   ParameterCache cache(
       {.cacheAllVendors = false, .directory = makeTempDir("rawremove").string(), .enabled = true});
-  cache.store(kSynapticonVendorId, 0x0201, 0x0A, {makeParam(0x6040, 0, kUnsigned32)});
-  const std::string id = ParameterCache::makeId(kSynapticonVendorId, 0x0201, 0x0A);
+  cache.store(kSynapticonVendorId, 0x0201, "5.6.6", {makeParam(0x6040, 0, kUnsigned32)});
+  const std::string id = ParameterCache::makeId(kSynapticonVendorId, 0x0201, "5.6.6");
 
   auto raw = cache.readRaw(id);
   ASSERT_TRUE(raw.has_value());
@@ -216,11 +219,74 @@ TEST(ParameterCacheTest, ReadRawAndRemove) {
 
   EXPECT_FALSE(cache.readRaw("not-a-valid-id").has_value());  // malformed → error
   EXPECT_FALSE(
-      cache.readRaw(ParameterCache::makeId(kSynapticonVendorId, 0x0201, 0x0B)).has_value());
+      cache.readRaw(ParameterCache::makeId(kSynapticonVendorId, 0x0201, "5.6.7")).has_value());
 
   EXPECT_TRUE(cache.remove(id).has_value());
   EXPECT_TRUE(cache.list().empty());
   EXPECT_FALSE(cache.remove(id).has_value());  // already gone → error
+}
+
+// A device without 0x100A has an empty version. It is never cached, so store writes nothing and
+// load misses.
+TEST(ParameterCacheTest, EmptyFirmwareVersionIsNotCached) {
+  const fs::path dir = makeTempDir("empty-version");
+  ParameterCache cache({.cacheAllVendors = false, .directory = dir.string(), .enabled = true});
+
+  cache.store(kSynapticonVendorId, 1, "", {makeParam(0x6040, 0, kUnsigned32)});
+  EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, "").has_value());
+  EXPECT_TRUE(cache.list().empty());
+}
+
+// A version is reduced to URL-safe characters in the id and the file name. A semver prerelease
+// keeps its '-', build metadata loses its '+', and the id still parses back to the same file.
+TEST(ParameterCacheTest, IdCarriesASanitizedVersion) {
+  ParameterCache cache(
+      {.cacheAllVendors = false, .directory = makeTempDir("sanitize").string(), .enabled = true});
+  const std::string version = "10.0.4-rc.1+build 7/a";
+  const std::string id = ParameterCache::makeId(kSynapticonVendorId, 0x0501, version);
+  EXPECT_EQ(id, "000022d2-00000501-10.0.4-rc.1_build_7_a");
+
+  cache.store(kSynapticonVendorId, 0x0501, version, {makeParam(0x6040, 0, kUnsigned32)});
+  ASSERT_EQ(cache.list().size(), 1u);
+  EXPECT_EQ(cache.list()[0].id, id);
+  EXPECT_EQ(cache.list()[0].firmwareVersion, version);  // the file keeps the full string
+  EXPECT_TRUE(cache.readRaw(id).has_value());
+  EXPECT_TRUE(cache.remove(id).has_value());
+}
+
+// Two versions that reduce to one file name share the file, so load compares the full string. The
+// other version is a miss, never the wrong dictionary.
+TEST(ParameterCacheTest, VersionsSharingAFileNameMiss) {
+  ParameterCache cache(
+      {.cacheAllVendors = false, .directory = makeTempDir("collision").string(), .enabled = true});
+  ASSERT_EQ(ParameterCache::makeId(kSynapticonVendorId, 1, "1.0+a"),
+            ParameterCache::makeId(kSynapticonVendorId, 1, "1.0 a"));
+
+  cache.store(kSynapticonVendorId, 1, "1.0+a", {makeParam(0x6040, 0, kUnsigned32)});
+  EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, "1.0 a").has_value());
+  EXPECT_TRUE(cache.load(kSynapticonVendorId, 1, "1.0+a").has_value());
+}
+
+// A file written in an older format, keyed on the SII revision, is skipped by load and by list.
+TEST(ParameterCacheTest, OlderFormatIsSkipped) {
+  const fs::path dir = makeTempDir("old-format");
+  ParameterCache cache({.cacheAllVendors = false, .directory = dir.string(), .enabled = true});
+  fs::create_directories(dir);
+  std::ofstream(dir / "parameters-000022d2-00000001-00000001.json")
+      << R"({"formatVersion":2,"vendorId":8914,"productCode":1,"revisionNumber":1,"parameters":[]})";
+
+  EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, "00000001").has_value());
+  EXPECT_TRUE(cache.list().empty());
+}
+
+// An id needs two hex fields and a non-empty URL-safe version.
+TEST(ParameterCacheTest, RejectsMalformedIds) {
+  ParameterCache cache(
+      {.cacheAllVendors = false, .directory = makeTempDir("bad-ids").string(), .enabled = true});
+  for (const char* id : {"", "000022d2", "000022d2-00000001", "000022d2-00000001-",
+                         "xyz-00000001-1.0.0", "000022d2-00000001-1.0/0"}) {
+    EXPECT_FALSE(cache.readRaw(id).has_value()) << id;
+  }
 }
 
 }  // namespace

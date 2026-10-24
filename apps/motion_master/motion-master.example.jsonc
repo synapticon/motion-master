@@ -156,7 +156,8 @@
   // Enumerating a drive's object dictionary over SDO is hundreds of mailbox round-trips and takes
   // seconds. The result — the parameter DEFINITIONS (index, name, data type, access, units, and the
   // default/min/max bounds), NOT the live values — is identical for every device of the same vendor,
-  // product, and revision. Motion Master caches it to a human-readable JSON file per identity (under
+  // product, and firmware version (object 0x100A). Motion Master caches it to a human-readable JSON
+  // file per identity (under
   // a per-user cache directory) and reuses it on a later scan of the same hardware, so re-reading the
   // device list after a scan no longer re-enumerates devices it has seen before.
   //
@@ -165,13 +166,14 @@
   "parameterCache": {
     "enabled": true,         // master switch; false disables the cache entirely
 
-    // Which vendors to cache. The cache is keyed only on (vendor, product, revision), so it is only
-    // correct for a vendor that bumps its revision whenever the object dictionary changes.
+    // Which vendors to cache. The cache is keyed only on (vendor, product, firmware version), so it
+    // is only correct for a vendor whose firmware version changes whenever the object dictionary
+    // changes. A device without 0x100A is never cached.
     //   false (default): cache ONLY SOMANET devices (vendor 0x22D2 or 0x063A), for which this
     //                    holds.
-    //   true:            cache EVERY vendor — enable only if you trust your other vendors' revision
-    //                    discipline; otherwise a firmware change that reuses a revision could serve
-    //                    mismatched definitions.
+    //   true:            cache EVERY vendor — enable only if you trust your other vendors' version
+    //                    discipline; otherwise a dictionary change that keeps the version string
+    //                    could serve mismatched definitions.
     "cacheAllVendors": false,
 
     // Directory for the cache files. Empty = a standard per-user cache directory

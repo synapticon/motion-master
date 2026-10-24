@@ -54,6 +54,7 @@ the driver when none is open, and scans nothing.
 | `cia402-state.py` | Prints the CiA 402 state of the drive with its actual and target values. | PRE-OP |
 | `run-procedure.py` | Lists the procedures of a device. With a name, it runs that procedure with parameters given as `name=value`, and prints each step with its result. `--describe` prints the description, caveats and parameters instead. | PRE-OP, or `--state` |
 | `offset-detection.py` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |
+| `parse-esi.py` | Parses an ESI (EtherCAT Slave Information) file and lists the devices it describes. | No bus |
 
 Every script that needs a bus opens the fieldbus driver from `config.toml` when no driver is
 open, and scans when no devices are known. A script that addresses one device takes `--slave`,

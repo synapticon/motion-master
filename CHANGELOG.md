@@ -22,6 +22,7 @@ the HTTP/WebSocket API may break between any two alphas.
 ### Changed
 
 - **The object dictionary cache is keyed on the firmware version.** A cache file is now named by vendor ID, product code and the device's firmware version in 0x100A, and it no longer uses the SII revision. After a firmware update, the next scan reads the new dictionary from the device. A Jasper drive with an older bootloader reports the revision of the bootloader, whatever application is installed, so the revision could not tell two firmwares apart. A device without 0x100A is not cached. `GET /api/parameter-cache` reports `firmwareVersion` in place of `revisionNumber`, and the Console's Storage page shows it. Files written by an older version are ignored. Delete them in the folder of the cache.
+- **The Python reference client has one example script per action, named after it.** `clients/python/examples/` holds 42 scripts, from `scan.py` and `read-parameter.py` to `offset-detection.py` and `firmware-installation.py`, in place of the nine numbered scripts of a walkthrough. Each script runs on its own: it opens the fieldbus driver from `config.toml` when none is open, scans when no devices are known, and moves the device to the AL state it needs, so a second run gives the same result. `run-procedure.py` lists the procedures of a device and runs any of them by name. The client is one file, `motion_master_client.py`. (#142)
 
 ### Fixed
 

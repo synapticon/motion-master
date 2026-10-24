@@ -227,8 +227,8 @@ Which means you can drive drives from **any language, any tool, any AI agent**:
 
 - **TypeScript** — `@synapticon/motion-master-client`, published to npm on every release.
 - **Python** — a reference client in [`clients/python`](clients/python) that reads the
-  server's own OpenAPI spec at startup and resolves every call from it, with numbered example
-  scripts that read as a walkthrough of the full fieldbus lifecycle.
+  server's own OpenAPI spec at startup and resolves every call from it, with one example
+  script per action that runs on its own.
 - **curl, Postman, a shell script, an LLM** — it's HTTP.
 
 Secured properly, too: HTTPS/WSS with a real Let's Encrypt certificate, CORS locked to the

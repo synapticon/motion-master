@@ -157,13 +157,13 @@ If a raised `skippedCycles` count shows up right after start (visible on the con
 
 The API is plain HTTPS + JSON, so any language works. Two reference clients ship in the repo:
 
-- **[`clients/python`](clients/python)** — a standalone reference client (`requests` + `websockets`). Each example runs on its own, and the numbered set reads in order as a walkthrough of the whole fieldbus lifecycle: bring up a driver, scan, climb the AL states, read SDOs and files, dump parameters, stream live process data, and tear back down. It resolves every call by `operationId` against the spec it fetches from `GET /api/swagger.yml` at startup, so it holds no hardcoded URLs and adapts to whichever server version it is pointed at. Copy the two client files anywhere — no checkout needed.
+- **[`clients/python`](clients/python)** — a standalone reference client (`requests` + `websockets`) with one example script per action, each named after it: `scan.py`, `read-parameter.py`, `monitor.py`, `offset-detection.py`, `firmware-installation.py` and more. Each script runs on its own. It opens the fieldbus driver, scans, and moves the device to the AL state it needs, so no script has to run before another, and a second run gives the same result. The client resolves every call by `operationId` against the spec it fetches from `GET /api/swagger.yml` at startup, so it holds no hardcoded URLs and adapts to whichever server version it is pointed at. Copy `motion_master_client.py` anywhere — no checkout needed.
 
   ```bash
   cd clients/python
   source setup.sh                      # venv + pip install -r requirements.txt
   cp config.example.toml config.toml   # point it at your server
-  python examples/01_init.py
+  python examples/scan.py
   ```
 
 - **[`@synapticon/motion-master-client`](web/packages/motion-master-client)** — the published, isomorphic TypeScript SDK (browser and Node): the generated HTTP client plus the WebSocket connection, and a parser for `.mmpd` recorder dumps. It ships on npm at the same version as the server binary, so `client@X` is known-good against `binary@X`. This is what the console and the integration tests use.

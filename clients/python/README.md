@@ -1,144 +1,165 @@
 # Motion Master reference Python client
 
-A reference Python client for the Motion Master HTTP API and
-monitoring WebSocket, driven directly by the server's own OpenAPI spec, which it
-fetches at startup from `GET /api/swagger.yml` (see [Why it reads the
-spec](#why-it-reads-the-spec)). Each script demonstrates
-one part of the API and runs on its own; against a freshly started,
-**uninitialised** Motion Master the numbered scripts also read in order as a
-walkthrough of the full fieldbus lifecycle — from bringing up a driver to
-streaming live process data and tearing back down.
+This is a reference Python client for the Motion Master HTTP API and the monitoring WebSocket.
+At startup it reads the server's own OpenAPI spec from `GET /api/swagger.yml`, and it calls each
+operation by its `operationId`. [Why it reads the spec](#why-it-reads-the-spec) explains the
+reason.
+
+Each script in `examples/` does one action and is named after it. Each script runs on its own.
+It brings the server to the state it needs, so no script has to run before another one. A
+second run gives the same result as the first run.
 
 ## Layout
 
 | File | Purpose |
 | --- | --- |
-| `motion_master_client.py` | `MotionMasterClient` — fetches the server's spec from `GET /api/swagger.yml` (parsed with PyYAML), resolves each operation's method + URL by `operationId`, and calls it with `requests`. Holds both the HTTP and WebSocket endpoints. `from_config()` builds it from `config.toml`, `init()` opens the driver, and `ensure_state()` scans when needed and moves the devices to an AL state. |
-| `config.example.toml` | Config template — copy to `config.toml`. |
-| `examples/scan.py` | `POST /api/scan` — open the driver from config when none is open, scan, and list the devices. |
-| `examples/transition-state.py` | `POST /api/devices/state` — move the devices to an AL state, one legal step at a time. |
-| `examples/read-sdo.py` | `GET .../sdo/{index}/{subindex}` — read one object with a raw CoE SDO upload. Needs PRE-OP or higher. |
-| `examples/read-file.py` | `GET .../files/{filename}` — read a file over FoE and save it into the git-ignored `files/`. Needs PRE-OP or higher. |
-| `examples/read-all-parameters.py` | `POST .../parameters/init?readValues=true` — read the whole object dictionary with its values. Needs PRE-OP or higher. |
-| `examples/monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. Needs OP for values from the process image. |
-| `examples/reset.py` | `POST /api/reset` — close the fieldbus driver and clear the device list. Needs no AL state. |
+| `motion_master_client.py` | `MotionMasterClient`. It calls the HTTP API by `operationId` and streams the monitoring WebSocket. It also has the steps that most scripts begin with: `from_config()`, `init()` and `ensure_state()`. |
+| `config.example.toml` | The config template. Copy it to `config.toml`. |
+| `examples/` | One script per action. See [Scripts](#scripts). |
+| `files/` | Files that `read-file.py` saves. Git ignores this directory. |
 
-Every request goes through one method — `MotionMasterClient.call(operationId, ...)` — with
-`path` parameters, a JSON `body`, and/or a `query` as the operation needs:
+## Scripts
+
+The AL state (Application Layer state, the EtherCAT state machine of a device) column gives
+the lowest state the script needs. A script moves the device up to that state when the device is
+lower. A device that is already higher stays where it is. The states, from low to high, are INIT,
+PRE-OP, SAFE-OP and OP. BOOT is separate: a device enters and leaves BOOT only through INIT.
+
+| Script | What it does | AL state |
+| --- | --- | --- |
+| `scan.py` | Scans the bus and lists the devices it finds. A scan leaves every device in INIT. | None |
+| `transition-state.py` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
+| `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PRE-OP |
+| `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PRE-OP |
+| `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
+| `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
+| `reset.py` | Closes the fieldbus driver and clears the device list. | None |
+
+Every script that needs a bus opens the fieldbus driver from `config.toml` when no driver is
+open, and scans when no devices are known. A script that addresses one device takes `--slave`,
+the position of the device on the bus. The default is 1.
+
+```bash
+python examples/scan.py
+python examples/transition-state.py --state op
+python examples/read-sdo.py --index 0x6064 --subindex 0
+python examples/read-file.py --filename .hardware_description
+python examples/read-all-parameters.py --slave 2
+python examples/monitor.py --count 10
+python examples/reset.py
+```
+
+Each script prints its options with `--help`.
+
+**The running server is shared.** A Console session that is connected to the same server sees
+every change that a script makes. A script that opens the driver, scans, resets or moves a
+device to another AL state changes what the Console shows.
+
+## Setup
+
+Python 3.11 or newer is necessary, because the client reads the config with the standard library
+module `tomllib`. The client is standalone. It reads the API spec from the running server, so it
+needs no checkout of this repository.
+
+```bash
+cd clients/python
+source setup.sh
+cp config.example.toml config.toml
+```
+
+`setup.sh` creates a virtual environment in `.venv`, activates it, and installs
+`requirements.txt` into it. A virtual environment is a directory that holds the dependencies of
+this client apart from your system Python. Git ignores `.venv`. To remove everything, delete the
+directory. Source the script, so that the activation stays in your shell.
+
+To do the same by hand, for example on Windows:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Then edit `config.toml`. Set `adapter` in the `[fieldbus]` table to the network interface that
+the drives are connected to. Give an interface name, such as `eth0`, or a MAC address.
+`GET /api/adapters` on a running server lists the interfaces of the host.
+
+## Run
+
+1. Download a build from the [releases](https://github.com/synapticon/motion-master/releases).
+2. Start the binary. It listens on `127.0.0.1` by default.
+3. Run a script.
+
+The scripts work against a server with no driver open, and against a server with a driver open.
+
+## Calls by operationId
+
+Every request goes through one method, `MotionMasterClient.call(operationId, ...)`. It takes
+the path parameters as `path`, a JSON body as `body`, and the query string as `query`:
 
 ```python
 client.call("init", body={"driver": "soem", "adapter": "eth0"})
 client.call("sdoUpload", path={"slavePosition": 1, "index": 0x6041, "subindex": 0})
 ```
 
+The steps that most scripts begin with are methods on the client:
+
+```python
+client = MotionMasterClient.from_config()     # reads config.toml
+client.init()                                 # opens the driver, or accepts the one that is open
+client.ensure_state(PRE_OP, positions=[1])    # scans when needed, then moves device 1 up
+```
+
+`init()` and `ensure_state()` log through the `motion_master_client` logger. Turn on logging at
+INFO to see each step.
+
 ## Why it reads the spec
 
-Notice the scripts name an **`operationId`** — `init`, `sdoUpload` — never a URL or
-an HTTP verb. At startup the client fetches `GET /api/swagger.yml`, walks the
-spec's `paths`, and builds one lookup table, `operationId → (method, URL
-template)`. `call()` then resolves the id, fills the template's `{...}`
-placeholders from `path`, and fires the request. The URLs and verbs live in
-exactly one place — the server's own spec — and the client reads them from the
-source of truth instead of duplicating them. Four things fall out of that:
+The scripts name an `operationId`, such as `init` or `sdoUpload`. They never name a URL or an
+HTTP method. At startup the client reads `GET /api/swagger.yml` and builds one table from
+`operationId` to the method and the URL template. `call()` looks up the ID, fills the
+placeholders of the template from `path`, and sends the request. So the URLs and the methods
+are in one place only, the spec of the server.
 
-- **One source of truth, no drift.** The server implements the API *and* serves
-  the spec describing it, both from the same binary. Hardcoded URLs would be a
-  second, hand-maintained copy of the contract that silently rots when the API
-  moves; resolving by `operationId` (a stable logical name) means a URL
-  restructuring on the server just flows through — the script keeps working with
-  no edit.
-- **It always matches the server it's talking to.** The spec comes from the
-  *running* server, so the client is correct against *that* server's contract by
-  construction — point it at an older or newer Motion Master and it adapts; it
-  can't be a stale client against a fresh server.
-- **It's standalone.** Because the contract is fetched live, there's no bundled
-  spec, no code generation, and no checkout of this repository — copy the client
-  file (`motion_master_client.py`) anywhere, `pip install`, and point
-  at a server.
-- **It reads as a teaching client.** Each call says "invoke *this named
-  operation*" — a clean tour of the API surface — instead of a pile of URL
-  string-building that hides what's being shown.
+That gives four results:
 
-The spec is parsed with a plain `yaml.safe_load`: the client only needs
-`operationId → method + path`, so a generic YAML load is enough — and it avoids a
-strict OpenAPI validator rejecting perfectly legal media types such as the
-`text/yaml` this very endpoint declares.
+- **There is one source of truth.** The same binary implements the API and serves the spec. URLs
+  in the scripts would be a second copy of the contract, written by hand, and it would be wrong
+  after the API changes. An `operationId` is a stable name, so a script keeps working when a URL
+  on the server changes.
+- **The client always matches its server.** The spec comes from the running server. So the client
+  is correct against the contract of that server, older or newer.
+- **The client is standalone.** There is no bundled spec, no code generation and no checkout of
+  this repository. Copy `motion_master_client.py`, install the requirements, and point it at a
+  server.
+- **A script shows the API.** Each call names the operation that it invokes. There is no URL
+  string to read past.
 
-The cost is one round-trip at startup and needing the server reachable when the
-client is built — free for an examples client that can't do anything until the
-server is up. The committed TypeScript client makes the opposite trade: it bakes
-the contract in at build time (zero startup cost, offline construction) at the
-price of regeneration whenever the spec changes. Different tool, different job.
+The client parses the spec with `yaml.safe_load`. It needs only the `operationId`, the method and
+the path of each operation, so a plain YAML load is enough. A strict OpenAPI validator would also
+refuse legal media types, such as the `text/yaml` that this endpoint declares.
 
-## Setup
-
-Requires Python 3.11+ (the config is parsed with the stdlib `tomllib`). The
-client is standalone — it reads the API spec from the running server at startup,
-so no checkout of this repository is needed.
-
-```bash
-cd clients/python
-source setup.sh                                     # creates .venv, activates it, installs requirements
-cp config.example.toml config.toml                  # then edit driver + adapter
-```
-
-`setup.sh` runs `python -m venv .venv && source .venv/bin/activate && pip
-install -r requirements.txt`. Source it so the activation sticks in your shell.
-To do it by hand instead (e.g. on Windows):
-
-```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-The `venv` line creates a *virtual environment* — a throwaway `.venv` folder that
-holds this example's dependencies in isolation, so they never touch your system
-Python. `.venv` is the conventional name (editors auto-detect it) and is
-git-ignored; delete the folder to remove everything.
-
-The `adapter` is the NIC the drives are wired to — an interface name (e.g.
-`eth0`) or its MAC address. `GET /api/adapters` on a running server lists the
-interfaces available on the host.
-
-## Run
-
-Start Motion Master and leave it uninitialised — download a build from the
-[releases](https://github.com/synapticon/motion-master/releases) and run the
-binary (it listens on `127.0.0.1` by default). Then run the examples in order:
-
-```bash
-python examples/scan.py
-python examples/transition-state.py --state pre-op
-python examples/read-sdo.py                         # Statusword 0x6041:00 by default
-python examples/read-sdo.py --index 0x6064 --subindex 0
-python examples/read-file.py --filename log.csv      # saved to files/ (git-ignored)
-python examples/read-all-parameters.py             # the object dictionary with values
-python examples/transition-state.py --state op      # climb to OP (exchanging state)
-python examples/monitor.py --count 10               # stream 10 batches, then stop
-python examples/reset.py                            # close the driver, back to uninitialised
-```
-
-The per-device examples (`read-sdo.py`, `read-file.py`, `read-all-parameters.py`, `monitor.py`) act on slave 1 by default; pass `--slave N`
-to target another. Monitoring is live-only — values read `null` until the device
-is exchanging, so `monitor.py` needs the bus in OP (`transition-state.py --state op`); `read-sdo.py`, `read-file.py` and `read-all-parameters.py` only
-need PRE-OP.
+The cost is one request at startup, and the server must be reachable when the client is built.
+For an example client that can do nothing without the server, that costs nothing. The TypeScript
+client makes the opposite choice. It builds the contract in when it is compiled, so it needs no
+request at startup and no server to construct. In exchange, it must be generated again whenever
+the spec changes.
 
 ## TLS
 
-Motion Master is TLS-only. A release binary bundles a publicly-trusted Let's
-Encrypt certificate for `local.motion-master.synapticon.com` (which resolves to
-`127.0.0.1`), so with the default `host` you can set `verify = true` and it
-verifies against the system CA store with no extra setup.
+Motion Master accepts TLS connections only. A release binary includes a Let's Encrypt
+certificate for `local.motion-master.synapticon.com`, which resolves to `127.0.0.1`. A public
+CA signs it, so with the default `host` you can set `verify = true`. The client then verifies the
+certificate against the CA store of the system, with no other setup.
 
-The default `config.toml` ships `verify = false` because it works everywhere —
-including the self-signed certificate the binary falls back to when it cannot
-fetch a real one (offline / air-gapped). Set `verify = true`, or point `verify`
-at a `cert.pem`, once you know the server is presenting the bundled cert.
+The template sets `verify = false`, because that works with every certificate. This includes the
+self-signed certificate that the binary uses when it cannot download a real one, for example on a
+host with no internet access. Set `verify = true`, or set `verify` to the path of a `cert.pem`,
+when you know which certificate the server presents.
 
 ## Two ports
 
-The config keeps `host` portless because Motion Master exposes two endpoints on
-separate loops: the HTTP API (`http_port`, 61447) used by most examples, and the
-monitoring WebSocket (`ws_port`, 62281) for live process data. `MotionMasterClient` holds
-both — `client.call(...)` hits the HTTP API, and `client.monitor(topic)` streams
-batches from the WebSocket (see `monitor.py`).
+Motion Master serves two endpoints, each on its own event loop. The HTTP API is on `http_port`,
+61447. The monitoring WebSocket is on `ws_port`, 62281. That is why `host` in the config has no
+port. `MotionMasterClient` holds both endpoints: `client.call(...)` uses the HTTP API, and
+`client.monitor(topic)` streams batches from the WebSocket. `monitor.py` shows the second one.

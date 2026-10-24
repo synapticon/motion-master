@@ -5039,3 +5039,44 @@ the same check now also guards gaps inside `MaxSub`. Issue #145 tracks it.
 
 **Not yet done.** No Jasper v10.0.4 drive is on the bench, and the Integro on the bench has no gaps
 inside `MaxSub`, so the new path of the enumeration has not run on hardware.
+
+## Session 2026-10-24 — The probe past the reported count is removed (as-built)
+
+Issue #145, firmware issue synapticon/somanet_software#5821.
+
+**The bit-length rule was never safe.** `describesNoEntry` took a bit length of 0 as "no entry",
+because the Integro's replies for a missing subindex had shown 0 on 2026-08-25. That reply is built
+from an uninitialised struct in `Handle_Get_SubObject_Info_Ind`, so every field is stack memory. In
+30 reads of one dictionary in a row, 17 recorded at least one phantom entry, with bit lengths of 500
+and 24196 and names that were not text. A bit length of 500 is most likely `TX_TIMEOUT` left by an
+earlier `Pkt_SendPacket`; that is a reading of the source, not of the binary. The single read of
+August was lucky, and the cache made sure it was the only one.
+
+**The probe existed for OS command 21 alone, so it went.** Its values include every reserved slot of
+the PDO mapping objects, and the decode needs the width of each. Nothing else needs the slots: the
+PDO mapping write uses raw `writeSdo`. Nothing uses command 21 yet, and v6 is alpha until next year,
+so the probe is removed rather than made safe. `read-object-dictionary` now fails on a drive with an
+unused slot, on XMOS as well as on an Integro: on the bench Integro "the drive sent 1900 bytes but
+the master's 519 dictionary entries account for 1678", and the 222 bytes are the slots, 53 × 4 plus
+5 × 2, the arithmetic of Session 2026-08-25. Bring the probe back with the firmware fix.
+
+**Two ways to keep it were built or weighed, and dropped.** A test before the read, one Get Entry
+Description for an object the slave does not list, told the Integro apart from a slave that refuses:
+15 reads of the bench Integro gave 520 entries each. Its first form asked 0x1018:05 and did not work,
+because the netX answers the standard objects itself and refuses a missing subindex correctly; only
+objects the netX does not know reach the ARM application. The test was correct, but it kept a probe
+that nothing uses. Accepting a probed entry only if it looked like a slot (the type, width and access
+of subindex 1, a printable name) was rejected as a test of leftover memory. An SDO upload cannot
+confirm a slot either: an upload of the real 0x1600:08 is not answered.
+
+**Inside the reported count the rules of #143 stay.** An abort 0x06020000 or 0x06090011, or a reply
+with bit length 0, leaves the entry out without counting it as lost. On an Integro a gap there would
+still record leftover data, because its reply is a success; no Integro firmware has such a gap.
+
+**The cache writer is not the problem.** A garbage name that is not valid UTF-8 made `store` throw
+inside the JSON dump. CoE names are VISIBLE_STRING, ISO/IEC 646, so a correct name never does this,
+and nothing is changed there.
+
+**Measured on the bench Integro, v5.6.11.** 15 reads in a row without the probe: 520 entries every
+time, none failed, none absent, each cached, about 1.45 s each against 1.7 s with the probe. 520 is
+578 less the 58 reserved slots.

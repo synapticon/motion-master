@@ -6424,10 +6424,13 @@ components:
           default: none
           description: >
             `os-command` only: whether the command moves bulk data through the drive's fs-buffer,
-            and which way. Most commands move none. The transfer runs while the command runs,
-            because the drive holds the command in progress until all the data has moved, and it
-            needs firmware 5.2 or newer. Setting a direction for a command that moves no bulk data
-            leaves the server waiting for a transfer the drive will never start.
+            and which way. Most commands move none. A write runs while the command runs, because
+            the command reads its input as it arrives, and it needs firmware 5.2 or newer. A read
+            runs after the command succeeds, because the command completes when its whole output
+            is in the fs-buffer. No read runs after a failure. An output larger than the 2024-byte
+            fs-buffer cannot be read: the command waits for the master to empty it and runs into
+            its timeout. Setting a direction for a command that moves no bulk data makes the
+            transfer wait for an answer the drive never sends.
           example: read
         fsBufferData:
           type: string

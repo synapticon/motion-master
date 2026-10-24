@@ -550,9 +550,12 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "Some commands are refused unless the drive is already enabled in a suitable mode of "
       "operation; the drive reports those as OS error 251, \"command not allowed\".",
       "Size the timeout for the command being run. Reaching it aborts the command on the drive.",
-      "Bulk data moves through the drive's fs-buffer while the command runs, and only firmware 5.2 "
-      "and newer can do that. Setting a direction for a command that moves no bulk data leaves the "
-      "master waiting for a transfer the drive will never start.",
+      "A write to the drive's fs-buffer runs while the command runs, and only firmware 5.2 and "
+      "newer can do that. A read runs after the command succeeds, and none runs after a failure.",
+      "Setting a direction for a command that moves no bulk data makes the transfer wait for an "
+      "answer the drive never sends, and the run fails on its timeout.",
+      "A command whose output is larger than the 2024-byte fs-buffer waits for the master to empty "
+      "it, so it never completes and runs into its timeout.",
   };
   // Unknowable here — the caller chooses the command, and some of them spin the motor — so this
   // reports the possibility rather than a false negative. requiresEnabled stays false because the
@@ -607,6 +610,8 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "Reports two values SDO cannot read: 0x1024, which is write-only, and 0x1023:01.",
       "Reports the values the drive holds right now. A value the drive is still computing reads as "
       "whatever it held at the moment of the transfer.",
+      "Fails on its timeout when the values take more than the 2024-byte fs-buffer, as they do on "
+      "a Circulo with a safety module.",
   };
   readObjectDictionary.movesMotor = false;
   readObjectDictionary.requiresEnabled = false;

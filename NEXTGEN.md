@@ -5112,3 +5112,42 @@ is separate from the dictionary and has its own issue.
 **The PDO mapping paragraph above now applies to the Integro alone.** On Circulo and Node the
 dictionary holds every slot whatever the mapping is at the time of the read.
 
+## Session 2026-10-24 — An fs-buffer read waits for the end of the command (as-built)
+
+Issue #148. Command 21 failed on the bench Circulo at the read of 0x1023:03 after the `fs-buffer`
+read, and the drive's file system then refused every file read until a power cycle. The cause is in
+the firmware, synapticon/somanet_software#5822. In `foe_glb_buffer_write_data`, the
+`FOE_DB_STREAM_UP` branch sets the ending message without `FOE_HAS_PENDING_ACK`. So when the command
+marks its last chunk while the FoE side waits for data, the drive sends one more DATA packet, empty,
+after the last one. Nothing acknowledges it, and the next mailbox request gets it as its answer.
+
+**The master triggered that branch by its own order.** `runOsCommand` read `fs-buffer` between the
+write to 0x1023:01 and the first poll, on the rule of Session 2026-08-25 that the drive holds the
+command until every byte has moved. The firmware source says otherwise. `write_stream_foe_buffer`
+writes what fits and returns the count, so a command waits only when the 2024-byte buffer is full.
+Command 21 completes when its whole output is in the buffer. A read after that finds the data in
+`foe_glb_buffer_request_file`, which sets the pending ACK with the ending message, and the transfer
+ends correctly.
+
+**The read during the command is the documented order for two commands.** The OS command
+specification gives two orders. For the SMM commands that return data (11.3, 11.5 and 11.13) it runs
+the command, reads 0x1023:03, and then reads `fs-buffer`. For command 21 and for command 17.7, the
+read of the Kübler correction table, it reads 0x1023:03 once, which answers "in progress", reads
+`fs-buffer`, and then polls 0x1023:03 until the command completes. Motion Master followed the second
+order for command 21, and that order is the one that triggers #5822. The firmware defect stays open
+for that reason.
+
+**The read now follows OBLAC.** OBLAC reads `fs-buffer` after the poll reports a success, and never
+after a failure (`runOsCommand` in `libs/motion-master-client/src/lib/motion-master-req-res-client.ts`).
+Every read it makes goes through that path: the SMM parameter reads, the load of SMM parameters for
+verification, and the custom OS command page. That is the order in use in the field. A write keeps
+its place after the write to 0x1023:01 and before the first poll, which is also the OBLAC order for
+firmware 5.2 or newer. The command takes its input with `read_stream_foe_buffer`, which returns data
+only after the master's write request.
+
+**An output larger than the buffer cannot be read in this order.** The command waits for the master
+to empty a full buffer, so it never reports a terminal status and runs into its timeout. Two
+producers in the firmware send that much: command 21 on a Circulo with a safety module, 2517 bytes,
+and the read of the Kübler correction table, 2072 bytes. OBLAC reads neither. Reading them needs a
+read during the command plus an ACK of the empty packet, and that is not built. This comes from the
+firmware source and was not tested.

@@ -1138,19 +1138,28 @@ std::optional<FsBufferTransfer> parseFsBufferTransfer(std::string_view token);
 /// @brief An OS command's fs-buffer transfer — the data that does not fit in the 8 command bytes.
 ///
 /// **`fs-buffer` is not a file, and the difference is not cosmetic.** The firmware routes the
-/// transfer to 2024 bytes of memory shared with the command that is running. The command writes
-/// into that memory as the master reads it out, or reads out of it as the master writes in. Three
-/// rules follow, and none of them is the caller's choice:
+/// transfer to 2024 bytes of memory shared with the command. Four rules follow, and none of them is
+/// the caller's choice:
 ///
-/// - **The transfer runs while the command runs.** It is issued after the write to 0x1023:01 and
-///   before the response is read, because the command does not report a terminal status until all
-///   the data has moved. More data than 2024 bytes cannot be held: the drive stops and waits for
-///   the master to move the next part. A transfer that waited for the command to finish would
-///   therefore never finish either, on exactly the commands that need one.
+/// - **A write runs while the command runs.** It is issued after the write to 0x1023:01 and before
+///   the first poll, because the command reads its input out of the memory as the master writes it.
+/// - **A read runs after the command completes, and only after a success.** The command reports a
+///   terminal status when its whole output is in the memory, not when the master has read it. A
+///   read during the command fails on a Circulo: when the command marks its last chunk while the
+///   FoE side waits for data, the drive sends one more DATA packet, empty, after the last one. The
+///   next mailbox request gets that packet as its answer, and the drive's file system then refuses
+///   every file read until a power cycle (synapticon/somanet_software#5822). A read after the
+///   command finds the data in the memory and ends correctly. The OS command specification gives
+///   the read during the command for command 21 and command 17.7, and the read after the command
+///   for the SMM commands. This follows the SMM order for every command.
+/// - **An output larger than 2024 bytes cannot be read.** The command waits for the master to empty
+///   the memory, and never reports a terminal status, so it runs into its timeout. This comes from
+///   the firmware source and was not tested. The only known case is OS command 21 on a drive with
+///   a safety module.
 /// - **You cannot ask for part of the memory, and it does not last.** The transfer carries no
-///   offset and no length: what it moves is whatever the running command put there. The firmware
-///   clears the memory 2.5 seconds after the command stops using it. So a transfer belongs to one
-///   run of one command, and is not a step a caller can take afterwards.
+///   offset and no length: what it moves is whatever the command put there. The firmware clears
+///   the memory 2.5 seconds after the command stops using it. So a transfer belongs to one run of
+///   one command, and is not a step a caller can take later.
 /// - **It needs firmware 5.2 or newer.** Older firmware cannot move data while a command runs. It
 ///   requires the data to be written *before* the command instead, and that older way is
 ///   deliberately not implemented here.
@@ -1701,14 +1710,16 @@ class SomanetDrive : public Cia402Drive {
   /// the driver's lock for one transaction, so it never blocks the RT loop. Requires the mailbox
   /// to be active (PRE-OP/SAFE-OP/OP).
   ///
-  /// A command that carries bulk data moves it through @p fsBuffer, after the write to 0x1023:01
-  /// and before the first poll. @c OsCommandFsBuffer explains why that position is not a choice.
+  /// A command that carries bulk data moves it through @p fsBuffer. A write goes after the write to
+  /// 0x1023:01 and before the first poll. A read goes after a terminal status that is a success.
+  /// @c OsCommandFsBuffer explains why those positions are not a choice.
   ///
-  /// **A failed transfer is written down, and the poll runs anyway.** The reason is that the drive
-  /// usually gives the better answer. A command the firmware does not support writes nothing, so
-  /// the FoE read gets no reply and fails with a bare timeout, while the drive is about to report
+  /// **A failed write is written down, and the poll runs anyway.** The reason is that the drive
+  /// usually gives the better answer. A command the firmware does not support reads nothing, so
+  /// the FoE write gets no reply and fails with a bare timeout, while the drive is about to report
   /// "unsupported command". So the transfer's own error is returned in one case only: the drive
-  /// reports that the command succeeded, and the payload the caller asked for is still missing.
+  /// reports that the command succeeded, and the transfer still failed. A command that failed is
+  /// not read at all.
   ///
   /// @param command  The 8-byte request: byte 0 is the OS command ID, bytes 1-7 its parameters.
   /// @param config   Timing and cancellation (see @c OsCommandConfig).

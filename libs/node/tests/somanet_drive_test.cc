@@ -299,9 +299,14 @@ class OsCommandFakeDriver : public FieldbusDriver {
   /// The timeout of every read, in the order of @c reads.
   std::vector<std::chrono::milliseconds> readTimeouts;
 
+  /// How many response polls had run when the first file transfer happened, or -1 if none has. A
+  /// read must follow the terminal poll and a write must precede the first one.
+  int responseReadsAtFirstTransfer = -1;
+
   void recordTransferOrder() {
     if (commandWritesAtFirstTransfer < 0) {
       commandWritesAtFirstTransfer = commandWrites;
+      responseReadsAtFirstTransfer = responseReads;
     }
   }
 
@@ -625,15 +630,34 @@ TEST(RunOsCommand, ReadsTheFsBufferAfterIssuingTheCommand) {
   ASSERT_TRUE(drive.has_value()) << drive.error();
 
   driver.files[std::string(kFsBufferFilename)] = {1, 2, 3, 4};
+  driver.responses = {{255, 0, 0, 0, 0, 0, 0, 0}, {1, 0, 0, 0, 0, 0, 0, 0}};
   auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
                                       {.transfer = FsBufferTransfer::kRead, .payload = {}});
   ASSERT_TRUE(response.has_value()) << response.error();
   EXPECT_EQ(response->fsBuffer, std::vector<uint8_t>({1, 2, 3, 4}));
   ASSERT_EQ(driver.reads.size(), 1U);
   EXPECT_EQ(driver.reads[0], kFsBufferFilename);
-  // The drive holds the command in progress until the data has moved, so a transfer issued before
-  // the command write would wait on a drive that has not been told to produce anything.
   EXPECT_EQ(driver.commandWritesAtFirstTransfer, 1);
+  // A read during the command makes an XMOS drive send an empty packet after the last one, which
+  // the next mailbox request takes as its answer (synapticon/somanet_software#5822). So the read
+  // comes after the terminal poll, here the second.
+  EXPECT_EQ(driver.responseReadsAtFirstTransfer, 2);
+}
+
+TEST(RunOsCommand, ReadsNoFsBufferAfterAFailedCommand) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.files[std::string(kFsBufferFilename)] = {1, 2, 3, 4};
+  driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};  // failed, "unsupported command"
+  auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
+                                      {.transfer = FsBufferTransfer::kRead, .payload = {}});
+  ASSERT_TRUE(response.has_value()) << response.error();
+  EXPECT_TRUE(response->failed());
+  EXPECT_TRUE(driver.reads.empty());
+  EXPECT_TRUE(response->fsBuffer.empty());
 }
 
 TEST(RunOsCommand, WritesTheFsBufferAfterIssuingTheCommand) {
@@ -650,6 +674,8 @@ TEST(RunOsCommand, WritesTheFsBufferAfterIssuingTheCommand) {
   EXPECT_EQ(driver.writes[0].first, kFsBufferFilename);
   EXPECT_EQ(driver.writes[0].second, payload);
   EXPECT_EQ(driver.commandWritesAtFirstTransfer, 1);
+  // The command reads its input while it runs, so the write precedes the first poll.
+  EXPECT_EQ(driver.responseReadsAtFirstTransfer, 0);
   EXPECT_TRUE(response->fsBuffer.empty());
 }
 
@@ -671,12 +697,12 @@ TEST(RunOsCommand, AFailedTransferUnderARefusedCommandReportsTheDrivesReason) {
   auto drive = createSomanetDrive(device);
   ASSERT_TRUE(drive.has_value()) << drive.error();
 
-  // What an unsupported command looks like on the wire: the drive produces nothing, so the read
+  // What an unsupported command looks like on the wire: the drive takes nothing, so the write
   // gets no reply, and the drive is about to say why. Its answer is the one worth reporting.
-  driver.readFailure = mm::comm::FoeErrorKind::NoResponse;
+  driver.writeFailure = mm::comm::FoeErrorKind::NoResponse;
   driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};  // failed, "unsupported command"
   auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
-                                      {.transfer = FsBufferTransfer::kRead, .payload = {}});
+                                      {.transfer = FsBufferTransfer::kWrite, .payload = {1, 2}});
   ASSERT_TRUE(response.has_value()) << response.error();
   EXPECT_TRUE(response->failed());
   ASSERT_TRUE(response->errorCode.has_value());
@@ -854,7 +880,6 @@ TEST(ReadObjectDictionaryValues, ReportsARefusalAsTheDriveNamedIt) {
   auto drive = createSomanetDrive(device);
   ASSERT_TRUE(drive.has_value()) << drive.error();
 
-  driver.readFailure = mm::comm::FoeErrorKind::NoResponse;
   driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};  // failed, "unsupported command"
   auto values = drive->readObjectDictionaryValues({.pollInterval = kNoDelay});
   ASSERT_FALSE(values.has_value());

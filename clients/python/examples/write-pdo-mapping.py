@@ -6,10 +6,10 @@ objects (0x16xx) and "inputs" the TxPDO objects (0x1Axx), each with its entries 
 order of the objects is the order of the sync manager assignment. An empty list clears that
 direction. The script ignores the bitOffset of an entry, because the device derives the offsets.
 
-The mapping objects are writable only in PRE-OP, so the script moves the device to PRE-OP, writes
-the mapping, and moves the device back to SAFE-OP or OP when it was there. The server then maps
-the process image of the whole bus again from the new mapping, which pauses the bus briefly. The
-script prints the mapping that the device reports back.
+The mapping objects are writable only in PRE-OP, so the script restarts the device through INIT
+to PRE-OP, writes the mapping, and moves the device back to SAFE-OP or OP when it was there. The
+server then maps the process image of the whole bus again from the new mapping, which pauses the
+bus briefly. The script prints the mapping that the device reports back.
 
 Opens the fieldbus driver and scans first when needed.
 
@@ -59,7 +59,13 @@ def main():
 
     query = {"positions": str(args.slave)}
     previous = client.call("getDeviceStates", query=query).json()[0]["alState"]
-    client.ensure_state(PRE_OP, positions=[args.slave], exact=True)
+
+    # Through INIT, never down from SAFE-OP or OP. An Integro tells its application processor only
+    # of a transition upwards, so after OP -> PRE-OP that processor still checks a write against
+    # the rights of OP, and refuses the PRE-OP-only mapping objects with abort 0x08000000.
+    restart = client.call("restartDevices", body={"positions": [args.slave], "target": PRE_OP})
+    if not restart.json()["ok"]:
+        sys.exit(f"slave {args.slave} did not reach PRE-OP through INIT")
 
     r = client.call(
         "writeDevicePdoMapping", path={"slavePosition": args.slave}, body=body, check=False

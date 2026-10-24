@@ -60,9 +60,10 @@ def main():
     query = {"positions": str(args.slave)}
     previous = client.call("getDeviceStates", query=query).json()[0]["alState"]
 
-    # Through INIT, never down from SAFE-OP or OP. An Integro tells its application processor only
-    # of a transition upwards, so after OP -> PRE-OP that processor still checks a write against
-    # the rights of OP, and refuses the PRE-OP-only mapping objects with abort 0x08000000.
+    # Through INIT, never down from SAFE-OP or OP. On an Integro, a write of the mapping objects
+    # aborts with 0x08000000 after SAFE-OP -> PRE-OP or OP -> PRE-OP, and passes after
+    # INIT -> PRE-OP. The firmware source points at its application processor, which learns only
+    # of a transition upwards and so checks the write against the rights of the state before.
     restart = client.call("restartDevices", body={"positions": [args.slave], "target": PRE_OP})
     if not restart.json()["ok"]:
         sys.exit(f"slave {args.slave} did not reach PRE-OP through INIT")

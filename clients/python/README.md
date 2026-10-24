@@ -37,6 +37,7 @@ the driver when none is open, and scans nothing.
 | `transition-state.py` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
 | `diagnostics.py` | Prints the ESC (EtherCAT Slave Controller) error counters and the distributed clock sync of the devices. | None |
 | `reset.py` | Closes the fieldbus driver and clears the device list. | No bus |
+| `read-parameter.py` | Reads one parameter with its name, data type and decoded value. `--cache` reads no bus. | PRE-OP |
 | `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
 | `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PRE-OP |
 | `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PRE-OP |

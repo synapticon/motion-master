@@ -50,6 +50,7 @@ the driver when none is open, and scans nothing.
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
 | `dump-process-data.py` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFE-OP |
 | `notifications.py` | Prints the notifications that the server sends over the WebSocket. | No bus |
+| `capture.py` | Records the EtherCAT frames on the bus adapter for some seconds, and prints how late the frames came back. | Driver open |
 | `run-procedure.py` | Lists the procedures of a device. With a name, it runs that procedure with parameters given as `name=value`, and prints each step with its result. `--describe` prints the description, caveats and parameters instead. | PRE-OP, or `--state` |
 | `offset-detection.py` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |
 

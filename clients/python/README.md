@@ -55,6 +55,7 @@ the driver when none is open, and scans nothing.
 | `read-sii.py` | Prints the SII (Slave Information Interface, the configuration in the EEPROM of the device), or saves the raw image with `--output`. | None |
 | `write-sii.py` | Writes a raw SII image to the EEPROM. **A wrong image can leave the device unidentifiable.** The device adopts it after a power cycle. | None |
 | `read-pdo-mapping.py` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PRE-OP |
+| `write-pdo-mapping.py` | Writes the PDO mapping from a JSON file. It moves the device to PRE-OP for the write, and back to SAFE-OP or OP. | PRE-OP for the write |
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
 | `dump-process-data.py` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFE-OP |
 | `notifications.py` | Prints the notifications that the server sends over the WebSocket. | No bus |

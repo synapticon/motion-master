@@ -631,18 +631,23 @@ third argument of `SomanetDrive::runOsCommand`. **`fs-buffer` is not a file.** T
 the name exactly and connects the FoE transfer to 2024 bytes of memory shared with the command that
 is running.
 
-Three rules, and none is a preference:
+Four rules, and none is a preference:
 
-- **The transfer sits between the write to 0x1023:01 and the first poll.** The drive holds the
-  command in progress until every byte has moved, and a command whose output is larger than 2024
-  bytes stalls on a full buffer until the master drains it. Circulo with a safety module sends 2517
-  bytes, so a transfer deferred until the command finished would hang on that device and work on
-  every other one.
-- **A failed transfer is recorded, not returned.** A command the firmware does not support produces
-  nothing, and the slave answers a read of an empty buffer with *silence* — no `FOE_BUSY`, no error
-  — so `ecx_FOEread` fails on a 700 ms mailbox timeout while the drive is about to say "unsupported
-  command". The poll runs anyway and the drive's verdict wins. The transfer's own error surfaces
-  only when the drive reports success and the payload is still missing.
+- **A read runs after the command succeeds, never during it.** The command completes when its whole
+  output is in the buffer, not when the master has read it. A read during the command makes an XMOS
+  drive send one more FoE DATA packet, empty, after the last one. The next mailbox request gets that
+  packet as its answer, and the drive's file system then refuses every file read until a power
+  cycle (synapticon/somanet_software#5822). A read after the command takes the other branch of the
+  firmware and ends correctly. OBLAC reads in this order too.
+- **An output larger than 2024 bytes cannot be read.** The command waits for the master to empty a
+  full buffer, so it never completes and runs into its timeout. Circulo with a safety module sends
+  2517 bytes from command 21. Reading it needs a read during the command plus an ACK of the empty
+  packet, which is not built (#148). This comes from the firmware source and was not tested.
+- **A write sits between the write to 0x1023:01 and the first poll, and a failed write is recorded,
+  not returned.** A command the firmware does not support takes nothing, and the slave answers with
+  *silence* — no `FOE_BUSY`, no error — so the FoE transfer fails on a mailbox timeout while the
+  drive is about to say "unsupported command". The poll runs anyway and the drive's verdict wins.
+  The write's own error surfaces only when the drive reports success.
 - **Firmware 5.2 or newer only.** Older firmware wants the payload written before the command. That
   path is deliberately not built, and nothing reads 0x100A to detect it.
 

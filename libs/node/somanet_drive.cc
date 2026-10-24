@@ -556,45 +556,28 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
     return std::unexpected(reason);
   }
 
-  // Started before the transfer, not after it, so config.timeout keeps meaning what it says: a
-  // ceiling on the whole command. Overrunning it costs nothing when the command has in fact
+  // Started before an fs-buffer write, not after it, so config.timeout keeps meaning what it says:
+  // a ceiling on the whole command. An fs-buffer read comes after the command and has its own FoE
+  // timeout. Overrunning it costs nothing when the command has in fact
   // finished, because the loop below reads the response before it looks at the clock.
   auto deadline = std::chrono::steady_clock::now() + config.timeout;
 
-  // The transfer goes here, after the command write and before the first poll, because the drive
-  // keeps the command in progress until all the data has moved. OsCommandFsBuffer has the detail.
+  // A write goes here, after the command write and before the first poll, because the command
+  // reads its input from the buffer while it runs. A read waits for the terminal status below.
+  // OsCommandFsBuffer has the detail.
   //
-  // A failure is recorded rather than returned. A command the drive never accepted writes nothing,
-  // so the read gets no reply and fails with a bare timeout. The poll below is what learns why.
+  // A failed write is recorded rather than returned. A command the drive never accepted reads
+  // nothing, so the write gets no reply and fails with a bare timeout. The poll below learns why.
   std::string fsBufferError;
-  std::vector<uint8_t> fsBufferData;
-  switch (fsBuffer.transfer) {
-    case FsBufferTransfer::kNone:
-      break;
-    case FsBufferTransfer::kRead: {
-      auto read = device_.readFile(std::string(kFsBufferFilename));
-      if (read) {
-        fsBufferData = std::move(*read);
-        spdlog::debug("Device {}: OS command 0x{:02X} read {} fs-buffer bytes", position, id,
-                      fsBufferData.size());
-      } else {
-        fsBufferError = read.error().message;
-        spdlog::debug("Device {}: OS command 0x{:02X} fs-buffer read failed: {}", position, id,
-                      fsBufferError);
-      }
-      break;
-    }
-    case FsBufferTransfer::kWrite: {
-      if (auto written = device_.writeFile(std::string(kFsBufferFilename), fsBuffer.payload);
-          !written) {
-        fsBufferError = written.error().message;
-        spdlog::debug("Device {}: OS command 0x{:02X} fs-buffer write failed: {}", position, id,
-                      fsBufferError);
-      } else {
-        spdlog::debug("Device {}: OS command 0x{:02X} wrote {} fs-buffer bytes", position, id,
-                      fsBuffer.payload.size());
-      }
-      break;
+  if (fsBuffer.transfer == FsBufferTransfer::kWrite) {
+    if (auto written = device_.writeFile(std::string(kFsBufferFilename), fsBuffer.payload);
+        !written) {
+      fsBufferError = written.error().message;
+      spdlog::debug("Device {}: OS command 0x{:02X} fs-buffer write failed: {}", position, id,
+                    fsBufferError);
+    } else {
+      spdlog::debug("Device {}: OS command 0x{:02X} wrote {} fs-buffer bytes", position, id,
+                    fsBuffer.payload.size());
     }
   }
 
@@ -633,7 +616,20 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
                         "completed OS command 0x{:02X}: {}",
                         id, fsBufferError));
       }
-      decoded.fsBuffer = std::move(fsBufferData);
+      // The read comes after the terminal status, and only after a success. A command that failed
+      // wrote nothing to read. OsCommandFsBuffer says why a read during the command is wrong.
+      if (fsBuffer.transfer == FsBufferTransfer::kRead && !decoded.failed()) {
+        auto read = device_.readFile(std::string(kFsBufferFilename));
+        if (!read) {
+          return std::unexpected(
+              std::format("the fs-buffer transfer failed although the drive "
+                          "completed OS command 0x{:02X}: {}",
+                          id, read.error().message));
+        }
+        spdlog::debug("Device {}: OS command 0x{:02X} read {} fs-buffer bytes", position, id,
+                      read->size());
+        decoded.fsBuffer = std::move(*read);
+      }
       return decoded;
     }
     if (status >= kProgressMin && status <= kProgressMax) {

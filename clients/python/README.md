@@ -32,6 +32,7 @@ the driver when none is open, and scans nothing.
 
 | Script | What it does | AL state |
 | --- | --- | --- |
+| `server-info.py` | Prints the server version, the host, the network adapters and the health of the game loop. | No bus |
 | `scan.py` | Scans the bus and lists the devices it finds. A scan leaves every device in INIT. | None |
 | `transition-state.py` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
 | `reset.py` | Closes the fieldbus driver and clears the device list. | No bus |

@@ -43,6 +43,7 @@ the driver when none is open, and scans nothing.
 | `write-parameter.py` | Writes one parameter. It converts the value to the data type, and prints the value before and after. | PRE-OP |
 | `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
 | `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PRE-OP |
+| `write-sdo.py` | Writes raw bytes to one object with an SDO download. | PRE-OP |
 | `list-files.py` | Lists the files stored on the device with their sizes. | PRE-OP |
 | `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PRE-OP |
 | `read-hardware-description.py` | Prints what a SOMANET device says it is: the device, the assembly and their components. | PRE-OP |

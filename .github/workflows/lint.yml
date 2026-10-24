@@ -136,12 +136,14 @@ jobs:
       - name: Byte-compile
         run: python -m py_compile clients/python/*.py clients/python/examples/*.py
 
-      # Guard against swagger drift: every operationId the examples call must
-      # still exist in swagger.yml (mirrors the api-client-drift job for the
-      # generated TS client). The runtime client fetches the spec from a live
+      # Guard against swagger drift: every operationId the client and the
+      # examples call must still exist in swagger.yml (mirrors the
+      # api-client-drift job for the generated TS client). The client's own
+      # steps, such as ensure_state(), call operations too, so both are read.
+      # The runtime client fetches the spec from a live
       # server, so this check parses the repo's swagger.yml directly instead --
       # no server needed in CI, and the file is right here in the checkout.
-      - name: Check example operationIds resolve against swagger.yml
+      - name: Check client and example operationIds resolve against swagger.yml
         working-directory: clients/python
         run: |
           python - <<'PY'
@@ -155,12 +157,13 @@ jobs:
                  if isinstance(op, dict) and "operationId" in op}
 
           used = set()
-          for f in pathlib.Path("examples").glob("*.py"):
+          sources = [*pathlib.Path(".").glob("*.py"), *pathlib.Path("examples").glob("*.py")]
+          for f in sources:
               used |= set(re.findall(r'call\(\s*["\']([A-Za-z]+)["\']', f.read_text()))
 
           missing = used - ops
-          print("operationIds used by examples:", sorted(used))
+          print("operationIds used by the client and the examples:", sorted(used))
           if missing:
               raise SystemExit(f"::error::operationIds not in swagger.yml: {sorted(missing)}")
-          print("all example operationIds resolve")
+          print("all operationIds resolve")
           PY

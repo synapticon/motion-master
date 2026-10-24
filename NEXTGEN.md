@@ -5080,3 +5080,12 @@ and nothing is changed there.
 **Measured on the bench Integro, v5.6.11.** 15 reads in a row without the probe: 520 entries every
 time, none failed, none absent, each cached, about 1.45 s each against 1.7 s with the probe. 520 is
 578 less the 58 reserved slots.
+
+**The PDO mapping objects follow the mapping, and that is accepted.** SOMANET firmware reserves ten
+entries in each 0x16xx and 0x1Axx object, and a user may map up to ten. Without the probe, the
+dictionary holds an object's entries up to its count at the time of the read, and the cache keeps
+that count for the firmware version. So after a user maps more entries, the Parameters page shows
+fewer subentries than are mapped, and two machines can show different counts for one firmware. The
+mapping itself is unaffected: `Device::readPdoMapping` and `Device::writePdoMapping` use raw SDO,
+and the Console's mapping page takes no limit from the dictionary. Leaving the mapping objects out
+of the cache was offered and declined; the firmware fix and the probe's return settle it.

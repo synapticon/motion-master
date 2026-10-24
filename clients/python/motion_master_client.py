@@ -17,11 +17,13 @@ avoids a strict OpenAPI validator rejecting perfectly legal media types such as
 the text/yaml this very endpoint declares).
 
 On top of call(), the client has the steps that most scripts begin with. init()
-opens the fieldbus driver and accepts one that is open already. ensure_state()
-scans when needed and moves the devices to an AL state. from_config() builds a
-client from config.toml. The steps log through the "motion_master_client" logger, so a
+opens the fieldbus driver and accepts one that is open already. ensure_scanned()
+scans when needed and moves no device. ensure_state() scans when needed and
+moves the devices to an AL state. from_config() builds a client from
+config.toml. The steps log through the "motion_master_client" logger, so a
 script that wants to see them turns on logging at INFO. run_procedure() starts a
 procedure, polls it until it ends, and cancels it when the caller stops early.
+monitor() and notifications() stream from the WebSocket.
 """
 
 from __future__ import annotations
@@ -173,15 +175,13 @@ class MotionMasterClient:
         elif r.status_code != 409:
             r.raise_for_status()
 
-    def ensure_state(self, state, positions=None, exact=False):
-        """Bring the devices to the AL state a script needs.
+    def ensure_scanned(self):
+        """Scan when the last scan is missing or wrong, and move no device.
 
-        Scans when the last scan is missing or wrong, then moves each device to `state` one legal
-        step at a time. A device already above `state` stays where it is, because SAFE-OP and OP
-        keep the mailbox of PRE-OP. Pass exact=True when the script needs that one state. A target
-        of BOOT is always exact. Call init() first.
+        A script that needs the devices known but no AL state calls this instead of ensure_state(),
+        so that it leaves every device where it is, BOOT included. Call init() first.
 
-        Raises StateError when a device does not answer or does not reach a step.
+        Raises StateError when the scan finds no device.
         """
         # Over SPoE, devicesOnWire is null, so `required` stays false before the first scan.
         # devicesScanned is 0 until a scan ran on either driver.
@@ -192,6 +192,18 @@ class MotionMasterClient:
             log.info("found %d device(s)", found)
             if found == 0:
                 raise StateError("no devices on the bus")
+
+    def ensure_state(self, state, positions=None, exact=False):
+        """Bring the devices to the AL state a script needs.
+
+        Scans when the last scan is missing or wrong, then moves each device to `state` one legal
+        step at a time. A device already above `state` stays where it is, because SAFE-OP and OP
+        keep the mailbox of PRE-OP. Pass exact=True when the script needs that one state. A target
+        of BOOT is always exact. Call init() first.
+
+        Raises StateError when a device does not answer or does not reach a step.
+        """
+        self.ensure_scanned()
 
         query = {"positions": ",".join(map(str, positions))} if positions else None
         while True:
@@ -248,6 +260,37 @@ class MotionMasterClient:
                 log.info("cancelling %s on device %d", name, position)
                 self.call("cancelProcedure", path=path, check=False)
 
+    def notifications(self):
+        """Subscribe to the notifications topic and yield the data of each notification.
+
+        Every notification source publishes to the one "notifications" topic, so one subscription
+        receives every event, also a kind that a later server adds. data["event"] names the kind.
+        The caller stops by breaking out of the loop.
+        """
+        for msg in self._subscribe("notifications"):
+            if msg.get("type") == "notification":
+                yield msg["data"]
+
+    def _subscribe(self, topic):
+        """Open the WebSocket, subscribe to a topic, and yield every message as parsed JSON."""
+        if not self.ws_url:
+            raise RuntimeError("no ws_url configured on this client")
+
+        # Lazy import so HTTP-only usage doesn't require the websockets package.
+        from websockets.sync.client import connect
+
+        with connect(self.ws_url, ssl=self._ssl_context()) as ws:
+            ws.send(json.dumps({"subscribe": topic}))
+            try:
+                for message in ws:
+                    yield json.loads(message)
+            finally:
+                # Best-effort unsubscribe; the socket close below also ends it.
+                try:
+                    ws.send(json.dumps({"unsubscribe": topic}))
+                except Exception:
+                    pass
+
     def _ssl_context(self):
         """Build an SSL context matching the HTTP verify setting for the WebSocket."""
         if self._verify is False:
@@ -270,22 +313,6 @@ class MotionMasterClient:
         since the last flush arrives in the batch. The caller stops by breaking
         out of the loop; the socket and subscription are torn down on exit.
         """
-        if not self.ws_url:
-            raise RuntimeError("no ws_url configured on this client")
-
-        # Lazy import so HTTP-only usage doesn't require the websockets package.
-        from websockets.sync.client import connect
-
-        with connect(self.ws_url, ssl=self._ssl_context()) as ws:
-            ws.send(json.dumps({"subscribe": topic}))
-            try:
-                for message in ws:
-                    msg = json.loads(message)
-                    if msg.get("type") == "monitoring" and msg.get("topic") == topic:
-                        yield msg["data"]
-            finally:
-                # Best-effort unsubscribe; the socket close below also ends it.
-                try:
-                    ws.send(json.dumps({"unsubscribe": topic}))
-                except Exception:
-                    pass
+        for msg in self._subscribe(topic):
+            if msg.get("type") == "monitoring" and msg.get("topic") == topic:
+                yield msg["data"]

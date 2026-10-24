@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """Stream live process data over the monitoring WebSocket.
 
-Registers a monitoring over the HTTP API (POST /api/monitorings), then subscribes
-to its topic on the WebSocket (wss://host:62281) and prints each batch of cycle
-rows as they arrive.
+Creates a monitoring over the HTTP API (POST /api/monitorings), subscribes to its topic on the
+WebSocket, and prints each batch of cycle rows as it arrives. The monitoring is deleted on exit.
 
-Monitoring is live-only: a value is `null` until its device is exchanging
-(SAFE-OP/OP), so run 07_transition_op first for non-null data. By default this
-samples slave 1's Timestamp (0x20F0:00), Position actual value (0x6064:00), DC
-link circuit voltage (0x6079:00), and Drive temperature (0x2031:01). Each object
-is sourced from the process image if PDO-mapped, otherwise by a background SDO
-poll; the server decides per object and reports it (the `(pdo)`/`(sdo)` tags).
+Opens the fieldbus driver, scans and moves the device to OP first when needed. A value is null
+while its device is not exchanging process data, which starts in SAFE-OP.
 
-    python 08_monitor.py --slave 1 --interval 100 --count 10
-    python 08_monitor.py                 # runs until Ctrl-C
+The defaults sample four objects of the device: Timestamp (0x20F0:00), Position actual value
+(0x6064:00), DC link circuit voltage (0x6079:00) and Drive temperature (0x2031:01). The server
+reads each object from the process image when it is PDO-mapped, and with a background SDO poll
+otherwise. The header line shows which, as (pdo) or (sdo).
+
+    python monitor.py --count 10
+    python monitor.py --slave 2 --interval 500     # runs until Ctrl-C
 """
 
 import argparse
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import MotionMasterClient  # noqa: E402
+from motion_master_client import OP, MotionMasterClient  # noqa: E402
 
 TOPIC = "python-example"
 
@@ -35,10 +36,6 @@ def main():
     args = ap.parse_args()
 
     # Each parameter is [devicePosition, index, subindex].
-    # The server classifies each object's source automatically: if it is in the
-    # device's PDO map it is decoded from the process image ("pdo"), otherwise it
-    # is read by a background SDO poll ("sdo"). GET /api/monitorings/{topic}
-    # reports the resolved source per parameter (see the header printed below).
     parameters = [
         [args.slave, 0x20F0, 0],  # Timestamp
         [args.slave, 0x6064, 0],  # Position actual value
@@ -46,9 +43,13 @@ def main():
         [args.slave, 0x2031, 1],  # Drive temperature
     ]
 
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
+    client.init()
+    client.ensure_state(OP, positions=[args.slave])
 
-    # Recreate cleanly in case a monitoring with this topic lingers from a prior run.
+    # A monitoring with this topic can remain from a run that was killed, and the server refuses
+    # a second create of one topic with 409.
     client.call("deleteMonitoring", path={"topic": TOPIC}, check=False)
     client.call(
         "createMonitoring",
@@ -62,7 +63,7 @@ def main():
     batches = 0
     try:
         for rows in client.monitor(TOPIC):
-            ts_us, *values = rows[-1]  # freshest row in the batch
+            ts_us, *values = rows[-1]
             ts = datetime.fromtimestamp(ts_us / 1e6, timezone.utc).strftime("%H:%M:%S.%f")
             print(f"  {ts}  {len(rows):4d} row(s)  latest={values}")
             batches += 1

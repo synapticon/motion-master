@@ -20,7 +20,7 @@ streaming live process data and tearing back down.
 | `examples/read-sdo.py` | `GET .../sdo/{index}/{subindex}` — read one object with a raw CoE SDO upload. Needs PRE-OP or higher. |
 | `examples/read-file.py` | `GET .../files/{filename}` — read a file over FoE and save it into the git-ignored `files/`. Needs PRE-OP or higher. |
 | `examples/read-all-parameters.py` | `POST .../parameters/init?readValues=true` — read the whole object dictionary with its values. Needs PRE-OP or higher. |
-| `examples/08_monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. |
+| `examples/monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. Needs OP for values from the process image. |
 | `examples/09_reset.py` | `POST /api/reset` — tear the driver down, back to uninitialised. |
 
 Every request goes through one method — `MotionMasterClient.call(operationId, ...)` — with
@@ -114,13 +114,13 @@ python examples/read-sdo.py --index 0x6064 --subindex 0
 python examples/read-file.py --filename log.csv      # saved to files/ (git-ignored)
 python examples/read-all-parameters.py             # the object dictionary with values
 python examples/transition-state.py --state op      # climb to OP (exchanging state)
-python examples/08_monitor.py --count 10            # stream 10 batches, then stop
+python examples/monitor.py --count 10               # stream 10 batches, then stop
 python examples/09_reset.py                          # tear down, back to uninitialised
 ```
 
-The per-device examples (`read-sdo.py`, `read-file.py`, `read-all-parameters.py`, 08) act on slave 1 by default; pass `--slave N`
+The per-device examples (`read-sdo.py`, `read-file.py`, `read-all-parameters.py`, `monitor.py`) act on slave 1 by default; pass `--slave N`
 to target another. Monitoring is live-only — values read `null` until the device
-is exchanging, so `08_monitor.py` needs the bus in OP (`transition-state.py --state op`); `read-sdo.py`, `read-file.py` and `read-all-parameters.py` only
+is exchanging, so `monitor.py` needs the bus in OP (`transition-state.py --state op`); `read-sdo.py`, `read-file.py` and `read-all-parameters.py` only
 need PRE-OP.
 
 ## TLS
@@ -141,4 +141,4 @@ The config keeps `host` portless because Motion Master exposes two endpoints on
 separate loops: the HTTP API (`http_port`, 61447) used by most examples, and the
 monitoring WebSocket (`ws_port`, 62281) for live process data. `MotionMasterClient` holds
 both — `client.call(...)` hits the HTTP API, and `client.monitor(topic)` streams
-batches from the WebSocket (see `08_monitor.py`).
+batches from the WebSocket (see `monitor.py`).

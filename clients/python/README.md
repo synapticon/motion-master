@@ -70,6 +70,7 @@ the driver when none is open, and scans nothing.
 | `store-parameters.py` | Stores the current parameter values in the flash of the device. | PRE-OP |
 | `restore-default-parameters.py` | Restores the default values of a parameter group. **Values not stored are gone.** | PRE-OP |
 | `device-locate.py` | Blinks the LEDs of the device. Only SPoE offers it. | PRE-OP |
+| `system-identification.py` | Configures the system identification chirp, and arms it with `--start`. **Once armed, it turns the motor.** | PRE-OP |
 | `parse-esi.py` | Parses an ESI (EtherCAT Slave Information) file and lists the devices it describes. | No bus |
 | `export-eni.py` | Saves the bus as an ENI (EtherCAT Network Information) file in `files/`, for another master to replay. | SAFE-OP |
 

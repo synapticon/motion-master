@@ -1,35 +1,37 @@
 #!/usr/bin/env python3
-"""Enumerate a device's full object dictionary with values and print it.
+"""Read the whole object dictionary of a device with its values and print it.
 
-POST /api/devices/{slavePosition}/parameters/init?readValues=true walks the
-entire CoE object dictionary via the SDO Info service and, with readValues=true,
-also SDO-reads and decodes every entry's value in the same call. The device must
-be in PRE-OP or above (mailbox active), so run 03_transition_preop first. On a
-fully populated drive this can take several seconds.
+POST /api/devices/{slavePosition}/parameters/init?readValues=true reads the object dictionary
+through the SDO Information service. With readValues=true it also reads and decodes the value of
+every entry in the same call. On a drive with a full dictionary this takes several seconds.
 
-    python 06_read_parameters.py --slave 1
+Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed, because the
+mailbox is live from PRE-OP up. A device in SAFE-OP or OP stays there.
+
+    python read-all-parameters.py
+    python read-all-parameters.py --slave 2
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import MotionMasterClient  # noqa: E402
+from motion_master_client import PRE_OP, MotionMasterClient  # noqa: E402
 
 
 def decode_value(param):
-    """Render a DeviceParameter value, decoding raw byte arrays by data type.
+    """Render a DeviceParameter value, and decode a raw byte array by its data type.
 
-    The server already decodes the standard scalar and string types (they arrive
-    as JSON numbers/strings). What comes back as a byte array is everything the
-    server left raw: the odd-width integers (INTEGER24/40/48/56, UNSIGNED..),
-    ENUM, BIT*/BITARR*, OCTET_STRING, GUID, DOMAIN, RECORD, etc. We decode the
-    ones with a well-defined scalar interpretation and show hex for the rest.
+    The server decodes the standard scalar and string types, which arrive as JSON numbers and
+    strings. Every other type arrives as a byte array: the odd-width integers, ENUM, the BIT types,
+    OCTET_STRING, GUID, DOMAIN and RECORD. The types with one scalar reading are decoded here. The
+    rest is shown as hex.
     """
     value = param["value"]
     if not isinstance(value, list):
-        return repr(value)  # already a decoded number or string
+        return repr(value)
 
     name = param["dataTypeName"]
     raw = bytes(value)
@@ -50,9 +52,12 @@ def main():
     ap.add_argument("--slave", type=int, default=1)
     args = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
-    print(f"enumerating object dictionary of slave {args.slave} (this may take a few seconds)...")
+    client.init()
+    client.ensure_state(PRE_OP, positions=[args.slave])
 
+    print(f"reading the object dictionary of slave {args.slave}...")
     params = client.call(
         "initializeDeviceParameters",
         path={"slavePosition": args.slave},

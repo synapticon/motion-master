@@ -70,4 +70,13 @@ constexpr std::string_view sdoAbortCodeDescription(uint32_t code) {
   return it != kSdoAbortCodes.end() ? it->description : std::string_view{};
 }
 
+/// @brief Whether @p code says that the object or the subindex that was asked for does not exist.
+///
+/// A slave that refuses an entry this way gives a definitive answer, so there is nothing to ask
+/// again and nothing missing. The SOMANET XMOS stack and the Jasper stack refuse a Get Entry
+/// Description for an entry they do not have with one of these two codes, at once.
+constexpr bool isNonexistentEntryAbort(uint32_t code) {
+  return code == 0x06020000 || code == 0x06090011;
+}
+
 }  // namespace mm::comm

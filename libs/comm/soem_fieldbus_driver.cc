@@ -287,13 +287,14 @@ std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
 }
 
 // Explains a failed SDO transfer (wkc <= 0) as a short human-readable suffix. Prefers the specific
-// reason SOEM enqueues — SDO abort code, mailbox error — popped via ecx_popslaveerror (" (SDO abort
-// 0x...)", " (mailbox error)", ...). When the queue is empty it falls back to the wkc return value,
+// reason SOEM enqueues — SDO abort code, SDO Info error, mailbox error — which the caller popped
+// via ecx_popslaveerror (" (SDO abort 0x...)", " (mailbox error)", ...) and passes as @p queued.
+// When nothing was queued it falls back to the wkc return value,
 // which for CoE is a negative EC_* sentinel (e.g. EC_TIMEOUT when the slave never answers) rather
 // than a working counter, so a "no response" timeout reads differently from a bare failure. The one
 // case neither describes — wkc == 0 with nothing queued — is handed to mailboxRefusalSuffix, which
-// asks the slave. Never empty for a failed transfer. Called with the drive's lock held (it
-// pops the drive's errors, and mailboxRefusalSuffix reads one of its registers).
+// asks the slave. Never empty for a failed transfer. Called with the drive's lock held, because
+// mailboxRefusalSuffix reads one of the drive's registers.
 //
 // Reached through drainSdoErrors, which is what every failing CoE path calls — popping one entry
 // and leaving the rest would hand them to the next transfer to report as its own.
@@ -303,16 +304,22 @@ std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
 //                        false once it already has a reason worth reporting — every later attempt
 //                        would read SM0 again and throw the answer away, which is the last thing a
 //                        bus already refusing its mailbox needs.
-std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
-                           bool explainRefusal) {
-  ec_errort err{};
-  if (ecx_popslaveerror(ctx, slavePosition, &err)) {
+std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc, bool explainRefusal,
+                           const std::optional<ec_errort>& queued) {
+  if (queued) {
+    const ec_errort& err = *queued;
     switch (err.Etype) {
       case EC_ERR_TYPE_SDO_ERROR: {
         const auto code = static_cast<uint32_t>(err.AbortCode);
         const std::string_view reason = sdoAbortCodeDescription(code);
         return reason.empty() ? std::format(" (SDO abort 0x{:08X})", code)
                               : std::format(" (SDO abort 0x{:08X}: {})", code, reason);
+      }
+      case EC_ERR_TYPE_SDOINFO_ERROR: {
+        const auto code = static_cast<uint32_t>(err.AbortCode);
+        const std::string_view reason = sdoAbortCodeDescription(code);
+        return reason.empty() ? std::format(" (SDO Info error 0x{:08X})", code)
+                              : std::format(" (SDO Info error 0x{:08X}: {})", code, reason);
       }
       case EC_ERR_TYPE_MBX_ERROR: {
         const auto code = static_cast<uint16_t>(err.ErrorCode);
@@ -359,8 +366,14 @@ void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
   }
 }
 
-// Pops every error SOEM queued for one slave's failed transfer, returning the decoded reason of the
-// first.
+// What a failed transfer left on SOEM's error list: the first entry, and its decoded reason.
+struct SdoFailure {
+  std::string reason;
+  std::optional<ec_errort> error;  // empty when SOEM queued nothing for the slave
+};
+
+// Pops every error SOEM queued for one slave's failed transfer, returning the first with its
+// decoded reason.
 //
 // Only the errors of @p slavePosition are popped, because every entry carries the slave that caused
 // it. An entry of another slave belongs to the work on that slave, which can run at the same time
@@ -383,13 +396,23 @@ void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
 // transfer of their slave: an emergency during a transfer that succeeds, or an abort during a scan
 // or a re-map. Each of those paths therefore discards the slave's entries before it starts, with
 // discardSlaveErrors.
-std::string drainSdoErrors(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
+SdoFailure drainSdoFailure(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
                            bool explainRefusal = true) {
-  std::string reason = sdoErrorSuffix(ctx, slavePosition, wkc, explainRefusal);
+  SdoFailure failure;
+  if (ec_errort err{}; ecx_popslaveerror(ctx, slavePosition, &err)) {
+    failure.error = err;
+  }
+  failure.reason = sdoErrorSuffix(ctx, slavePosition, wkc, explainRefusal, failure.error);
   // The first entry is the one that describes this transfer, and the rest must not survive to be
   // blamed on the next one.
   discardSlaveErrors(ctx, slavePosition);
-  return reason;
+  return failure;
+}
+
+// The decoded reason of drainSdoFailure, for a caller that branches on nothing else.
+std::string drainSdoErrors(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
+                           bool explainRefusal = true) {
+  return drainSdoFailure(ctx, slavePosition, wkc, explainRefusal).reason;
 }
 
 }  // namespace
@@ -1112,14 +1135,17 @@ constexpr auto kSdoInfoRetryDelay = std::chrono::milliseconds(50);
 // between the two.
 constexpr auto kProbeRefusalBudget = std::chrono::milliseconds(100);
 
-// Whether the answer to a probe carries no entry, which ends the probe exactly as a refusal does.
+// Whether an answer to Get Entry Description carries no entry. Past the size the slave reports, it
+// ends the probe exactly as a refusal does. Within that size, it is a gap the firmware left in a
+// record, and the entry is left out without counting as lost.
 //
 // **A refusal is not the only way a slave says "no such subindex".** The ARM stack in a SOMANET
 // Integro answers Get Entry Description for a subindex it does not have with *success* and an
 // all-zero descriptor (`Handle_Get_SubObject_Info_Ind` discards the lookup's error and replies from
 // an uninitialised struct). The XMOS stack in a SOMANET Node aborts, which is what ETG.1000.6
 // asks for. Reading only the abort therefore probes an ARM device to subindex 255 on every record
-// and array, and records thousands of rows that name nothing.
+// and array, and records thousands of rows that name nothing. Within the reported size it would
+// cache a row with no width and a name and type left over from another request.
 //
 // **The bit length is the test, and the data type cannot be part of it.** The reply is built from
 // whatever the stack left behind, so its data type is sometimes zero and sometimes a leftover from
@@ -1147,6 +1173,9 @@ struct SdoInfoResult {
   int attempts = 0;                      // 1 .. kSdoInfoMaxRetries + 1
   std::string reason;                    // decoded from the first failing attempt
   std::chrono::microseconds elapsed{0};  // wall time of the whole call, back-off included
+  // The slave answered that the object or subindex it was asked about does not exist. That is an
+  // answer, not a loss, so the transfer is not asked again (see isNonexistentEntryAbort).
+  bool doesNotExist = false;
 
   bool ok() const { return wkc > 0; }
 };
@@ -1182,13 +1211,16 @@ SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, ControlPla
         // fault. Once there is one, later attempts stop asking the slave to explain a refusal —
         // the answer would be discarded, and it is not free.
         const bool wantReason = result.reason.empty();
-        std::string reason = drainSdoErrors(ctx, slavePosition, result.wkc, wantReason);
+        SdoFailure failure = drainSdoFailure(ctx, slavePosition, result.wkc, wantReason);
         if (wantReason) {
-          result.reason = std::move(reason);
+          result.reason = std::move(failure.reason);
         }
+        result.doesNotExist =
+            failure.error && failure.error->Etype == EC_ERR_TYPE_SDOINFO_ERROR &&
+            isNonexistentEntryAbort(static_cast<uint32_t>(failure.error->AbortCode));
       }
     }
-    if (result.ok()) {
+    if (result.ok() || result.doesNotExist) {
       break;
     }
   }
@@ -1215,6 +1247,9 @@ struct SdoInfoCounters {
   // with an abort or the mailbox send failed. The per-object line's reason tells them apart.
   int zeroWkc = 0;
   int probes = 0;  // declared-size probes issued; the refusal that ends one is not a failure
+  // Entries within the size the slave reports that the slave says it does not have. An answer, not
+  // a failure: a firmware can remove a subindex from a record and keep the record's size.
+  int absent = 0;
 
   // Counts a declared-size probe. Its refusal is the expected outcome and the signal the loop is
   // looking for, so it must not reach `failed` — otherwise every healthy device logs its summary
@@ -1227,6 +1262,10 @@ struct SdoInfoCounters {
   void add(const SdoInfoResult& result) {
     retries += result.attempts - 1;
     if (result.ok()) {
+      return;
+    }
+    if (result.doesNotExist) {
+      ++absent;
       return;
     }
     ++failed;
@@ -1381,10 +1420,10 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
     spdlog::log(counters.failed > 0 ? spdlog::level::warn : spdlog::level::debug,
                 "Device {}: object dictionary read {} entries from {} object(s) in {} ms; "
                 "{} failed, {} retries consumed ({} no reply, {} zero wkc, {} no frame), "
-                "{} declared-size probes",
+                "{} declared-size probes, {} absent",
                 slavePosition, entriesRead, odList.Entries, elapsedMs, counters.failed,
                 counters.retries, counters.noReply, counters.zeroWkc, counters.noFrame,
-                counters.probes);
+                counters.probes, counters.absent);
   };
 
   if (auto list = retrySdoInfo(ctx_.get(), slavePosition, controlPlane_,
@@ -1453,6 +1492,11 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
         counters.add(entry);
       }
       if (!entry.ok()) {
+        if (!probing && entry.doesNotExist) {
+          spdlog::debug("Device {}: 0x{:04X}:{:02X} does not exist{}", slavePosition,
+                        odList.Index[i], sub, entry.reason);
+          continue;
+        }
         if (probing) {
           if (entry.elapsed > kProbeRefusalBudget) {
             spdlog::debug(
@@ -1467,8 +1511,15 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
                      odList.Index[i], sub, sdoInfoFailureDetail(entry));
         continue;
       }
-      if (probing && describesNoEntry(oeList, sub)) {
-        break;
+      // Within the reported size an empty descriptor is a gap the firmware left in a record, which
+      // the ARM stack of an Integro reports this way rather than with an abort. Past it, the probe
+      // has reached the end of the object.
+      if (describesNoEntry(oeList, sub)) {
+        if (probing) {
+          break;
+        }
+        ++counters.absent;
+        continue;
       }
       entries.push_back(OdEntry{
           .index = odList.Index[i],

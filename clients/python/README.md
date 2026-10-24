@@ -33,6 +33,7 @@ PRE-OP, SAFE-OP and OP. BOOT is separate: a device enters and leaves BOOT only t
 | `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PRE-OP |
 | `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
+| `offset-detection.py` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |
 | `reset.py` | Closes the fieldbus driver and clears the device list. | None |
 
 Every script that needs a bus opens the fieldbus driver from `config.toml` when no driver is

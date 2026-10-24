@@ -20,7 +20,8 @@ On top of call(), the client has the steps that most scripts begin with. init()
 opens the fieldbus driver and accepts one that is open already. ensure_state()
 scans when needed and moves the devices to an AL state. from_config() builds a
 client from config.toml. The steps log through the "motion_master_client" logger, so a
-script that wants to see them turns on logging at INFO.
+script that wants to see them turns on logging at INFO. run_procedure() starts a
+procedure, polls it until it ends, and cancels it when the caller stops early.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import ssl
+import time
 import tomllib
 from pathlib import Path
 
@@ -219,6 +221,32 @@ class MotionMasterClient:
                         if not d["reached"]
                     )
                     raise StateError(f"not every device reached {STATE_NAMES[step]}: {failed}")
+
+    def run_procedure(self, position, name, params=None, poll_interval=0.5):
+        """Start a procedure on a device and yield its snapshot at every poll until the run ends.
+
+        The last snapshot yielded has the final status: succeeded, failed or cancelled. Polling is
+        lossless, because every finished step keeps its status and value, so a step that starts
+        and ends between two polls still shows. When the caller stops iterating before the run
+        ends, for example on Ctrl-C, the run is cancelled, so that the drive does not continue
+        alone.
+
+        Raises requests.HTTPError when the server refuses the start, for example with 409 when
+        another procedure runs on the device.
+        """
+        path = {"slavePosition": position, "procedureName": name}
+        snapshot = self.call("startProcedure", path=path, body=params or {}).json()
+        try:
+            while True:
+                yield snapshot
+                if snapshot["status"] != "running":
+                    return
+                time.sleep(poll_interval)
+                snapshot = self.call("getProcedure", path=path).json()
+        finally:
+            if snapshot["status"] == "running":
+                log.info("cancelling %s on device %d", name, position)
+                self.call("cancelProcedure", path=path, check=False)
 
     def _ssl_context(self):
         """Build an SSL context matching the HTTP verify setting for the WebSocket."""

@@ -36,6 +36,7 @@ the driver when none is open, and scans nothing.
 | `set-game-loop-period.py` | Changes the cycle period of the real-time game loop until the server stops. | No bus |
 | `scan.py` | Scans the bus and lists the devices it finds. A scan leaves every device in INIT. | None |
 | `transition-state.py` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
+| `restart-devices.py` | Restarts devices through INIT up to an AL state. An enabled drive is disabled. | None |
 | `diagnostics.py` | Prints the ESC (EtherCAT Slave Controller) error counters and the distributed clock sync of the devices. | None |
 | `reset.py` | Closes the fieldbus driver and clears the device list. | No bus |
 | `read-parameter.py` | Reads one parameter with its name, data type and decoded value. `--cache` reads no bus. | PRE-OP |

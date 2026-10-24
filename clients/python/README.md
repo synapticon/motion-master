@@ -17,7 +17,7 @@ streaming live process data and tearing back down.
 | `config.example.toml` | Config template — copy to `config.toml`. |
 | `examples/scan.py` | `POST /api/scan` — open the driver from config when none is open, scan, and list the devices. |
 | `examples/transition-state.py` | `POST /api/devices/state` — move the devices to an AL state, one legal step at a time. |
-| `examples/04_read_sdo.py` | `GET .../sdo/{index}/{subindex}` — raw CoE SDO upload. |
+| `examples/read-sdo.py` | `GET .../sdo/{index}/{subindex}` — read one object with a raw CoE SDO upload. Needs PRE-OP or higher. |
 | `examples/05_read_file.py` | `GET .../files/{filename}` — read a file over FoE (saved into the git-ignored `files/`). |
 | `examples/06_read_parameters.py` | `POST .../parameters/init?readValues=true` — dump the full object dictionary with values. |
 | `examples/08_monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. |
@@ -109,8 +109,8 @@ binary (it listens on `127.0.0.1` by default). Then run the examples in order:
 ```bash
 python examples/scan.py
 python examples/transition-state.py --state pre-op
-python examples/04_read_sdo.py                      # Statusword 0x6041:00 by default
-python examples/04_read_sdo.py --index 0x6064 --subindex 0
+python examples/read-sdo.py                         # Statusword 0x6041:00 by default
+python examples/read-sdo.py --index 0x6064 --subindex 0
 python examples/05_read_file.py --filename log.csv   # saved to files/ (git-ignored)
 python examples/06_read_parameters.py               # dump the object dictionary + values
 python examples/transition-state.py --state op      # climb to OP (exchanging state)
@@ -118,9 +118,9 @@ python examples/08_monitor.py --count 10            # stream 10 batches, then st
 python examples/09_reset.py                          # tear down, back to uninitialised
 ```
 
-The per-device examples (04–06, 08) act on slave 1 by default; pass `--slave N`
+The per-device examples (`read-sdo.py`, 05–06, 08) act on slave 1 by default; pass `--slave N`
 to target another. Monitoring is live-only — values read `null` until the device
-is exchanging, so `08_monitor.py` needs the bus in OP (`transition-state.py --state op`); steps 04–06 only
+is exchanging, so `08_monitor.py` needs the bus in OP (`transition-state.py --state op`); `read-sdo.py` and steps 05–06 only
 need PRE-OP.
 
 ## TLS

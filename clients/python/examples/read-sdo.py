@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Read an object dictionary entry via a raw CoE SDO upload.
+"""Read one object dictionary entry with a CoE SDO upload (GET .../sdo/{index}/{subindex}).
 
-GET /api/devices/{slavePosition}/sdo/{index}/{subindex} returns the raw object
-bytes. Requires the device to be in PRE-OP or above (mailbox active), so run
-03_transition_preop first.
+Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed, because the
+mailbox is live from PRE-OP up. A device in SAFE-OP or OP stays there. The server returns the
+raw bytes of the object. The script prints them and their little-endian unsigned value.
 
-Defaults read the CiA402 Statusword (0x6041:0). Override on the command line:
-    python 04_read_sdo.py --slave 1 --index 0x6064 --subindex 0
+The defaults read the Statusword, 0x6041:00.
+
+    python read-sdo.py
+    python read-sdo.py --slave 2 --index 0x6064 --subindex 0
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import MotionMasterClient  # noqa: E402
+from motion_master_client import PRE_OP, MotionMasterClient  # noqa: E402
 
 
 def auto_int(text):
@@ -29,7 +32,11 @@ def main():
     ap.add_argument("--subindex", type=auto_int, default=0)
     args = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
+    client.init()
+    client.ensure_state(PRE_OP, positions=[args.slave])
+
     data = client.call(
         "sdoUpload",
         path={"slavePosition": args.slave, "index": args.index, "subindex": args.subindex},

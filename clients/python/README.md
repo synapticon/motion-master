@@ -51,6 +51,7 @@ the driver when none is open, and scans nothing.
 | `read-hardware-description.py` | Prints what a SOMANET device says it is: the device, the assembly and their components. | PRE-OP |
 | `check-firmware-compatibility.py` | Says whether a firmware package belongs on the device, from the package filename alone. It installs nothing. | PRE-OP |
 | `read-register.py` | Reads bytes from an ESC register. | None |
+| `write-register.py` | Writes bytes to an ESC register. | None |
 | `read-sii.py` | Prints the SII (Slave Information Interface, the configuration in the EEPROM of the device), or saves the raw image with `--output`. | None |
 | `read-pdo-mapping.py` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PRE-OP |
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |

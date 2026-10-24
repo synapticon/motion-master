@@ -4954,3 +4954,161 @@ use.
 200 ms as v5 used, split by the drive into 100 ms on each side, and nothing measured whether that
 rest is enough for the fit; the first bench run should look at the first and last rows of the
 recording.
+
+## Session 2026-10-24 — The parameter cache keys on the firmware version, and self-heal waits (design)
+
+Issue #143, from synapticon/motion_master#69: after a Jasper update, OBLAC loaded a dictionary cache
+written for older firmware and could not open the drive page. Nothing is built yet. The design is
+in #143.
+
+**The SII revision cannot key the cache.** A Jasper drive with a bootloader from the v10.0.0 era
+answers the first scan after a reset with the revision compiled into the bootloader, 1, whatever
+application is installed. So the revision the master reads does not follow the application's
+dictionary. The convention that the firmware team raises the revision when the ESI changes still
+holds for picking an ESI. It does not make the revision the master reads trustworthy.
+
+**The key is vendor ID, product code and 0x100A.** 0x100A has a fixed index and type, so one SDO
+upload reads it before the dictionary is known. On Jasper and SOMANET it holds the semver firmware
+version. The revision leaves the key, the file and the check in `load` entirely, because keeping it
+gives two files for one firmware on a Jasper drive. A device without 0x100A is not cached: a
+fallback to the revision brings the fault back. The version goes into the file name sanitized to the
+character set of `mm::core::isUrlSafeId`, and the file stores the full string, which `load`
+compares, so two strings that sanitize to one name cost a miss and never a wrong dictionary. Old
+files are not migrated, because v6 is alpha. The cost is a new dictionary read after every firmware
+update, also when the dictionary did not change.
+
+**A refusal inside `MaxSub` is an answer.** Jasper v10.0.4 removed subindices inside `MaxSub`, and
+each one cost eleven attempts and ten 50 ms waits, then blocked the cache because it counted as
+missing. The firmware source settles what each stack answers to Get Entry Description for an entry
+that does not exist. Jasper (`sdoserv.c`) and the SOMANET XMOS stack (`coe.xc`) send abort
+0x06020000 or 0x06090011 at once. The Integro's ARM application replies with success from a struct
+it never filled, so only a bit length of 0 is reliable, which `describesNoEntry` already uses past
+`MaxSub`. Over SPoE the firmware clears the descriptor first, and `decodeParameterEntries` already
+skips it. So the SOEM enumeration gets both rules inside `MaxSub`, and the SPoE enumeration needs
+none.
+
+**Self-heal is deferred, and this is the option to build when it comes back.** A cache that passes
+the 0x100A check can still be stale: a development build can change the dictionary and keep its
+version string. Deleting the cache file on a failed read was rejected first, and a warning only was
+considered next. A warning on "a cached entry does not exist" is wrong as written, because a drive
+can list an entry in its dictionary and refuse an upload of it, which is a firmware fault with a
+correct cache. The option that tells the two apart:
+
+1. A live SDO read of a parameter whose dictionary came from the cache gets abort 0x06020000 or
+   0x06090011.
+2. The master sends one Get Entry Description for that entry, once per device and cache load.
+3. If the drive says the entry does not exist, by abort or by bit length 0, the warning says the
+   cache file is stale and names its id. If the drive describes the entry, the warning says the
+   dictionary and the upload disagree, which is a firmware fault.
+
+It needs three things: a flag on `Device` that its dictionary came from the cache; the abort code
+from a read, because `readSdo` returns only a formatted string and matching that string to branch is
+what the error convention forbids; and one warning per device and cache load, because
+`ParameterRefresher` polls the same object again and again. Monitoring already marks such a
+parameter `Stale`, which is why this waits. An Integro answers an SDO upload of an object it does
+not have with abort 0x08000000, "General error", measured below. It is not silent, and it is not
+"does not exist", so a check keyed on the two "does not exist" codes never fires on an Integro.
+
+**A warning at scan was built, measured, and reverted.** The idea was one line per device when the
+dictionary came from the cache and value reads of the scan failed: the count, the file id, "the
+cache may be out of sync", and how to delete the file. It counted every failed read, to need no
+abort code. The bench Integro (firmware v5.6.11, product 0x401) showed why that cannot work. Two
+reads fail on every scan with a correct cache: 0x1024:00 is write-only (access 0x38) and the scan
+still reads it, and 0x1600:08, a declared-size slot of a mapping object, is never answered and costs
+1.5 s. The warning appeared on every cached scan and blamed the cache for nothing, and deleting the
+file would bring the same dictionary and the same two failures back. Narrowing it to "does not
+exist" aborts misses the Integro, whose answer is "General error", which also covers other faults.
+Any later version of the warning needs a baseline of the reads that fail with a correct dictionary,
+not a count.
+
+**Two scan reads that fail every time, found on the way.** The value pass reads write-only entries,
+which `DeviceParameter::isReadable` already identifies, so every scan logs a refused read of
+0x1024:00. And the Integro never answers 0x1600:08, at a cost of one mailbox timeout per scan. Both
+are older than this session and are not fixed here.
+
+**Measured on the bench Integro.** Files keyed on the revision are hidden from the list and left on
+disk. `DELETE` with the new id answers 204. 0x100A comes back as 50 bytes padded with NULs and is
+trimmed to `v5.6.11`. A read from the drive gives 578 entries in 1.7 s, with nothing lost and nothing
+absent, the same count as the old file, and writes `parameters-000022d2-00000401-v5.6.11.json`.
+`POST /api/devices/1/parameters/init` then loads the 578 definitions from that file. A second read
+from the drive gave 579 entries and 138 probes: the probe past the reported size recorded
+`0x6621:03`, named `"\x19g"`, data type 0x52BF, 500 bits, access 0x00. 0x6621 is the Safety
+statusword with two bytes, so subindex 3 is the Integro's uninitialised reply with a nonzero bit
+length left in it, and `describesNoEntry` let it through. The probe is older than this session, and
+the same check now also guards gaps inside `MaxSub`. Issue #145 tracks it.
+
+**Not yet done.** No Jasper v10.0.4 drive is on the bench, and the Integro on the bench has no gaps
+inside `MaxSub`, so the new path of the enumeration has not run on hardware.
+
+## Session 2026-10-24 — The probe past the reported count is removed (as-built)
+
+Issue #145, firmware issue synapticon/somanet_software#5821.
+
+**The bit-length rule was never safe.** `describesNoEntry` took a bit length of 0 as "no entry",
+because the Integro's replies for a missing subindex had shown 0 on 2026-08-25. That reply is built
+from an uninitialised struct in `Handle_Get_SubObject_Info_Ind`, so every field is stack memory. In
+30 reads of one dictionary in a row, 17 recorded at least one phantom entry, with bit lengths of 500
+and 24196 and names that were not text. A bit length of 500 is most likely `TX_TIMEOUT` left by an
+earlier `Pkt_SendPacket`; that is a reading of the source, not of the binary. The single read of
+August was lucky, and the cache made sure it was the only one.
+
+**The probe existed for OS command 21 alone, so it went.** Its values include every reserved slot of
+the PDO mapping objects, and the decode needs the width of each. Nothing else needs the slots: the
+PDO mapping write uses raw `writeSdo`. Nothing uses command 21 yet, and v6 is alpha until next year,
+so the probe is removed rather than made safe. `read-object-dictionary` now fails on a drive with an
+unused slot, on XMOS as well as on an Integro: on the bench Integro "the drive sent 1900 bytes but
+the master's 519 dictionary entries account for 1678", and the 222 bytes are the slots, 53 × 4 plus
+5 × 2, the arithmetic of Session 2026-08-25. Bring the probe back with the firmware fix.
+
+**Two ways to keep it were built or weighed, and dropped.** A test before the read, one Get Entry
+Description for an object the slave does not list, told the Integro apart from a slave that refuses:
+15 reads of the bench Integro gave 520 entries each. Its first form asked 0x1018:05 and did not work,
+because the netX answers the standard objects itself and refuses a missing subindex correctly; only
+objects the netX does not know reach the ARM application. The test was correct, but it kept a probe
+that nothing uses. Accepting a probed entry only if it looked like a slot (the type, width and access
+of subindex 1, a printable name) was rejected as a test of leftover memory. An SDO upload cannot
+confirm a slot either: an upload of the real 0x1600:08 is not answered.
+
+**Inside the reported count the rules of #143 stay.** An abort 0x06020000 or 0x06090011, or a reply
+with bit length 0, leaves the entry out without counting it as lost. On an Integro a gap there would
+still record leftover data, because its reply is a success; no Integro firmware has such a gap.
+
+**The cache writer is not the problem.** A garbage name that is not valid UTF-8 made `store` throw
+inside the JSON dump. CoE names are VISIBLE_STRING, ISO/IEC 646, so a correct name never does this,
+and nothing is changed there.
+
+**Measured on the bench Integro, v5.6.11.** 15 reads in a row without the probe: 520 entries every
+time, none failed, none absent, each cached, about 1.45 s each against 1.7 s with the probe. 520 is
+578 less the 58 reserved slots.
+
+**The PDO mapping objects follow the mapping, and that is accepted.** SOMANET firmware reserves ten
+entries in each 0x16xx and 0x1Axx object, and a user may map up to ten. Without the probe, the
+dictionary holds an object's entries up to its count at the time of the read, and the cache keeps
+that count for the firmware version. So after a user maps more entries, the Parameters page shows
+fewer subentries than are mapped, and two machines can show different counts for one firmware. The
+mapping itself is unaffected: `Device::readPdoMapping` and `Device::writePdoMapping` use raw SDO,
+and the Console's mapping page takes no limit from the dictionary. Leaving the mapping objects out
+of the cache was offered and declined; the firmware fix and the probe's return settle it.
+
+## Session 2026-10-24 — The probe returns for a slave that refuses an absent object (as-built)
+
+Issue #145. The removal of the probe, two sections above, took the reserved slots of the PDO mapping
+objects from every drive to protect the Integro. The slots are useful on the Parameters page, and
+the XMOS stack of Circulo and Node refuses correctly. So the probe is back, gated by the test that
+was built first and replaced: before the read, one Get Entry Description for subindex 1 of the
+highest index from 0x5FFF down that the slave does not list. A slave that refuses it within 100 ms is
+probed; one that answers is not.
+
+**Measured on the bench Circulo** (product 0x301, ESC type 0xC0, firmware v5.6.11). It refuses the
+test. 15 reads in a row gave 564 entries each, with 135 probes, none absent, none failed, about
+0.67 s each. Every 0x16xx and 0x1Axx has its ten slots and 0x1C12 and 0x1C13 have six. The Integro
+results of the first test stand: no probe, 520 entries, no phantom entry.
+
+**The widths fit command 21, and command 21 still fails, for another reason.** The 564 entries add
+up to 1770 bytes, exactly what the drive sends over `fs-buffer`. The read of 0x1023:03 right after
+the transfer fails within 0.3 ms with "packet/timeout error", in 4 runs of 4, before the decode. That
+is separate from the dictionary and has its own issue.
+
+**The PDO mapping paragraph above now applies to the Integro alone.** On Circulo and Node the
+dictionary holds every slot whatever the mapping is at the time of the read.
+

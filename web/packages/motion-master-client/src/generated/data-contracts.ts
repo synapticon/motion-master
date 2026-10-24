@@ -259,8 +259,8 @@ export interface UserCacheFile {
 /** Summary of one on-disk parameter-cache file (its identity, size, and count). */
 export interface ParameterCacheEntry {
   /**
-   * Opaque key addressing this cache file in the download/delete endpoints ("<vendor>-<product>-<revision>"). Use it verbatim — do not construct it client-side.
-   * @example "000022d2-00000201-0000000a"
+   * Opaque key addressing this cache file in the download/delete endpoints ("<vendor>-<product>-<version>", the version reduced to URL-safe characters). Use it verbatim — do not construct it client-side.
+   * @example "000022d2-00000201-v5.6.6"
    */
   id: string;
   /**
@@ -274,10 +274,10 @@ export interface ParameterCacheEntry {
    */
   productCode: number;
   /**
-   * Revision number.
-   * @example 10
+   * The device's firmware version (0x100A) the file was written for, in full.
+   * @example "v5.6.6"
    */
-  revisionNumber: number;
+  firmwareVersion: string;
   /**
    * Number of cached parameter definitions in the file.
    * @example 312

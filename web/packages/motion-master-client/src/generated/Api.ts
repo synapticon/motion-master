@@ -2880,7 +2880,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Returns one entry per cached parameter-definition file on disk, keyed by device identity (vendor, product, revision). The cache stores only the object-dictionary *definitions* (not live values), so a scan of previously-seen hardware can skip the slow SDO enumeration. Independent of the bus — works whether or not a driver is initialised.
+   * @description Returns one entry per cached parameter-definition file on disk, keyed by vendor ID, product code and firmware version (object 0x100A). A device without 0x100A is not cached. The cache stores only the object-dictionary *definitions* (not live values), so a scan of previously-seen hardware can skip the slow SDO enumeration. Independent of the bus — works whether or not a driver is initialised.
    *
    * @name ListParameterCacheEntries
    * @summary List on-disk parameter caches
@@ -2908,7 +2908,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Removes one cached file from disk. The next scan of that hardware re-enumerates it. Useful when a vendor reused a revision across an object-dictionary change.
+   * @description Removes one cached file from disk. The next scan of that hardware re-enumerates it. Useful when a firmware changed its object dictionary and kept its version string.
    *
    * @name DeleteParameterCache
    * @summary Delete a parameter-cache file

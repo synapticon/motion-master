@@ -16,6 +16,7 @@ add_executable(
   control_plane_locks_test.cc
   fake_spoe_server_test.cc
   foe_error_test.cc
+  sdo_abort_codes_test.cc
   sii_test.cc
   soem_error_list_test.cc
   soem_fieldbus_driver_test.cc

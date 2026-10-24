@@ -5129,6 +5129,14 @@ Command 21 completes when its whole output is in the buffer. A read after that f
 `foe_glb_buffer_request_file`, which sets the pending ACK with the ending message, and the transfer
 ends correctly.
 
+**The read during the command is the documented order for two commands.** The OS command
+specification gives two orders. For the SMM commands that return data (11.3, 11.5 and 11.13) it runs
+the command, reads 0x1023:03, and then reads `fs-buffer`. For command 21 and for command 17.7, the
+read of the Kübler correction table, it reads 0x1023:03 once, which answers "in progress", reads
+`fs-buffer`, and then polls 0x1023:03 until the command completes. Motion Master followed the second
+order for command 21, and that order is the one that triggers #5822. The firmware defect stays open
+for that reason.
+
 **The read now follows OBLAC.** OBLAC reads `fs-buffer` after the poll reports a success, and never
 after a failure (`runOsCommand` in `libs/motion-master-client/src/lib/motion-master-req-res-client.ts`).
 Every read it makes goes through that path: the SMM parameter reads, the load of SMM parameters for

@@ -1149,7 +1149,9 @@ std::optional<FsBufferTransfer> parseFsBufferTransfer(std::string_view token);
 ///   FoE side waits for data, the drive sends one more DATA packet, empty, after the last one. The
 ///   next mailbox request gets that packet as its answer, and the drive's file system then refuses
 ///   every file read until a power cycle (synapticon/somanet_software#5822). A read after the
-///   command finds the data in the memory and ends correctly.
+///   command finds the data in the memory and ends correctly. The OS command specification gives
+///   the read during the command for command 21 and command 17.7, and the read after the command
+///   for the SMM commands. This follows the SMM order for every command.
 /// - **An output larger than 2024 bytes cannot be read.** The command waits for the master to empty
 ///   the memory, and never reports a terminal status, so it runs into its timeout. This comes from
 ///   the firmware source and was not tested. The only known case is OS command 21 on a drive with

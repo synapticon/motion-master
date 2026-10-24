@@ -638,7 +638,8 @@ Four rules, and none is a preference:
   drive send one more FoE DATA packet, empty, after the last one. The next mailbox request gets that
   packet as its answer, and the drive's file system then refuses every file read until a power
   cycle (synapticon/somanet_software#5822). A read after the command takes the other branch of the
-  firmware and ends correctly. OBLAC reads in this order too.
+  firmware and ends correctly. OBLAC reads in this order too. The OS command specification gives
+  this order for the SMM commands, and a read during the command for command 21 and command 17.7.
 - **An output larger than 2024 bytes cannot be read.** The command waits for the master to empty a
   full buffer, so it never completes and runs into its timeout. Circulo with a safety module sends
   2517 bytes from command 21. Reading it needs a read during the command plus an ACK of the empty

@@ -35,6 +35,7 @@ the driver when none is open, and scans nothing.
 | `server-info.py` | Prints the server version, the host, the network adapters and the health of the game loop. | No bus |
 | `scan.py` | Scans the bus and lists the devices it finds. A scan leaves every device in INIT. | None |
 | `transition-state.py` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
+| `diagnostics.py` | Prints the ESC (EtherCAT Slave Controller) error counters and the distributed clock sync of the devices. | None |
 | `reset.py` | Closes the fieldbus driver and clears the device list. | No bus |
 | `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
 | `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PRE-OP |

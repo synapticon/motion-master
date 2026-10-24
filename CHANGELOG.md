@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **The Python reference client has one example script per action, named after it.** `clients/python/examples/` holds 42 scripts, from `scan.py` and `read-parameter.py` to `offset-detection.py` and `firmware-installation.py`, in place of the nine numbered scripts of a walkthrough. Each script runs on its own: it opens the fieldbus driver from `config.toml` when none is open, scans when no devices are known, and moves the device to the AL state it needs, so a second run gives the same result. `run-procedure.py` lists the procedures of a device and runs any of them by name. The client is one file, `motion_master_client.py`. (#142)
+
 ## [6.0.0-alpha.111] - 2026-10-23
 
 ### Added

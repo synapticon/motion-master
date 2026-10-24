@@ -47,6 +47,7 @@ the driver when none is open, and scans nothing.
 | `list-files.py` | Lists the files stored on the device with their sizes. | PRE-OP |
 | `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PRE-OP |
 | `write-file.py` | Writes a local file to the device over FoE. A file of the same name is replaced. | PRE-OP |
+| `delete-file.py` | Deletes a file from the flash of a SOMANET device. | PRE-OP |
 | `read-hardware-description.py` | Prints what a SOMANET device says it is: the device, the assembly and their components. | PRE-OP |
 | `check-firmware-compatibility.py` | Says whether a firmware package belongs on the device, from the package filename alone. It installs nothing. | PRE-OP |
 | `read-register.py` | Reads bytes from an ESC register. | None |

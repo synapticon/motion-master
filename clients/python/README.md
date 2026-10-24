@@ -21,7 +21,7 @@ streaming live process data and tearing back down.
 | `examples/read-file.py` | `GET .../files/{filename}` — read a file over FoE and save it into the git-ignored `files/`. Needs PRE-OP or higher. |
 | `examples/read-all-parameters.py` | `POST .../parameters/init?readValues=true` — read the whole object dictionary with its values. Needs PRE-OP or higher. |
 | `examples/monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. Needs OP for values from the process image. |
-| `examples/09_reset.py` | `POST /api/reset` — tear the driver down, back to uninitialised. |
+| `examples/reset.py` | `POST /api/reset` — close the fieldbus driver and clear the device list. Needs no AL state. |
 
 Every request goes through one method — `MotionMasterClient.call(operationId, ...)` — with
 `path` parameters, a JSON `body`, and/or a `query` as the operation needs:
@@ -115,7 +115,7 @@ python examples/read-file.py --filename log.csv      # saved to files/ (git-igno
 python examples/read-all-parameters.py             # the object dictionary with values
 python examples/transition-state.py --state op      # climb to OP (exchanging state)
 python examples/monitor.py --count 10               # stream 10 batches, then stop
-python examples/09_reset.py                          # tear down, back to uninitialised
+python examples/reset.py                            # close the driver, back to uninitialised
 ```
 
 The per-device examples (`read-sdo.py`, `read-file.py`, `read-all-parameters.py`, `monitor.py`) act on slave 1 by default; pass `--slave N`

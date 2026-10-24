@@ -25,6 +25,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+- **A dictionary read of an Integro no longer records entries that do not exist.** The firmware of an Integro answers a Get Entry Description for an entry it does not have with success and leftover data (synapticon/somanet_software#5821). Motion Master asks past the count each object reports, to find the slots an object reserves, and recorded that leftover data as entries in about half the reads, and cached it. A read now first asks for an object the device does not have. A device that answers with success is not asked past the reported counts, so its dictionary lacks the reserved slots. On today's Integro firmware, `read-object-dictionary` therefore fails. A firmware that refuses correctly is asked again, with no change in Motion Master.
 - **Reading an object dictionary with gaps takes seconds again, and the result is cached.** A firmware can remove a subindex from a record and keep the record's size, as Jasper v10.0.4 does. The device then refuses that subindex with the abort "object does not exist" or "subindex does not exist", and an Integro answers with an empty description. Motion Master asked each such subindex 11 times, 50 ms apart, and then counted it as lost, so the dictionary was never cached and every scan read it again. Such a subindex is now asked once and left out of the dictionary, and the dictionary is cached. The log summary of the read counts these subindices as `absent`.
 
 ## [6.0.0-alpha.111] - 2026-10-23

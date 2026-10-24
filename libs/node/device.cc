@@ -229,6 +229,7 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
     }
     definitions = parameterCache_->load(vendorId_, productCode_, firmwareVersion);
   }
+  const bool fromCache = definitions.has_value();
   if (!definitions) {
     auto read = driver_.readObjectDictionary(slavePosition_);
     if (!read) {
@@ -305,6 +306,23 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
   }
   if (readValues) {
     readParameterValues(defs, useCompleteAccess);
+    // A cache file can list entries the device does not have: a development build can change the
+    // dictionary and keep its version string. Each failed read is already logged with its object
+    // and reason. This line names the likely cause once, and the way out. It says "may", because a
+    // firmware can also refuse an entry it lists, with a correct cache.
+    if (fromCache) {
+      const auto failed = std::ranges::count_if(
+          defs, [](const DeviceParameter& p) { return p.syncState == SyncState::Stale; });
+      if (failed > 0) {
+        spdlog::warn(
+            "Device {}: {} entries from the parameter cache file {} failed to read. The cache may "
+            "be out of sync with the device's object dictionary. Delete the file with DELETE "
+            "/api/parameter-cache/{{id}}, or on the Console's Storage page, to read the dictionary "
+            "from the device",
+            slavePosition_, failed,
+            ParameterCache::makeId(vendorId_, productCode_, firmwareVersion));
+      }
+    }
   }
 
   std::unordered_map<uint32_t, DeviceParameter> built;

@@ -22,6 +22,7 @@ the HTTP/WebSocket API may break between any two alphas.
 ### Changed
 
 - **The object dictionary cache is keyed on the firmware version.** A cache file is now named by vendor ID, product code and the device's firmware version in 0x100A, and it no longer uses the SII revision. After a firmware update, the next scan reads the new dictionary from the device. A Jasper drive with an older bootloader reports the revision of the bootloader, whatever application is installed, so the revision could not tell two firmwares apart. A device without 0x100A is not cached. `GET /api/parameter-cache` reports `firmwareVersion` in place of `revisionNumber`, and the Console's Storage page shows it. Files written by an older version are ignored. Delete them in the folder of the cache.
+- **A scan says when a cached dictionary may be the cause of failed reads.** When the dictionary came from the cache and some of its entries fail to read, the log has one warning per device with the count and the id of the cache file, and says how to delete the file. A development build that changes the dictionary and keeps its version string is the case it is for. The warning says "may", because a firmware can also refuse an entry its dictionary lists.
 
 ### Fixed
 

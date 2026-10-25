@@ -68,6 +68,7 @@ syntaxError:*/eni_test.cc
 syntaxError:*/esi_data_type_test.cc
 syntaxError:*/esi_entry_test.cc
 syntaxError:*/esi_request_test.cc
+syntaxError:*/esi_cache_test.cc
 syntaxError:*/esi_somanet_test.cc
 syntaxError:*/esi_test.cc
 syntaxError:*/esi_unit_test.cc

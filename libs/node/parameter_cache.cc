@@ -15,6 +15,7 @@
 
 #include "core/platform.h"  // userCacheDir — the shared root this cache lives under
 #include "core/util.h"      // isUrlSafeId
+#include "node/firmware_version.h"
 
 namespace mm::node {
 
@@ -93,20 +94,6 @@ DeviceParameter definitionFromJson(const nlohmann::json& j) {
   return p;
 }
 
-/// Reduces a firmware version to a file-name and URL-safe form: the characters of
-/// @c mm::core::isUrlSafeId, every other character becoming '_', at most 64 of them. Idempotent, so
-/// the version part of a parsed id maps to the same file as the string it came from.
-std::string sanitizeVersion(std::string_view version) {
-  constexpr std::size_t kMaxLength = 64;
-  std::string out;
-  for (const char c : version.substr(0, kMaxLength)) {
-    const bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                      c == '.' || c == '_' || c == '-';
-    out.push_back(safe ? c : '_');
-  }
-  return out;
-}
-
 /// One cache file's address, parsed back from its id.
 struct ParsedId {
   uint32_t vendorId = 0;
@@ -165,7 +152,8 @@ fs::path ParameterCache::resolveDir() const {
 
 std::string ParameterCache::makeId(uint32_t vendorId, uint32_t productCode,
                                    std::string_view firmwareVersion) {
-  return std::format("{:08x}-{:08x}-{}", vendorId, productCode, sanitizeVersion(firmwareVersion));
+  return std::format("{:08x}-{:08x}-{}", vendorId, productCode,
+                     sanitizeFirmwareVersion(firmwareVersion));
 }
 
 fs::path ParameterCache::pathFor(uint32_t vendorId, uint32_t productCode,

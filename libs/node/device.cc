@@ -18,6 +18,7 @@
 #include "core/util.h"
 #include "node/cia402.h"
 #include "node/device_parameter.h"
+#include "node/firmware_version.h"
 #include "node/parameter_cache.h"
 #include "node/process_data.h"
 #include "node/process_image.h"
@@ -153,26 +154,6 @@ std::expected<std::vector<uint8_t>, std::string> Device::readSii() const {
 std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data) const {
   return driver_.writeSii(slavePosition_, data);
 }
-
-namespace {
-
-// The firmware version as the parameter cache keys it: 0x100A with the padding a VISIBLE_STRING
-// carries removed. A firmware pads the string to its declared size with NULs or spaces, and that
-// padding is not part of the version.
-std::string trimFirmwareVersion(std::span<const uint8_t> bytes) {
-  std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-  text = text.substr(0, text.find('\0'));
-  const auto isPadding = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-  while (!text.empty() && isPadding(text.front())) {
-    text.remove_prefix(1);
-  }
-  while (!text.empty() && isPadding(text.back())) {
-    text.remove_suffix(1);
-  }
-  return std::string(text);
-}
-
-}  // namespace
 
 std::expected<void, std::string> Device::initializeParameters(bool readValues,
                                                               bool useCompleteAccess) {

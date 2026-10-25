@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import STATE_NAMES, MotionMasterClient  # noqa: E402
+from motion_master_client import STATE_NAMES, MotionMasterClient, run  # noqa: E402
 
 STATES = {name.lower(): value for value, name in STATE_NAMES.items() if value != 0}
 
@@ -47,4 +47,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

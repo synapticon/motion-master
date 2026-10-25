@@ -33,6 +33,7 @@ from motion_master_client import (  # noqa: E402
     MotionMasterClient,
     ProcedureError,
     format_step,
+    run,
     step_changes,
 )
 
@@ -100,4 +101,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

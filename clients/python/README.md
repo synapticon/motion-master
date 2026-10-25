@@ -13,7 +13,7 @@ second run gives the same result as the first run.
 
 | File | Purpose |
 | --- | --- |
-| `motion_master_client.py` | `MotionMasterClient`. It calls the HTTP API by `operationId` and streams the monitoring WebSocket. It also has the steps that most scripts begin with: `from_config()`, `init()`, `ensure_scanned()` and `ensure_state()`. `run_procedure()` runs a procedure to its end, and `notifications()` streams the notifications. |
+| `motion_master_client.py` | `MotionMasterClient`. It calls the HTTP API by `operationId` and streams the monitoring WebSocket. It also has the steps that most scripts begin with: `from_config()`, `init()`, `ensure_scanned()` and `ensure_state()`. `run_procedure()` runs a procedure to its end, and `notifications()` streams the notifications. `run(main)` prints an error that a user can correct, such as a server that is not running, as one line instead of a traceback. Set `MM_TRACEBACK=1` to get the traceback. |
 | `config.example.toml` | The config template. Copy it to `config.toml`. |
 | `examples/` | One script per action. See [Scripts](#scripts). |
 | `files/` | Where a script saves a file when `--output` names no other path. Git ignores this directory. |

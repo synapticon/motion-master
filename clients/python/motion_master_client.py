@@ -25,16 +25,21 @@ script that wants to see them turns on logging at INFO. run_procedure() starts a
 procedure, polls it until it ends, and cancels it when the caller stops early.
 step_changes() picks out the steps whose status changed, and format_step() turns
 one into a line.
-monitor() and notifications() stream from the WebSocket.
+monitor() and notifications() stream from the WebSocket. run(main) calls a
+script's main() and turns an error a user can act on, such as a server that is
+not running, into one line on stderr.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import ssl
+import sys
 import time
 import tomllib
+import urllib.parse
 from pathlib import Path
 
 import requests
@@ -122,6 +127,42 @@ def format_step(step):
     if "error" in step:
         line += f"  {step['error']}"
     return line
+
+
+def _error_line(error):
+    """Return one line that names an error a user can act on, or None for any other error."""
+    if isinstance(error, requests.ConnectionError):
+        url = urllib.parse.urlsplit(error.request.url) if error.request else None
+        where = f"{url.scheme}://{url.netloc}" if url else "the server"
+        return f"cannot connect to {where}. Is the server running, and is config.toml correct?"
+    if isinstance(error, requests.HTTPError):
+        r = error.response
+        try:
+            reason = r.json()["error"]
+        except (ValueError, KeyError, TypeError):
+            reason = r.text or r.reason
+        path = urllib.parse.urlsplit(r.url).path
+        return f"{r.request.method} {path}: HTTP {r.status_code}, {reason}"
+    if isinstance(error, (StateError, ProcedureError, FileNotFoundError, ConnectionError)):
+        return str(error)
+    return None
+
+
+def run(main):
+    """Call main() and exit with one line on stderr when it fails with an error a user can act on.
+
+    Those errors are: no connection to the server, an HTTP error status, a StateError, a
+    ProcedureError and a missing file. Any other error is a bug, so it keeps its traceback. Set
+    MM_TRACEBACK=1 to get the traceback for every error.
+    """
+    try:
+        main()
+    except Exception as error:
+        line = _error_line(error)
+        if line is None or os.environ.get("MM_TRACEBACK") == "1":
+            raise
+        print(f"error: {line}", file=sys.stderr)
+        sys.exit(1)
 
 
 class MotionMasterClient:

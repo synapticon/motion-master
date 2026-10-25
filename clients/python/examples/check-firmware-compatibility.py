@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient  # noqa: E402
+from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
 
 
 def main():
@@ -51,4 +51,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run(main)

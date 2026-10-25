@@ -43,7 +43,6 @@ the driver when none is open, and scans nothing.
 | `read-parameter.py` | Reads one parameter with its name, data type and decoded value. `--cache` reads no bus. | PRE-OP |
 | `write-parameter.py` | Writes one parameter. It converts the value to the data type, and prints the value before and after. | PRE-OP |
 | `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
-| `read-motor-parameters.py` | Prints the motor parameters of the drive: 0x2003 Motor specific settings, the motor rated current and torque, and the max motor speed. | PRE-OP |
 | `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PRE-OP |
 | `write-sdo.py` | Writes raw bytes to one object with an SDO download. | PRE-OP |
 | `list-files.py` | Lists the files stored on the device with their sizes. | PRE-OP |

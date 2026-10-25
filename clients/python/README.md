@@ -9,9 +9,7 @@ Each script in `examples/` does one action and is named after it. Each script ru
 It brings the server to the state it needs, so no script has to run before another one. A
 second run gives the same result as the first run.
 
-The recording below shows a first run. It clones the repository, sets up the client, sets the
-adapter in the config, starts the server and runs `server-info.py`. The steps are in
-[Setup](#setup) and [Run](#run).
+The recording below shows a first run. The steps are in [Setup](#setup) and [Run](#run).
 
 ![A first run of the Python client](demo.gif)
 

@@ -213,7 +213,8 @@ struct DeviceParameter {
   ScalarCell cell{};                ///< Scalar value, LSB-aligned little-endian, zero-extended.
   std::vector<uint8_t> rawValue{};  ///< Non-scalar value (string / byte array) as wire bytes.
   SyncState syncState{SyncState::Unknown};  ///< Freshness of the value relative to the device.
-  std::optional<uint32_t> unit;             ///< ETG.1004 unit code, when reported.
+  std::optional<uint32_t> unit;             ///< ETG.1004 unit code, from CoE or the ESI.
+  std::string unitSymbol;  ///< The symbol of @c unit, e.g. "rpm"; empty when unknown.
   std::optional<DeviceParameterValue> defaultValue;  ///< Slave-reported default, when available.
   std::optional<DeviceParameterValue> minValue;      ///< Slave-reported minimum, when available.
   std::optional<DeviceParameterValue> maxValue;      ///< Slave-reported maximum, when available.

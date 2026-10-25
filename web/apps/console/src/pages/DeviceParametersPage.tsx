@@ -911,7 +911,12 @@ export default function DeviceParametersPage() {
                             <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.defaultValue)}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.minValue)}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.maxValue)}</td>
-                            <td className="px-3 py-1.5 font-mono text-grey-600">{p.unit !== undefined ? toHex(p.unit, 8) : '—'}</td>
+                            <td
+                              className="px-3 py-1.5 font-mono text-grey-600"
+                              title={p.unit !== undefined ? toHex(p.unit, 8) : undefined}
+                            >
+                              {p.unit === undefined ? '—' : p.unitSymbol || toHex(p.unit, 8)}
+                            </td>
                           </tr>
                         )
                       })}

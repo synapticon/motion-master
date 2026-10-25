@@ -148,6 +148,7 @@ Every setting lives in a JSONC config file — comments are allowed, all keys ar
 | `gameLoop` | `periodUs` — the real-time cycle period (1000 = 1 ms; the Windows release ships 4000) |
 | `recorder` | `capacity` of the lossless process-data ring in cycles (default 300000 ≈ 5 min at 1 ms for one drive, ≈ 38 MB) and `dumpDir` for `.mmpd` dumps |
 | `parameterCache` | On-disk cache of CoE object-dictionary *definitions* (never values) keyed by vendor/product/firmware version (0x100A) — `enabled`, `cacheAllVendors`, `directory` |
+| `esiCache` | ESI files that add units to live parameters, found by vendor and firmware version (0x100A) as `esi-<vendor>-<version>.xml` — `enabled`, `directory` (default: the `esis` subdirectory of the user cache) |
 | `parameters` | `readObjectDictionaryOnPreop` (enumerate on the first PRE-OP) and `useCompleteAccess` (one CoE Complete Access upload per ARRAY/RECORD instead of per-subindex reads) |
 | `tls` | `certPath`, `keyPath` (empty = auto-discover), and `autoUpdate` — set `false` for air-gapped installs |
 

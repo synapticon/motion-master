@@ -1786,10 +1786,15 @@ export interface DeviceParameter {
    */
   value: ParameterValue;
   /**
-   * ETG.1004 unit code reported by the slave for this entry.  Absent when the slave does not populate the Unit field of the SDO Info response.  The 32-bit code decomposes into prefix, base SI unit, and exponent per ETG.1004.
-   * @example 0
+   * ETG.1004 unit code of this entry. The code comes from the SDO Info response of the slave. When the slave reports none, it comes from the device's ESI in the `esis` directory of the user cache. That file is named `esi-<vendor>-<version>.xml`, where `<version>` is the device's firmware version in 0x100A, matched exactly. Absent when neither source gives a unit. The 32-bit code decomposes into prefix, base SI unit, and exponent per ETG.1004.
+   * @example 11814656
    */
   unit?: number;
+  /**
+   * The symbol of `unit`, for example `rpm` or `mV`. It comes from the ESI with the unit, or is rendered from the ETG.1004 code when the slave reported the unit. Absent when there is no unit or it has no symbol.
+   * @example "rpm"
+   */
+  unitSymbol?: string;
   /** Slave-reported default value, decoded with the same logic as `value`.  Absent when the slave does not report a default. */
   defaultValue?: ParameterValue;
   /** Slave-reported minimum value, decoded with the same logic as `value`.  Absent when the slave does not report a minimum. */

@@ -4956,7 +4956,9 @@ paths:
 
         That is separate from whether a *feature* reads a given file, and several do: `parameters/`
         (the on-disk object-dictionary cache) and `dumps/` (`.mmpd` recorder dumps) are written and
-        consumed by those features, with more to follow. Their files appear in this listing
+        consumed by those features. `esis/` holds ESI files that a client adds, named
+        `esi-<vendor>-<version>.xml`; a device whose vendor and firmware version (0x100A) match a
+        file takes the units of its parameters from it at the next scan or parameter init. Their files appear in this listing
         alongside everything else, so a client must not assume every entry was uploaded through this
         API, nor that deleting one is inconsequential.
       responses:
@@ -7185,11 +7187,21 @@ components:
         unit:
           type: integer
           description: >-
-            ETG.1004 unit code reported by the slave for this entry.  Absent
-            when the slave does not populate the Unit field of the SDO Info
-            response.  The 32-bit code decomposes into prefix, base SI unit,
-            and exponent per ETG.1004.
-          example: 0
+            ETG.1004 unit code of this entry. The code comes from the SDO Info
+            response of the slave. When the slave reports none, it comes from the
+            device's ESI in the `esis` directory of the user cache. That file is
+            named `esi-<vendor>-<version>.xml`, where `<version>` is the device's
+            firmware version in 0x100A, matched exactly. Absent when neither
+            source gives a unit. The 32-bit code decomposes into prefix, base SI
+            unit, and exponent per ETG.1004.
+          example: 11814656
+        unitSymbol:
+          type: string
+          description: >-
+            The symbol of `unit`, for example `rpm` or `mV`. It comes from the ESI
+            with the unit, or is rendered from the ETG.1004 code when the slave
+            reported the unit. Absent when there is no unit or it has no symbol.
+          example: "rpm"
         defaultValue:
           description: >-
             Slave-reported default value, decoded with the same logic as

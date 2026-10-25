@@ -119,6 +119,16 @@ struct ParameterCacheConfig {
   std::string directory;  ///< "" = a standard per-user cache directory; set to override.
 };
 
+/// @brief @c "esiCache" block — the ESI files that add units to live parameters.
+///
+/// A device's ESI is the file @c esi-<vendor>-<version>.xml in this directory, where the version is
+/// the device's 0x100A. Every vendor is looked up, so 0x100A is read from every CoE device while
+/// the cache is on.
+struct EsiCacheConfig {
+  bool enabled = true;    ///< false: no device gets metadata from an ESI.
+  std::string directory;  ///< "" = the @c esis subdirectory of the user cache; set to override.
+};
+
 /// @brief @c "userCache" block — the user-writable file store served at @c /api/user-cache.
 ///
 /// A plain place to keep files that should outlive a restart. The store itself neither validates
@@ -220,6 +230,7 @@ struct Config {
   GameLoopConfig gameLoop;
   RecorderConfig recorder;
   ParameterCacheConfig parameterCache;
+  EsiCacheConfig esiCache;
   UserCacheConfig userCache;
   ParametersConfig parameters;
   AutoTuningConfig autoTuning;
@@ -235,6 +246,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs, cpuAff
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, capacity, dumpDir)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, cacheAllVendors,
                                                 directory)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(EsiCacheConfig, enabled, directory)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(UserCacheConfig, directory)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParametersConfig, readObjectDictionaryOnPreop,
                                                 useCompleteAccess)
@@ -243,8 +255,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FileLoggingConfig, enabled, leve
                                                 maxSizeMb, maxFiles)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(LoggingConfig, level, file)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logging, tls, gameLoop,
-                                                recorder, parameterCache, userCache, parameters,
-                                                autoTuning)
+                                                recorder, parameterCache, esiCache, userCache,
+                                                parameters, autoTuning)
 
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///

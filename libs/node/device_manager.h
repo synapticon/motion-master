@@ -21,6 +21,7 @@
 
 #include "comm/fieldbus_driver.h"
 #include "node/device.h"
+#include "node/esi_cache.h"
 #include "node/parameter_cache.h"
 #include "node/process_data_ring.h"
 #include "node/process_image.h"
@@ -311,7 +312,7 @@ std::ostream& operator<<(std::ostream& os, const ParameterError& error);
 /// This map is so a reader can find the part they need without reading all of it.
 ///
 /// - *lifecycle:* @c init, @c scan, @c reset, @c initialised, @c topologyGeneration,
-///   @c configureParameterCache, @c parameterCache
+///   @c configureParameterCache, @c parameterCache, @c configureEsiCache
 /// - *reaching a device:* @c deviceAt (a handle that owns its set), @c deviceSet (the whole set),
 ///   @c hasDevice (a predicate, no device), @c findDevice (**real-time only**)
 /// - *process data:* @c configureProcessData, @c exchangeProcessData (**real-time**),
@@ -369,6 +370,11 @@ class DeviceManager {
   ///
   /// A disk store independent of the bus; usable with or without a driver initialised.
   const ParameterCache& parameterCache() const;
+
+  /// @brief Sets the ESI cache policy and location. Called once at startup, like
+  ///        @c configureParameterCache. A device already up keeps the metadata it has; the next
+  ///        scan or parameter init uses the new setting.
+  void configureEsiCache(const EsiCacheConfig& config);
 
   /// @brief Scans the bus for nodes and populates the device list.
   ///
@@ -1116,6 +1122,8 @@ class DeviceManager {
   // On-disk parameter-definition cache, shared by every Device (handed to each by pointer at
   // scan()). Outlives every device set. Configured at init().
   ParameterCache parameterCache_;
+  // The ESI cache, shared by every Device like parameterCache_.
+  EsiCache esiCache_;
   // Runtime tuning captured at init(); drives recorder-ring sizing at configureProcessData.
   DeviceManagerConfig config_;
 };

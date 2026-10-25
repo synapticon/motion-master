@@ -7,7 +7,9 @@ add_library(
   device_parameter.cc
   eni_collector.cc
   eni_request.cc
+  esi_cache.cc
   firmware_package.cc
+  firmware_version.cc
   hardware_description.cc
   integro_variant.cc
   ic_haus_registers.cc

@@ -29,6 +29,14 @@ TEST(ConfigTest, EmptyObjectYieldsDefaults) {
   EXPECT_TRUE(r->fieldbus.driver.empty());
   EXPECT_TRUE(r->fieldbus.adapter.empty());
   EXPECT_EQ(r->gameLoop.periodUs, 1000u);
+  EXPECT_TRUE(r->esiCache.enabled);
+  EXPECT_TRUE(r->esiCache.directory.empty());
+}
+
+TEST(ConfigTest, EsiCacheCanBeDisabled) {
+  auto r = parseConfig(json{{"esiCache", {{"enabled", false}}}});
+  ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_FALSE(r->esiCache.enabled);
 }
 
 TEST(ConfigTest, GameLoopPeriodOverride) {

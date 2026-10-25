@@ -10,6 +10,7 @@ add_executable(
   device_manager_test.cc
   eni_collector_test.cc
   eni_request_test.cc
+  esi_cache_test.cc
   firmware_package_test.cc
   hardware_description_test.cc
   integro_variant_test.cc
@@ -45,12 +46,13 @@ if(MM_HAVE_MU_3SL)
 endif()
 
 # The firmware package fixtures are read from the source tree, and eni_collector_test.cc writes the
-# collected ENI for the schema-validation test below. Hand both directories to the test rather than
-# letting it guess a path relative to cwd.
+# collected ENI for the schema-validation test below. esi_cache_test.cc reads the pinned SOMANET ESI
+# of libs/etg. Hand every directory to the test rather than letting it guess a path relative to cwd.
 target_compile_definitions(
   mm_node_tests
   PRIVATE MM_NODE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
           MM_NODE_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+          MM_ETG_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/libs/etg/tests/data"
           MM_ENI_SAMPLES_DIR="${MM_ENI_SAMPLES_DIR}")
 
 # GCC 12–14 emit false-positive -Warray-bounds / -Wstringop-overflow inside libstdc++

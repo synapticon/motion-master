@@ -11,8 +11,7 @@ second run gives the same result as the first run.
 
 The recording below shows a first run. It clones the repository, sets up the client, sets the
 adapter in the config, starts the server and runs `server-info.py`. The steps are in
-[Setup](#setup) and [Run](#run). `demo.tape` records the GIF again with
-[VHS](https://github.com/charmbracelet/vhs).
+[Setup](#setup) and [Run](#run).
 
 ![A first run of the Python client](demo.gif)
 
@@ -22,7 +21,7 @@ adapter in the config, starts the server and runs `server-info.py`. The steps ar
 | --- | --- |
 | `motion_master_client.py` | `MotionMasterClient`. It calls the HTTP API by `operationId` and streams the monitoring WebSocket. It also has the steps that most scripts begin with: `from_config()`, `init()`, `ensure_scanned()` and `ensure_state()`. `run_procedure()` runs a procedure to its end, and `notifications()` streams the notifications. `run(main)` prints an error that a user can correct, such as a server that is not running, as one line instead of a traceback. Set `MM_TRACEBACK=1` to get the traceback. |
 | `config.example.toml` | The config template. Copy it to `config.toml`. |
-| `demo.tape` | The VHS script that records `demo.gif`. Run `vhs demo.tape`. |
+| `demo.tape` | The [VHS](https://github.com/charmbracelet/vhs) script that records `demo.gif`. Run `vhs demo.tape`. |
 | `examples/` | One script per action. See [Scripts](#scripts). |
 | `files/` | Where a script saves a file when `--output` names no other path. Git ignores this directory. |
 | `swagger.yml` | A copy of the spec that the client read from the server at its last startup. Look up an `operationId` here when you write a new script. The client writes it again at each startup, and Git ignores it. |

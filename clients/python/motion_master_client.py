@@ -188,6 +188,9 @@ class MotionMasterClient:
         # path template such as "/api/devices/{slavePosition}/sdo/{index}/{subindex}").
         response = self._session.get(f"{self._http_url}/api/swagger.yml", verify=verify)
         response.raise_for_status()
+        # A copy beside this module lets a reader, or a coding assistant that writes a new script,
+        # look up an operationId without a running server.
+        (Path(__file__).resolve().parent / "swagger.yml").write_text(response.text, encoding="utf-8")
         spec = yaml.safe_load(response.text)
 
         self._ops = {}

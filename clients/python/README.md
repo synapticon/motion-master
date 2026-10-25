@@ -17,6 +17,7 @@ second run gives the same result as the first run.
 | `config.example.toml` | The config template. Copy it to `config.toml`. |
 | `examples/` | One script per action. See [Scripts](#scripts). |
 | `files/` | Where a script saves a file when `--output` names no other path. Git ignores this directory. |
+| `swagger.yml` | A copy of the spec that the client read from the server at its last startup. Look up an `operationId` here when you write a new script. The client writes it again at each startup, and Git ignores it. |
 
 ## Scripts
 

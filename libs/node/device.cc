@@ -18,6 +18,7 @@
 #include "core/util.h"
 #include "node/cia402.h"
 #include "node/device_parameter.h"
+#include "node/esi_cache.h"
 #include "node/firmware_version.h"
 #include "node/parameter_cache.h"
 #include "node/process_data.h"
@@ -27,11 +28,12 @@
 namespace mm::node {
 
 Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, ProcessData* processData,
-               const ParameterCache* parameterCache)
+               const ParameterCache* parameterCache, const EsiCache* esiCache)
     : slavePosition_(slavePosition),
       driver_(driver),
       processData_(processData),
       parameterCache_(parameterCache),
+      esiCache_(esiCache),
       parametersMutex_(std::make_unique<std::mutex>()),
       cells_(std::make_unique<std::deque<DeviceParameter>>()) {
   auto info = driver_.slaveInfo(slavePosition);
@@ -194,20 +196,23 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
   //    enumeration. The cache holds the static schema only — never live values — so on a hit each
   //    definition's value is the type default and is filled in by the value-read pass below.
   //
-  //    The cache is keyed on the firmware version, so 0x100A is read before the dictionary is
-  //    known. A device that does not answer leaves the version empty, which the cache takes as a
-  //    miss on load and ignores on store: such a device is read from the device on every scan. A
-  //    vendor the cache does not apply to costs no extra upload.
+  //    Both caches are keyed on the firmware version, so 0x100A is read before the dictionary is
+  //    known. A device that does not answer leaves the version empty, which both caches take as a
+  //    miss: such a device is read from the device on every scan and gets no ESI. When neither
+  //    cache applies, the upload is not made.
+  const bool useParameterCache = parameterCache_ && parameterCache_->enabledForVendor(vendorId_);
+  const bool useEsiCache = esiCache_ && esiCache_->enabled();
   std::optional<std::vector<DeviceParameter>> definitions;
   std::string firmwareVersion;
-  if (parameterCache_ && parameterCache_->enabledForVendor(vendorId_)) {
+  if (useParameterCache || useEsiCache) {
     if (auto version = readSdo(0x100A, 0); version) {
       firmwareVersion = trimFirmwareVersion(*version);
     } else {
-      spdlog::debug(
-          "Device {}: no firmware version in 0x100A, so the parameter cache is not used: {}",
-          slavePosition_, version.error());
+      spdlog::debug("Device {}: no firmware version in 0x100A, so no cache applies: {}",
+                    slavePosition_, version.error());
     }
+  }
+  if (useParameterCache) {
     definitions = parameterCache_->load(vendorId_, productCode_, firmwareVersion);
   }
   if (!definitions) {
@@ -227,6 +232,7 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
           .bitLength = e.bitLength,
           .access = e.access,
           .unit = e.unit,
+          .unitSymbol = {},
           .defaultValue = std::nullopt,
           .minValue = std::nullopt,
           .maxValue = std::nullopt,
@@ -273,6 +279,12 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
     }
     definitions = std::move(built);
   }
+
+  // The ESI is joined after the store, so the cache file holds what CoE said and a new ESI takes
+  // effect without deleting it.
+  const auto esi =
+      useEsiCache ? esiCache_->find(vendorId_, productCode_, firmwareVersion) : nullptr;
+  definitions = joinEsi(std::move(*definitions), esi.get());
 
   // 2. Fill in live values (if requested). The per-entry uploads are slow and must not hold the
   //    cache lock (that would stall a concurrent sampler cached-read for the whole enumeration), so
@@ -334,6 +346,7 @@ void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& b
         cell->objectCode = definition.objectCode;
         cell->access = definition.access;
         cell->unit = definition.unit;
+        cell->unitSymbol = std::move(definition.unitSymbol);
         cell->defaultValue = std::move(definition.defaultValue);
         cell->minValue = std::move(definition.minValue);
         cell->maxValue = std::move(definition.maxValue);
@@ -818,6 +831,7 @@ std::expected<std::vector<DeviceParameter>, std::string> Device::buildSiiParamet
             .access = access,
             .origin = ParameterOrigin::Sii,
             .unit = std::nullopt,
+            .unitSymbol = {},
             .defaultValue = std::nullopt,
             .minValue = std::nullopt,
             .maxValue = std::nullopt,

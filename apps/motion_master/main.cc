@@ -121,6 +121,10 @@ int main(int argc, char** argv) {
                         ? (userCacheRoot / "parameters").string()
                         : opts.config.parameterCache.directory,
        .enabled = opts.config.parameterCache.enabled});
+  deviceManager.configureEsiCache({.enabled = opts.config.esiCache.enabled,
+                                   .directory = opts.config.esiCache.directory.empty()
+                                                    ? (userCacheRoot / "esis").string()
+                                                    : opts.config.esiCache.directory});
 
   // Runtime tuning for DeviceManager::init, derived once from the config and shared by both the
   // eager startup init below and the POST /api/init callback.

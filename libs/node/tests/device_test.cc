@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/esi_cache.h"
 #include "node/parameter_cache.h"
 #include "node/synapticon.h"
 
@@ -1782,6 +1783,100 @@ TEST(DeviceParameterCache, NewFirmwareVersionReadsTheDictionaryAgain) {
   EXPECT_EQ(cache.list().size(), 2U);
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
+}
+
+// ── Units from the ESI ──────────────────────────────────────────────────────────────────────────
+//
+// A SOMANET drive reports no unit over CoE, so the unit comes from the ESI the cache finds for the
+// device's vendor, product and 0x100A. The fixture is the pinned SOMANET ESI of libs/etg.
+
+constexpr uint32_t kCirculoProduct = 0x00000301;
+constexpr uint32_t kMaxMotorSpeedUnit = 0x00B44700;
+
+std::filesystem::path makeEsiDir(const std::string& tag, std::string_view version) {
+  const auto dir = std::filesystem::temp_directory_path() / ("mm-device-esi-test-" + tag);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+  std::filesystem::create_directories(dir);
+  std::filesystem::copy_file(
+      std::filesystem::path(MM_ETG_TEST_DATA_DIR) / "somanet-v5.6.6.xml",
+      dir / mm::node::EsiCache::fileName(mm::node::kSynapticonVendorId, version));
+  return dir;
+}
+
+std::vector<uint8_t> visibleString(std::string_view text, std::size_t size) {
+  std::vector<uint8_t> bytes(text.begin(), text.end());
+  bytes.resize(size, 0);
+  return bytes;
+}
+
+void programCirculo(SdoFakeDriver& driver, std::string_view version) {
+  driver.info.vendorId = mm::node::kSynapticonVendorId;
+  driver.info.productCode = kCirculoProduct;
+  driver.state = kPreOp;
+  driver.programRead(0x100A, 0x00, visibleString(version, 50));
+  driver.programOd(0x6080, 0x00, kU32);
+  driver.programRead(0x6080, 0x00, u32le(3000));
+}
+
+TEST(DeviceEsiUnits, TakesTheUnitOfAParameterFromTheEsi) {
+  SdoFakeDriver driver;
+  programCirculo(driver, "v5.6.6");
+  const mm::node::EsiCache esi(
+      {.enabled = true, .directory = makeEsiDir("unit", "v5.6.6").string()});
+  Device device(1, driver, nullptr, nullptr, &esi);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
+
+  const auto p = device.parameter(0x6080, 0x00);
+  ASSERT_TRUE(p.has_value());
+  EXPECT_EQ(p->unit, kMaxMotorSpeedUnit);
+  EXPECT_EQ(p->unitSymbol, "rpm");
+}
+
+TEST(DeviceEsiUnits, GetsNoUnitWhenNoFileMatchesTheFirmwareVersion) {
+  SdoFakeDriver driver;
+  programCirculo(driver, "v5.6.6+1.g676379dc4");
+  const mm::node::EsiCache esi(
+      {.enabled = true, .directory = makeEsiDir("miss", "v5.6.6").string()});
+  Device device(1, driver, nullptr, nullptr, &esi);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
+
+  EXPECT_FALSE(device.parameter(0x6080, 0x00)->unit.has_value());
+}
+
+TEST(DeviceEsiUnits, GetsNoUnitAndReadsNoVersionWhileTheCacheIsDisabled) {
+  SdoFakeDriver driver;
+  programCirculo(driver, "v5.6.6");
+  const mm::node::EsiCache esi(
+      {.enabled = false, .directory = makeEsiDir("disabled", "v5.6.6").string()});
+  Device device(1, driver, nullptr, nullptr, &esi);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+
+  EXPECT_FALSE(device.parameter(0x6080, 0x00)->unit.has_value());
+  EXPECT_EQ(driver.perSubReads, 0);
+}
+
+TEST(DeviceEsiUnits, AddsTheUnitToADictionaryFromTheParameterCache) {
+  const auto dir = makeEsiDir("parameter-cache", "v5.6.6");
+  SdoFakeDriver driver;
+  programCirculo(driver, "v5.6.6");
+  const mm::node::ParameterCache parameters(
+      {.cacheAllVendors = false, .directory = (dir / "parameters").string(), .enabled = true});
+  const mm::node::EsiCache esi({.enabled = true, .directory = dir.string()});
+
+  {
+    Device first(1, driver, nullptr, &parameters, &esi);
+    ASSERT_TRUE(first.initializeParameters(/*readValues=*/false).has_value());
+  }
+  // The second device is served from the cache file, which holds what CoE said and no unit.
+  driver.ods.clear();
+  Device second(1, driver, nullptr, &parameters, &esi);
+  ASSERT_TRUE(second.initializeParameters(/*readValues=*/false).has_value());
+
+  EXPECT_EQ(second.parameter(0x6080, 0x00)->unit, kMaxMotorSpeedUnit);
 }
 
 }  // namespace

@@ -205,6 +205,9 @@ FakeDriver* setUp(DeviceManager& dm, uint32_t value, int slaves = 1) {
     raw->programOd(0x2030, subindex, kU32);
     raw->programRead(0x2030, subindex, u32le(value));
   }
+  // The ESI cache reads 0x100A from every device, and these tests count the reads of the refresher
+  // alone.
+  dm.configureEsiCache({.enabled = false, .directory = {}});
   EXPECT_TRUE(dm.init(std::move(driver)).has_value());
   EXPECT_TRUE(dm.scan().has_value());
   for (int position = 1; position <= slaves; ++position) {

@@ -8,8 +8,10 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include "etg/esi_entry.h"
+#include "node/device_parameter.h"
 
 namespace mm::node {
 namespace {
@@ -127,6 +129,65 @@ TEST(EsiCacheTest, SharesOneTableBetweenDevicesOfOneProductAndFirmware) {
   const auto integro = cache.find(kSynapticon, 0x00000401, "v5.6.6");
   ASSERT_NE(integro, nullptr);
   EXPECT_NE(integro, first);
+}
+
+TEST(EsiCacheTest, MissesEveryDeviceWhileDisabled) {
+  const fs::path dir = makeTempDir("disabled");
+  addFixture(dir, "v5.6.6");
+  const EsiCache cache({.enabled = false, .directory = dir.string()});
+
+  EXPECT_FALSE(cache.enabled());
+  EXPECT_EQ(cache.find(kSynapticon, kCirculo, "v5.6.6"), nullptr);
+}
+
+DeviceParameter makeParameter(uint16_t index, uint8_t subindex) {
+  DeviceParameter p;
+  p.index = index;
+  p.subindex = subindex;
+  return p;
+}
+
+mm::etg::EsiEntryTable tableWithUnit(uint16_t index, uint8_t subindex, uint32_t unit,
+                                     std::string symbol) {
+  mm::etg::EsiEntry entry;
+  entry.index = index;
+  entry.subindex = subindex;
+  entry.unit = unit;
+  entry.unitSymbol = std::move(symbol);
+  return mm::etg::EsiEntryTable{.entries = {entry}, .warnings = {}};
+}
+
+TEST(JoinEsiTest, TakesTheUnitOfTheEsiWhereCoeReportsNone) {
+  const auto esi = tableWithUnit(0x6080, 0, 0x00B44700, "rpm");
+
+  const auto joined = joinEsi({makeParameter(0x6080, 0), makeParameter(0x6081, 0)}, &esi);
+
+  EXPECT_EQ(joined[0].unit, 0x00B44700u);
+  EXPECT_EQ(joined[0].unitSymbol, "rpm");
+  // An object the ESI does not describe keeps what CoE gave it.
+  EXPECT_FALSE(joined[1].unit.has_value());
+  EXPECT_TRUE(joined[1].unitSymbol.empty());
+}
+
+TEST(JoinEsiTest, KeepsTheUnitCoeReports) {
+  const auto esi = tableWithUnit(0x6080, 0, 0x00B44700, "rpm");
+  DeviceParameter volts = makeParameter(0x6080, 0);
+  volts.unit = 0x00260000;
+
+  const auto joined = joinEsi({volts}, &esi);
+
+  EXPECT_EQ(joined[0].unit, 0x00260000u);
+  EXPECT_EQ(joined[0].unitSymbol, "V");
+}
+
+TEST(JoinEsiTest, RendersTheSymbolOfACoeUnitWithoutAnEsi) {
+  DeviceParameter volts = makeParameter(0x6079, 0);
+  volts.unit = 0x00260000;
+
+  const auto joined = joinEsi({volts, makeParameter(0x6080, 0)}, nullptr);
+
+  EXPECT_EQ(joined[0].unitSymbol, "V");
+  EXPECT_TRUE(joined[1].unitSymbol.empty());
 }
 
 }  // namespace

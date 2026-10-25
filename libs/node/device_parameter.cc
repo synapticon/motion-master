@@ -444,6 +444,9 @@ void to_json(nlohmann::json& j, const DeviceParameter& p) {
   if (p.unit) {
     j["unit"] = *p.unit;
   }
+  if (!p.unitSymbol.empty()) {
+    j["unitSymbol"] = p.unitSymbol;
+  }
   auto emitValue = [&j](const char* key, const std::optional<DeviceParameterValue>& v) {
     if (v) {
       std::visit([&j, key](const auto& x) { j[key] = x; }, *v);

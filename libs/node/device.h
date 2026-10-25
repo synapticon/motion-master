@@ -35,6 +35,10 @@ struct ProcessData;
 ///        device.cc, which consults it from @c initializeParameters. Owned by @c DeviceManager.
 class ParameterCache;
 
+/// @brief Finds a device's ESI by vendor and firmware version. Forward-declared and held by pointer
+///        like @c ParameterCache. Owned by @c DeviceManager.
+class EsiCache;
+
 /// @brief Runtime discovery state of CoE Complete Access support. CA is optional in CoE and the
 ///        EEPROM capability hint is unreliable (SOMANET advertises @c completeAccess=false while
 ///        CA in fact works), so support is probed: the first grouped read attempts CA and the
@@ -130,8 +134,12 @@ class Device {
   ///                       enumerate live. When supplied (by @c DeviceManager),
   ///                       @c initializeParameters loads definitions from it on a hit and populates
   ///                       it on a miss. Lifetime must exceed that of this object.
+  /// @param esiCache       The ESI cache, or @c nullptr to use CoE metadata only. When supplied,
+  ///                       @c initializeParameters adds the units of the device's ESI. Lifetime
+  ///                       must exceed that of this object.
   Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver,
-         ProcessData* processData = nullptr, const ParameterCache* parameterCache = nullptr);
+         ProcessData* processData = nullptr, const ParameterCache* parameterCache = nullptr,
+         const EsiCache* esiCache = nullptr);
 
   /// @brief Returns the 1-based position of this node on the fieldbus.
   uint16_t slavePosition() const;
@@ -879,6 +887,9 @@ class Device {
   // On-disk parameter-definition cache, or nullptr to always enumerate live. Non-owning; owned by
   // DeviceManager, which outlives every Device. Consulted only by initializeParameters.
   const ParameterCache* parameterCache_ = nullptr;
+  // The ESI cache, or nullptr. Non-owning, like parameterCache_. Consulted only by
+  // initializeParameters.
+  const EsiCache* esiCache_ = nullptr;
   std::string name_;
   uint32_t vendorId_;
   uint32_t productCode_;

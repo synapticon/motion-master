@@ -182,6 +182,22 @@
     "directory": ""
   },
 
+  // ESI files (EtherCAT Slave Information, the XML description a vendor ships for a device). Over CoE
+  // a SOMANET drive reports no units, so Motion Master takes each parameter's unit from the
+  // device's ESI. The ESI of a device is the file esi-<vendor>-<version>.xml in the directory below:
+  // <vendor> is the vendor ID as 8 lowercase hex digits, and <version> is the device's firmware
+  // version from 0x100A, with every character other than A-Z, a-z, 0-9, '.', '_' and '-' turned into
+  // '_'. Example: esi-000022d2-v5.6.11.xml. The version must match exactly, build metadata
+  // included. Add a file with PUT /api/user-cache/esis/<name>. A device with no matching file keeps
+  // what CoE reported. While the cache is enabled, 0x100A is read from every CoE device.
+  "esiCache": {
+    "enabled": true,  // false: no device gets metadata from an ESI
+
+    // Directory for the ESI files. Empty = the "esis" subdirectory of the user cache, so the files
+    // are listed, uploaded and deleted through /api/user-cache. Set an absolute path to override.
+    "directory": ""
+  },
+
   // The user-writable file store served at /api/user-cache (console: Storage -> User Cache). A
   // plain place to keep files that should outlive a restart. The store itself neither validates nor
   // interprets an upload — putting a file here does not, on its own, make Motion Master do anything

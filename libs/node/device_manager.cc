@@ -144,6 +144,8 @@ void DeviceManager::configureParameterCache(const ParameterCacheConfig& config) 
 
 const ParameterCache& DeviceManager::parameterCache() const { return parameterCache_; }
 
+void DeviceManager::configureEsiCache(const EsiCacheConfig& config) { esiCache_.configure(config); }
+
 std::expected<int, std::string> DeviceManager::scan() {
   // busOperationMutex_ only. The driver scan reprograms the SOEM context underneath the *current*
   // set, so this must exclude the other control-plane operations — but not readers: they keep
@@ -190,10 +192,10 @@ std::expected<int, std::string> DeviceManager::scan() {
   for (uint16_t pos = 1; pos <= static_cast<uint16_t>(*result); ++pos) {
     // Hand each device the process-data runtime so its read/writeParameter can serve the live
     // IOmap value while exchanging (and stage outputs), falling back to SDO otherwise, plus the
-    // shared parameter cache so initializeParameters can skip enumeration on a hit. Both pd_ and
-    // parameterCache_ are members created once and never replaced, so the pointers are stable for
-    // our lifetime.
-    set->devices.emplace_back(pos, *set->driver, pd_.get(), &parameterCache_);
+    // shared parameter cache so initializeParameters can skip enumeration on a hit, and the ESI
+    // cache for the units. pd_, parameterCache_ and esiCache_ are members created once and never
+    // replaced, so the pointers are stable for our lifetime.
+    set->devices.emplace_back(pos, *set->driver, pd_.get(), &parameterCache_, &esiCache_);
   }
   spdlog::info("Found {} slave(s)", *result);
   for (const auto& found : set->devices) {

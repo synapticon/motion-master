@@ -8,8 +8,10 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "etg/esi_entry.h"
+#include "node/device_parameter.h"
 
 namespace mm::node {
 
@@ -20,8 +22,9 @@ namespace mm::node {
 // vendor ID and the firmware version, and the version must equal the device's 0x100A exactly,
 // build metadata included. A development build gets no ESI until a person adds one under its name.
 
-/// @brief Location of the ESI cache. Mirrors how @c ParameterCacheConfig names its directory.
+/// @brief Policy and location of the ESI cache. Mirrors the JSONC @c esiCache block.
 struct EsiCacheConfig {
+  bool enabled = true;    ///< false: @c find misses for every device.
   std::string directory;  ///< "" = the @c esis subdirectory of the per-user cache directory.
 };
 
@@ -53,9 +56,14 @@ class EsiCache {
   ///        reduced by @c sanitizeFirmwareVersion.
   static std::string fileName(uint32_t vendorId, std::string_view firmwareVersion);
 
+  /// @brief Whether lookups are on. A caller skips the work a lookup needs, such as reading 0x100A,
+  ///        when they are off.
+  bool enabled() const;
+
   /// @brief The flattened dictionary of one device from its ESI.
   ///
-  /// @param firmwareVersion  The device's 0x100A, trimmed. Empty is a miss.
+  /// @param firmwareVersion  The device's 0x100A, trimmed. Empty is a miss, and so is every
+  ///                         lookup while the cache is disabled.
   /// @return The table, shared with every other caller for the same file and product, or
   ///         @c nullptr on a miss.
   std::shared_ptr<const mm::etg::EsiEntryTable> find(uint32_t vendorId, uint32_t productCode,
@@ -81,5 +89,15 @@ class EsiCache {
   EsiCacheConfig config_;
   mutable std::unordered_map<std::string, LoadedFile> files_;  ///< Keyed on the file name.
 };
+
+/// @brief Adds what the ESI says about each parameter to the definitions CoE gave.
+///
+/// A unit CoE reported is kept, because the device is the authority on itself. A parameter with no
+/// unit takes the unit and symbol of the ESI entry with the same index and subindex. A unit with no
+/// symbol then gets one rendered from its ETG.1004 code.
+///
+/// @param esi  The device's table from @c EsiCache::find, or @c nullptr when it has none.
+std::vector<DeviceParameter> joinEsi(std::vector<DeviceParameter> parameters,
+                                     const mm::etg::EsiEntryTable* esi);
 
 }  // namespace mm::node

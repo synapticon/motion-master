@@ -7,6 +7,7 @@
 #include <cstring>
 #include <expected>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -460,9 +461,10 @@ void to_json(nlohmann::json& j, const DeviceParameter& p) {
   }
   if (!p.options.empty()) {
     auto& options = j["options"] = nlohmann::json::array();
-    for (const auto& option : p.options) {
-      options.push_back({{"value", option.value}, {"label", option.label}});
-    }
+    std::transform(p.options.begin(), p.options.end(), std::back_inserter(options),
+                   [](const EsiParameterOption& option) {
+                     return nlohmann::json{{"value", option.value}, {"label", option.label}};
+                   });
   }
   if (!p.esiFile.empty()) {
     j["esiFile"] = p.esiFile;

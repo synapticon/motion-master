@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -397,6 +398,32 @@ TEST(DeviceParameterStorage, CopiesCarryTheCellIndependently) {
   ASSERT_TRUE(original.setValue(uint32_t{9}).has_value());
   EXPECT_EQ(original.currentValue(), DeviceParameterValue{uint32_t{9}});
   EXPECT_EQ(copy.currentValue(), DeviceParameterValue{uint32_t{7}});  // snapshot, not a view
+}
+
+// The ESI fields reach a client only through this serialisation, and are left out when empty.
+TEST(DeviceParameterJson, CarriesTheEsiFieldsOnlyWhenTheyAreSet) {
+  DeviceParameter p;
+  p.index = 0x6060;
+  p.dataType = 0x0002;  // INTEGER8
+  p.bitLength = 8;
+  p.unit = 0x00B44700;
+  p.unitSymbol = "rpm";
+  p.description = "<p>Modes of operation</p>";
+  p.options = {{.value = 8, .label = "CSP"}, {.value = 9, .label = "CSV"}};
+  p.esiFile = "esi-000022d2-v5.6.11.xml";
+
+  const nlohmann::json j = p;
+
+  EXPECT_EQ(j.at("unitSymbol"), "rpm");
+  EXPECT_EQ(j.at("description"), "<p>Modes of operation</p>");
+  EXPECT_EQ(j.at("options"),
+            nlohmann::json::parse(R"([{"value":8,"label":"CSP"},{"value":9,"label":"CSV"}])"));
+  EXPECT_EQ(j.at("esiFile"), "esi-000022d2-v5.6.11.xml");
+
+  const nlohmann::json bare = DeviceParameter{};
+  for (const char* key : {"unitSymbol", "description", "options", "esiFile"}) {
+    EXPECT_FALSE(bare.contains(key)) << key;
+  }
 }
 
 }  // namespace

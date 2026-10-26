@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -160,7 +162,8 @@ mm::etg::EsiEntryTable tableWithUnit(uint16_t index, uint8_t subindex, uint32_t 
 TEST(JoinEsiTest, TakesTheUnitOfTheEsiWhereCoeReportsNone) {
   const auto esi = tableWithUnit(0x6080, 0, 0x00B44700, "rpm");
 
-  const auto joined = joinEsi({makeParameter(0x6080, 0), makeParameter(0x6081, 0)}, &esi);
+  const auto joined =
+      joinEsi({makeParameter(0x6080, 0), makeParameter(0x6081, 0)}, &esi, "esi.xml");
 
   EXPECT_EQ(joined[0].unit, 0x00B44700u);
   EXPECT_EQ(joined[0].unitSymbol, "rpm");
@@ -174,7 +177,7 @@ TEST(JoinEsiTest, KeepsTheUnitCoeReports) {
   DeviceParameter volts = makeParameter(0x6080, 0);
   volts.unit = 0x00260000;
 
-  const auto joined = joinEsi({volts}, &esi);
+  const auto joined = joinEsi({volts}, &esi, "esi.xml");
 
   EXPECT_EQ(joined[0].unit, 0x00260000u);
   EXPECT_EQ(joined[0].unitSymbol, "V");
@@ -184,10 +187,94 @@ TEST(JoinEsiTest, RendersTheSymbolOfACoeUnitWithoutAnEsi) {
   DeviceParameter volts = makeParameter(0x6079, 0);
   volts.unit = 0x00260000;
 
-  const auto joined = joinEsi({volts, makeParameter(0x6080, 0)}, nullptr);
+  const auto joined = joinEsi({volts, makeParameter(0x6080, 0)}, nullptr, "");
 
   EXPECT_EQ(joined[0].unitSymbol, "V");
   EXPECT_TRUE(joined[1].unitSymbol.empty());
+}
+
+// The join against the real table of a Circulo, so the ranges, descriptions and options are the
+// ones a drive gets.
+class JoinSomanetEsiTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    const fs::path dir = makeTempDir("join");
+    addFixture(dir, "v5.6.6");
+    cache_ = std::make_unique<EsiCache>(EsiCacheConfig{.directory = dir.string()});
+    table_ = cache_->find(kSynapticon, kCirculo, "v5.6.6");
+    ASSERT_NE(table_, nullptr);
+  }
+
+  // A parameter as CoE would describe the ESI entry: same address and type, nothing else.
+  DeviceParameter coeParameter(const mm::etg::EsiEntry& entry) const {
+    DeviceParameter p = makeParameter(entry.index, entry.subindex);
+    p.dataType = entry.dataType;
+    return p;
+  }
+
+  const mm::etg::EsiEntry* findNamed(uint16_t index, std::string_view name) const {
+    const auto it = std::find_if(table_->entries.begin(), table_->entries.end(),
+                                 [index, name](const mm::etg::EsiEntry& e) {
+                                   return e.index == index && e.entryName == name;
+                                 });
+    return it != table_->entries.end() ? &*it : nullptr;
+  }
+
+  std::unique_ptr<EsiCache> cache_;
+  std::shared_ptr<const mm::etg::EsiEntryTable> table_;
+};
+
+TEST_F(JoinSomanetEsiTest, DecodesASignedRangeThroughTheParameterType) {
+  // A SINT that runs -1..+1, written MinData=FF MaxData=01.
+  const auto* direction = findNamed(0x2004, "Initial movement direction (pin brake)");
+  ASSERT_NE(direction, nullptr);
+
+  const auto joined = joinEsi({coeParameter(*direction)}, table_.get(), "esi.xml");
+
+  ASSERT_TRUE(joined[0].minValue.has_value());
+  ASSERT_TRUE(joined[0].maxValue.has_value());
+  EXPECT_EQ(*joined[0].minValue, DeviceParameterValue{int8_t{-1}});
+  EXPECT_EQ(*joined[0].maxValue, DeviceParameterValue{int8_t{1}});
+  EXPECT_EQ(joined[0].esiFile, "esi.xml");
+}
+
+TEST_F(JoinSomanetEsiTest, TakesTheOptionsAndTheDescriptionOfAnEntry) {
+  const auto withOptions =
+      std::find_if(table_->entries.begin(), table_->entries.end(),
+                   [](const mm::etg::EsiEntry& e) { return !e.options.empty(); });
+  ASSERT_NE(withOptions, table_->entries.end());
+  const auto* maxMotorSpeed = findEntry(*table_, 0x6080, 0);
+  ASSERT_NE(maxMotorSpeed, nullptr);
+
+  const auto joined =
+      joinEsi({coeParameter(*withOptions), coeParameter(*maxMotorSpeed)}, table_.get(), "esi.xml");
+
+  ASSERT_EQ(joined[0].options.size(), withOptions->options.size());
+  EXPECT_EQ(joined[0].options[0].label, withOptions->options[0].label);
+  EXPECT_EQ(joined[0].options[0].value, withOptions->options[0].value);
+  EXPECT_NE(joined[1].description.find("max allowed speed"), std::string::npos);
+}
+
+TEST_F(JoinSomanetEsiTest, KeepsTheBoundsCoeReports) {
+  const auto* maxMotorSpeed = findEntry(*table_, 0x6080, 0);
+  ASSERT_NE(maxMotorSpeed, nullptr);
+  DeviceParameter p = coeParameter(*maxMotorSpeed);
+  p.maxValue = DeviceParameterValue{uint32_t{1234}};
+
+  const auto joined = joinEsi({p}, table_.get(), "esi.xml");
+
+  EXPECT_EQ(*joined[0].maxValue, DeviceParameterValue{uint32_t{1234}});
+}
+
+TEST_F(JoinSomanetEsiTest, LeavesAnEntryTheEsiDoesNotDescribeAsCoeGaveIt) {
+  DeviceParameter unknown = makeParameter(0x5FFF, 0);
+  unknown.dataType = 0x0007;
+
+  const auto joined = joinEsi({unknown}, table_.get(), "esi.xml");
+
+  EXPECT_TRUE(joined[0].esiFile.empty());
+  EXPECT_TRUE(joined[0].description.empty());
+  EXPECT_FALSE(joined[0].maxValue.has_value());
 }
 
 }  // namespace

@@ -183,8 +183,8 @@
   },
 
   // ESI files (EtherCAT Slave Information, the XML description a vendor ships for a device). Over CoE
-  // a SOMANET drive reports no units, so Motion Master takes each parameter's unit from the
-  // device's ESI. The ESI of a device is the file esi-<vendor>-<version>.xml in the directory below:
+  // a SOMANET drive reports no units, ranges, defaults, descriptions or options, so Motion Master
+  // takes them from the device's ESI. The ESI of a device is the file esi-<vendor>-<version>.xml in the directory below:
   // <vendor> is the vendor ID as 8 lowercase hex digits, and <version> is the device's firmware
   // version from 0x100A, with every character other than A-Z, a-z, 0-9, '.', '_' and '-' turned into
   // '_'. Example: esi-000022d2-v5.6.11.xml. The version must match exactly, build metadata

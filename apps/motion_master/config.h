@@ -119,7 +119,7 @@ struct ParameterCacheConfig {
   std::string directory;  ///< "" = a standard per-user cache directory; set to override.
 };
 
-/// @brief @c "esiCache" block — the ESI files that add units to live parameters.
+/// @brief @c "esiCache" block — the ESI files that add metadata to live parameters.
 ///
 /// A device's ESI is the file @c esi-<vendor>-<version>.xml in this directory, where the version is
 /// the device's 0x100A. Every vendor is looked up, so 0x100A is read from every CoE device while

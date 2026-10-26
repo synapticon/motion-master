@@ -455,6 +455,18 @@ void to_json(nlohmann::json& j, const DeviceParameter& p) {
   emitValue("defaultValue", p.defaultValue);
   emitValue("minValue", p.minValue);
   emitValue("maxValue", p.maxValue);
+  if (!p.description.empty()) {
+    j["description"] = p.description;
+  }
+  if (!p.options.empty()) {
+    auto& options = j["options"] = nlohmann::json::array();
+    for (const auto& option : p.options) {
+      options.push_back({{"value", option.value}, {"label", option.label}});
+    }
+  }
+  if (!p.esiFile.empty()) {
+    j["esiFile"] = p.esiFile;
+  }
 }
 
 }  // namespace mm::node

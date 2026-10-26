@@ -1795,12 +1795,29 @@ export interface DeviceParameter {
    * @example "rpm"
    */
   unitSymbol?: string;
-  /** Slave-reported default value, decoded with the same logic as `value`.  Absent when the slave does not report a default. */
+  /** The default value, decoded with the same logic as `value`. It comes from the SDO Info response of the slave. When the slave reports none, it comes from the device's ESI (see `esiFile`). Absent when neither source gives one. */
   defaultValue?: ParameterValue;
-  /** Slave-reported minimum value, decoded with the same logic as `value`.  Absent when the slave does not report a minimum. */
+  /** The minimum value, decoded with the same logic as `value`. It comes from the SDO Info response of the slave. When the slave reports none, it comes from the device's ESI (see `esiFile`). Absent when neither source gives one. */
   minValue?: ParameterValue;
-  /** Slave-reported maximum value, decoded with the same logic as `value`.  Absent when the slave does not report a maximum. */
+  /** The maximum value, decoded with the same logic as `value`. It comes from the SDO Info response of the slave. When the slave reports none, it comes from the device's ESI (see `esiFile`). Absent when neither source gives one. */
   maxValue?: ParameterValue;
+  /** What the entry does, from the device's ESI, as HTML. A record or array is described once, on subindex 0. Absent when the ESI gives no description. SOMANET ESIs carry one for most objects. */
+  description?: string;
+  /** The named values of an enumerated entry, from the device's ESI. Absent when the entry is not an enumeration. */
+  options?: {
+    /**
+     * @format int64
+     * @example 1
+     */
+    value: number;
+    /** @example "Enabled" */
+    label: string;
+  }[];
+  /**
+   * The file in the `esis` directory of the user cache that described this entry. Absent when the device has no ESI, or its ESI does not describe this entry. On a device whose other entries have one, an absent `esiFile` means the ESI and the firmware disagree.
+   * @example "esi-000022d2-v5.6.11.xml"
+   */
+  esiFile?: string;
   /**
    * Freshness of `value` relative to the device. `synced` — matches the device (last successful read or write); `pending` — set locally while offline or after a failed write, not yet confirmed on the device; `stale` — came from an earlier read or write, and the latest read of the object failed; `unknown` — never read, `value` is the type-appropriate default. A failed read turns `synced` into `stale` and keeps the value. It leaves `unknown` and `pending` unchanged. The next successful read sets `synced` again.
    * @example "synced"

@@ -22,6 +22,7 @@ the HTTP/WebSocket API may break between any two alphas.
 ### Added
 
 - **Live parameters carry a unit symbol.** Each entry of `GET /api/devices/{slavePosition}/parameters` with a unit has `unitSymbol` beside `unit`, for example `rpm` for 0x6080 Max motor speed. A SOMANET drive reports no units over CoE, so the unit comes from the device's ESI. Add the ESI to the user cache as `esis/esi-<vendor>-<version>.xml`, where `<version>` is the firmware version in 0x100A, for example `PUT /api/user-cache/esis/esi-000022d2-v5.6.11.xml`. The version must match exactly, build metadata included. The next scan or parameter init uses the file. A unit the device reports over CoE is kept. The new `esiCache` block of the config file turns this off. (#141)
+- **Live parameters carry the range, default, description and options of the device's ESI.** Each entry of `GET /api/devices/{slavePosition}/parameters` that the ESI describes has `minValue`, `maxValue` and `defaultValue` where the device reports none, plus `description` (HTML), `options` (the named values of an enumeration) and `esiFile`, the file in `esis/` it came from. An entry without `esiFile` on a device whose other entries have one is one the ESI does not describe, and the server log names such entries. (#42)
 
 ### Changed
 

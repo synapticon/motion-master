@@ -113,8 +113,26 @@ EsiCache::LoadedFile EsiCache::load(const fs::path& path, fs::file_time_type mod
   return loaded;
 }
 
+namespace {
+
+// A bound of the ESI as a value of the parameter's own type, or nothing when the bytes do not fit
+// it. The ESI pads a short value to its declared width with the sign rules of libs/etg.
+std::optional<DeviceParameterValue> decodeBound(uint16_t dataType,
+                                                const std::optional<std::vector<uint8_t>>& bytes) {
+  if (!bytes) {
+    return std::nullopt;
+  }
+  auto decoded = decodeSdoBytes(dataType, *bytes);
+  if (!decoded) {
+    return std::nullopt;
+  }
+  return std::move(*decoded);
+}
+
+}  // namespace
+
 std::vector<DeviceParameter> joinEsi(std::vector<DeviceParameter> parameters,
-                                     const mm::etg::EsiEntryTable* esi) {
+                                     const mm::etg::EsiEntryTable* esi, std::string_view esiFile) {
   std::unordered_map<uint32_t, const mm::etg::EsiEntry*> entries;
   if (esi != nullptr) {
     entries.reserve(esi->entries.size());
@@ -122,11 +140,27 @@ std::vector<DeviceParameter> joinEsi(std::vector<DeviceParameter> parameters,
                    [](const mm::etg::EsiEntry& entry) { return std::pair{entry.key(), &entry}; });
   }
   for (auto& p : parameters) {
-    if (!p.unit) {
-      if (const auto it = entries.find(p.key()); it != entries.end() && it->second->unit) {
-        p.unit = it->second->unit;
-        p.unitSymbol = it->second->unitSymbol;
+    if (const auto it = entries.find(p.key()); it != entries.end()) {
+      const mm::etg::EsiEntry& entry = *it->second;
+      if (!p.unit && entry.unit) {
+        p.unit = entry.unit;
+        p.unitSymbol = entry.unitSymbol;
       }
+      if (!p.defaultValue) {
+        p.defaultValue = decodeBound(p.dataType, entry.defaultData);
+      }
+      if (!p.minValue) {
+        p.minValue = decodeBound(p.dataType, entry.minData);
+      }
+      if (!p.maxValue) {
+        p.maxValue = decodeBound(p.dataType, entry.maxData);
+      }
+      p.description = entry.description;
+      p.options.clear();
+      for (const auto& option : entry.options) {
+        p.options.push_back({.value = option.value, .label = option.label});
+      }
+      p.esiFile = esiFile;
     }
     if (p.unit && p.unitSymbol.empty()) {
       p.unitSymbol = mm::etg::esiUnitSymbol(*p.unit);

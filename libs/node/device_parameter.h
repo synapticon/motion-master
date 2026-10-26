@@ -23,6 +23,12 @@ namespace mm::node {
 static_assert(std::endian::native == std::endian::little,
               "parameter values are stored as little-endian wire bytes");
 
+/// @brief One named value of an enumerated parameter, from the ESI.
+struct EsiParameterOption {
+  int64_t value = 0;
+  std::string label;
+};
+
 /// @brief Decoded value of a single device parameter (CoE object dictionary entry).
 ///
 /// The variant alternatives cover the standard ETG.1020 data types that can be
@@ -218,6 +224,13 @@ struct DeviceParameter {
   std::optional<DeviceParameterValue> defaultValue;  ///< Slave-reported default, when available.
   std::optional<DeviceParameterValue> minValue;      ///< Slave-reported minimum, when available.
   std::optional<DeviceParameterValue> maxValue;      ///< Slave-reported maximum, when available.
+
+  // --- from the ESI -------------------------------------------------------------------------
+  // CoE carries none of these. Each is empty when the device has no ESI, or the ESI does not
+  // describe the entry. A record or array is described once, on subindex 0.
+  std::string description;                  ///< HTML, as the ESI holds it.
+  std::vector<EsiParameterOption> options;  ///< The named values of an enumeration.
+  std::string esiFile;  ///< The file in @c esis/ that described this entry; empty when none did.
 
   /// @brief Returns the packed @c (index, subindex) key used in the parameter map.
   uint32_t key() const { return makeParameterKey(index, subindex); }

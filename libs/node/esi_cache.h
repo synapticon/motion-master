@@ -92,12 +92,15 @@ class EsiCache {
 
 /// @brief Adds what the ESI says about each parameter to the definitions CoE gave.
 ///
-/// A unit CoE reported is kept, because the device is the authority on itself. A parameter with no
-/// unit takes the unit and symbol of the ESI entry with the same index and subindex. A unit with no
-/// symbol then gets one rendered from its ETG.1004 code.
+/// A parameter takes the ESI entry with the same index and subindex. What CoE reported is kept,
+/// because the device is the authority on itself: the ESI fills a unit, a default, a minimum or a
+/// maximum only where CoE gave none. The description and the options come from the ESI alone. A
+/// value is decoded through the parameter's own data type; one that does not decode is left out.
+/// A unit with no symbol gets one rendered from its ETG.1004 code, with or without an ESI.
 ///
-/// @param esi  The device's table from @c EsiCache::find, or @c nullptr when it has none.
+/// @param esi      The device's table from @c EsiCache::find, or @c nullptr when it has none.
+/// @param esiFile  The name of that table's file, recorded on every parameter it describes.
 std::vector<DeviceParameter> joinEsi(std::vector<DeviceParameter> parameters,
-                                     const mm::etg::EsiEntryTable* esi);
+                                     const mm::etg::EsiEntryTable* esi, std::string_view esiFile);
 
 }  // namespace mm::node

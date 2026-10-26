@@ -135,7 +135,7 @@ class Device {
   ///                       @c initializeParameters loads definitions from it on a hit and populates
   ///                       it on a miss. Lifetime must exceed that of this object.
   /// @param esiCache       The ESI cache, or @c nullptr to use CoE metadata only. When supplied,
-  ///                       @c initializeParameters adds the units of the device's ESI. Lifetime
+  ///                       @c initializeParameters adds the metadata of the device's ESI. Lifetime
   ///                       must exceed that of this object.
   Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver,
          ProcessData* processData = nullptr, const ParameterCache* parameterCache = nullptr,

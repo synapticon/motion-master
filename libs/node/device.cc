@@ -236,6 +236,9 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
           .defaultValue = std::nullopt,
           .minValue = std::nullopt,
           .maxValue = std::nullopt,
+          .description = {},
+          .options = {},
+          .esiFile = {},
       };
 
       auto decodeRawBytes = [&](const std::optional<std::vector<uint8_t>>& raw)
@@ -284,7 +287,27 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
   // effect without deleting it.
   const auto esi =
       useEsiCache ? esiCache_->find(vendorId_, productCode_, firmwareVersion) : nullptr;
-  definitions = joinEsi(std::move(*definitions), esi.get());
+  const std::string esiFile = EsiCache::fileName(vendorId_, firmwareVersion);
+  definitions = joinEsi(std::move(*definitions), esi.get(), esiFile);
+  if (esi) {
+    // An entry the ESI does not describe means the ESI and the firmware disagree. The parameters
+    // show it by their empty esiFile; the log names a few, so a support log carries it too.
+    std::vector<std::string> undescribed;
+    for (const auto& p : *definitions) {
+      if (p.esiFile.empty()) {
+        undescribed.push_back(std::format("0x{:04X}:{:02X}", p.index, p.subindex));
+      }
+    }
+    if (!undescribed.empty()) {
+      constexpr std::size_t kNamed = 5;
+      std::string named;
+      for (std::size_t i = 0; i < std::min(kNamed, undescribed.size()); ++i) {
+        named += (i == 0 ? "" : ", ") + undescribed[i];
+      }
+      spdlog::warn("Device {}: the ESI {} does not describe {} entry(ies), among them {}",
+                   slavePosition_, esiFile, undescribed.size(), named);
+    }
+  }
 
   // 2. Fill in live values (if requested). The per-entry uploads are slow and must not hold the
   //    cache lock (that would stall a concurrent sampler cached-read for the whole enumeration), so
@@ -350,6 +373,9 @@ void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& b
         cell->defaultValue = std::move(definition.defaultValue);
         cell->minValue = std::move(definition.minValue);
         cell->maxValue = std::move(definition.maxValue);
+        cell->description = std::move(definition.description);
+        cell->options = std::move(definition.options);
+        cell->esiFile = std::move(definition.esiFile);
         // A read that failed in this enumeration keeps the cell's value and marks it.
         if (definition.syncState == SyncState::Stale) {
           cell->markReadFailed();
@@ -835,6 +861,9 @@ std::expected<std::vector<DeviceParameter>, std::string> Device::buildSiiParamet
             .defaultValue = std::nullopt,
             .minValue = std::nullopt,
             .maxValue = std::nullopt,
+            .description = {},
+            .options = {},
+            .esiFile = {},
         });
       }
     }

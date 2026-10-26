@@ -942,7 +942,9 @@ Rules that are easy to get wrong and are pinned by tests:
 - **Type structure mirrors the ESI element structure.** Nested where the parent owns the type;
   namespace-scope and unprefixed for vocabulary with several parents; flat and `Esi`-prefixed
   for types in public signatures. The prefix survives on that last group because
-  `mm::etg::Device` next to `mm::node::Device` would be a trap.
+  `mm::etg::Device` next to `mm::node::Device` would be a trap. **Outside `mm::etg`, every type
+  that deals with an ESI takes the `Esi` prefix** (`EsiCache`, `EsiParameterOption`), because
+  there the namespace no longer says it. A private type nested in one of them needs none.
 - **Flag inheritance is not per-flag fallback.** A `<Flags>` element on a `DataType/SubItem`
   shadows the object's block wholesale. A flag the SubItem lacks falls back to the spec
   default, never to the object's value. `SdoAccess` is the carve-out.

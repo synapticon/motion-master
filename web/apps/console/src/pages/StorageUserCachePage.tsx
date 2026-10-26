@@ -127,7 +127,7 @@ export default function StorageUserCachePage() {
       <PageHeader
         eyebrow="Storage"
         title="User Cache"
-        description="Store files on the machine running Motion Master so they survive a restart. Uploading does not by itself make Motion Master do anything with a file — but some folders here belong to features that read their own."
+        description="Store files on the machine running Motion Master so they survive a restart. Uploading does not by itself make Motion Master do anything with a file — but some folders here belong to features that read their own. An ESI in esis, named esi-<vendor>-<version>.xml after the vendor ID in 8 hex digits and the firmware version in 0x100A, gives the parameters of a matching device their units, ranges and descriptions at the next scan."
       />
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <UserCacheExplainer />

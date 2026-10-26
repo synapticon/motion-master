@@ -2391,7 +2391,8 @@ std::vector<ProcedureParameter> firmwareInstallationParameters() {
       booleanParameter("cachePackage", "Cache the package",
                        "Keep a copy of the package on the server so it can be re-installed without "
                        "uploading it again. Only possible when a filename is given and it follows "
-                       "the SOMANET package naming convention.",
+                       "the SOMANET package naming convention. The package's ESI is stored too, so "
+                       "a device on this firmware gets its parameter metadata at the next scan.",
                        true),
       enumParameter(
           "finalState", "Final state",
@@ -2597,6 +2598,21 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
       reporter.succeed(kCacheStep, std::format("not cached: could not write '{}'", path->string()));
     } else {
       reporter.succeed(kCacheStep, path->string());
+      // The ESI goes with the package, so a device on this firmware gets its metadata at the next
+      // scan. Best effort like the package itself: a package with no ESI still installs.
+      if (auto esi = readPackageEsi(request.package); !esi) {
+        spdlog::warn("Firmware package {}: the ESI was not stored: {}", request.filename,
+                     esi.error());
+      } else if (*esi) {
+        if (auto stored = deviceManager.esiCache().store(**esi, request.name->softwareVersion);
+            stored) {
+          spdlog::info("Firmware package {}: stored its ESI as {}", request.filename,
+                       stored->string());
+        } else {
+          spdlog::warn("Firmware package {}: the ESI was not stored: {}", request.filename,
+                       stored.error());
+        }
+      }
     }
   }
 

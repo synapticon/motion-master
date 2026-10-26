@@ -27,6 +27,7 @@
 #include "comm/object_data_types.h"
 #include "comm/spoe_fieldbus_driver.h"
 #include "core/base64.h"
+#include "core/platform.h"
 #include "fake_spoe_server.h"
 #include "node/cia402.h"
 #include "node/device.h"
@@ -2651,6 +2652,10 @@ TEST(FirmwareInstallationBody, CachesThePackageUnderItsName) {
   ASSERT_TRUE(std::filesystem::exists(cached)) << cached;
   EXPECT_EQ(std::filesystem::file_size(cached), 608513u);
   EXPECT_EQ(stepNamed(reporter.steps(), "cache").value, cached.string());
+
+  // The package's ESI goes beside it, named for the vendor it declares and the package's version.
+  EXPECT_TRUE(
+      std::filesystem::exists(mm::core::userCacheDir() / "esis" / "esi-000022d2-v5.6.10.xml"));
 }
 
 TEST(FirmwareInstallationBody, DoesNotCacheAPackageWithAnUnrecognisedName) {

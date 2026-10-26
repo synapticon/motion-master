@@ -376,6 +376,9 @@ class DeviceManager {
   ///        scan or parameter init uses the new setting.
   void configureEsiCache(const EsiCacheConfig& config);
 
+  /// @brief The ESI cache, for a procedure that adds an ESI to it.
+  const EsiCache& esiCache() const;
+
   /// @brief Scans the bus for nodes and populates the device list.
   ///
   /// Must be called after @c init(). Forwards to @c FieldbusDriver::scan().

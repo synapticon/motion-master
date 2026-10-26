@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -69,6 +70,17 @@ class EsiCache {
   std::shared_ptr<const mm::etg::EsiEntryTable> find(uint32_t vendorId, uint32_t productCode,
                                                      std::string_view firmwareVersion) const;
 
+  /// @brief Writes an ESI under the name a device on @p firmwareVersion looks for.
+  ///
+  /// The vendor comes from the ESI's own @c Vendor/Id, so a file is named right for every vendor
+  /// that ships it. A file of the same name is replaced. The write goes to a temporary file that is
+  /// then renamed, so a lookup never reads half a file.
+  ///
+  /// @return The path written, or an error when the cache is disabled, @p firmwareVersion is empty,
+  ///         @p xml does not parse, or the file cannot be written.
+  std::expected<std::filesystem::path, std::string> store(std::string_view xml,
+                                                          std::string_view firmwareVersion) const;
+
  private:
   /// @brief One file as it was read: the stamp it was read at, and a table per product code. A file
   ///        that does not parse is kept with no tables, so it is not parsed and reported again
@@ -92,12 +104,15 @@ class EsiCache {
 
 /// @brief Adds what the ESI says about each parameter to the definitions CoE gave.
 ///
-/// A unit CoE reported is kept, because the device is the authority on itself. A parameter with no
-/// unit takes the unit and symbol of the ESI entry with the same index and subindex. A unit with no
-/// symbol then gets one rendered from its ETG.1004 code.
+/// A parameter takes the ESI entry with the same index and subindex. What CoE reported is kept,
+/// because the device is the authority on itself: the ESI fills a unit, a default, a minimum or a
+/// maximum only where CoE gave none. The description and the options come from the ESI alone. A
+/// value is decoded through the parameter's own data type; one that does not decode is left out.
+/// A unit with no symbol gets one rendered from its ETG.1004 code, with or without an ESI.
 ///
-/// @param esi  The device's table from @c EsiCache::find, or @c nullptr when it has none.
+/// @param esi      The device's table from @c EsiCache::find, or @c nullptr when it has none.
+/// @param esiFile  The name of that table's file, recorded on every parameter it describes.
 std::vector<DeviceParameter> joinEsi(std::vector<DeviceParameter> parameters,
-                                     const mm::etg::EsiEntryTable* esi);
+                                     const mm::etg::EsiEntryTable* esi, std::string_view esiFile);
 
 }  // namespace mm::node

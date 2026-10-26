@@ -105,6 +105,52 @@ struct FileDeleter {
   void operator()(zip_file_t* file) const { zip_fclose(file); }
 };
 
+/// The first entry of @p zip whose name ends in @p suffix, decompressed, or nothing when no entry
+/// does.
+std::expected<std::optional<std::vector<uint8_t>>, std::string> readEntryEndingIn(
+    std::span<const uint8_t> zip, std::string_view suffix) {
+  zip_error_t error;
+  zip_error_init(&error);
+  zip_source_t* source = zip_source_buffer_create(zip.data(), zip.size(), 0, &error);
+  if (source == nullptr) {
+    std::string reason = zip_error_strerror(&error);
+    zip_error_fini(&error);
+    return std::unexpected(reason);
+  }
+  std::unique_ptr<zip_t, ArchiveDeleter> archive(zip_open_from_source(source, ZIP_RDONLY, &error));
+  if (!archive) {
+    zip_source_free(source);
+    std::string reason = zip_error_strerror(&error);
+    zip_error_fini(&error);
+    return std::unexpected(reason);
+  }
+  zip_error_fini(&error);
+
+  const zip_int64_t entries = zip_get_num_entries(archive.get(), 0);
+  for (zip_int64_t i = 0; i < entries; ++i) {
+    zip_stat_t stat;
+    zip_stat_init(&stat);
+    if (zip_stat_index(archive.get(), i, 0, &stat) != 0 || stat.name == nullptr ||
+        !endsWithIgnoringCase(stat.name, suffix)) {
+      continue;
+    }
+    std::unique_ptr<zip_file_t, FileDeleter> file(zip_fopen_index(archive.get(), i, 0));
+    if (!file) {
+      return std::unexpected(
+          std::format("could not open '{}': {}", stat.name, zip_strerror(archive.get())));
+    }
+    std::vector<uint8_t> content(stat.size);
+    if (stat.size > 0) {
+      const zip_int64_t read = zip_fread(file.get(), content.data(), stat.size);
+      if (read < 0 || static_cast<zip_uint64_t>(read) != stat.size) {
+        return std::unexpected(std::format("'{}' is truncated", stat.name));
+      }
+    }
+    return content;
+  }
+  return std::nullopt;
+}
+
 }  // namespace
 
 std::expected<FirmwarePackageName, std::string> parseFirmwarePackageName(
@@ -238,6 +284,25 @@ std::expected<FirmwarePackage, std::string> openFirmwarePackage(
         "firmware package");
   }
   return package;
+}
+
+std::expected<std::optional<std::string>, std::string> readPackageEsi(
+    std::span<const uint8_t> zip) {
+  auto inner = readEntryEndingIn(zip, kEsiFileName);
+  if (!inner) {
+    return std::unexpected(std::format("could not read the firmware package: {}", inner.error()));
+  }
+  if (!*inner) {
+    return std::nullopt;
+  }
+  auto xml = readEntryEndingIn(**inner, ".xml");
+  if (!xml) {
+    return std::unexpected(std::format("could not read '{}': {}", kEsiFileName, xml.error()));
+  }
+  if (!*xml) {
+    return std::unexpected(std::format("'{}' holds no XML file", kEsiFileName));
+  }
+  return std::string((*xml)->begin(), (*xml)->end());
 }
 
 void to_json(nlohmann::json& j, const FirmwarePackageName& name) {

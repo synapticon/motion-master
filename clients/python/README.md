@@ -5,9 +5,14 @@ At startup it reads the server's own OpenAPI spec from `GET /api/swagger.yml`, a
 operation by its `operationId`. [Why it reads the spec](#why-it-reads-the-spec) explains the
 reason.
 
-Each script in `examples/` does one action and is named after it. Each script runs on its own.
-It brings the server to the state it needs, so no script has to run before another one. A
-second run gives the same result as the first run.
+Each script in `examples/` runs on its own. It brings the server to the state it needs, so no
+script has to run before another one. A second run gives the same result as the first run.
+
+It is easy to start. Clone this repository, do the three steps in [Setup](#setup), and run a
+script. Nothing must be built. Then use the scripts as a starting point for your own programs.
+We recommend that you use an AI assistant, such as Claude, for this. Give it the client, the
+scripts and `swagger.yml`, and tell it what your program must do. It can then write the new
+program for you.
 
 The recording below shows a first run. The steps are in [Setup](#setup) and [Run](#run).
 
@@ -20,7 +25,7 @@ The recording below shows a first run. The steps are in [Setup](#setup) and [Run
 | `motion_master_client.py` | `MotionMasterClient`. It calls the HTTP API by `operationId` and streams the monitoring WebSocket. It also has the steps that most scripts begin with: `from_config()`, `init()`, `ensure_scanned()` and `ensure_state()`. `run_procedure()` runs a procedure to its end, and `notifications()` streams the notifications. `run(main)` prints an error that a user can correct, such as a server that is not running, as one line instead of a traceback. Set `MM_TRACEBACK=1` to get the traceback. |
 | `config.example.toml` | The config template. Copy it to `config.toml`. |
 | `demo.tape` | The [VHS](https://github.com/charmbracelet/vhs) script that records `demo.gif`. Run `vhs demo.tape`. |
-| `examples/` | One script per action. See [Scripts](#scripts). |
+| `examples/` | The example scripts. See [Scripts](#scripts). |
 | `files/` | Where a script saves a file when `--output` names no other path. Git ignores this directory. |
 | `swagger.yml` | A copy of the spec that the client read from the server at its last startup. Look up an `operationId` here when you write a new script. The client writes it again at each startup, and Git ignores it. |
 

@@ -5,14 +5,11 @@ At startup it reads the server's own OpenAPI spec from `GET /api/swagger.yml`, a
 operation by its `operationId`. [Why it reads the spec](#why-it-reads-the-spec) explains the
 reason.
 
-Each script in `examples/` runs on its own. It brings the server to the state it needs, so no
-script has to run before another one. A second run gives the same result as the first run.
-
-It is easy to start. Clone this repository, do the three steps in [Setup](#setup), and run a
-script. Nothing must be built. Then use the scripts as a starting point for your own programs.
-We recommend that you use an AI assistant, such as Claude, for this. Give it the client, the
-scripts and `swagger.yml`, and tell it what your program must do. It can then write the new
-program for you.
+It is easy to start. Clone this repository, set up the client, and run a script. Nothing must be built. Then use the scripts as a starting point for your own programs.
+We recommend that you use an AI coding assistant, such as Claude Code, for this. Open the
+assistant in `clients/python` and tell it what your program must do. It reads the client, the
+scripts and `swagger.yml`, and then it writes the new program. `swagger.yml` exists after the
+first run of a script, because the client copies it from the server at startup.
 
 The recording below shows a first run. The steps are in [Setup](#setup) and [Run](#run).
 
@@ -30,6 +27,8 @@ The recording below shows a first run. The steps are in [Setup](#setup) and [Run
 | `swagger.yml` | A copy of the spec that the client read from the server at its last startup. Look up an `operationId` here when you write a new script. The client writes it again at each startup, and Git ignores it. |
 
 ## Scripts
+
+Any script can run first, because it brings the server to the state it needs.
 
 The AL state (Application Layer state, the EtherCAT state machine of a device) column gives
 the lowest state the script needs. A script moves the device up to that state when the device is

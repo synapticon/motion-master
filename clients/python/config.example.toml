@@ -21,10 +21,13 @@ ws_port = 62281
 #   "/path/cert.pem" -> verify against this certificate bundle
 verify = false
 
-# Fieldbus driver to bring up with POST /api/init.
-# Assumes Motion Master was started uninitialized (no driver open yet).
+# The fieldbus driver that a script opens with POST /api/init when no driver is
+# open. When a driver is open already, the script uses it and ignores this table.
 [fieldbus]
-driver = "soem"                 # soem | spoe (spoe is planned)
-# Network interface name (e.g. "eth0") or MAC address.
+driver = "soem"                 # soem or spoe
+# SOEM: the network interface name (for example "eth0") or its MAC address.
 # SOEM has no adapter auto-detect, so this is required.
 adapter = "aa:bb:cc:dd:ee:ff"
+# SPoE: set driver = "spoe" and give one IP address per drive in place of
+# adapter. The list order is the position order.
+# ipAddresses = ["192.168.0.10"]

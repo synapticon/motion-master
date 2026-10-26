@@ -1,4 +1,5 @@
-import { memo, useState } from 'react'
+import { Fragment, memo, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Callout from '../components/Callout'
@@ -81,6 +82,26 @@ function valueToInputString(v: number | string | number[] | undefined): string {
 }
 
 // ETG.1000.6 ObjAccess: write bits 3-5 (Wr PreOp/SafeOp/Op). Writable iff any is set.
+// The number a value input holds, for the range warning: hex as the toggle writes it, else decimal.
+// Anything else (text, a byte list) has no range to check.
+function inputNumber(s: string): number | null {
+  const t = s.trim()
+  if (/^0[xX][0-9a-fA-F]+$/.test(t)) return parseInt(t.slice(2), 16)
+  if (t === '') return null
+  const n = Number(t)
+  return Number.isFinite(n) ? n : null
+}
+
+// Whether a typed number lies outside the range the ESI or the device declares. Only warns: the
+// firmware team writes values outside the range on purpose.
+function outsideRange(p: DeviceParameter, raw: string): boolean {
+  const n = inputNumber(raw)
+  if (n === null) return false
+  if (typeof p.minValue === 'number' && n < p.minValue) return true
+  if (typeof p.maxValue === 'number' && n > p.maxValue) return true
+  return false
+}
+
 function isWritable(access: number): boolean {
   return (access & 0x38) !== 0
 }
@@ -524,6 +545,8 @@ export default function DeviceParametersPage() {
   // Per-row in-progress edits, keyed by index-subindex. Absent means the input
   // mirrors the cached value; present means the user has typed an override.
   const [editValues, setEditValues] = useState<Record<string, string>>({})
+  // Parameters whose ESI description is open below their row.
+  const [openDescriptions, setOpenDescriptions] = useState<Set<string>>(new Set())
   // A single transient message attached to one row: an 'error' (red, the op
   // failed) or a 'note' (amber, the op succeeded but the result is unexpected,
   // e.g. the device clamped a write).
@@ -685,6 +708,25 @@ export default function DeviceParametersPage() {
       : null
   const listBusy = initMutation.isPending || readAllMutation.isPending || paramsQuery.isFetching
 
+  // The ESI describes a record or array once, on subindex 0, so a member without its own text shows
+  // the object's.
+  const objectDescriptions = new Map<number, string>()
+  for (const p of params) {
+    if (p.subindex === 0 && p.description) objectDescriptions.set(p.index, p.description)
+  }
+  // A device with an ESI marks the entries its ESI leaves out, because those mean the ESI and the
+  // firmware disagree.
+  const deviceHasEsi = params.some(p => p.esiFile)
+
+  function toggleDescription(key: string) {
+    setOpenDescriptions(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   const filterLower = filter.trim().toLowerCase()
   const filteredParams = filterLower
     ? params.filter(p =>
@@ -843,14 +885,42 @@ export default function DeviceParametersPage() {
                         const writable = isWritable(p.access)
                         const editValue = editValues[key] ?? valueToInputString(p.value)
                         const cellMsg = rowMsg?.key === key ? rowMsg : null
+                        const description =
+                          p.description || (p.subindex > 0 ? objectDescriptions.get(p.index) : undefined)
+                        const descriptionOpen = description !== undefined && openDescriptions.has(key)
+                        const selectedOption = p.options?.find(o => String(o.value) === editValue.trim())
+                        const rangeWarning = writable && outsideRange(p, editValue)
                         return (
-                          <tr key={key} className="border-b border-grey-100 last:border-0">
+                          <Fragment key={key}>
+                          <tr className="border-b border-grey-100 last:border-0">
                             <td className="px-3 py-1.5 font-mono whitespace-nowrap">
                               {toHex(p.index, 4)}:{p.subindex.toString(16).toUpperCase().padStart(2, '0')}
                             </td>
                             <td className="px-3 py-1.5 text-grey-800">
                               <span className="inline-flex items-center gap-1.5">
-                                {p.name || <span className="text-grey-400">—</span>}
+                                <span title={p.esiFile ? `Described by ${p.esiFile}` : undefined}>
+                                  {p.name || <span className="text-grey-400">—</span>}
+                                </span>
+                                {description && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleDescription(key)}
+                                    aria-expanded={descriptionOpen}
+                                    aria-label="Show the description"
+                                    title="Show what this parameter does, from the device's ESI"
+                                    className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-grey-300 text-[10px] leading-none text-grey-500 hover:text-ocean hover:border-ocean cursor-pointer"
+                                  >
+                                    i
+                                  </button>
+                                )}
+                                {deviceHasEsi && !p.esiFile && (
+                                  <span
+                                    title="The device's ESI does not describe this entry, so it has no description, options or range from the ESI. The ESI and the firmware disagree here."
+                                    className="inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wide font-display cursor-help bg-status-warn/10 text-status-warn whitespace-nowrap"
+                                  >
+                                    Not in ESI
+                                  </span>
+                                )}
                                 {p.origin === 'sii' && (
                                   <span
                                     title="Definition read from this slave's SII/EEPROM, not a CoE object dictionary — the slave has no CoE mailbox (e.g. an EtherCAT coupler or simple I/O terminal), so this object cannot be read or written over SDO; its value comes only from the process image."
@@ -896,7 +966,31 @@ export default function DeviceParametersPage() {
                                 >
                                   {refreshing ? '…' : '↻'}
                                 </button>
+                                {p.options && p.options.length > 0 && (
+                                  <select
+                                    value={selectedOption ? String(selectedOption.value) : ''}
+                                    onChange={e => {
+                                      const v = e.target.value
+                                      if (v !== '') setEditValues(prev => ({ ...prev, [key]: v }))
+                                    }}
+                                    disabled={!writable || busy}
+                                    title="Pick a named value to put it in the input. Any other value can still be typed and set."
+                                    className="border border-grey-300 px-2 py-1 text-xs font-sans bg-white disabled:bg-grey-50 disabled:text-grey-500 disabled:cursor-not-allowed max-w-56"
+                                  >
+                                    <option value="">{selectedOption ? '' : 'Not a named value'}</option>
+                                    {p.options.map(o => (
+                                      <option key={o.value} value={String(o.value)}>
+                                        {o.label} ({o.value})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
                               </div>
+                              {rangeWarning && (
+                                <p className="mt-1 whitespace-normal text-status-warn">
+                                  Outside the range {formatValue(p.minValue)} … {formatValue(p.maxValue)}. Set still sends it.
+                                </p>
+                              )}
                               {cellMsg && (
                                 <p
                                   className={`mt-1 whitespace-normal ${
@@ -918,6 +1012,18 @@ export default function DeviceParametersPage() {
                               {p.unit === undefined ? '—' : p.unitSymbol || toHex(p.unit, 8)}
                             </td>
                           </tr>
+                          {descriptionOpen && (
+                            <tr className="border-b border-grey-100 bg-grey-50">
+                              <td colSpan={11} className="px-3 py-2">
+                                {/* The HTML comes from an ESI file anyone can upload to the server, so it is sanitised before it is rendered. */}
+                                <div
+                                  className="max-w-4xl text-grey-700 space-y-2 [&_code]:font-mono [&_table]:border-collapse [&_table]:my-1 [&_td]:border [&_td]:border-grey-200 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-grey-200 [&_th]:px-1.5 [&_th]:py-0.5"
+                                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(description) }}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
                         )
                       })}
                     </tbody>

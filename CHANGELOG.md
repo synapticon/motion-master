@@ -25,6 +25,7 @@ the HTTP/WebSocket API may break between any two alphas.
 - **Live parameters carry the range, default, description and options of the device's ESI.** Each entry of `GET /api/devices/{slavePosition}/parameters` that the ESI describes has `minValue`, `maxValue` and `defaultValue` where the device reports none, plus `description` (HTML), `options` (the named values of an enumeration) and `esiFile`, the file in `esis/` it came from. An entry without `esiFile` on a device whose other entries have one is one the ESI does not describe, and the server log names such entries. (#42)
 - **A firmware installation stores the package's ESI.** When the installation caches the package, it also writes the ESI from inside it to `esis/`, named after the vendor the ESI declares and the package's version, so a device on that firmware gets its metadata at the next scan. A file of the same name is replaced. Nothing is stored while the ESI cache is disabled. (#42)
 - **The Parameters page shows what the ESI says.** An "i" beside a name opens the parameter's description. An enumerated parameter has a select of its named values beside the input; picking one fills the input, and any other value can still be typed. A value outside the range gets a warning under the input, and Set still sends it. An entry the device's ESI does not describe is marked "Not in ESI". (#42)
+- **Tools → ESI lists the ESI cache.** The files in `esis/` are listed beside the viewer; click one to parse and view it, as a picked file is. (#42)
 
 ### Changed
 

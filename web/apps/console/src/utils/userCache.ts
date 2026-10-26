@@ -9,6 +9,10 @@
 /// callers should treat an empty listing as "none here", never as "none exist".
 export const DUMPS_FOLDER = 'dumps'
 
+/// Folder the server finds a device's ESI in, relative to the user-cache root. A file is named
+/// `esi-<vendor>-<version>.xml`; the source of truth is `EsiCache` in libs/node/esi_cache.h.
+export const ESIS_FOLDER = 'esis'
+
 /// Encodes a cache-relative path for use in a `/api/user-cache/...` URL.
 ///
 /// Each segment is encoded on its own: the backend takes the path after the prefix verbatim (then

@@ -1,4 +1,6 @@
 import { Fragment, useMemo, useState } from 'react'
+import { Link } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
 import type { EsiDeviceSummary, EsiEntry, EsiParseResult } from '@synapticon/motion-master-client'
 import { ChevronRight } from 'lucide-react'
 import Checkbox, { selectAllState } from '../components/Checkbox'
@@ -8,6 +10,7 @@ import PageHeader from '../components/PageHeader'
 import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
+import { ESIS_FOLDER, userCacheBasename, userCacheUrl } from '../utils/userCache'
 
 const inputCls = 'h-[38px] border border-grey-300 px-3 text-sm w-full bg-white'
 
@@ -395,6 +398,22 @@ export default function ToolsEsiPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { timing, measure, reset: resetTiming } = useWireTiming()
+  // The cached ESI on show, or null when the file came from the picker.
+  const [cachedPath, setCachedPath] = useState<string | null>(null)
+
+  // The same query and key the Storage → User Cache page uses, so an upload or delete there
+  // refreshes this list.
+  const cacheQuery = useQuery({
+    queryKey: ['user-cache'],
+    queryFn: () => api.listUserCacheFiles(),
+  })
+  const cachedEsis = useMemo(
+    () =>
+      (cacheQuery.data?.data?.files ?? [])
+        .filter(f => f.path.startsWith(`${ESIS_FOLDER}/`) && f.path.endsWith('.xml'))
+        .sort((a, b) => a.path.localeCompare(b.path)),
+    [cacheQuery.data],
+  )
 
   // The endpoint is stateless — nothing is stored server-side — so re-applying a module selection
   // re-uploads the file. Same trade the SII tool makes, and it keeps a parsed document from
@@ -451,6 +470,30 @@ export default function ToolsEsiPage() {
     })
   }
 
+  // A cached ESI is downloaded and then parsed like a picked file, so the server needs no route of
+  // its own for it. Over loopback the two megabytes each way cost little.
+  async function loadCached(path: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(userCacheUrl(api.baseUrl, path))
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const blob = await res.blob()
+      setCachedPath(path)
+      await loadFile(new File([blob], userCacheBasename(path), { type: 'application/xml' }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to read the cached ESI.')
+      setBusy(false)
+    }
+  }
+
+  async function loadPickedFile(f: File) {
+    setCachedPath(null)
+    await loadFile(f)
+  }
+
   async function loadFile(f: File) {
     setFile(f)
     setSelected(new Set())
@@ -468,8 +511,56 @@ export default function ToolsEsiPage() {
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <EsiExplainer />
 
+        <div className="grid grid-cols-[20rem_minmax(0,1fr)] gap-6 items-start">
+        <aside className="border border-grey-200">
+          <div className="px-4 py-3 border-b border-grey-200 bg-grey-50">
+            <h3 className="font-display uppercase tracking-wide text-sm text-grey-700">ESI cache</h3>
+            <p className="text-xs text-grey-600 mt-1">
+              The ESIs live parameters take their metadata from. Click one to view it.
+            </p>
+          </div>
+          {cacheQuery.isError && (
+            <p className="px-4 py-3 text-xs text-status-bad">The user cache could not be listed.</p>
+          )}
+          {!cacheQuery.isError && cachedEsis.length === 0 && (
+            <p className="px-4 py-3 text-xs text-grey-500">
+              No ESI in the cache. A firmware installation stores the ESI of the package, or upload
+              one to the <code>esis</code> folder on{' '}
+              <Link to="/storage/user-cache" className="underline hover:text-ocean">
+                Storage → User Cache
+              </Link>
+              .
+            </p>
+          )}
+          <ul>
+            {cachedEsis.map(f => {
+              const active = f.path === cachedPath
+              return (
+                <li key={f.path} className="border-b border-grey-100 last:border-0">
+                  <button
+                    type="button"
+                    onClick={() => loadCached(f.path)}
+                    disabled={busy}
+                    aria-current={active ? 'true' : undefined}
+                    className={`w-full text-left px-4 py-2 text-xs font-mono break-all cursor-pointer disabled:cursor-wait ${
+                      active ? 'bg-ocean/10 text-ocean' : 'text-grey-700 hover:bg-grey-50'
+                    }`}
+                  >
+                    {userCacheBasename(f.path)}
+                    <span className="block text-grey-500 font-sans">
+                      {(f.size / 1024).toFixed(0)} KB · {new Date(f.modifiedMs).toLocaleDateString()}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </aside>
+
+        <div className="space-y-6 min-w-0">
+
         <div className="flex flex-wrap items-center gap-3">
-          <FilePickerButton onFile={loadFile} disabled={busy} accept=".xml,application/xml,text/xml">
+          <FilePickerButton onFile={loadPickedFile} disabled={busy} accept=".xml,application/xml,text/xml">
             {file ? 'Load another file' : 'Load ESI file'}
           </FilePickerButton>
           {file && (
@@ -491,7 +582,8 @@ export default function ToolsEsiPage() {
 
         {!file && !busy && (
           <p className="text-xs text-grey-500">
-            No file loaded. Choose a <code>.xml</code> ESI file to decode it.
+            No file loaded. Pick one from the ESI cache, or choose a <code>.xml</code> ESI file to
+            decode it.
           </p>
         )}
 
@@ -653,6 +745,8 @@ export default function ToolsEsiPage() {
             )}
           </>
         )}
+        </div>
+        </div>
       </div>
     </div>
   )

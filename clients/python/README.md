@@ -1,15 +1,13 @@
 # Motion Master reference Python client
 
 This is a reference Python client for the Motion Master HTTP API and the monitoring WebSocket.
-At startup it reads the server's own OpenAPI spec from `GET /api/swagger.yml`, and it calls each
-operation by its `operationId`. [Why it reads the spec](#why-it-reads-the-spec) explains the
-reason.
+At startup it reads the OpenAPI spec from the server and calls each operation by its
+`operationId`. See [Why it reads the spec](#why-it-reads-the-spec).
 
-It is easy to start. Clone this repository, set up the client, and run a script. Nothing must be built. Then use the scripts as a starting point for your own programs.
-We recommend that you use an AI coding assistant, such as Claude Code, for this. Open the
-assistant in `clients/python` and tell it what your program must do. It reads the client, the
-scripts and `swagger.yml`, and then it writes the new program. `swagger.yml` exists after the
-first run of a script, because the client copies it from the server at startup.
+It is easy to start, and nothing must be built. Clone this repository, set up the client, and
+run a script. Then use the scripts as a starting point for your own programs. We recommend an AI
+coding assistant, such as Claude Code. Open it in `clients/python` and tell it what your program
+must do. It reads the client, the scripts and `swagger.yml`, and writes the program.
 
 The recording below shows a first run. The steps are in [Setup](#setup) and [Run](#run).
 

@@ -1,5 +1,6 @@
 import { Fragment, memo, useState } from 'react'
 import DOMPurify from 'dompurify'
+import { ChevronRight } from 'lucide-react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Callout from '../components/Callout'
@@ -869,7 +870,7 @@ export default function DeviceParametersPage() {
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-grey-200 bg-grey-50">
-                        {['Address', 'Name', 'Type', 'Bits', 'Access', 'Value', 'Sync', 'Default', 'Min', 'Max', 'Unit'].map(h => (
+                        {['', 'Address', 'Name', 'Type', 'Bits', 'Access', 'Value', 'Sync', 'Default', 'Min', 'Max', 'Unit'].map(h => (
                           <th key={h} className="text-left px-3 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
                             {h}
                           </th>
@@ -892,7 +893,23 @@ export default function DeviceParametersPage() {
                         const rangeWarning = writable && outsideRange(p, editValue)
                         return (
                           <Fragment key={key}>
-                          <tr className="border-b border-grey-100 last:border-0">
+                          <tr
+                            onClick={description ? () => toggleDescription(key) : undefined}
+                            aria-expanded={description ? descriptionOpen : undefined}
+                            className={`border-b border-grey-100 last:border-0 hover:bg-grey-50 ${
+                              description ? 'cursor-pointer' : ''
+                            } ${descriptionOpen ? 'bg-grey-50' : ''}`}
+                          >
+                            <td className="pl-3 py-1.5 w-px">
+                              {description && (
+                                <ChevronRight
+                                  aria-hidden="true"
+                                  className={`w-3.5 h-3.5 text-grey-400 transition-transform ${
+                                    descriptionOpen ? 'rotate-90' : ''
+                                  }`}
+                                />
+                              )}
+                            </td>
                             <td className="px-3 py-1.5 font-mono whitespace-nowrap">
                               {toHex(p.index, 4)}:{p.subindex.toString(16).toUpperCase().padStart(2, '0')}
                             </td>
@@ -901,18 +918,6 @@ export default function DeviceParametersPage() {
                                 <span title={p.esiFile ? `Described by ${p.esiFile}` : undefined}>
                                   {p.name || <span className="text-grey-400">—</span>}
                                 </span>
-                                {description && (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleDescription(key)}
-                                    aria-expanded={descriptionOpen}
-                                    aria-label="Show the description"
-                                    title="Show what this parameter does, from the device's ESI"
-                                    className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-grey-300 text-[10px] leading-none text-grey-500 hover:text-ocean hover:border-ocean cursor-pointer"
-                                  >
-                                    i
-                                  </button>
-                                )}
                                 {deviceHasEsi && !p.esiFile && (
                                   <span
                                     title="The device's ESI does not describe this entry, so it has no description, options or range from the ESI. The ESI and the firmware disagree here."
@@ -934,7 +939,8 @@ export default function DeviceParametersPage() {
                             <td className="px-3 py-1.5 font-mono text-grey-700">{p.dataTypeName}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-700">{p.bitLength}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-700">{formatAccess(p.access)}</td>
-                            <td className="px-3 py-1.5 font-mono">
+                            {/* The controls here edit the value, so a click on them must not open or close the row. */}
+                            <td className="px-3 py-1.5 font-mono cursor-default" onClick={e => e.stopPropagation()}>
                               <div className="flex items-stretch gap-2">
                                 <HexDecInput
                                   value={editValue}
@@ -1014,7 +1020,7 @@ export default function DeviceParametersPage() {
                           </tr>
                           {descriptionOpen && (
                             <tr className="border-b border-grey-100 bg-grey-50">
-                              <td colSpan={11} className="px-3 py-2">
+                              <td colSpan={12} className="px-4 py-3">
                                 {/* The HTML comes from an ESI file anyone can upload to the server, so it is sanitised before it is rendered. */}
                                 <div
                                   className="max-w-4xl text-grey-700 space-y-2 [&_code]:font-mono [&_table]:border-collapse [&_table]:my-1 [&_td]:border [&_td]:border-grey-200 [&_td]:px-1.5 [&_td]:py-0.5 [&_th]:border [&_th]:border-grey-200 [&_th]:px-1.5 [&_th]:py-0.5"

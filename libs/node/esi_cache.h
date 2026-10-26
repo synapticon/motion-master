@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -68,6 +69,17 @@ class EsiCache {
   ///         @c nullptr on a miss.
   std::shared_ptr<const mm::etg::EsiEntryTable> find(uint32_t vendorId, uint32_t productCode,
                                                      std::string_view firmwareVersion) const;
+
+  /// @brief Writes an ESI under the name a device on @p firmwareVersion looks for.
+  ///
+  /// The vendor comes from the ESI's own @c Vendor/Id, so a file is named right for every vendor
+  /// that ships it. A file of the same name is replaced. The write goes to a temporary file that is
+  /// then renamed, so a lookup never reads half a file.
+  ///
+  /// @return The path written, or an error when the cache is disabled, @p firmwareVersion is empty,
+  ///         @p xml does not parse, or the file cannot be written.
+  std::expected<std::filesystem::path, std::string> store(std::string_view xml,
+                                                          std::string_view firmwareVersion) const;
 
  private:
   /// @brief One file as it was read: the stamp it was read at, and a table per product code. A file

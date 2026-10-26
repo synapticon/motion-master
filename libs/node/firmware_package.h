@@ -141,6 +141,16 @@ struct FirmwarePackage {
 std::expected<FirmwarePackage, std::string> openFirmwarePackage(
     std::span<const uint8_t> zip, std::span<const std::string> skipFiles);
 
+/// @brief The ESI of a SOMANET firmware package, as XML text.
+///
+/// The package holds the ESI zipped a second time, as @c kEsiFileName. Only that entry and the XML
+/// inside it are decompressed.
+///
+/// @param zip  Package bytes.
+/// @return The XML, @c std::nullopt when the package holds no ESI, or an error when either zip does
+///         not read.
+std::expected<std::optional<std::string>, std::string> readPackageEsi(std::span<const uint8_t> zip);
+
 /// @brief The full firmware descriptors one device accepts firmware under (specification §3.4.1).
 ///
 /// Two rather than one, because the specification says both are compatible and lists both for the

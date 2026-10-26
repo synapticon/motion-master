@@ -4956,10 +4956,11 @@ paths:
 
         That is separate from whether a *feature* reads a given file, and several do: `parameters/`
         (the on-disk object-dictionary cache) and `dumps/` (`.mmpd` recorder dumps) are written and
-        consumed by those features. `esis/` holds ESI files that a client adds, named
+        consumed by those features. `esis/` holds ESI files, which a client adds and the
+        firmware installation stores from each package it caches, named
         `esi-<vendor>-<version>.xml`; a device whose vendor and firmware version (0x100A) match a
-        file takes the units, ranges, descriptions and options of its parameters from it at the next scan or parameter init. Their files appear in this listing
-        alongside everything else, so a client must not assume every entry was uploaded through this
+        file takes the units, ranges, descriptions and options of its parameters from it at the
+        next scan or parameter init. Their files appear in this listing alongside everything else, so a client must not assume every entry was uploaded through this
         API, nor that deleting one is inconsequential.
       responses:
         "200":

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <format>
+#include <fstream>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -79,6 +80,41 @@ std::shared_ptr<const mm::etg::EsiEntryTable> EsiCache::find(
     spdlog::info("The ESI {} does not describe product code 0x{:08X}", path.string(), productCode);
   }
   return nullptr;
+}
+
+std::expected<fs::path, std::string> EsiCache::store(std::string_view xml,
+                                                     std::string_view firmwareVersion) const {
+  if (firmwareVersion.empty()) {
+    return std::unexpected("the firmware version is empty");
+  }
+  fs::path dir;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!config_.enabled) {
+      return std::unexpected("the ESI cache is disabled");
+    }
+    dir = resolveDir();
+  }
+  const auto file = mm::etg::parseEsi(xml);
+  if (!file) {
+    return std::unexpected(std::format("the ESI does not parse: {}", file.error()));
+  }
+  const fs::path path = dir / fileName(file->vendor.id, firmwareVersion);
+  const fs::path temporary = fs::path(path).concat(".tmp");
+  std::error_code ec;
+  fs::create_directories(dir, ec);
+  {
+    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+    if (ec || !out || !out.write(xml.data(), static_cast<std::streamsize>(xml.size()))) {
+      return std::unexpected(std::format("could not write '{}'", temporary.string()));
+    }
+  }
+  fs::rename(temporary, path, ec);
+  if (ec) {
+    fs::remove(temporary, ec);
+    return std::unexpected(std::format("could not write '{}'", path.string()));
+  }
+  return path;
 }
 
 EsiCache::LoadedFile EsiCache::load(const fs::path& path, fs::file_time_type modified,

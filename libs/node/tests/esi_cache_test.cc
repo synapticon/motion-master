@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -140,6 +141,44 @@ TEST(EsiCacheTest, MissesEveryDeviceWhileDisabled) {
 
   EXPECT_FALSE(cache.enabled());
   EXPECT_EQ(cache.find(kSynapticon, kCirculo, "v5.6.6"), nullptr);
+}
+
+std::string fixtureText() {
+  std::ifstream in(fixturePath(), std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+TEST(EsiCacheTest, StoresAnEsiUnderTheVendorItNamesAndTheGivenVersion) {
+  const fs::path dir = makeTempDir("store");
+  const EsiCache cache({.directory = dir.string()});
+
+  const auto stored = cache.store(fixtureText(), "v5.6.10+1.g676379dc4");
+
+  ASSERT_TRUE(stored.has_value()) << stored.error();
+  EXPECT_EQ(*stored, dir / "esi-000022d2-v5.6.10_1.g676379dc4.xml");
+  EXPECT_NE(cache.find(kSynapticon, kCirculo, "v5.6.10+1.g676379dc4"), nullptr);
+}
+
+TEST(EsiCacheTest, ReplacesAnEsiOfTheSameName) {
+  const fs::path dir = makeTempDir("replace");
+  std::ofstream(dir / EsiCache::fileName(kSynapticon, "v5.6.6")) << "<EtherCATInfo>";
+  const EsiCache cache({.directory = dir.string()});
+
+  ASSERT_TRUE(cache.store(fixtureText(), "v5.6.6").has_value());
+
+  EXPECT_EQ(fs::file_size(dir / EsiCache::fileName(kSynapticon, "v5.6.6")),
+            fs::file_size(fixturePath()));
+}
+
+TEST(EsiCacheTest, StoresNothingWhileDisabledOrWithoutAVersionOrFromBrokenXml) {
+  const fs::path dir = makeTempDir("store-refused");
+  const EsiCache disabled({.enabled = false, .directory = dir.string()});
+  const EsiCache cache({.directory = dir.string()});
+
+  EXPECT_FALSE(disabled.store(fixtureText(), "v5.6.6").has_value());
+  EXPECT_FALSE(cache.store(fixtureText(), "").has_value());
+  EXPECT_FALSE(cache.store("<EtherCATInfo>", "v5.6.6").has_value());
+  EXPECT_TRUE(fs::is_empty(dir));
 }
 
 DeviceParameter makeParameter(uint16_t index, uint8_t subindex) {

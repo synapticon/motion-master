@@ -99,6 +99,20 @@ TEST(FirmwarePackageNameTest, RejectsNamesOutsideTheGrammar) {
 
 // ── Package contents ───────────────────────────────────────────────────────────────────────────
 
+TEST(FirmwarePackageTest, ReadsTheEsiOfAPackage) {
+  for (std::string_view package : {kCirculoPackage, kActilinkPackage}) {
+    const auto esi = readPackageEsi(readPackage(package));
+    ASSERT_TRUE(esi.has_value()) << package << ": " << esi.error();
+    ASSERT_TRUE(esi->has_value()) << package;
+    EXPECT_NE((*esi)->find("<EtherCATInfo"), std::string::npos) << package;
+  }
+}
+
+TEST(FirmwarePackageTest, RefusesToReadAnEsiFromBytesThatAreNotAZip) {
+  const std::vector<uint8_t> notAZip{'n', 'o', 't', ' ', 'a', ' ', 'z', 'i', 'p'};
+  EXPECT_FALSE(readPackageEsi(notAZip).has_value());
+}
+
 TEST(FirmwarePackageTest, ClassifiesACirculoPackage) {
   const std::vector<uint8_t> zip = readPackage(kCirculoPackage);
   auto package = openFirmwarePackage(zip, defaultSkipFiles());

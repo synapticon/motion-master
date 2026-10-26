@@ -146,6 +146,8 @@ const ParameterCache& DeviceManager::parameterCache() const { return parameterCa
 
 void DeviceManager::configureEsiCache(const EsiCacheConfig& config) { esiCache_.configure(config); }
 
+const EsiCache& DeviceManager::esiCache() const { return esiCache_; }
+
 std::expected<int, std::string> DeviceManager::scan() {
   // busOperationMutex_ only. The driver scan reprograms the SOEM context underneath the *current*
   // set, so this must exclude the other control-plane operations — but not readers: they keep

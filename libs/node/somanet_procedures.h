@@ -129,7 +129,7 @@ inline constexpr std::string_view kEncoderRegisterStep = "register-access";
 /// **the first procedure request made of named parameters** rather than raw command bytes — which
 /// is what @c ProcedureParameter exists to describe.
 struct EncoderRegisterRequest {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
   bool write = false;           ///< Write the register rather than read it.
   uint8_t registerAddress = 0;  ///< The register to access; no default, so a request must say.
   uint8_t value = 0;            ///< The byte to write; ignored when reading.
@@ -137,7 +137,7 @@ struct EncoderRegisterRequest {
 
 /// @brief Parses and validates a client's encoder register request body.
 ///
-/// Accepts `{"encoder": 1, "write": false, "registerAddress": 117, "value": 7}`. Only
+/// Accepts `{"encoderOrdinal": 1, "write": false, "registerAddress": 117, "value": 7}`. Only
 /// `registerAddress` is required; the rest default as @c EncoderRegisterRequest declares, which is
 /// exactly what @c encoderRegisterParameters advertises.
 ///
@@ -184,7 +184,7 @@ inline constexpr std::string_view kIcMuCalibrationModeStep = "set-mode";
 
 /// @brief What one iC-MU calibration mode change was asked to do.
 struct IcMuCalibrationModeRequest {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
 
   /// Which mode to put it in. Has no default in the request a client sends — the value here is
   /// only what an unset struct holds — because the mode *is* the instruction, and defaulting it
@@ -194,8 +194,8 @@ struct IcMuCalibrationModeRequest {
 
 /// @brief Parses and validates a client's iC-MU calibration mode request body.
 ///
-/// Accepts `{"encoder": 1, "mode": "configuration"}` — or `raw`, or `standard`. @c mode is
-/// required; @c encoder defaults to encoder 1.
+/// Accepts `{"encoderOrdinal": 1, "mode": "configuration"}` — or `raw`, or `standard`. @c mode is
+/// required; @c encoderOrdinal defaults to encoder 1.
 ///
 /// @param body  Parsed request JSON.
 /// @return The validated request, or a message naming what is wrong with it.
@@ -286,7 +286,7 @@ struct IcMuConfigurationWaits {
 
 /// @brief Which encoder to configure, and how.
 struct IcMuEncoderConfigurationRequest {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};
 
   /// iC-PVL register 0x03, or nothing for the default from the shaft the encoder measures. Only
   /// the multiturn path takes it.
@@ -297,9 +297,10 @@ struct IcMuEncoderConfigurationRequest {
 
 /// @brief Parses and validates a client's iC-MU encoder configuration request body.
 ///
-/// Accepts `{"encoder": 1, "batteryMode": "18-microamperes"}`. @c encoder is required, because a
-/// default would write the EEPROM of an encoder that nobody named. @c batteryMode is @c "default"
-/// or a name from @c somanet::icPvlBatteryModes, and defaults to @c "default".
+/// Accepts `{"encoderOrdinal": 1, "batteryMode": "18-microamperes"}`. @c encoderOrdinal is
+/// required, because a default would write the EEPROM of an encoder that nobody named. @c
+/// batteryMode is @c "default" or a name from @c somanet::icPvlBatteryModes, and defaults to @c
+/// "default".
 std::expected<IcMuEncoderConfigurationRequest, std::string> parseIcMuEncoderConfigurationRequest(
     const nlohmann::json& body);
 
@@ -840,7 +841,7 @@ inline constexpr std::string_view kIgnoreBissStatusBitsStep = "set-ignore";
 
 /// @brief Which encoder's status bits to act on, and which way.
 struct IgnoreBissStatusBitsRequest {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
 
   /// Whether to ignore them. Has no default in the request a client sends — the value here is only
   /// what an unset struct holds — because the direction *is* the instruction, and defaulting it
@@ -850,8 +851,8 @@ struct IgnoreBissStatusBitsRequest {
 
 /// @brief Parses and validates a client's ignore-BiSS-status-bits request body.
 ///
-/// Accepts `{"encoder": 1, "ignore": true}`. @c ignore is required; @c encoder defaults to
-/// encoder 1.
+/// Accepts `{"encoderOrdinal": 1, "ignore": true}`. @c ignore is required; @c encoderOrdinal
+/// defaults to encoder 1.
 ///
 /// @param body  Parsed request JSON.
 /// @return The validated request, or a message naming what is wrong with it.

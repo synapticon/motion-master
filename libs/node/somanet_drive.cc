@@ -248,7 +248,7 @@ std::expected<EncoderRegisterResult, std::string> accessEncoderRegister(
         std::format("{} failed with OS error {} (command-specific)", what, code));
   }
 
-  EncoderRegisterResult result{.encoder = encoder,
+  EncoderRegisterResult result{.encoderOrdinal = encoder,
                                .registerAddress = registerAddress,
                                .wrote = write,
                                .value = std::nullopt};
@@ -817,7 +817,7 @@ std::expected<void, std::string> SomanetDrive::setBrakeStatus(somanet::BrakeStat
 
 void to_json(nlohmann::json& j, const EncoderConfiguration& encoder) {
   j = nlohmann::json{
-      {"encoder", static_cast<int>(encoder.encoder)},
+      {"encoderOrdinal", static_cast<int>(encoder.encoderOrdinal)},
       {"sensorPort", encoder.sensorPort},
       {"type", somanet::toString(encoder.type)},
       {"resolution", encoder.resolution},
@@ -845,7 +845,7 @@ std::expected<Encoders, std::string> SomanetDrive::encoders() const {
        {std::pair{somanet::EncoderOrdinal::kEncoder1, somanet::kEncoder1Configuration},
         std::pair{somanet::EncoderOrdinal::kEncoder2, somanet::kEncoder2Configuration}}) {
     EncoderConfiguration encoder;
-    encoder.encoder = ordinal;
+    encoder.encoderOrdinal = ordinal;
     auto port = device_.readValue<uint8_t>(index, somanet::kEncoderSensorPort);
     if (!port) {
       return std::unexpected(port.error());
@@ -1383,14 +1383,15 @@ std::expected<HrdRecording, std::string> SomanetDrive::readHrdRecording(
 std::string EncoderRegisterResult::describe() const {
   if (!value) {
     return std::format("{} register 0x{:02X} {} acknowledged without a response",
-                       somanet::toString(encoder), registerAddress, wrote ? "write" : "read");
+                       somanet::toString(encoderOrdinal), registerAddress,
+                       wrote ? "write" : "read");
   }
-  return std::format("{} register 0x{:02X} = 0x{:02X} ({})", somanet::toString(encoder),
+  return std::format("{} register 0x{:02X} = 0x{:02X} ({})", somanet::toString(encoderOrdinal),
                      registerAddress, *value, *value);
 }
 
 void to_json(nlohmann::json& j, const EncoderRegisterResult& result) {
-  j = nlohmann::json{{"encoder", static_cast<uint8_t>(result.encoder)},
+  j = nlohmann::json{{"encoderOrdinal", static_cast<uint8_t>(result.encoderOrdinal)},
                      {"registerAddress", result.registerAddress},
                      {"wrote", result.wrote},
                      {"description", result.describe()}};

@@ -286,7 +286,7 @@ void to_json(nlohmann::json& j, const IcPvlBatteryModeChoice& choice);
 
 /// @brief What the status reports for one encoder.
 struct IcMuEncoderStatus {
-  EncoderOrdinal encoder{EncoderOrdinal::kEncoder1};
+  EncoderOrdinal encoderOrdinal{EncoderOrdinal::kEncoder1};
   uint8_t sensorPort = 0;                         ///< 0x21x0:01.
   uint8_t singleturnBits = 0;                     ///< 0x21x0:0C.
   uint8_t multiturnBits = 0;                      ///< 0x21x0:0A, 0 where the object has none.

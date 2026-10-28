@@ -167,11 +167,11 @@ std::expected<uint8_t, std::string> readByte(const nlohmann::json& body, const c
   return static_cast<uint8_t>(raw);
 }
 
-// Reads the "encoder" field, which both encoder commands take and describe identically — the
+// Reads the "encoderOrdinal" field, which both encoder commands take and describe identically — the
 // ordinal picks one of the drive's two encoder configuration objects and nothing else.
 std::expected<somanet::EncoderOrdinal, std::string> readEncoderOrdinal(
     const nlohmann::json& body, somanet::EncoderOrdinal fallback) {
-  auto ordinal = readByte(body, "encoder", static_cast<uint8_t>(fallback));
+  auto ordinal = readByte(body, "encoderOrdinal", static_cast<uint8_t>(fallback));
   if (!ordinal) {
     return std::unexpected(ordinal.error());
   }
@@ -179,16 +179,16 @@ std::expected<somanet::EncoderOrdinal, std::string> readEncoderOrdinal(
   // the drive would refuse it anyway, and refusing here says which values are real.
   if (*ordinal != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1) &&
       *ordinal != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2)) {
-    return std::unexpected(std::format("'encoder' must be 1 or 2, got {}", *ordinal));
+    return std::unexpected(std::format("'encoderOrdinal' must be 1 or 2, got {}", *ordinal));
   }
   return static_cast<somanet::EncoderOrdinal>(*ordinal);
 }
 
-// The "encoder" parameter as every encoder command advertises it — one description, so two
+// The "encoderOrdinal" parameter as every encoder command advertises it — one description, so two
 // procedures cannot end up explaining the same field differently.
 ProcedureParameter encoderParameter(std::optional<somanet::EncoderOrdinal> defaultValue) {
   return enumParameter(
-      "encoder", "Encoder",
+      "encoderOrdinal", "Encoder ordinal",
       "Which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and "
       "encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather "
       "than a kind of encoder.",
@@ -957,11 +957,11 @@ std::expected<EncoderRegisterRequest, std::string> parseEncoderRegisterRequest(
   }
   EncoderRegisterRequest request;
 
-  auto encoder = readEncoderOrdinal(body, request.encoder);
+  auto encoder = readEncoderOrdinal(body, request.encoderOrdinal);
   if (!encoder) {
     return std::unexpected(encoder.error());
   }
-  request.encoder = *encoder;
+  request.encoderOrdinal = *encoder;
 
   auto write = readBool(body, "write", request.write);
   if (!write) {
@@ -986,7 +986,7 @@ std::expected<EncoderRegisterRequest, std::string> parseEncoderRegisterRequest(
 std::vector<ProcedureParameter> encoderRegisterParameters() {
   const EncoderRegisterRequest defaults;
   return {
-      encoderParameter(defaults.encoder),
+      encoderParameter(defaults.encoderOrdinal),
       booleanParameter("write", "Write",
                        "Off reads the register; on writes the value into it. Either way the drive "
                        "reports what the register holds afterwards, so a write confirms itself.",
@@ -1018,10 +1018,11 @@ std::expected<void, std::string> runEncoderRegisterProcedure(
   const OsCommandConfig config{.timeout = kEncoderRegisterTimeout,
                                .pollInterval = kEncoderRegisterPollInterval,
                                .stop = std::move(stop)};
-  auto result = request.write
-                    ? drive->writeEncoderRegister(request.encoder, request.registerAddress,
-                                                  request.value, config)
-                    : drive->readEncoderRegister(request.encoder, request.registerAddress, config);
+  auto result =
+      request.write
+          ? drive->writeEncoderRegister(request.encoderOrdinal, request.registerAddress,
+                                        request.value, config)
+          : drive->readEncoderRegister(request.encoderOrdinal, request.registerAddress, config);
   if (!result) {
     reporter.fail(kEncoderRegisterStep, result.error());
     return std::unexpected(result.error());
@@ -1037,11 +1038,11 @@ std::expected<IcMuCalibrationModeRequest, std::string> parseIcMuCalibrationModeR
   }
   IcMuCalibrationModeRequest request;
 
-  auto encoder = readEncoderOrdinal(body, request.encoder);
+  auto encoder = readEncoderOrdinal(body, request.encoderOrdinal);
   if (!encoder) {
     return std::unexpected(encoder.error());
   }
-  request.encoder = *encoder;
+  request.encoderOrdinal = *encoder;
 
   auto mode = body.find("mode");
   if (mode == body.end() || mode->is_null()) {
@@ -1065,7 +1066,7 @@ std::expected<IcMuCalibrationModeRequest, std::string> parseIcMuCalibrationModeR
 std::vector<ProcedureParameter> icMuCalibrationModeParameters() {
   const IcMuCalibrationModeRequest defaults;
   return {
-      encoderParameter(defaults.encoder),
+      encoderParameter(defaults.encoderOrdinal),
       enumParameter(
           "mode", "Mode",
           "Which mode to put the encoder in. Standard is normal operation; configuration stops "
@@ -1099,7 +1100,7 @@ std::expected<void, std::string> runIcMuCalibrationModeProcedure(
   }
 
   reporter.start(kIcMuCalibrationModeStep);
-  auto result = drive->setIcMuCalibrationMode(request.encoder, request.mode,
+  auto result = drive->setIcMuCalibrationMode(request.encoderOrdinal, request.mode,
                                               {.timeout = kEncoderRegisterTimeout,
                                                .pollInterval = kEncoderRegisterPollInterval,
                                                .stop = std::move(stop)});
@@ -1110,7 +1111,7 @@ std::expected<void, std::string> runIcMuCalibrationModeProcedure(
   // The command reports nothing, so the step records what was asked for: a snapshot read later has
   // to say which encoder is now in which mode, since nothing here restores it.
   reporter.succeed(kIcMuCalibrationModeStep,
-                   nlohmann::json{{"encoder", static_cast<uint8_t>(request.encoder)},
+                   nlohmann::json{{"encoderOrdinal", static_cast<uint8_t>(request.encoderOrdinal)},
                                   {"mode", somanet::toString(request.mode)}});
   return {};
 }
@@ -1193,11 +1194,13 @@ std::expected<void, std::string> runIcMuEncoderStatusProcedure(Device& device,
   reporter.start(kIcMuEncoderStatusRegistersStep);
   std::vector<somanet::IcMuEncoderStatus> statuses;
   for (const auto& encoder : listed) {
-    auto hardRev = readIcMuRegister(*drive, encoder.encoder, somanet::kIcMuHardRevRegister, stop);
+    auto hardRev =
+        readIcMuRegister(*drive, encoder.encoderOrdinal, somanet::kIcMuHardRevRegister, stop);
     if (!hardRev) {
       return fail(kIcMuEncoderStatusRegistersStep, hardRev.error());
     }
-    auto output = readIcMuRegister(*drive, encoder.encoder, somanet::kIcMuOutputRegister, stop);
+    auto output =
+        readIcMuRegister(*drive, encoder.encoderOrdinal, somanet::kIcMuOutputRegister, stop);
     if (!output) {
       return fail(kIcMuEncoderStatusRegistersStep, output.error());
     }
@@ -1214,14 +1217,14 @@ std::expected<IcMuEncoderConfigurationRequest, std::string> parseIcMuEncoderConf
   }
   IcMuEncoderConfigurationRequest request;
 
-  if (auto it = body.find("encoder"); it == body.end() || it->is_null()) {
-    return std::unexpected("'encoder' is required");
+  if (auto it = body.find("encoderOrdinal"); it == body.end() || it->is_null()) {
+    return std::unexpected("'encoderOrdinal' is required");
   }
-  auto encoder = readEncoderOrdinal(body, request.encoder);
+  auto encoder = readEncoderOrdinal(body, request.encoderOrdinal);
   if (!encoder) {
     return std::unexpected(encoder.error());
   }
-  request.encoder = *encoder;
+  request.encoderOrdinal = *encoder;
 
   auto battery = body.find("batteryMode");
   if (battery == body.end() || battery->is_null()) {
@@ -1350,12 +1353,12 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
   if (!configurations) {
     return std::unexpected(configurations.error());
   }
-  const auto found =
-      std::ranges::find(configurations->encoders, request.encoder, &EncoderConfiguration::encoder);
+  const auto found = std::ranges::find(configurations->encoders, request.encoderOrdinal,
+                                       &EncoderConfiguration::encoderOrdinal);
   if (found == configurations->encoders.end() || !somanet::isIcMuEncoder(*found)) {
     return std::unexpected(std::format(
         "{} is not a BiSS or internal encoder with singleturn bits on sensor port 1 or 2",
-        somanet::toString(request.encoder)));
+        somanet::toString(request.encoderOrdinal)));
   }
   if (auto error = somanet::icMuSingleturnBitsError(found->singleturnBits)) {
     return std::unexpected(std::move(*error));
@@ -1406,12 +1409,12 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
   if (!gearRatio) {
     return std::unexpected(gearRatio.error());
   }
-  const auto shaft = somanet::encoderShaft(*configurations, request.encoder, *gearRatio);
+  const auto shaft = somanet::encoderShaft(*configurations, request.encoderOrdinal, *gearRatio);
   if (!shaft) {
     return std::unexpected(std::format(
         "{} serves no controller, so its shaft and its default battery mode are unknown; assign it "
         "to the commutation, position or velocity controller first, or name a battery mode",
-        somanet::toString(request.encoder)));
+        somanet::toString(request.encoderOrdinal)));
   }
   configuration.batteryMode = somanet::icPvlDefaultBatteryMode(*shaft);
   return plan;
@@ -1420,7 +1423,7 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
 nlohmann::json toJson(const IcMuPlan& plan) {
   const auto& c = plan.configuration;
   nlohmann::json j{
-      {"encoder", static_cast<int>(plan.encoder.encoder)},
+      {"encoderOrdinal", static_cast<int>(plan.encoder.encoderOrdinal)},
       {"sensorPort", plan.encoder.sensorPort},
       {"path", c.path == somanet::IcMuPath::kMultiturn ? "multiturn" : "singleturn"},
       {"singleturnBits", c.singleturnBits},
@@ -1445,7 +1448,7 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     reporter.fail(step, error);
     return std::unexpected(std::move(error));
   };
-  const auto encoder = request.encoder;
+  const auto encoder = request.encoderOrdinal;
   const auto& waits = request.waits;
   const OsCommandConfig bissConfig{
       .timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval, .stop = stop};
@@ -2748,11 +2751,11 @@ std::expected<IgnoreBissStatusBitsRequest, std::string> parseIgnoreBissStatusBit
   }
   IgnoreBissStatusBitsRequest request;
 
-  auto encoder = readEncoderOrdinal(body, request.encoder);
+  auto encoder = readEncoderOrdinal(body, request.encoderOrdinal);
   if (!encoder) {
     return std::unexpected(encoder.error());
   }
-  request.encoder = *encoder;
+  request.encoderOrdinal = *encoder;
 
   auto ignore = body.find("ignore");
   if (ignore == body.end() || ignore->is_null()) {
@@ -2768,7 +2771,7 @@ std::expected<IgnoreBissStatusBitsRequest, std::string> parseIgnoreBissStatusBit
 std::vector<ProcedureParameter> ignoreBissStatusBitsParameters() {
   const IgnoreBissStatusBitsRequest defaults;
   return {
-      encoderParameter(defaults.encoder),
+      encoderParameter(defaults.encoderOrdinal),
       booleanParameter("ignore", "Ignore",
                        "On stops the firmware acting on the encoder's status bits; off restores "
                        "the default. Required — the direction is the instruction, and nothing "
@@ -2790,7 +2793,7 @@ std::expected<void, std::string> runIgnoreBissStatusBitsProcedure(
   }
 
   reporter.start(kIgnoreBissStatusBitsStep);
-  auto result = drive->setIgnoreBissStatusBits(request.encoder, request.ignore,
+  auto result = drive->setIgnoreBissStatusBits(request.encoderOrdinal, request.ignore,
                                                {.timeout = kBissServiceTimeout,
                                                 .pollInterval = kEncoderRegisterPollInterval,
                                                 .stop = std::move(stop)});
@@ -2801,7 +2804,7 @@ std::expected<void, std::string> runIgnoreBissStatusBitsProcedure(
   // The command answers with no payload, so the step records what was asked for — which is also
   // what a later reader needs, since nothing on the drive reports the flag back.
   reporter.succeed(kIgnoreBissStatusBitsStep,
-                   nlohmann::json{{"encoder", static_cast<uint8_t>(request.encoder)},
+                   nlohmann::json{{"encoderOrdinal", static_cast<uint8_t>(request.encoderOrdinal)},
                                   {"ignore", request.ignore}});
   return {};
 }

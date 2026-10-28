@@ -589,7 +589,7 @@ TEST(RunOsCommandProcedure, LeavesTheStepIdleWhenTheDeviceIsNotASomanetDrive) {
 TEST(ParseEncoderRegisterRequest, DefaultsEverythingButTheRegisterAddress) {
   auto request = parseEncoderRegisterRequest(nlohmann::json{{"registerAddress", 0x75}});
   ASSERT_TRUE(request.has_value()) << request.error();
-  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(request->encoderOrdinal, somanet::EncoderOrdinal::kEncoder1);
   EXPECT_FALSE(request->write);
   EXPECT_EQ(request->registerAddress, 0x75);
   EXPECT_EQ(request->value, 0);
@@ -605,7 +605,7 @@ TEST(ParseEncoderRegisterRequest, RequiresTheRegisterAddress) {
 
 TEST(ParseEncoderRegisterRequest, RejectsAnOrdinalThatIsNeitherSlot) {
   auto request =
-      parseEncoderRegisterRequest(nlohmann::json{{"encoder", 3}, {"registerAddress", 0x11}});
+      parseEncoderRegisterRequest(nlohmann::json{{"encoderOrdinal", 3}, {"registerAddress", 0x11}});
   ASSERT_FALSE(request.has_value());
   EXPECT_NE(request.error().find("must be 1 or 2"), std::string::npos) << request.error();
 }
@@ -633,16 +633,17 @@ TEST(EncoderRegisterParameters, DescribeExactlyWhatTheParserAccepts) {
   for (const auto& parameter : parameters) {
     names.push_back(parameter.name);
   }
-  EXPECT_EQ(names, (std::vector<std::string>{"encoder", "write", "registerAddress", "value"}));
+  EXPECT_EQ(names,
+            (std::vector<std::string>{"encoderOrdinal", "write", "registerAddress", "value"}));
 
   const auto find = [&parameters](std::string_view name) {
     return std::ranges::find(parameters, name, &mm::node::ProcedureParameter::name);
   };
   EXPECT_TRUE(find("registerAddress")->required());
-  EXPECT_FALSE(find("encoder")->required());
+  EXPECT_FALSE(find("encoderOrdinal")->required());
   EXPECT_FALSE(find("write")->required());
   EXPECT_FALSE(find("value")->required());
-  EXPECT_EQ(find("encoder")->options.size(), 2u);
+  EXPECT_EQ(find("encoderOrdinal")->options.size(), 2u);
   EXPECT_EQ(find("value")->maxValue, 0xFF);
 }
 
@@ -672,7 +673,7 @@ TEST(RunEncoderRegisterProcedure, AWriteCarriesTheDirectionBitAndTheValue) {
   driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};
   auto result = runEncoderRegisterProcedure(
       device, reporter, std::stop_token{},
-      EncoderRegisterRequest{.encoder = somanet::EncoderOrdinal::kEncoder2,
+      EncoderRegisterRequest{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder2,
                              .write = true,
                              .registerAddress = 0x11,
                              .value = 0x08});
@@ -728,7 +729,7 @@ TEST(ParseIcMuCalibrationModeRequest, RequiresTheMode) {
 TEST(ParseIcMuCalibrationModeRequest, DefaultsTheEncoderButNotTheMode) {
   auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "configuration"}});
   ASSERT_TRUE(request.has_value()) << request.error();
-  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(request->encoderOrdinal, somanet::EncoderOrdinal::kEncoder1);
   EXPECT_EQ(request->mode, somanet::IcMuCalibrationMode::kConfiguration);
 }
 
@@ -739,7 +740,8 @@ TEST(ParseIcMuCalibrationModeRequest, RejectsAnUnknownMode) {
 }
 
 TEST(ParseIcMuCalibrationModeRequest, RejectsAnOrdinalThatIsNeitherSlot) {
-  auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "raw"}, {"encoder", 3}});
+  auto request =
+      parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "raw"}, {"encoderOrdinal", 3}});
   ASSERT_FALSE(request.has_value());
   EXPECT_NE(request.error().find("must be 1 or 2"), std::string::npos) << request.error();
 }
@@ -747,7 +749,7 @@ TEST(ParseIcMuCalibrationModeRequest, RejectsAnOrdinalThatIsNeitherSlot) {
 TEST(IcMuCalibrationModeParameters, DescribeExactlyWhatTheParserAccepts) {
   const auto parameters = icMuCalibrationModeParameters();
   ASSERT_EQ(parameters.size(), 2u);
-  EXPECT_EQ(parameters[0].name, "encoder");
+  EXPECT_EQ(parameters[0].name, "encoderOrdinal");
   EXPECT_FALSE(parameters[0].required());
   EXPECT_EQ(parameters[1].name, "mode");
   EXPECT_TRUE(parameters[1].required());
@@ -769,14 +771,14 @@ TEST(RunIcMuCalibrationModeProcedure, RecordsWhichEncoderIsInWhichMode) {
   driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
   auto result = runIcMuCalibrationModeProcedure(
       device, reporter, std::stop_token{},
-      IcMuCalibrationModeRequest{.encoder = somanet::EncoderOrdinal::kEncoder2,
+      IcMuCalibrationModeRequest{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder2,
                                  .mode = somanet::IcMuCalibrationMode::kRaw});
   ASSERT_TRUE(result.has_value()) << result.error();
 
   const auto steps = reporter.steps();
   ASSERT_EQ(steps.size(), 1u);
   EXPECT_EQ(steps[0].status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(steps[0].value["encoder"], 2);
+  EXPECT_EQ(steps[0].value["encoderOrdinal"], 2);
   EXPECT_EQ(steps[0].value["mode"], "raw");
   // Mode 1 shifted up three bits, plus ordinal 2.
   EXPECT_EQ(driver.store[OsCommandFakeDriver::key(kOsCommand, 1)],
@@ -1815,7 +1817,7 @@ TEST(IgnoreBissStatusBitsSteps, DeclaresOneStep) {
 TEST(ParseIgnoreBissStatusBitsRequest, RequiresTheDirection) {
   // Defaulting it either way would let a run that named nothing change how the drive reacts to its
   // encoder — in one direction, silently suppressing a fault.
-  auto missing = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"encoder", 1}});
+  auto missing = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"encoderOrdinal", 1}});
   ASSERT_FALSE(missing.has_value());
   EXPECT_NE(missing.error().find("'ignore' is required"), std::string::npos) << missing.error();
 
@@ -1827,7 +1829,7 @@ TEST(ParseIgnoreBissStatusBitsRequest, RequiresTheDirection) {
 TEST(ParseIgnoreBissStatusBitsRequest, DefaultsToEncoderOne) {
   auto request = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"ignore", true}});
   ASSERT_TRUE(request.has_value()) << request.error();
-  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(request->encoderOrdinal, somanet::EncoderOrdinal::kEncoder1);
   EXPECT_TRUE(request->ignore);
 }
 
@@ -1839,7 +1841,8 @@ TEST(RunIgnoreBissStatusBitsProcedure, AppliesTheChangeAndTouchesNothingElse) {
   driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};  // completed, no reply — all this command answers
   auto result = runIgnoreBissStatusBitsProcedure(
       device, reporter, std::stop_token{},
-      IgnoreBissStatusBitsRequest{.encoder = somanet::EncoderOrdinal::kEncoder2, .ignore = true});
+      IgnoreBissStatusBitsRequest{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder2,
+                                  .ignore = true});
   ASSERT_TRUE(result.has_value()) << result.error();
 
   const auto step = stepById(reporter.steps(), "set-ignore");
@@ -1847,7 +1850,7 @@ TEST(RunIgnoreBissStatusBitsProcedure, AppliesTheChangeAndTouchesNothingElse) {
   EXPECT_EQ(step->status, ProgressStatus::kSucceeded);
   // Nothing on the drive reports the flag back, so the step's record of what was asked for is the
   // only account of it.
-  EXPECT_EQ(step->value.at("encoder").get<uint8_t>(), 2);
+  EXPECT_EQ(step->value.at("encoderOrdinal").get<uint8_t>(), 2);
   EXPECT_TRUE(step->value.at("ignore").get<bool>());
 
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0b101);
@@ -3270,7 +3273,7 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
 };
 
 mm::node::IcMuEncoderConfigurationRequest icMuRequest() {
-  return {.encoder = somanet::EncoderOrdinal::kEncoder1,
+  return {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1,
           .batteryMode = std::nullopt,
           .waits = {.writeAll = kNoDelay,
                     .icPvlEeprom = kNoDelay,
@@ -3495,20 +3498,21 @@ TEST(RunIcMuEncoderConfigurationProcedure, AnEncoderWithoutARoleNeedsABatteryMod
 
 TEST(ParseIcMuEncoderConfigurationRequest, RequiresTheEncoderAndKnowsTheBatteryModes) {
   EXPECT_FALSE(mm::node::parseIcMuEncoderConfigurationRequest(osCommandBody("{}")));
-  auto plain = mm::node::parseIcMuEncoderConfigurationRequest(osCommandBody(R"({"encoder": 2})"));
+  auto plain =
+      mm::node::parseIcMuEncoderConfigurationRequest(osCommandBody(R"({"encoderOrdinal": 2})"));
   ASSERT_TRUE(plain) << plain.error();
-  EXPECT_EQ(plain->encoder, somanet::EncoderOrdinal::kEncoder2);
+  EXPECT_EQ(plain->encoderOrdinal, somanet::EncoderOrdinal::kEncoder2);
   EXPECT_EQ(plain->batteryMode, std::nullopt);
   auto named = mm::node::parseIcMuEncoderConfigurationRequest(
-      osCommandBody(R"({"encoder": 1, "batteryMode": "36-microamperes"})"));
+      osCommandBody(R"({"encoderOrdinal": 1, "batteryMode": "36-microamperes"})"));
   ASSERT_TRUE(named) << named.error();
   EXPECT_EQ(named->batteryMode, 0x48);
   auto fallback = mm::node::parseIcMuEncoderConfigurationRequest(
-      osCommandBody(R"({"encoder": 1, "batteryMode": "default"})"));
+      osCommandBody(R"({"encoderOrdinal": 1, "batteryMode": "default"})"));
   ASSERT_TRUE(fallback) << fallback.error();
   EXPECT_EQ(fallback->batteryMode, std::nullopt);
   EXPECT_FALSE(mm::node::parseIcMuEncoderConfigurationRequest(
-      osCommandBody(R"({"encoder": 1, "batteryMode": "5g"})")));
+      osCommandBody(R"({"encoderOrdinal": 1, "batteryMode": "5g"})")));
 }
 
 }  // namespace

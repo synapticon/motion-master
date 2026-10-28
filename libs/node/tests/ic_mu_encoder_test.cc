@@ -256,7 +256,7 @@ TEST(IcMuEncoderTest, FirmwareSupport) {
 
 EncoderConfiguration icMu(uint8_t sensorPort, uint8_t singleturnBits, uint8_t multiturnBits) {
   EncoderConfiguration encoder;
-  encoder.encoder = sensorPort == 2 ? EncoderOrdinal::kEncoder2 : EncoderOrdinal::kEncoder1;
+  encoder.encoderOrdinal = sensorPort == 2 ? EncoderOrdinal::kEncoder2 : EncoderOrdinal::kEncoder1;
   encoder.sensorPort = sensorPort;
   encoder.type = EncoderType::kInternal;
   encoder.singleturnBits = singleturnBits;
@@ -339,7 +339,7 @@ TEST(IcMuEncoderTest, StatusOfAnUnknownRingSaysWhy) {
 
 TEST(IcMuEncoderTest, StatusJson) {
   const nlohmann::json j = somanet::icMuEncoderStatus(icMu(1, 20, 0), 0x24, 0xA5);
-  EXPECT_EQ(j["encoder"], 1);
+  EXPECT_EQ(j["encoderOrdinal"], 1);
   EXPECT_EQ(j["sensorPort"], 1);
   EXPECT_EQ(j["singleturnBits"], 20);
   EXPECT_EQ(j["multiturnBits"], 0);

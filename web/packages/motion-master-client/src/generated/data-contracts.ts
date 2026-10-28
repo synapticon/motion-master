@@ -579,10 +579,10 @@ export interface HrdRecording {
 /** One encoder configuration record, 0x2110 for encoder 1 or 0x2112 for encoder 2. */
 export interface EncoderConfiguration {
   /**
-   * The ordinal the controller fields refer to; 1 is 0x2110, 2 is 0x2112.
+   * The encoder ordinal, which the controller fields and the OS commands refer to; 1 is 0x2110, 2 is 0x2112.
    * @example 1
    */
-  encoder: 1 | 2;
+  encoderOrdinal: 1 | 2;
   /**
    * The port the encoder is wired to (:01), 0 for none.
    * @example 1
@@ -1168,11 +1168,11 @@ export interface ProcedureRequest {
   /** `os-command` only, and required when `fsBuffer` is `write`: the bytes to send, base64-encoded into this JSON string. Rejected for the other two directions rather than ignored, so a request that names one and forgets the other is told rather than running a command that moves nothing. (Deliberately not `format: byte`, for the reason spelled out on `packageContent`.) */
   fsBufferData?: string;
   /**
-   * `encoder-register-communication`, `ic-mu-calibration-mode` and `ic-mu-encoder-configuration`: which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder. Required for `ic-mu-encoder-configuration`, because a default would write the EEPROM of an encoder that nobody named.
+   * `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits` and `ic-mu-encoder-configuration`: the encoder ordinal of the OS commands, which picks the drive's encoder to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder. Required for `ic-mu-encoder-configuration`, because a default would write the EEPROM of an encoder that nobody named.
    * @default 1
    * @example 1
    */
-  encoder?: 1 | 2;
+  encoderOrdinal?: 1 | 2;
   /**
    * `encoder-register-communication` only: false reads the register, true writes `value` into it. Either way the drive reports what the register holds afterwards.
    * @default false

@@ -22,7 +22,7 @@ const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 // The status of one encoder, as the status procedure reports it in its read-registers step and the
 // configuration in its verify step.
 interface IcMuEncoderStatus {
-  encoder: 1 | 2
+  encoderOrdinal: 1 | 2
   sensorPort: number
   singleturnBits: number
   multiturnBits: number
@@ -149,19 +149,19 @@ export default function DeviceIcMuEncodersPage() {
 
         {encoders.map(encoder => (
           <EncoderCard
-            key={encoder.encoder}
+            key={encoder.encoderOrdinal}
             encoder={encoder}
             status={
-              configured?.encoder === encoder.encoder &&
+              configured?.encoderOrdinal === encoder.encoderOrdinal &&
               (configurationQuery.data?.finishedAt ?? 0) > (statusQuery.data?.finishedAt ?? 0)
                 ? configured
-                : statuses.find(s => s.encoder === encoder.encoder)
+                : statuses.find(s => s.encoderOrdinal === encoder.encoderOrdinal)
             }
             busy={running || start.isPending}
             onConfigure={batteryMode =>
               start.mutate({
                 name: CONFIGURATION_PROCEDURE,
-                body: { encoder: encoder.encoder, ...(batteryMode ? { batteryMode } : {}) },
+                body: { encoderOrdinal: encoder.encoderOrdinal, ...(batteryMode ? { batteryMode } : {}) },
               })
             }
           />
@@ -193,7 +193,7 @@ function EncoderCard({
     <section className="border border-grey-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-grey-200">
         <h3 className="font-display uppercase tracking-wide text-sm">
-          Encoder {encoder.encoder} · sensor port {encoder.sensorPort}
+          Encoder {encoder.encoderOrdinal} · sensor port {encoder.sensorPort}
         </h3>
         {status?.state ? (
           <span className={`px-2 py-0.5 text-xs ${STATE_BADGE[status.state]}`}>{status.state}</span>
@@ -225,11 +225,11 @@ function EncoderCard({
       <div className="flex flex-wrap items-end gap-3 px-5 py-4 border-t border-grey-100">
         {multiturn && (
           <div>
-            <label className={labelCls} htmlFor={`battery-${encoder.encoder}`}>
+            <label className={labelCls} htmlFor={`battery-${encoder.encoderOrdinal}`}>
               Battery mode
             </label>
             <select
-              id={`battery-${encoder.encoder}`}
+              id={`battery-${encoder.encoderOrdinal}`}
               className={inputCls}
               value={batteryMode}
               onChange={event => setBatteryMode(event.target.value)}
@@ -271,12 +271,12 @@ function Field({ label, value }: { label: string; value: string | number }) {
 }
 
 function ConfigurationRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
-  const validate = stepValue(snapshot, 'validate') as { encoder?: number } | undefined
+  const validate = stepValue(snapshot, 'validate') as { encoderOrdinal?: number } | undefined
   return (
     <section className="border border-grey-200 bg-white">
       <div className="px-5 py-3 border-b border-grey-200 flex items-center justify-between">
         <h3 className="font-display uppercase tracking-wide text-sm">
-          Last configuration{validate?.encoder ? ` · encoder ${validate.encoder}` : ''}
+          Last configuration{validate?.encoderOrdinal ? ` · encoder ${validate.encoderOrdinal}` : ''}
         </h3>
         <span className="text-xs text-grey-600">{snapshot.status}</span>
       </div>

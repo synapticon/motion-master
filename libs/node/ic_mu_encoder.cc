@@ -281,7 +281,7 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
   };
   const auto part = icMuPartName(status.hardRev);
   j = nlohmann::json{
-      {"encoder", static_cast<int>(status.encoder)},
+      {"encoderOrdinal", static_cast<int>(status.encoderOrdinal)},
       {"sensorPort", status.sensorPort},
       {"singleturnBits", status.singleturnBits},
       {"multiturnBits", status.multiturnBits},
@@ -302,7 +302,7 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
 IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t hardRev,
                                     uint8_t outputRegister) {
   IcMuEncoderStatus status;
-  status.encoder = encoder.encoder;
+  status.encoderOrdinal = encoder.encoderOrdinal;
   status.sensorPort = encoder.sensorPort;
   status.singleturnBits = encoder.singleturnBits;
   status.multiturnBits = encoder.multiturnBits;

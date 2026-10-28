@@ -1165,57 +1165,7 @@ paths:
                     registers:
                       type: array
                       items:
-                        type: object
-                        required: [address, lastAddress, layout, fields, reserved, spiOnly]
-                        properties:
-                          address:
-                            type: integer
-                            description: The address, or the first of a printed range.
-                            example: 15
-                          lastAddress:
-                            type: integer
-                            description: >-
-                              The last address of the range; equal to address for a single-address
-                              row.
-                            example: 15
-                          layout:
-                            type: string
-                            description: >-
-                              The fields rendered as the datasheet prints the row. "RESERVED" for a
-                              reserved row.
-                            example: SPO_MT(3:0) | MPC(3:0)
-                          fields:
-                            type: array
-                            description: >-
-                              The named pieces of this register, most significant bit first. Empty
-                              when reserved.
-                            items:
-                              type: object
-                              required: [name, bits, description]
-                              properties:
-                                name:
-                                  type: string
-                                  description: The datasheet's own name for the field.
-                                  example: SPO_MT
-                                bits:
-                                  type: string
-                                  description: >-
-                                    The field's own bit slice as the register map prints it, empty
-                                    where it prints a bare name. Not the position within the byte.
-                                  example: "3:0"
-                                description:
-                                  type: string
-                                  description: The datasheet's one-line description of the field.
-                                  example: Offset external multiturn
-                          reserved:
-                            type: boolean
-                            example: false
-                          spiOnly:
-                            type: boolean
-                            description: >-
-                              Reachable over SPI only, so the register communication service cannot
-                              touch it.
-                            example: false
+                        $ref: "#/components/schemas/IcHausRegister"
   /api/meta/kuebler-registers:
     get:
       summary: The Integro internal encoder's register map
@@ -3462,6 +3412,35 @@ paths:
                 $ref: "#/components/schemas/HardwareDescription"
         "400":
           description: The body is not a valid hardware description
+  /api/ic-mu-restore-file/parse:
+    post:
+      summary: Parse an iC-MU restore file
+      operationId: parseIcMuRestoreFile
+      description: >
+        Decodes a `circulo_integrated_encoder_<sensor port>_config.bin` supplied in the request
+        body. The `ic-mu-encoder-configuration` procedure writes this file. It holds
+        `[address, value]` pairs of iC-MU registers, and the drive writes them into the encoder
+        when the iC-MU reports a corrupted EEPROM. Each pair comes back with the iC-MU register at
+        its address.
+
+
+        The file is refused when the drive would refuse it: an odd length, or more than 66 bytes.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: The decoded file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IcMuRestoreFile"
+        "400":
+          description: The body has an odd length, or more than 66 bytes
   /api/integro-variant/parse:
     post:
       summary: Parse a .variant file
@@ -5757,12 +5736,14 @@ components:
     EncoderConfiguration:
       type: object
       description: One encoder configuration record, 0x2110 for encoder 1 or 0x2112 for encoder 2.
-      required: [encoder, sensorPort, type, resolution, inverted, multiturnBits, singleturnBits]
+      required: [encoderOrdinal, sensorPort, type, resolution, inverted, multiturnBits, singleturnBits]
       properties:
-        encoder:
+        encoderOrdinal:
           type: integer
           enum: [1, 2]
-          description: The ordinal the controller fields refer to; 1 is 0x2110, 2 is 0x2112.
+          description: >-
+            The encoder ordinal, which the controller fields and the OS commands refer to; 1 is
+            0x2110, 2 is 0x2112.
           example: 1
         sensorPort:
           type: integer
@@ -6386,6 +6367,90 @@ components:
         descriptor: { $ref: "#/components/schemas/ProcedureDescriptor" }
         snapshot: { $ref: "#/components/schemas/ProcedureSnapshot" }
       required: [descriptor, snapshot]
+    IcHausRegister:
+      type: object
+      required: [address, lastAddress, layout, fields, reserved, spiOnly]
+      properties:
+        address:
+          type: integer
+          description: The address, or the first of a printed range.
+          example: 15
+        lastAddress:
+          type: integer
+          description: >-
+            The last address of the range; equal to address for a single-address
+            row.
+          example: 15
+        layout:
+          type: string
+          description: >-
+            The fields rendered as the datasheet prints the row. "RESERVED" for a
+            reserved row.
+          example: SPO_MT(3:0) | MPC(3:0)
+        fields:
+          type: array
+          description: >-
+            The named pieces of this register, most significant bit first. Empty
+            when reserved.
+          items:
+            type: object
+            required: [name, bits, description]
+            properties:
+              name:
+                type: string
+                description: The datasheet's own name for the field.
+                example: SPO_MT
+              bits:
+                type: string
+                description: >-
+                  The field's own bit slice as the register map prints it, empty
+                  where it prints a bare name. Not the position within the byte.
+                example: "3:0"
+              description:
+                type: string
+                description: The datasheet's one-line description of the field.
+                example: Offset external multiturn
+        reserved:
+          type: boolean
+          example: false
+        spiOnly:
+          type: boolean
+          description: >-
+            Reachable over SPI only, so the register communication service cannot
+            touch it.
+          example: false
+    IcMuRestoreFile:
+      type: object
+      required: [entries]
+      description: >
+        A decoded iC-MU restore file, `circulo_integrated_encoder_<sensor port>_config.bin`. The
+        drive writes these pairs into the encoder when the iC-MU reports a corrupted EEPROM.
+      properties:
+        entries:
+          type: array
+          description: One entry for each pair, in the order of the file.
+          items:
+            type: object
+            required: [address, value, register]
+            properties:
+              address:
+                type: integer
+                minimum: 0
+                maximum: 255
+                description: The iC-MU RAM address the drive writes the value into.
+                example: 12
+              value:
+                type: integer
+                minimum: 0
+                maximum: 255
+                example: 108
+              register:
+                description: >-
+                  The iC-MU register at the address, as `/api/meta/ic-haus-registers` lists it, or
+                  null for an address the register map does not list.
+                nullable: true
+                allOf:
+                  - $ref: "#/components/schemas/IcHausRegister"
     ProcedureRequest:
       type: object
       additionalProperties: true
@@ -6443,15 +6508,18 @@ components:
             ignored, so a request that names one and forgets the other is told rather than running a
             command that moves nothing.
             (Deliberately not `format: byte`, for the reason spelled out on `packageContent`.)
-        encoder:
+        encoderOrdinal:
           type: integer
           enum: [1, 2]
           default: 1
           description: >
-            `encoder-register-communication` and `ic-mu-calibration-mode`: which of the drive's
-            encoders to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one
-            configured in 0x2112, so the ordinal picks a configuration object rather than a kind of
-            encoder.
+            `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits`
+            and `ic-mu-encoder-configuration`: the encoder ordinal of the OS commands, which picks
+            the drive's encoder to address. Encoder 1 is the encoder configured in 0x2110 and
+            encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object
+            rather than a kind of encoder. Required for
+            `ic-mu-encoder-configuration`, because a default would write the EEPROM of an encoder
+            that nobody named.
           example: 1
         write:
           type: boolean
@@ -6504,6 +6572,20 @@ components:
             raised; `raw` clocks an encoder already configured for raw output and averages that data
             into 0x2704. There is no default — the mode is the instruction.
           example: configuration
+        batteryMode:
+          type: string
+          enum: [default, 6-microamperes, 10-microamperes, 18-microamperes, 36-microamperes,
+                 72-microamperes]
+          default: default
+          description: >
+            `ic-mu-encoder-configuration` only, and only on the multiturn path: the current the
+            iC-PVL draws from the battery while the drive has no power. A higher current lets it
+            count revolutions at a higher acceleration. `default` takes iC-PVL code 0x5D for an
+            encoder on the motor shaft and 0x68 for one on the driving shaft, and refuses an
+            encoder that serves no controller. A ring of 16 master pole pairs takes only `default`.
+            The `ic-mu-encoder-status` result lists the modes of each encoder with the acceleration
+            each one allows.
+          example: 18-microamperes
         group:
           type: string
           enum: [all, communication, application, manufacturer]

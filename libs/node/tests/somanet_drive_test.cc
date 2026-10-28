@@ -915,7 +915,7 @@ TEST(SomanetDrive, EncodersReportsBothRecordsAndTheControllerSources) {
   ASSERT_TRUE(encoders.has_value()) << encoders.error();
   ASSERT_EQ(encoders->encoders.size(), 2u);
   const auto& first = encoders->encoders[0];
-  EXPECT_EQ(first.encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(first.encoderOrdinal, somanet::EncoderOrdinal::kEncoder1);
   EXPECT_EQ(first.sensorPort, 1);
   EXPECT_EQ(first.type, somanet::EncoderType::kBiss);
   EXPECT_EQ(first.resolution, 262144u);
@@ -923,7 +923,7 @@ TEST(SomanetDrive, EncodersReportsBothRecordsAndTheControllerSources) {
   EXPECT_EQ(first.multiturnBits, 0);
   EXPECT_EQ(first.singleturnBits, 18);
   const auto& second = encoders->encoders[1];
-  EXPECT_EQ(second.encoder, somanet::EncoderOrdinal::kEncoder2);
+  EXPECT_EQ(second.encoderOrdinal, somanet::EncoderOrdinal::kEncoder2);
   EXPECT_EQ(second.type, somanet::EncoderType::kNone);
   EXPECT_EQ(second.resolution, 0u);
   EXPECT_EQ(encoders->position, somanet::EncoderOrdinal::kEncoder1);
@@ -932,7 +932,7 @@ TEST(SomanetDrive, EncodersReportsBothRecordsAndTheControllerSources) {
 
   const nlohmann::json j = *encoders;
   EXPECT_EQ(j.at("encoders").size(), 2u);
-  EXPECT_EQ(j.at("encoders")[0].at("encoder"), 1);
+  EXPECT_EQ(j.at("encoders")[0].at("encoderOrdinal"), 1);
   EXPECT_EQ(j.at("encoders")[0].at("type"), "biss");
   EXPECT_EQ(j.at("encoders")[0].at("resolution"), 262144);
   EXPECT_EQ(j.at("encoders")[1].at("type"), "none");

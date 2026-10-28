@@ -39,6 +39,7 @@ import DeviceSiiPage from './pages/DeviceSiiPage'
 import DeviceRegistersPage from './pages/DeviceRegistersPage'
 import DeviceFoePage from './pages/DeviceFoePage'
 import DeviceHrdPage from './pages/DeviceHrdPage'
+import DeviceIcMuEncodersPage from './pages/DeviceIcMuEncodersPage'
 import DeviceParametersPage from './pages/DeviceParametersPage'
 import DevicePdoMappingPage from './pages/DevicePdoMappingPage'
 import DeviceMotionPage from './pages/DeviceMotionPage'
@@ -112,6 +113,7 @@ export default function App() {
           <Route path="registers" element={<DeviceRegistersPage />} />
           <Route path="foe" element={<DeviceFoePage />} />
           <Route path="hrd" element={<DeviceHrdPage />} />
+          <Route path="ic-mu-encoders" element={<DeviceIcMuEncodersPage />} />
           <Route path="parameters" element={<DeviceParametersPage />} />
           <Route path="pdo-mapping" element={<DevicePdoMappingPage />} />
           <Route path="motion" element={<DeviceMotionPage />} />

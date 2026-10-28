@@ -150,7 +150,7 @@ export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
     if (!e || e.position === null) {
       return null
     }
-    const encoder = e.encoders.find((c) => c.encoder === e.position)
+    const encoder = e.encoders.find((c) => c.encoderOrdinal === e.position)
     return encoder && encoder.resolution > 0 ? encoder.resolution : null
   })()
 

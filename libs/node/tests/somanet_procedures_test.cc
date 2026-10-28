@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -32,6 +33,7 @@
 #include "node/cia402.h"
 #include "node/device.h"
 #include "node/device_manager.h"
+#include "node/ic_mu_encoder.h"
 #include "node/procedure.h"
 #include "node/profile_procedures.h"
 #include "node/synapticon.h"
@@ -587,7 +589,7 @@ TEST(RunOsCommandProcedure, LeavesTheStepIdleWhenTheDeviceIsNotASomanetDrive) {
 TEST(ParseEncoderRegisterRequest, DefaultsEverythingButTheRegisterAddress) {
   auto request = parseEncoderRegisterRequest(nlohmann::json{{"registerAddress", 0x75}});
   ASSERT_TRUE(request.has_value()) << request.error();
-  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(request->encoderOrdinal, somanet::EncoderOrdinal::kEncoder1);
   EXPECT_FALSE(request->write);
   EXPECT_EQ(request->registerAddress, 0x75);
   EXPECT_EQ(request->value, 0);
@@ -603,7 +605,7 @@ TEST(ParseEncoderRegisterRequest, RequiresTheRegisterAddress) {
 
 TEST(ParseEncoderRegisterRequest, RejectsAnOrdinalThatIsNeitherSlot) {
   auto request =
-      parseEncoderRegisterRequest(nlohmann::json{{"encoder", 3}, {"registerAddress", 0x11}});
+      parseEncoderRegisterRequest(nlohmann::json{{"encoderOrdinal", 3}, {"registerAddress", 0x11}});
   ASSERT_FALSE(request.has_value());
   EXPECT_NE(request.error().find("must be 1 or 2"), std::string::npos) << request.error();
 }
@@ -631,16 +633,17 @@ TEST(EncoderRegisterParameters, DescribeExactlyWhatTheParserAccepts) {
   for (const auto& parameter : parameters) {
     names.push_back(parameter.name);
   }
-  EXPECT_EQ(names, (std::vector<std::string>{"encoder", "write", "registerAddress", "value"}));
+  EXPECT_EQ(names,
+            (std::vector<std::string>{"encoderOrdinal", "write", "registerAddress", "value"}));
 
   const auto find = [&parameters](std::string_view name) {
     return std::ranges::find(parameters, name, &mm::node::ProcedureParameter::name);
   };
   EXPECT_TRUE(find("registerAddress")->required());
-  EXPECT_FALSE(find("encoder")->required());
+  EXPECT_FALSE(find("encoderOrdinal")->required());
   EXPECT_FALSE(find("write")->required());
   EXPECT_FALSE(find("value")->required());
-  EXPECT_EQ(find("encoder")->options.size(), 2u);
+  EXPECT_EQ(find("encoderOrdinal")->options.size(), 2u);
   EXPECT_EQ(find("value")->maxValue, 0xFF);
 }
 
@@ -670,7 +673,7 @@ TEST(RunEncoderRegisterProcedure, AWriteCarriesTheDirectionBitAndTheValue) {
   driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};
   auto result = runEncoderRegisterProcedure(
       device, reporter, std::stop_token{},
-      EncoderRegisterRequest{.encoder = somanet::EncoderOrdinal::kEncoder2,
+      EncoderRegisterRequest{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder2,
                              .write = true,
                              .registerAddress = 0x11,
                              .value = 0x08});
@@ -726,7 +729,7 @@ TEST(ParseIcMuCalibrationModeRequest, RequiresTheMode) {
 TEST(ParseIcMuCalibrationModeRequest, DefaultsTheEncoderButNotTheMode) {
   auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "configuration"}});
   ASSERT_TRUE(request.has_value()) << request.error();
-  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(request->encoderOrdinal, somanet::EncoderOrdinal::kEncoder1);
   EXPECT_EQ(request->mode, somanet::IcMuCalibrationMode::kConfiguration);
 }
 
@@ -737,7 +740,8 @@ TEST(ParseIcMuCalibrationModeRequest, RejectsAnUnknownMode) {
 }
 
 TEST(ParseIcMuCalibrationModeRequest, RejectsAnOrdinalThatIsNeitherSlot) {
-  auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "raw"}, {"encoder", 3}});
+  auto request =
+      parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "raw"}, {"encoderOrdinal", 3}});
   ASSERT_FALSE(request.has_value());
   EXPECT_NE(request.error().find("must be 1 or 2"), std::string::npos) << request.error();
 }
@@ -745,7 +749,7 @@ TEST(ParseIcMuCalibrationModeRequest, RejectsAnOrdinalThatIsNeitherSlot) {
 TEST(IcMuCalibrationModeParameters, DescribeExactlyWhatTheParserAccepts) {
   const auto parameters = icMuCalibrationModeParameters();
   ASSERT_EQ(parameters.size(), 2u);
-  EXPECT_EQ(parameters[0].name, "encoder");
+  EXPECT_EQ(parameters[0].name, "encoderOrdinal");
   EXPECT_FALSE(parameters[0].required());
   EXPECT_EQ(parameters[1].name, "mode");
   EXPECT_TRUE(parameters[1].required());
@@ -767,14 +771,14 @@ TEST(RunIcMuCalibrationModeProcedure, RecordsWhichEncoderIsInWhichMode) {
   driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
   auto result = runIcMuCalibrationModeProcedure(
       device, reporter, std::stop_token{},
-      IcMuCalibrationModeRequest{.encoder = somanet::EncoderOrdinal::kEncoder2,
+      IcMuCalibrationModeRequest{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder2,
                                  .mode = somanet::IcMuCalibrationMode::kRaw});
   ASSERT_TRUE(result.has_value()) << result.error();
 
   const auto steps = reporter.steps();
   ASSERT_EQ(steps.size(), 1u);
   EXPECT_EQ(steps[0].status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(steps[0].value["encoder"], 2);
+  EXPECT_EQ(steps[0].value["encoderOrdinal"], 2);
   EXPECT_EQ(steps[0].value["mode"], "raw");
   // Mode 1 shifted up three bits, plus ordinal 2.
   EXPECT_EQ(driver.store[OsCommandFakeDriver::key(kOsCommand, 1)],
@@ -1813,7 +1817,7 @@ TEST(IgnoreBissStatusBitsSteps, DeclaresOneStep) {
 TEST(ParseIgnoreBissStatusBitsRequest, RequiresTheDirection) {
   // Defaulting it either way would let a run that named nothing change how the drive reacts to its
   // encoder — in one direction, silently suppressing a fault.
-  auto missing = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"encoder", 1}});
+  auto missing = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"encoderOrdinal", 1}});
   ASSERT_FALSE(missing.has_value());
   EXPECT_NE(missing.error().find("'ignore' is required"), std::string::npos) << missing.error();
 
@@ -1825,7 +1829,7 @@ TEST(ParseIgnoreBissStatusBitsRequest, RequiresTheDirection) {
 TEST(ParseIgnoreBissStatusBitsRequest, DefaultsToEncoderOne) {
   auto request = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"ignore", true}});
   ASSERT_TRUE(request.has_value()) << request.error();
-  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(request->encoderOrdinal, somanet::EncoderOrdinal::kEncoder1);
   EXPECT_TRUE(request->ignore);
 }
 
@@ -1837,7 +1841,8 @@ TEST(RunIgnoreBissStatusBitsProcedure, AppliesTheChangeAndTouchesNothingElse) {
   driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};  // completed, no reply — all this command answers
   auto result = runIgnoreBissStatusBitsProcedure(
       device, reporter, std::stop_token{},
-      IgnoreBissStatusBitsRequest{.encoder = somanet::EncoderOrdinal::kEncoder2, .ignore = true});
+      IgnoreBissStatusBitsRequest{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder2,
+                                  .ignore = true});
   ASSERT_TRUE(result.has_value()) << result.error();
 
   const auto step = stepById(reporter.steps(), "set-ignore");
@@ -1845,7 +1850,7 @@ TEST(RunIgnoreBissStatusBitsProcedure, AppliesTheChangeAndTouchesNothingElse) {
   EXPECT_EQ(step->status, ProgressStatus::kSucceeded);
   // Nothing on the drive reports the flag back, so the step's record of what was asked for is the
   // only account of it.
-  EXPECT_EQ(step->value.at("encoder").get<uint8_t>(), 2);
+  EXPECT_EQ(step->value.at("encoderOrdinal").get<uint8_t>(), 2);
   EXPECT_TRUE(step->value.at("ignore").get<bool>());
 
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0b101);
@@ -3197,6 +3202,317 @@ TEST(RunPlantIdentificationProcedure, RestoresAfterCancellation) {
   EXPECT_FALSE(fit.measurement.has_value());
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
             std::vector<uint8_t>{8});
+}
+
+// --- iC-MU encoder configuration --------------------------------------------------------------
+
+// A drive whose OS command 0 reaches a model of one iC-MU: a write stores the byte and echoes it, a
+// read returns it, and an I²C_COM from the iC-PVL copies an iC-PVL register into 0x60.
+class IcMuFakeDriver : public OsCommandFakeDriver {
+ public:
+  std::array<uint8_t, 256> icMu{};
+  std::array<uint8_t, 256> icPvl{};
+  // The (address, value) of every register write, in order.
+  std::vector<std::pair<uint8_t, uint8_t>> registerWrites;
+  // Whether the next OS command 0 write echoes another value than it was given.
+  std::optional<uint8_t> wrongEcho;
+
+  void programIcMuDrive(std::string_view firmware, uint8_t sensorPort, uint8_t singleturnBits,
+                        uint8_t multiturnBits) {
+    programDrive();
+    std::vector<uint8_t> version(firmware.begin(), firmware.end());
+    programObject(0x100A, 0, ObjectDataType::VISIBLE_STRING, version);
+    for (const uint16_t index : {uint16_t{0x2110}, uint16_t{0x2112}}) {
+      const bool mine = index == 0x2110;
+      programObject(index, 1, ObjectDataType::UNSIGNED8,
+                    {static_cast<uint8_t>(mine ? sensorPort : 0)});
+      programObject(index, 2, ObjectDataType::UNSIGNED8, {static_cast<uint8_t>(mine ? 4 : 0)});
+      programObject(index, 3, ObjectDataType::UNSIGNED32, {0, 0, 8, 0});
+      programObject(index, 5, ObjectDataType::UNSIGNED8, {0});
+      programObject(index, 10, ObjectDataType::UNSIGNED8, {mine ? multiturnBits : uint8_t{0}});
+      programObject(index, 12, ObjectDataType::UNSIGNED8, {mine ? singleturnBits : uint8_t{0}});
+    }
+    programObject(0x2111, 1, ObjectDataType::UNSIGNED32, {0x00, 0x00, 0x04, 0x00});
+    // Encoder 1 commutates, so it is on the motor shaft.
+    programObject(0x2010, 12, ObjectDataType::UNSIGNED8, {1});
+    programObject(0x2011, 5, ObjectDataType::UNSIGNED8, {1});
+    programObject(0x2012, 9, ObjectDataType::UNSIGNED8, {1});
+    programObject(0x6091, 0, ObjectDataType::UNSIGNED8, {2});
+    programObject(0x6091, 1, ObjectDataType::UNSIGNED32, {1, 0, 0, 0});
+    programObject(0x6091, 2, ObjectDataType::UNSIGNED32, {1, 0, 0, 0});
+    icMu[0x74] = 0x15;
+    icMu[0x11] = 0xA5;
+  }
+
+  std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slave, uint16_t index,
+                                                           uint8_t subindex) override {
+    if (index != kOsCommand || subindex != 3 || awaitingCommand || commands.empty() ||
+        commands.back()[0] != 0) {
+      return OsCommandFakeDriver::readSdo(slave, index, subindex);
+    }
+    awaitingCommand = true;
+    const auto& command = commands.back();
+    const uint8_t address = command[3];
+    if (command[2] != 0) {
+      registerWrites.emplace_back(address, command[4]);
+      if (address == 0x75) {
+        if (command[4] == 0x0A && icMu[0x5E] == 0xC3) {
+          icMu[0x60] = icPvl[icMu[0x5B]];
+        }
+        return std::vector<uint8_t>{1, 0, command[4], 0, 0, 0, 0, 0};
+      }
+      icMu[address] = command[4];
+      if (wrongEcho) {
+        const uint8_t echo = *wrongEcho;
+        wrongEcho.reset();
+        return std::vector<uint8_t>{1, 0, echo, 0, 0, 0, 0, 0};
+      }
+    }
+    return std::vector<uint8_t>{1, 0, icMu[address], 0, 0, 0, 0, 0};
+  }
+};
+
+mm::node::IcMuEncoderConfigurationRequest icMuRequest() {
+  return {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1,
+          .batteryMode = std::nullopt,
+          .waits = {.writeAll = kNoDelay,
+                    .icPvlEeprom = kNoDelay,
+                    .icPvlReboot = kNoDelay,
+                    .absReset = kNoDelay}};
+}
+
+Device makeIcMuDevice(IcMuFakeDriver& driver, std::string_view firmware, uint8_t sensorPort,
+                      uint8_t singleturnBits, uint8_t multiturnBits) {
+  driver.programIcMuDrive(firmware, sensorPort, singleturnBits, multiturnBits);
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters().has_value());
+  return device;
+}
+
+using Writes = std::vector<std::pair<uint8_t, uint8_t>>;
+
+// The singleturn RAM configuration of a Circulo 7, as the old per-product table holds it.
+const Writes kCirculo7SingleturnRam = {
+    {0x00, 0x00}, {0x05, 0x88}, {0x06, 0x00}, {0x0B, 0x02}, {0x0C, 0x6C}, {0x0D, 0xC0},
+    {0x0E, 0x04}, {0x0F, 0x05}, {0x10, 0x00}, {0x11, 0x05}, {0x12, 0x00}, {0x13, 0xFF},
+    {0x14, 0x0F}, {0x15, 0x13}, {0x16, 0x10}, {0x17, 0x02}, {0x18, 0x00},
+};
+
+TEST(RunIcMuEncoderConfigurationProcedure, WritesTheSingleturnTableOfACirculo7) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  Writes expected = kCirculo7SingleturnRam;
+  expected.emplace_back(0x75, 0x01);  // WRITE_ALL
+  expected.emplace_back(0x75, 0x03);  // ABS_RESET
+  EXPECT_EQ(driver.registerWrites, expected);
+
+  // OS command 14 ignores the status bits before the first write and restores them after the last.
+  ASSERT_GE(driver.commandIds.size(), 2u);
+  EXPECT_EQ(driver.commandIds.front(), 14);
+  EXPECT_EQ(driver.commands.front()[1], 0x03);  // encoder 1, ignore
+  EXPECT_EQ(driver.commandIds.back(), 14);
+  EXPECT_EQ(driver.commands.back()[1], 0x02);  // encoder 1, stop ignoring
+
+  // The restore file is named by the sensor port and holds 33 pairs.
+  ASSERT_EQ(driver.fileWrites.size(), 1u);
+  EXPECT_EQ(driver.fileWrites[0].first, "circulo_integrated_encoder_2_config.bin");
+  ASSERT_EQ(driver.fileWrites[0].second.size(), 66u);
+  EXPECT_EQ(driver.fileWrites[0].second[0x11 * 2], 0x11);
+  EXPECT_EQ(driver.fileWrites[0].second[0x11 * 2 + 1], 0x05);
+
+  const auto steps = reporter.steps();
+  auto step = [&steps](std::string_view id) {
+    return *std::ranges::find(steps, id, &mm::node::ProgressStep::id);
+  };
+  EXPECT_EQ(step(mm::node::kIcMuVerifyStep).value["state"], "configured");
+  EXPECT_EQ(step(mm::node::kIcPvlRegistersStep).status, ProgressStatus::kIdle);
+  EXPECT_EQ(step(mm::node::kIcMuSynchronisationStep).status, ProgressStatus::kIdle);
+  EXPECT_EQ(step(mm::node::kIcMuRestoreStatusBitsStep).status, ProgressStatus::kSucceeded);
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, WritesTheMultiturnSequenceOfACirculo9) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.icPvl[0x0D] = 0x02;  // SYNC 2, 90°
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const std::array<uint8_t, 6> settings = {0x28, 0x09, 0x3F, 0x5D, 0x50, 0x30};
+  const std::array<uint8_t, 5> reserved{};
+  auto icPvlCommand = [](uint8_t command) {
+    return Writes{{0x5E, 0xC2}, {0x5C, 0x60},    {0x5B, 0x11},
+                  {0x5D, 0x60}, {0x60, command}, {0x75, 0x0A}};
+  };
+  auto icPvlWrite = [](uint8_t reg, uint8_t value) {
+    return Writes{{0x5E, 0xC2}, {0x5C, 0x60},  {0x5B, reg},
+                  {0x5D, 0x60}, {0x60, value}, {0x75, 0x0A}};
+  };
+  Writes expected = {
+      {0x00, 0x00}, {0x05, 0x88},
+      {0x06, 0x00}, {0x0B, 0x02},
+      {0x0C, 0x6C}, {0x0D, 0xC0},
+      {0x0E, 0x44}, {0x0F, 0x06},
+      {0x10, 0x6F}, {0x11, 0x18},
+      {0x12, 0x00}, {0x13, 0xFF},
+      {0x14, 0x0F}, {0x15, 0x13},
+      {0x16, 0x10}, {0x17, 0x02},
+      {0x18, 0x00}, {0x5E, 0xA0},
+      {0x5C, 0x60}, {0x5B, 0x40},
+      {0x5D, 0x6C}, {0x60, 0x28},
+      {0x61, 0x09}, {0x62, 0x3F},
+      {0x63, 0x5D}, {0x64, 0x50},
+      {0x65, 0x30}, {0x66, somanet::icPvlCrc8(settings)},
+      {0x67, 0x00}, {0x68, 0x00},
+      {0x69, 0x00}, {0x6A, 0x00},
+      {0x6B, 0x00}, {0x6C, somanet::icPvlCrc8(reserved)},
+      {0x75, 0x0A},
+  };
+  auto append = [&expected](const Writes& more) {
+    expected.insert(expected.end(), more.begin(), more.end());
+  };
+  append(icPvlCommand(0x03));  // REBOOT
+  append({{0x75, 0x01}});      // WRITE_ALL
+  append(icPvlCommand(0x05));  // SCLR
+  append({{0x75, 0x03}});      // ABS_RESET
+  // The synchronisation: SPO_MT cleared, the position read, the SYNC bits read.
+  append({{0x0F, 0x06}, {0x75, 0x03}});
+  append(icPvlWrite(0x05, 0xB0));
+  append({{0x5E, 0xC3}, {0x5C, 0x60}, {0x5B, 0x0D}, {0x5D, 0x60}, {0x75, 0x0A}});
+  // A raw position of 0x40000 is a quarter turn of a 20-bit ring, 900, and SYNC 2 is 900 too.
+  append({{0x0F, 0x06}});
+  append(icPvlWrite(0x05, 0x30));
+  append({{0x75, 0x01}});
+  append(icPvlCommand(0x05));
+  append({{0x75, 0x03}});
+  EXPECT_EQ(driver.registerWrites, expected);
+
+  const auto steps = reporter.steps();
+  auto step = [&steps](std::string_view id) {
+    return *std::ranges::find(steps, id, &mm::node::ProgressStep::id);
+  };
+  EXPECT_EQ(step(mm::node::kIcMuValidateStep).value["batteryMode"], 0x5D);
+  EXPECT_EQ(step(mm::node::kIcMuFaultResetStep).value["faulted"], false);
+  EXPECT_EQ(step(mm::node::kIcMuSynchronisationStep).value["icPvlSync"], 2);
+  EXPECT_EQ(step(mm::node::kIcMuVerifyStep).value["expectedOutputRegister"], 0x18);
+  EXPECT_EQ(driver.fileWrites.at(0).first, "circulo_integrated_encoder_1_config.bin");
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, ANamedBatteryModeReplacesTheDefault) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 19, 18);
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+  auto request = icMuRequest();
+  request.batteryMode = 0x50;
+
+  auto result =
+      mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{}, request);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_NE(std::ranges::find(driver.registerWrites, std::pair<uint8_t, uint8_t>{0x63, 0x50}),
+            driver.registerWrites.end());
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, AWrongEchoFailsAndStillRestoresTheStatusBits) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  driver.wrongEcho = 0x01;  // the first write is 0x00 into register 0x00
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("register 0x00"), std::string::npos) << result.error();
+  EXPECT_EQ(driver.registerWrites.size(), 1u);
+  EXPECT_EQ(driver.commandIds.back(), 14);
+  EXPECT_TRUE(driver.fileWrites.empty());
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, RefusesBeforeWritingAnything) {
+  struct Case {
+    const char* name;
+    const char* firmware;
+    uint8_t sensorPort;
+    uint8_t singleturnBits;
+    uint8_t multiturnBits;
+    uint16_t statusword;
+  };
+  const std::array cases = {
+      Case{"old firmware", "v4.4.1", 1, 19, 0, 0x0040},
+      Case{"unknown ring", "v5.6.11", 1, 17, 0, 0x0040},
+      Case{"port 3", "v5.6.11", 3, 19, 0, 0x0040},
+      Case{"operation enabled", "v5.6.11", 1, 19, 0, 0x0027},
+      Case{"Jasper multiturn", "v10.0.0-jasper.5", 1, 19, 18, 0x0040},
+  };
+  for (const auto& c : cases) {
+    SCOPED_TRACE(c.name);
+    IcMuFakeDriver driver;
+    Device device =
+        makeIcMuDevice(driver, c.firmware, c.sensorPort, c.singleturnBits, c.multiturnBits);
+    driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {
+        static_cast<uint8_t>(c.statusword & 0xFF), static_cast<uint8_t>(c.statusword >> 8)};
+    ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+    auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter,
+                                                                 std::stop_token{}, icMuRequest());
+    EXPECT_FALSE(result.has_value());
+    EXPECT_TRUE(driver.commands.empty());
+    EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
+  }
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, JasperTakesTheSingleturnPath) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v10.0.0-jasper.5", 1, 19, 0);
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_NE(std::ranges::find(driver.registerWrites, std::pair<uint8_t, uint8_t>{0x0B, 0x02}),
+            driver.registerWrites.end());
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, AnEncoderWithoutARoleNeedsABatteryMode) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 19, 18);
+  for (const auto& [index, subindex] :
+       {std::pair<uint16_t, uint8_t>{0x2010, 12}, {0x2011, 5}, {0x2012, 9}}) {
+    driver.store[OsCommandFakeDriver::key(index, subindex)] = {0};
+  }
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("assign it"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.commands.empty());
+}
+
+TEST(ParseIcMuEncoderConfigurationRequest, RequiresTheEncoderAndKnowsTheBatteryModes) {
+  EXPECT_FALSE(mm::node::parseIcMuEncoderConfigurationRequest(osCommandBody("{}")));
+  auto plain =
+      mm::node::parseIcMuEncoderConfigurationRequest(osCommandBody(R"({"encoderOrdinal": 2})"));
+  ASSERT_TRUE(plain) << plain.error();
+  EXPECT_EQ(plain->encoderOrdinal, somanet::EncoderOrdinal::kEncoder2);
+  EXPECT_EQ(plain->batteryMode, std::nullopt);
+  auto named = mm::node::parseIcMuEncoderConfigurationRequest(
+      osCommandBody(R"({"encoderOrdinal": 1, "batteryMode": "36-microamperes"})"));
+  ASSERT_TRUE(named) << named.error();
+  EXPECT_EQ(named->batteryMode, 0x48);
+  auto fallback = mm::node::parseIcMuEncoderConfigurationRequest(
+      osCommandBody(R"({"encoderOrdinal": 1, "batteryMode": "default"})"));
+  ASSERT_TRUE(fallback) << fallback.error();
+  EXPECT_EQ(fallback->batteryMode, std::nullopt);
+  EXPECT_FALSE(mm::node::parseIcMuEncoderConfigurationRequest(
+      osCommandBody(R"({"encoderOrdinal": 1, "batteryMode": "5g"})")));
 }
 
 }  // namespace

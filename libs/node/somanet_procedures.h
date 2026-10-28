@@ -129,7 +129,7 @@ inline constexpr std::string_view kEncoderRegisterStep = "register-access";
 /// **the first procedure request made of named parameters** rather than raw command bytes — which
 /// is what @c ProcedureParameter exists to describe.
 struct EncoderRegisterRequest {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
   bool write = false;           ///< Write the register rather than read it.
   uint8_t registerAddress = 0;  ///< The register to access; no default, so a request must say.
   uint8_t value = 0;            ///< The byte to write; ignored when reading.
@@ -137,7 +137,7 @@ struct EncoderRegisterRequest {
 
 /// @brief Parses and validates a client's encoder register request body.
 ///
-/// Accepts `{"encoder": 1, "write": false, "registerAddress": 117, "value": 7}`. Only
+/// Accepts `{"encoderOrdinal": 1, "write": false, "registerAddress": 117, "value": 7}`. Only
 /// `registerAddress` is required; the rest default as @c EncoderRegisterRequest declares, which is
 /// exactly what @c encoderRegisterParameters advertises.
 ///
@@ -184,7 +184,7 @@ inline constexpr std::string_view kIcMuCalibrationModeStep = "set-mode";
 
 /// @brief What one iC-MU calibration mode change was asked to do.
 struct IcMuCalibrationModeRequest {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
 
   /// Which mode to put it in. Has no default in the request a client sends — the value here is
   /// only what an unset struct holds — because the mode *is* the instruction, and defaulting it
@@ -194,8 +194,8 @@ struct IcMuCalibrationModeRequest {
 
 /// @brief Parses and validates a client's iC-MU calibration mode request body.
 ///
-/// Accepts `{"encoder": 1, "mode": "configuration"}` — or `raw`, or `standard`. @c mode is
-/// required; @c encoder defaults to encoder 1.
+/// Accepts `{"encoderOrdinal": 1, "mode": "configuration"}` — or `raw`, or `standard`. @c mode is
+/// required; @c encoderOrdinal defaults to encoder 1.
 ///
 /// @param body  Parsed request JSON.
 /// @return The validated request, or a message naming what is wrong with it.
@@ -224,6 +224,117 @@ std::vector<ProgressStep> icMuCalibrationModeSteps();
 std::expected<void, std::string> runIcMuCalibrationModeProcedure(
     Device& device, ProgressReporter& reporter, std::stop_token stop,
     const IcMuCalibrationModeRequest& request);
+
+/// @brief Procedure name for reading the iC-MU encoder status, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kIcMuEncoderStatusProcedure = "ic-mu-encoder-status";
+
+/// @brief The step that reads the firmware version and the encoder configurations.
+inline constexpr std::string_view kIcMuEncoderStatusEncodersStep = "read-encoders";
+
+/// @brief The step that reads the iC-MU registers. Its value is the status of each encoder.
+inline constexpr std::string_view kIcMuEncoderStatusRegistersStep = "read-registers";
+
+/// @brief The iC-MU encoder status procedure's step template, idle.
+std::vector<ProgressStep> icMuEncoderStatusSteps();
+
+/// @brief Reads whether each iC-MU encoder of a drive is configured, as a procedure body.
+///
+/// It is a procedure and not a GET route because it runs OS command 0, and an OS command holds the
+/// busy token of the device. It reads @c HARD_REV and register 0x11 of every encoder that
+/// @c somanet::isIcMuEncoder lists, and writes nothing. It prepares nothing and moves nothing.
+///
+/// It refuses a firmware that @c somanet::icMuFirmwareSupport calls too old or unreadable.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token, passed into each register read.
+/// @return Void once every listed encoder was read, otherwise why one was not.
+std::expected<void, std::string> runIcMuEncoderStatusProcedure(Device& device,
+                                                               ProgressReporter& reporter,
+                                                               const std::stop_token& stop);
+
+/// @brief Procedure name for configuring an iC-MU encoder, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kIcMuEncoderConfigurationProcedure =
+    "ic-mu-encoder-configuration";
+
+/// @brief The steps of the iC-MU encoder configuration, in the order they run.
+///
+/// The singleturn path leaves the iC-PVL, fault reset and synchronisation steps idle.
+inline constexpr std::string_view kIcMuValidateStep = "validate";
+inline constexpr std::string_view kIcMuIgnoreStatusBitsStep = "ignore-status-bits";
+inline constexpr std::string_view kIcMuRegistersStep = "ic-mu-registers";
+inline constexpr std::string_view kIcPvlRegistersStep = "ic-pvl-registers";
+inline constexpr std::string_view kIcMuEepromWriteStep = "eeprom-write";
+inline constexpr std::string_view kIcMuFaultResetStep = "fault-reset";
+inline constexpr std::string_view kIcMuSynchronisationStep = "multiturn-synchronisation";
+inline constexpr std::string_view kIcMuVerifyStep = "verify";
+inline constexpr std::string_view kIcMuRestoreFileStep = "restore-file";
+inline constexpr std::string_view kIcMuRestoreStatusBitsStep = "restore-status-bits";
+
+/// @brief How long the configuration waits for the chips. Not part of a request.
+///
+/// The values are the ones the configuration is known to work with. The datasheets give no time
+/// for @c WRITE_ALL or for the iC-PVL reboot. A test sets them to zero.
+struct IcMuConfigurationWaits {
+  std::chrono::milliseconds writeAll{5000};     ///< After @c WRITE_ALL.
+  std::chrono::milliseconds icPvlEeprom{1000};  ///< After the iC-PVL configuration is in EEPROM.
+  std::chrono::milliseconds icPvlReboot{5000};  ///< After the iC-PVL reboot.
+  std::chrono::milliseconds absReset{80};       ///< After @c ABS_RESET, before the position read.
+};
+
+/// @brief Which encoder to configure, and how.
+struct IcMuEncoderConfigurationRequest {
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};
+
+  /// iC-PVL register 0x03, or nothing for the default from the shaft the encoder measures. Only
+  /// the multiturn path takes it.
+  std::optional<uint8_t> batteryMode;
+
+  IcMuConfigurationWaits waits;
+};
+
+/// @brief Parses and validates a client's iC-MU encoder configuration request body.
+///
+/// Accepts `{"encoderOrdinal": 1, "batteryMode": "18-microamperes"}`. @c encoderOrdinal is
+/// required, because a default would write the EEPROM of an encoder that nobody named. @c
+/// batteryMode is @c "default" or a name from @c somanet::icPvlBatteryModes, and defaults to @c
+/// "default".
+std::expected<IcMuEncoderConfigurationRequest, std::string> parseIcMuEncoderConfigurationRequest(
+    const nlohmann::json& body);
+
+/// @brief What the iC-MU encoder configuration accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> icMuEncoderConfigurationParameters();
+
+/// @brief The iC-MU encoder configuration's step template, idle.
+std::vector<ProgressStep> icMuEncoderConfigurationSteps();
+
+/// @brief Configures one iC-MU encoder, and the iC-PVL behind it on the multiturn path, as a
+///        procedure body.
+///
+/// It writes the iC-MU registers with OS command 0, copies them into the EEPROM, and on the
+/// multiturn path configures the iC-PVL and synchronises the revolution count of both chips. Then
+/// it checks 0x0F and 0x11, and writes the key registers to the file the drive restores a damaged
+/// EEPROM from. The status of the encoder is the value of @c kIcMuVerifyStep.
+///
+/// Each write goes out once. A write whose echo differs from the value fails the run, except a
+/// command to 0x75, which runs rather than stores. OS command 14 ignores the BiSS status bits
+/// before the first write, and @c kIcMuRestoreStatusBitsStep turns them on again on every path out,
+/// a cancel included.
+///
+/// It refuses, before it writes anything: a firmware @c somanet::icMuFirmwareSupport does not
+/// support, an encoder @c somanet::isIcMuEncoder does not list, a ring the rules do not know, a
+/// drive in Operation Enabled, and the multiturn path on Jasper firmware, which has no iC-PVL.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token. A cancel stops between two writes, never inside one.
+/// @param request  Which encoder, and the battery mode.
+/// @return Void once the encoder is configured and checked, otherwise why it is not.
+std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const IcMuEncoderConfigurationRequest& request);
 
 /// @brief Procedure name for recording a high resolution data stream, as it appears in its URL and
 /// its
@@ -730,7 +841,7 @@ inline constexpr std::string_view kIgnoreBissStatusBitsStep = "set-ignore";
 
 /// @brief Which encoder's status bits to act on, and which way.
 struct IgnoreBissStatusBitsRequest {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
 
   /// Whether to ignore them. Has no default in the request a client sends — the value here is only
   /// what an unset struct holds — because the direction *is* the instruction, and defaulting it
@@ -740,8 +851,8 @@ struct IgnoreBissStatusBitsRequest {
 
 /// @brief Parses and validates a client's ignore-BiSS-status-bits request body.
 ///
-/// Accepts `{"encoder": 1, "ignore": true}`. @c ignore is required; @c encoder defaults to
-/// encoder 1.
+/// Accepts `{"encoderOrdinal": 1, "ignore": true}`. @c ignore is required; @c encoderOrdinal
+/// defaults to encoder 1.
 ///
 /// @param body  Parsed request JSON.
 /// @return The validated request, or a message naming what is wrong with it.

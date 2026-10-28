@@ -1296,13 +1296,13 @@ void to_json(nlohmann::json& j, const BrakeState& state);
 ///        it. A record whose type is @c kNone is still listed, because the ordinal is what the
 ///        controller records refer to.
 struct EncoderConfiguration {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};
   uint8_t sensorPort = 0;                                  ///< :01, 0 for none.
   somanet::EncoderType type{somanet::EncoderType::kNone};  ///< :02.
   uint32_t resolution = 0;                                 ///< :03, counts per revolution.
   bool inverted = false;                                   ///< :05.
-  uint8_t multiturnBits = 0;                               ///< :0A.
-  uint8_t singleturnBits = 0;                              ///< :0C.
+  uint8_t multiturnBits = 0;                               ///< :0A, 0 where it is missing.
+  uint8_t singleturnBits = 0;                              ///< :0C, 0 where it is missing.
 };
 
 /// @brief Both encoder records and which of them each controller uses. One read answers every
@@ -1325,9 +1325,10 @@ void to_json(nlohmann::json& j, const Encoders& encoders);
 /// 0x07 to register 0x75) restarts the chip, so it is acknowledged without a response. Reporting
 /// that as a value of 0 would be a reading nobody took.
 struct EncoderRegisterResult {
-  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder answered.
-  uint8_t registerAddress = 0;                                          ///< The register accessed.
-  bool wrote = false;            ///< Whether this was a write; false for a read.
+  somanet::EncoderOrdinal encoderOrdinal{
+      somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder answered.
+  uint8_t registerAddress = 0;              ///< The register accessed.
+  bool wrote = false;                       ///< Whether this was a write; false for a read.
   std::optional<uint8_t> value;  ///< What the register holds, when the drive reported it.
 
   /// @brief One line describing the access, ready to put in front of a user.

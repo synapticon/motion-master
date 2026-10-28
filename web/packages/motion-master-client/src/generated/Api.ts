@@ -32,6 +32,8 @@ import {
   GameLoopHealth,
   HardwareDescription,
   HrdRecording,
+  IcHausRegister,
+  IcMuRestoreFile,
   IdentifiedPlantModel,
   IntegroVariant,
   IntegroVariantOption,
@@ -762,48 +764,7 @@ export class Api<
         name: string;
         /** How the space is reached, which is what decides whether the register communication service can read it at all. */
         addressing: string;
-        registers: {
-          /**
-           * The address, or the first of a printed range.
-           * @example 15
-           */
-          address: number;
-          /**
-           * The last address of the range; equal to address for a single-address row.
-           * @example 15
-           */
-          lastAddress: number;
-          /**
-           * The fields rendered as the datasheet prints the row. "RESERVED" for a reserved row.
-           * @example "SPO_MT(3:0) | MPC(3:0)"
-           */
-          layout: string;
-          /** The named pieces of this register, most significant bit first. Empty when reserved. */
-          fields: {
-            /**
-             * The datasheet's own name for the field.
-             * @example "SPO_MT"
-             */
-            name: string;
-            /**
-             * The field's own bit slice as the register map prints it, empty where it prints a bare name. Not the position within the byte.
-             * @example "3:0"
-             */
-            bits: string;
-            /**
-             * The datasheet's one-line description of the field.
-             * @example "Offset external multiturn"
-             */
-            description: string;
-          }[];
-          /** @example false */
-          reserved: boolean;
-          /**
-           * Reachable over SPI only, so the register communication service cannot touch it.
-           * @example false
-           */
-          spiOnly: boolean;
-        }[];
+        registers: IcHausRegister[];
       }[],
       any
     >({
@@ -1972,6 +1933,21 @@ export class Api<
       method: "POST",
       body: data,
       type: ContentType.Text,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Decodes a `circulo_integrated_encoder_<sensor port>_config.bin` supplied in the request body. The `ic-mu-encoder-configuration` procedure writes this file. It holds `[address, value]` pairs of iC-MU registers, and the drive writes them into the encoder when the iC-MU reports a corrupted EEPROM. Each pair comes back with the iC-MU register at its address. The file is refused when the drive would refuse it: an odd length, or more than 66 bytes.
+   *
+   * @name ParseIcMuRestoreFile
+   * @summary Parse an iC-MU restore file
+   * @request POST:/api/ic-mu-restore-file/parse
+   */
+  parseIcMuRestoreFile = (data: File, params: RequestParams = {}) =>
+    this.request<IcMuRestoreFile, void>({
+      path: `/api/ic-mu-restore-file/parse`,
+      method: "POST",
+      body: data,
       format: "json",
       ...params,
     });

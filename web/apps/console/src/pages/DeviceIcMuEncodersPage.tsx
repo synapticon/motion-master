@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   apiErrorMessage,
   type EncoderConfiguration,
+  type IcMuEncoderStatus,
   type ProcedureSnapshot,
   type ProgressStep,
 } from '@synapticon/motion-master-client'
@@ -18,25 +19,6 @@ const CONFIGURATION_PROCEDURE = 'ic-mu-encoder-configuration'
 
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
-
-// The status of one encoder, as the status procedure reports it in its read-registers step and the
-// configuration in its verify step.
-interface IcMuEncoderStatus {
-  encoderOrdinal: 1 | 2
-  sensorPort: number
-  singleturnBits: number
-  multiturnBits: number
-  masterPolePairs: number | null
-  hardRev: number
-  part: string | null
-  revision: number
-  outputRegister: number
-  expectedOutputRegister: number | null
-  state: 'not-configured' | 'invalid' | 'configured' | null
-  reason: string | null
-  path: 'singleturn' | 'multiturn'
-  batteryModes: { name: string; maxCurrentMicroamps: number; maxAccelerationKrpmPerSecond: number }[]
-}
 
 const STEP_DOT: Record<ProgressStep['status'], string> = {
   idle: 'bg-grey-300',

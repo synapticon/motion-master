@@ -13,6 +13,7 @@ add_library(
   hardware_description.cc
   integro_variant.cc
   ic_haus_registers.cc
+  ic_mu_encoder.cc
   kuebler_registers.cc
   monitoring.cc
   notification_bus.cc

@@ -15,6 +15,7 @@ add_executable(
   hardware_description_test.cc
   integro_variant_test.cc
   ic_haus_registers_test.cc
+  ic_mu_encoder_test.cc
   kuebler_registers_test.cc
   monitoring_test.cc
   notification_bus_test.cc

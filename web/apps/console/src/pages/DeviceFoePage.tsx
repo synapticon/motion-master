@@ -10,9 +10,11 @@ import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
 import {
   apiErrorMessage,
+  formatHex,
   wireTimeMs,
   type DeviceFile,
   type HardwareDescription,
+  type IcMuRestoreFile,
   type IntegroVariant,
 } from '@synapticon/motion-master-client'
 
@@ -634,7 +636,36 @@ export default function DeviceFoePage() {
 }
 
 /**
- * Decodes `.hardware_description` and `.variant` under the raw result.
+ * One row per pair of an iC-MU restore file: the register the drive writes, its layout as the
+ * datasheet prints it, and the value.
+ */
+function IcMuRestoreFileView({ file }: { file: IcMuRestoreFile }) {
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-left text-grey-500 border-b border-grey-200">
+          <th className="py-1.5 pr-3 font-normal">Address</th>
+          <th className="py-1.5 pr-3 font-normal">Register</th>
+          <th className="py-1.5 pr-3 font-normal">Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {file.entries.map((entry, i) => (
+          <tr key={i} className="border-b border-grey-100 last:border-0">
+            <td className="py-1.5 pr-3 font-mono">{formatHex(entry.address, 2)}</td>
+            <td className="py-1.5 pr-3 font-mono">{entry.register?.layout ?? 'not in the map'}</td>
+            <td className="py-1.5 pr-3 font-mono">
+              {formatHex(entry.value, 2)} ({entry.value})
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/**
+ * Decodes `.hardware_description`, `.variant` and the iC-MU restore files under the raw result.
  *
  * Parsed on the server, by the same code the device endpoints use — so what this shows is what a
  * compatibility check will read. Any other filename renders nothing.
@@ -646,7 +677,9 @@ function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array 
       ? 'hardware-description'
       : filename === '.variant'
         ? 'integro-variant'
-        : null
+        : /^circulo_integrated_encoder_\d+_config\.bin$/.test(filename)
+          ? 'ic-mu-restore-file'
+          : null
 
   const query = useQuery({
     queryKey: ['decoded-file', kind, filename, bytes.length, bytes[0] ?? 0],
@@ -669,7 +702,7 @@ function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array 
         const body = (await response.json().catch(() => null)) as { error?: string } | null
         throw new Error(body?.error ?? `HTTP ${response.status}`)
       }
-      return (await response.json()) as HardwareDescription | IntegroVariant
+      return (await response.json()) as HardwareDescription | IntegroVariant | IcMuRestoreFile
     },
   })
 
@@ -687,6 +720,8 @@ function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array 
       {query.data !== undefined &&
         (kind === 'hardware-description' ? (
           <HardwareDescriptionView description={query.data as HardwareDescription} />
+        ) : kind === 'ic-mu-restore-file' ? (
+          <IcMuRestoreFileView file={query.data as IcMuRestoreFile} />
         ) : (
           <IntegroVariantView variant={query.data as IntegroVariant} />
         ))}

@@ -5,6 +5,7 @@ import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
+import { isIcMuEncoder } from '../utils/icMuEncoder'
 import { formatHex } from '@synapticon/motion-master-client'
 
 const deviceLinks = [
@@ -221,6 +222,7 @@ function DeviceSection({
   revisionNumber,
   serialNumber,
   isCia402,
+  isSomanet,
   state,
 }: {
   deviceId: string
@@ -231,9 +233,22 @@ function DeviceSection({
   revisionNumber?: number
   serialNumber?: number
   isCia402?: boolean
+  isSomanet?: boolean
   state?: DeviceState
 }) {
   const { api } = useConnection()
+
+  // The iC-MU page is listed only for a drive with an encoder it can configure. The encoder objects
+  // exist once the dictionary is read, from PRE-OP up, and the link stays hidden until they answer.
+  const hasDictionary = state !== undefined && state.alState >= 2
+  const encodersQuery = useQuery({
+    queryKey: ['encoders', Number(deviceId)],
+    queryFn: () => api.getEncoders(Number(deviceId)).then(r => r.data),
+    enabled: Boolean(isSomanet) && hasDictionary,
+    staleTime: Infinity,
+    retry: false,
+  })
+  const hasIcMuEncoder = (encodersQuery.data?.encoders ?? []).some(isIcMuEncoder)
 
   // Links start expanded for every device. After that it's purely manual — the header
   // toggles it and that choice sticks; navigation alone never re-folds it.
@@ -316,6 +331,7 @@ function DeviceSection({
   const isOp = state?.alState === 8
   const links = [
     ...(isCia402 && isOp ? [{ to: 'motion', label: 'Motion' }] : []),
+    ...(hasIcMuEncoder ? [{ to: 'ic-mu-encoders', label: 'iC-MU Encoders' }] : []),
     ...deviceLinks,
   ].sort((a, b) => a.label.localeCompare(b.label))
 
@@ -668,6 +684,7 @@ export default function RootLayout() {
                     revisionNumber={d.revisionNumber}
                     serialNumber={d.serialNumber}
                     isCia402={d.isCia402}
+                    isSomanet={d.isSomanet}
                     state={stateByPosition.get(d.slavePosition)}
                   />
                 ))}

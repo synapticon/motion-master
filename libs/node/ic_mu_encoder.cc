@@ -257,9 +257,20 @@ std::optional<IcMuEncoderState> icMuEncoderState(uint8_t outputRegister,
 }
 
 std::optional<std::string_view> icMuPartName(uint8_t hardRev) {
-  switch (hardRev >> 4) {
-    case 0x0:
+  // The upper nibble 0 is shared by the plain iC-MU and the iC-MU128, so those codes are named one
+  // by one, as MU_3SL_defs.h lists them. From the iC-MU150 on, the nibble names the part.
+  switch (hardRev) {
+    case 0x05:
+    case 0x06:
+    case 0x07:
+      return "iC-MU";
+    case 0x09:
+    case 0x0A:
       return "iC-MU128";
+    default:
+      break;
+  }
+  switch (hardRev >> 4) {
     case 0x1:
       return "iC-MU150";
     case 0x2:

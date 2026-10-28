@@ -59,7 +59,8 @@ enum class IcMuPartClass : uint8_t {
   kIcMu150Or200,
 };
 
-/// @brief The part class that @p hardRev names, or nothing for a code that names no iC-MU.
+/// @brief The part class that @p hardRev names, or nothing for a code that names no iC-MU and for
+///        the plain iC-MU, whose PH scale is not known here.
 std::optional<IcMuPartClass> icMuPartClass(uint8_t hardRev);
 
 /// @brief The values a calibration starts from for one kind of encoder.

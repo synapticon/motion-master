@@ -75,6 +75,9 @@ TEST(IcMuCalibrationTest, RingPositionAndPartClass) {
   EXPECT_EQ(somanet::icMuPartClass(0x11), IcMuPartClass::kIcMu150Or200);
   EXPECT_EQ(somanet::icMuPartClass(0x24), IcMuPartClass::kIcMu150Or200);
   EXPECT_EQ(somanet::icMuPartClass(0x30), std::nullopt);
+  // The plain iC-MU has no class: its PH scale is not in the Rev B1 datasheet.
+  EXPECT_EQ(somanet::icMuPartClass(0x06), std::nullopt);
+  EXPECT_EQ(somanet::icMuPartClass(0x00), std::nullopt);
 }
 
 TEST(IcMuCalibrationTest, PhaseRegisterHoldsTheRangeInBitSeven) {

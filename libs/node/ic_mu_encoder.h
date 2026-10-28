@@ -281,8 +281,11 @@ constexpr std::string_view toString(IcMuEncoderState state) {
 std::optional<IcMuEncoderState> icMuEncoderState(uint8_t outputRegister,
                                                  std::optional<uint8_t> expected);
 
-/// @brief The part that @p hardRev names in its upper nibble, or nothing for a code the iC-MU
-///        datasheet does not list (Rev B1, Table 92).
+/// @brief The part that @p hardRev names, or nothing for a code that names no iC-MU.
+///
+/// From the iC-MU150 on, the upper nibble names the part (iC-MU datasheet Rev B1, Table 92). The
+/// nibble 0 covers the plain iC-MU, 0x05-0x07, and the iC-MU128, 0x09-0x0A, which MU_3SL_defs.h
+/// lists; any other code in it names nothing known.
 std::optional<std::string_view> icMuPartName(uint8_t hardRev);
 
 /// @brief One battery mode a configuration request can name for an encoder, with the acceleration

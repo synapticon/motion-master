@@ -94,15 +94,15 @@ std::optional<IcMuRingPosition> icMuRingPositionOfPort(uint8_t sensorPort) {
 }
 
 std::optional<IcMuPartClass> icMuPartClass(uint8_t hardRev) {
-  switch (hardRev >> 4) {
-    case 0x0:
-      return IcMuPartClass::kIcMu128;
-    case 0x1:
-    case 0x2:
-      return IcMuPartClass::kIcMu150Or200;
-    default:
-      return std::nullopt;
+  const auto part = icMuPartName(hardRev);
+  if (part == "iC-MU128") {
+    return IcMuPartClass::kIcMu128;
   }
+  if (part == "iC-MU150" || part == "iC-MU200") {
+    return IcMuPartClass::kIcMu150Or200;
+  }
+  // The plain iC-MU has a PH scale the Rev B1 datasheet does not give, so it has no class.
+  return std::nullopt;
 }
 
 std::optional<IcMuStartValues> icMuStartValues(uint8_t masterPolePairs, IcMuRingPosition position,

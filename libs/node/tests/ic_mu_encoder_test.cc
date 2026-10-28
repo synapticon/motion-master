@@ -310,6 +310,17 @@ TEST(IcMuEncoderTest, PartNameFromHardRev) {
   EXPECT_EQ(somanet::icMuPartName(0x30), std::nullopt);
 }
 
+TEST(IcMuEncoderTest, NibbleZeroHoldsTwoParts) {
+  // MU_3SL_defs.h: 0x05-0x07 the plain iC-MU, 0x09-0x0A the iC-MU128. A register that reads 0
+  // names no part.
+  EXPECT_EQ(somanet::icMuPartName(0x05), "iC-MU");
+  EXPECT_EQ(somanet::icMuPartName(0x07), "iC-MU");
+  EXPECT_EQ(somanet::icMuPartName(0x09), "iC-MU128");
+  EXPECT_EQ(somanet::icMuPartName(0x00), std::nullopt);
+  EXPECT_EQ(somanet::icMuPartName(0x03), std::nullopt);
+  EXPECT_NE(somanet::icMuPartError(3, 0x00), std::nullopt);
+}
+
 TEST(IcMuEncoderTest, StatusExpectsTheRulesOfEveryRing) {
   for (const Ring& ring : kRings) {
     SCOPED_TRACE(ring.singleturnBits);

@@ -19,7 +19,8 @@ Python 3.11 or newer is necessary, because the client reads the config with the 
 module `tomllib`.
 
 ```bash
-cd clients/python
+git clone https://github.com/synapticon/motion-master.git
+cd motion-master/clients/python
 source setup.sh
 cp config.example.toml config.toml
 ```

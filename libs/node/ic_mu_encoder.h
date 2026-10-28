@@ -292,6 +292,22 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status);
 IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t hardRev,
                                     uint8_t outputRegister);
 
+/// @brief The RAM addresses of the registers in the restore file, in the order the file holds them.
+///
+/// They are the iC-MU configuration 0x00-0x18 and 0x52-0x59. The drive writes the file to the
+/// encoder when the iC-MU reports a corrupted EEPROM, so the file holds the calibration registers
+/// as well as the ones the configuration writes.
+std::span<const uint8_t> icMuRestoreRegisters();
+
+/// @brief The name of the restore file for the encoder on @p sensorPort.
+///
+/// The drive picks the file by the sensor port, not by the encoder ordinal.
+std::string icMuRestoreFileName(uint8_t sensorPort);
+
+/// @brief The restore file: one @c [address, value] pair for each register of
+///        @c icMuRestoreRegisters. @p values holds the value of each register in that order.
+std::vector<uint8_t> icMuRestoreFile(std::span<const uint8_t> values);
+
 /// @brief Whether a firmware can run the configuration.
 enum class IcMuFirmwareSupport : uint8_t {
   kSupported,

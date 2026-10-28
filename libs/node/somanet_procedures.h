@@ -254,6 +254,87 @@ std::expected<void, std::string> runIcMuEncoderStatusProcedure(Device& device,
                                                                ProgressReporter& reporter,
                                                                const std::stop_token& stop);
 
+/// @brief Procedure name for configuring an iC-MU encoder, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kIcMuEncoderConfigurationProcedure =
+    "ic-mu-encoder-configuration";
+
+/// @brief The steps of the iC-MU encoder configuration, in the order they run.
+///
+/// The singleturn path leaves the iC-PVL, fault reset and synchronisation steps idle.
+inline constexpr std::string_view kIcMuValidateStep = "validate";
+inline constexpr std::string_view kIcMuIgnoreStatusBitsStep = "ignore-status-bits";
+inline constexpr std::string_view kIcMuRegistersStep = "ic-mu-registers";
+inline constexpr std::string_view kIcPvlRegistersStep = "ic-pvl-registers";
+inline constexpr std::string_view kIcMuEepromWriteStep = "eeprom-write";
+inline constexpr std::string_view kIcMuFaultResetStep = "fault-reset";
+inline constexpr std::string_view kIcMuSynchronisationStep = "multiturn-synchronisation";
+inline constexpr std::string_view kIcMuVerifyStep = "verify";
+inline constexpr std::string_view kIcMuRestoreFileStep = "restore-file";
+inline constexpr std::string_view kIcMuRestoreStatusBitsStep = "restore-status-bits";
+
+/// @brief How long the configuration waits for the chips. Not part of a request.
+///
+/// The values are the ones the configuration is known to work with. The datasheets give no time
+/// for @c WRITE_ALL or for the iC-PVL reboot. A test sets them to zero.
+struct IcMuConfigurationWaits {
+  std::chrono::milliseconds writeAll{5000};     ///< After @c WRITE_ALL.
+  std::chrono::milliseconds icPvlEeprom{1000};  ///< After the iC-PVL configuration is in EEPROM.
+  std::chrono::milliseconds icPvlReboot{5000};  ///< After the iC-PVL reboot.
+  std::chrono::milliseconds absReset{80};       ///< After @c ABS_RESET, before the position read.
+};
+
+/// @brief Which encoder to configure, and how.
+struct IcMuEncoderConfigurationRequest {
+  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};
+
+  /// iC-PVL register 0x03, or nothing for the default from the shaft the encoder measures. Only
+  /// the multiturn path takes it.
+  std::optional<uint8_t> batteryMode;
+
+  IcMuConfigurationWaits waits;
+};
+
+/// @brief Parses and validates a client's iC-MU encoder configuration request body.
+///
+/// Accepts `{"encoder": 1, "batteryMode": "18-microamperes"}`. @c encoder is required, because a
+/// default would write the EEPROM of an encoder that nobody named. @c batteryMode is @c "default"
+/// or a name from @c somanet::icPvlBatteryModes, and defaults to @c "default".
+std::expected<IcMuEncoderConfigurationRequest, std::string> parseIcMuEncoderConfigurationRequest(
+    const nlohmann::json& body);
+
+/// @brief What the iC-MU encoder configuration accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> icMuEncoderConfigurationParameters();
+
+/// @brief The iC-MU encoder configuration's step template, idle.
+std::vector<ProgressStep> icMuEncoderConfigurationSteps();
+
+/// @brief Configures one iC-MU encoder, and the iC-PVL behind it on the multiturn path, as a
+///        procedure body.
+///
+/// It writes the iC-MU registers with OS command 0, copies them into the EEPROM, and on the
+/// multiturn path configures the iC-PVL and synchronises the revolution count of both chips. Then
+/// it checks 0x0F and 0x11, and writes the key registers to the file the drive restores a damaged
+/// EEPROM from. The status of the encoder is the value of @c kIcMuVerifyStep.
+///
+/// Each write goes out once. A write whose echo differs from the value fails the run, except a
+/// command to 0x75, which runs rather than stores. OS command 14 ignores the BiSS status bits
+/// before the first write, and @c kIcMuRestoreStatusBitsStep turns them on again on every path out,
+/// a cancel included.
+///
+/// It refuses, before it writes anything: a firmware @c somanet::icMuFirmwareSupport does not
+/// support, an encoder @c somanet::isIcMuEncoder does not list, a ring the rules do not know, a
+/// drive in Operation Enabled, and the multiturn path on Jasper firmware, which has no iC-PVL.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token. A cancel stops between two writes, never inside one.
+/// @param request  Which encoder, and the battery mode.
+/// @return Void once the encoder is configured and checked, otherwise why it is not.
+std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const IcMuEncoderConfigurationRequest& request);
+
 /// @brief Procedure name for recording a high resolution data stream, as it appears in its URL and
 /// its
 ///        snapshot key.

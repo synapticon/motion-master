@@ -311,6 +311,30 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
   return status;
 }
 
+std::span<const uint8_t> icMuRestoreRegisters() {
+  static constexpr std::array<uint8_t, 33> kRegisters = {
+      0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,
+      0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+      0x16, 0x17, 0x18, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+  };
+  return kRegisters;
+}
+
+std::string icMuRestoreFileName(uint8_t sensorPort) {
+  return std::format("circulo_integrated_encoder_{}_config.bin", sensorPort);
+}
+
+std::vector<uint8_t> icMuRestoreFile(std::span<const uint8_t> values) {
+  const auto registers = icMuRestoreRegisters();
+  std::vector<uint8_t> file;
+  file.reserve(registers.size() * 2);
+  for (size_t i = 0; i < registers.size() && i < values.size(); ++i) {
+    file.push_back(registers[i]);
+    file.push_back(values[i]);
+  }
+  return file;
+}
+
 IcMuFirmwareSupport icMuFirmwareSupport(std::string_view version) {
   if (version.starts_with('v')) {
     version.remove_prefix(1);

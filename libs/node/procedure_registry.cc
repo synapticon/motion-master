@@ -304,6 +304,53 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor icMuEncoderConfiguration;
+  icMuEncoderConfiguration.name = std::string(kIcMuEncoderConfigurationProcedure);
+  icMuEncoderConfiguration.title = "iC-MU encoder configuration";
+  icMuEncoderConfiguration.description =
+      "Configures one iC-MU encoder for the ring and the output word that the encoder "
+      "configuration object of the drive states. It writes the iC-MU registers and copies them "
+      "into the EEPROM of the encoder. An encoder on sensor port 1 with multiturn bits also gets "
+      "its iC-PVL configured, and the revolution count of the two chips synchronised. Then it "
+      "reads registers 0x0F and 0x11 back, and writes the key registers to the file from which the "
+      "drive restores a corrupted EEPROM. Runs OS commands 0 and 14.";
+  icMuEncoderConfiguration.caveats = {
+      "It writes the EEPROM of the encoder. The calibration registers are not written and keep "
+      "their values.",
+      "The encoder does not report position while it is configured. A drive in Operation Enabled "
+      "is refused. The BiSS status bits are ignored during the run and turned on again at the end, "
+      "a failed or cancelled run included.",
+      "On the multiturn path it resets a drive in Fault or Fault Reaction Active after the iC-PVL "
+      "is rebooted, because the synchronisation reads the position through the drive.",
+      "The multiturn path waits about 16 seconds for the EEPROM and the iC-PVL, and the "
+      "singleturn path about 5 seconds, on top of the register writes. A cancel stops between two "
+      "register writes, which can leave the encoder half configured. Run it again to finish.",
+      "Jasper firmware takes only the singleturn path, because it has no iC-PVL. Firmware older "
+      "than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuEncoderConfiguration.movesMotor = false;
+  icMuEncoderConfiguration.requiresEnabled = false;
+  icMuEncoderConfiguration.parameters = icMuEncoderConfigurationParameters();
+  icMuEncoderConfiguration.steps = icMuEncoderConfigurationSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuEncoderConfiguration),
+      // The firmware gate needs 0x100A, which is not known at scan time, so it is in the body.
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuEncoderConfigurationRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          Device& device = ctx.device;
+          return runIcMuEncoderConfigurationProcedure(device, reporter, stop, spec);
+        };
+      },
+  });
+
   ProcedureDescriptor icMuCalibrationMode;
   icMuCalibrationMode.name = std::string(kIcMuCalibrationModeProcedure);
   icMuCalibrationMode.title = "iC-MU calibration mode";

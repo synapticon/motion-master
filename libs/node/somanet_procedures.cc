@@ -33,6 +33,7 @@
 #include "node/firmware_version.h"
 #include "node/ic_mu_encoder.h"
 #include "node/somanet_control.h"
+#include "node/somanet_drive_objects.h"
 
 namespace mm::node {
 
@@ -52,6 +53,9 @@ constexpr auto kMaxPollInterval = std::chrono::seconds(1);
 // token, which replaces the whole default config rather than adding to it.
 constexpr auto kEncoderRegisterTimeout = std::chrono::seconds(5);
 constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
+
+// The battery mode token that leaves the choice to the shaft the encoder measures.
+constexpr std::string_view kDefaultBatteryMode = "default";
 
 // Reading a counter takes one control cycle — a successful run finishes in about 20 ms — so this
 // ceiling is not about how long the work takes. It clears the drive's own ~20 s reception timeout
@@ -182,13 +186,13 @@ std::expected<somanet::EncoderOrdinal, std::string> readEncoderOrdinal(
 
 // The "encoder" parameter as every encoder command advertises it — one description, so two
 // procedures cannot end up explaining the same field differently.
-ProcedureParameter encoderParameter(somanet::EncoderOrdinal defaultValue) {
+ProcedureParameter encoderParameter(std::optional<somanet::EncoderOrdinal> defaultValue) {
   return enumParameter(
       "encoder", "Encoder",
       "Which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and "
       "encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather "
       "than a kind of encoder.",
-      static_cast<uint8_t>(defaultValue),
+      defaultValue ? nlohmann::json(static_cast<uint8_t>(*defaultValue)) : nlohmann::json(nullptr),
       {
           ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1),
                           .title = "Encoder 1"},
@@ -1200,6 +1204,469 @@ std::expected<void, std::string> runIcMuEncoderStatusProcedure(Device& device,
     statuses.push_back(somanet::icMuEncoderStatus(encoder, *hardRev, *output));
   }
   reporter.succeed(kIcMuEncoderStatusRegistersStep, statuses);
+  return {};
+}
+
+std::expected<IcMuEncoderConfigurationRequest, std::string> parseIcMuEncoderConfigurationRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  IcMuEncoderConfigurationRequest request;
+
+  if (auto it = body.find("encoder"); it == body.end() || it->is_null()) {
+    return std::unexpected("'encoder' is required");
+  }
+  auto encoder = readEncoderOrdinal(body, request.encoder);
+  if (!encoder) {
+    return std::unexpected(encoder.error());
+  }
+  request.encoder = *encoder;
+
+  auto battery = body.find("batteryMode");
+  if (battery == body.end() || battery->is_null()) {
+    return request;
+  }
+  if (!battery->is_string()) {
+    return std::unexpected("'batteryMode' must be a string");
+  }
+  const auto name = battery->get<std::string>();
+  if (name == kDefaultBatteryMode) {
+    return request;
+  }
+  const auto modes = somanet::icPvlBatteryModes();
+  const auto mode = std::ranges::find(modes, name, &somanet::IcPvlBatteryMode::name);
+  if (mode == modes.end()) {
+    std::string names(kDefaultBatteryMode);
+    for (const auto& m : modes) {
+      names += std::format(", {}", m.name);
+    }
+    return std::unexpected(std::format("'batteryMode' must be one of {}, got '{}'", names, name));
+  }
+  request.batteryMode = mode->code;
+  return request;
+}
+
+std::vector<ProcedureParameter> icMuEncoderConfigurationParameters() {
+  std::vector<ParameterOption> batteryModes = {
+      ParameterOption{.value = std::string(kDefaultBatteryMode), .title = "Default"}};
+  for (const auto& mode : somanet::icPvlBatteryModes()) {
+    batteryModes.push_back(ParameterOption{
+        .value = std::string(mode.name), .title = std::format("{} µA", mode.maxCurrentMicroamps)});
+  }
+  return {
+      encoderParameter(std::nullopt),
+      enumParameter(
+          "batteryMode", "Battery mode",
+          "The current the iC-PVL draws from the battery while the drive has no power. A higher "
+          "current lets it count revolutions at a higher acceleration. Default takes 0x5D for an "
+          "encoder on the motor shaft and 0x68 for one on the driving shaft. Only the multiturn "
+          "path takes a battery mode, and a ring of 16 master pole pairs takes only the default.",
+          std::string(kDefaultBatteryMode), std::move(batteryModes)),
+  };
+}
+
+std::vector<ProgressStep> icMuEncoderConfigurationSteps() {
+  return stepsFrom({kIcMuValidateStep, kIcMuIgnoreStatusBitsStep, kIcMuRegistersStep,
+                    kIcPvlRegistersStep, kIcMuEepromWriteStep, kIcMuFaultResetStep,
+                    kIcMuSynchronisationStep, kIcMuVerifyStep, kIcMuRestoreFileStep,
+                    kIcMuRestoreStatusBitsStep});
+}
+
+namespace {
+
+// Writes one iC-MU register and compares the echo. A command to 0x75 runs rather than stores, so
+// its echo says nothing about the write.
+std::expected<void, std::string> writeIcMuRegister(SomanetDrive& drive,
+                                                   somanet::EncoderOrdinal encoder,
+                                                   somanet::IcMuRegisterWrite write,
+                                                   const std::stop_token& stop) {
+  if (stop.stop_requested()) {
+    return std::unexpected("the configuration was cancelled");
+  }
+  auto result = drive.writeEncoderRegister(encoder, write.address, write.value,
+                                           {.timeout = kEncoderRegisterTimeout,
+                                            .pollInterval = kEncoderRegisterPollInterval,
+                                            .stop = stop});
+  if (!result) {
+    return std::unexpected(result.error());
+  }
+  if (write.address == somanet::kIcMuCommandRegister) {
+    return {};
+  }
+  if (result->value != write.value) {
+    return std::unexpected(std::format(
+        "{}: wrote 0x{:02X} into register 0x{:02X}, and the encoder reports {}",
+        somanet::toString(encoder), write.value, write.address,
+        result->value ? std::format("0x{:02X}", *result->value) : std::string("no value")));
+  }
+  return {};
+}
+
+std::expected<void, std::string> writeIcMuRegisters(
+    SomanetDrive& drive, somanet::EncoderOrdinal encoder,
+    std::span<const somanet::IcMuRegisterWrite> writes, const std::stop_token& stop) {
+  for (const auto& write : writes) {
+    if (auto written = writeIcMuRegister(drive, encoder, write, stop); !written) {
+      return written;
+    }
+  }
+  return {};
+}
+
+std::expected<void, std::string> waitForEncoder(std::chrono::milliseconds duration,
+                                                const std::stop_token& stop) {
+  if (!sleepUnlessStopped(duration, stop)) {
+    return std::unexpected("the configuration was cancelled");
+  }
+  return {};
+}
+
+somanet::IcMuRegisterWrite icMuCommand(somanet::IcMuCommand command) {
+  return {somanet::kIcMuCommandRegister, static_cast<uint8_t>(command)};
+}
+
+// What the validate step decides before anything is written.
+struct IcMuPlan {
+  EncoderConfiguration encoder;
+  somanet::IcMuConfiguration configuration;
+};
+
+std::expected<IcMuPlan, std::string> planIcMuConfiguration(
+    Device& device, SomanetDrive& drive, const IcMuEncoderConfigurationRequest& request) {
+  auto rawVersion = drive.manufacturerSoftwareVersion();
+  if (!rawVersion) {
+    return std::unexpected(rawVersion.error());
+  }
+  const auto version = trimFirmwareVersion(
+      std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
+  if (auto error = icMuFirmwareError(version)) {
+    return std::unexpected(std::move(*error));
+  }
+  const bool jasper =
+      somanet::icMuFirmwareSupport(version) == somanet::IcMuFirmwareSupport::kJasper;
+
+  auto configurations = drive.encoders();
+  if (!configurations) {
+    return std::unexpected(configurations.error());
+  }
+  const auto found =
+      std::ranges::find(configurations->encoders, request.encoder, &EncoderConfiguration::encoder);
+  if (found == configurations->encoders.end() || !somanet::isIcMuEncoder(*found)) {
+    return std::unexpected(std::format(
+        "{} is not a BiSS or internal encoder with singleturn bits on sensor port 1 or 2",
+        somanet::toString(request.encoder)));
+  }
+  if (auto error = somanet::icMuSingleturnBitsError(found->singleturnBits)) {
+    return std::unexpected(std::move(*error));
+  }
+
+  auto state = drive.state();
+  if (!state) {
+    return std::unexpected(state.error());
+  }
+  if (*state == cia402::State::kOperationEnabled) {
+    return std::unexpected(
+        "the drive is in Operation Enabled; disable it first, because the encoder stops reporting "
+        "position while it is configured");
+  }
+
+  IcMuPlan plan{.encoder = *found, .configuration = {}};
+  auto& configuration = plan.configuration;
+  configuration.path = somanet::icMuPath(found->sensorPort, found->multiturnBits);
+  configuration.singleturnBits = found->singleturnBits;
+  configuration.multiturnBits = found->multiturnBits;
+  configuration.safeMotion = device
+                                 .parameter(somanet::objects::kEncoderSourceTypeCount.index,
+                                            somanet::objects::kEncoderSourceTypeCount.subindex)
+                                 .has_value();
+
+  if (configuration.path == somanet::IcMuPath::kSingleturn) {
+    if (request.batteryMode) {
+      return std::unexpected("'batteryMode' applies only to the multiturn path");
+    }
+    return plan;
+  }
+  if (jasper) {
+    return std::unexpected(std::format(
+        "firmware {} is Jasper firmware, which has no iC-PVL, so it cannot take the multiturn path",
+        version));
+  }
+  if (request.batteryMode) {
+    if (!somanet::icPvlMaxAcceleration(somanet::icPvlBatteryModes().front(),
+                                       found->singleturnBits)) {
+      return std::unexpected(
+          std::format("a ring of {} master pole pairs takes only the default battery mode",
+                      somanet::icMuMasterPolePairs(found->singleturnBits)));
+    }
+    configuration.batteryMode = *request.batteryMode;
+    return plan;
+  }
+  auto gearRatio = drive.gearRatio();
+  if (!gearRatio) {
+    return std::unexpected(gearRatio.error());
+  }
+  const auto shaft = somanet::encoderShaft(*configurations, request.encoder, *gearRatio);
+  if (!shaft) {
+    return std::unexpected(std::format(
+        "{} serves no controller, so its shaft and its default battery mode are unknown; assign it "
+        "to the commutation, position or velocity controller first, or name a battery mode",
+        somanet::toString(request.encoder)));
+  }
+  configuration.batteryMode = somanet::icPvlDefaultBatteryMode(*shaft);
+  return plan;
+}
+
+nlohmann::json toJson(const IcMuPlan& plan) {
+  const auto& c = plan.configuration;
+  nlohmann::json j{
+      {"encoder", static_cast<int>(plan.encoder.encoder)},
+      {"sensorPort", plan.encoder.sensorPort},
+      {"path", c.path == somanet::IcMuPath::kMultiturn ? "multiturn" : "singleturn"},
+      {"singleturnBits", c.singleturnBits},
+      {"multiturnBits", c.multiturnBits},
+      {"outputPorts", somanet::icMuOutputPorts(c.safeMotion)},
+  };
+  j["batteryMode"] = c.path == somanet::IcMuPath::kMultiturn ? nlohmann::json(c.batteryMode)
+                                                             : nlohmann::json(nullptr);
+  return j;
+}
+
+}  // namespace
+
+std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const IcMuEncoderConfigurationRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+  const auto encoder = request.encoder;
+  const auto& waits = request.waits;
+  const OsCommandConfig bissConfig{
+      .timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval, .stop = stop};
+
+  reporter.start(kIcMuValidateStep);
+  auto plan = planIcMuConfiguration(device, *drive, request);
+  if (!plan) {
+    return fail(kIcMuValidateStep, plan.error());
+  }
+  reporter.succeed(kIcMuValidateStep, toJson(*plan));
+  const auto& configuration = plan->configuration;
+  const bool multiturn = configuration.path == somanet::IcMuPath::kMultiturn;
+
+  reporter.start(kIcMuIgnoreStatusBitsStep);
+  if (auto ignored = drive->setIgnoreBissStatusBits(encoder, true, bissConfig); !ignored) {
+    return fail(kIcMuIgnoreStatusBitsStep, ignored.error());
+  }
+  reporter.succeed(kIcMuIgnoreStatusBitsStep);
+
+  auto write = [&](std::span<const somanet::IcMuRegisterWrite> writes) {
+    return writeIcMuRegisters(*drive, encoder, writes, stop);
+  };
+  auto command = [&](somanet::IcMuCommand c) {
+    return writeIcMuRegister(*drive, encoder, icMuCommand(c), stop);
+  };
+  auto read = [&](uint8_t address) { return readIcMuRegister(*drive, encoder, address, stop); };
+  // SCLR clears the iC-PVL status, and ABS_RESET has the iC-MU read the revolution count again.
+  auto clearAndReset = [&]() -> std::expected<void, std::string> {
+    if (auto r = write(somanet::icPvlCommand(somanet::IcPvlCommand::kSclr)); !r) {
+      return r;
+    }
+    return command(somanet::IcMuCommand::kAbsReset);
+  };
+
+  // Gives SPO_MT the offset between the revolution of the iC-MU and the SYNC bits of the iC-PVL,
+  // then stores it like the first configuration.
+  auto synchronise = [&]() -> std::expected<nlohmann::json, std::string> {
+    auto mpc = read(somanet::kIcMuMpcRegister);
+    if (!mpc) {
+      return std::unexpected(mpc.error());
+    }
+    const auto cleared = static_cast<uint8_t>(*mpc & 0x0F);
+    if (auto r = write(std::array{somanet::IcMuRegisterWrite{somanet::kIcMuMpcRegister, cleared}})
+                     .and_then([&] { return command(somanet::IcMuCommand::kAbsReset); })
+                     .and_then([&] { return waitForEncoder(waits.absReset, stop); });
+        !r) {
+      return std::unexpected(r.error());
+    }
+    auto rawPosition = encoder == somanet::EncoderOrdinal::kEncoder1
+                           ? device.readValue(somanet::objects::kEncoder1FeedbackRawPosition)
+                           : device.readValue(somanet::objects::kEncoder2FeedbackRawPosition);
+    if (!rawPosition) {
+      return std::unexpected(rawPosition.error());
+    }
+    if (auto r =
+            write(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOn)).and_then([&] {
+              return write(somanet::icPvlRegisterRead(somanet::kIcPvlSyncRegister));
+            });
+        !r) {
+      return std::unexpected(r.error());
+    }
+    auto sync = read(somanet::kIcMuExchangeRegister);
+    if (!sync) {
+      return std::unexpected(sync.error());
+    }
+    const uint8_t spoMt =
+        somanet::icMuSpoMtRegister(*rawPosition, configuration.singleturnBits, *sync);
+    if (auto r =
+            write(std::array{somanet::IcMuRegisterWrite{somanet::kIcMuMpcRegister, spoMt}})
+                .and_then([&] {
+                  return write(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOff));
+                })
+                .and_then([&] { return command(somanet::IcMuCommand::kWriteAll); })
+                .and_then([&] { return waitForEncoder(waits.writeAll, stop); })
+                .and_then(clearAndReset);
+        !r) {
+      return std::unexpected(r.error());
+    }
+    return nlohmann::json{
+        {"rawPosition", *rawPosition}, {"icPvlSync", *sync & 0x07}, {"mpcRegister", spoMt}};
+  };
+
+  // Reads back what the EEPROM holds now. A ring the chip does not have shows in MPC, and an output
+  // word the drive does not expect shows in OUT_MSB.
+  auto verify = [&]() -> std::expected<somanet::IcMuEncoderStatus, std::string> {
+    auto mpc = read(somanet::kIcMuMpcRegister);
+    if (!mpc) {
+      return std::unexpected(mpc.error());
+    }
+    const uint8_t expectedMpc = somanet::icMuMasterPeriodCount(configuration.singleturnBits);
+    if ((*mpc & 0x0F) != expectedMpc) {
+      return std::unexpected(std::format(
+          "register 0x0F holds MPC {} after the configuration, not {}", *mpc & 0x0F, expectedMpc));
+    }
+    auto hardRev = read(somanet::kIcMuHardRevRegister);
+    if (!hardRev) {
+      return std::unexpected(hardRev.error());
+    }
+    auto output = read(somanet::kIcMuOutputRegister);
+    if (!output) {
+      return std::unexpected(output.error());
+    }
+    auto status = somanet::icMuEncoderStatus(plan->encoder, *hardRev, *output);
+    if (status.state != somanet::IcMuEncoderState::kConfigured) {
+      return std::unexpected(
+          std::format("register 0x11 holds 0x{:02X} after the configuration, not 0x{:02X}", *output,
+                      status.expectedOutputRegister.value_or(0)));
+    }
+    return status;
+  };
+
+  // The file the drive writes to the encoder when the iC-MU reports a corrupted EEPROM.
+  auto writeRestoreFile = [&]() -> std::expected<std::string, std::string> {
+    std::vector<uint8_t> values;
+    for (const uint8_t address : somanet::icMuRestoreRegisters()) {
+      auto value = read(address);
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+      values.push_back(*value);
+    }
+    auto name = somanet::icMuRestoreFileName(plan->encoder.sensorPort);
+    if (auto written = device.writeFile(name, somanet::icMuRestoreFile(values)); !written) {
+      return std::unexpected(
+          std::format("could not write '{}': {}", name, written.error().message));
+    }
+    return name;
+  };
+
+  // Every step that writes the encoder, so that the status bits come back on whatever it returns.
+  auto configure = [&]() -> std::expected<void, std::string> {
+    reporter.start(kIcMuRegistersStep);
+    if (auto r = write(somanet::icMuRamWrites(configuration)); !r) {
+      return fail(kIcMuRegistersStep, r.error());
+    }
+    reporter.succeed(kIcMuRegistersStep);
+
+    if (multiturn) {
+      reporter.start(kIcPvlRegistersStep);
+      auto pvl = write(somanet::icPvlEepromWrites(configuration))
+                     .and_then([&] { return waitForEncoder(waits.icPvlEeprom, stop); })
+                     .and_then([&] {
+                       return write(somanet::icPvlCommand(somanet::IcPvlCommand::kReboot));
+                     })
+                     .and_then([&] { return waitForEncoder(waits.icPvlReboot, stop); });
+      if (!pvl) {
+        return fail(kIcPvlRegistersStep, pvl.error());
+      }
+      reporter.succeed(kIcPvlRegistersStep);
+    }
+
+    reporter.start(kIcMuEepromWriteStep);
+    auto eeprom =
+        command(somanet::IcMuCommand::kWriteAll)
+            .and_then([&] { return waitForEncoder(waits.writeAll, stop); })
+            .and_then([&]() -> std::expected<void, std::string> {
+              return multiturn ? clearAndReset() : command(somanet::IcMuCommand::kAbsReset);
+            });
+    if (!eeprom) {
+      return fail(kIcMuEepromWriteStep, eeprom.error());
+    }
+    reporter.succeed(kIcMuEepromWriteStep);
+
+    if (multiturn) {
+      // The iC-PVL reboot and the cleared status can leave the drive in a fault, and the
+      // synchronisation reads the position through the drive.
+      reporter.start(kIcMuFaultResetStep);
+      auto statusword = drive->statusword();
+      if (!statusword) {
+        return fail(kIcMuFaultResetStep, statusword.error());
+      }
+      const bool faulted = cia402::isFaulted(*statusword);
+      if (faulted) {
+        if (auto reset = drive->faultReset(); !reset) {
+          return fail(kIcMuFaultResetStep, reset.error());
+        }
+      }
+      reporter.succeed(kIcMuFaultResetStep, nlohmann::json{{"faulted", faulted}});
+
+      reporter.start(kIcMuSynchronisationStep);
+      auto synchronised = synchronise();
+      if (!synchronised) {
+        return fail(kIcMuSynchronisationStep, synchronised.error());
+      }
+      reporter.succeed(kIcMuSynchronisationStep, *synchronised);
+    }
+
+    reporter.start(kIcMuVerifyStep);
+    auto verified = verify();
+    if (!verified) {
+      return fail(kIcMuVerifyStep, verified.error());
+    }
+    reporter.succeed(kIcMuVerifyStep, *verified);
+
+    reporter.start(kIcMuRestoreFileStep);
+    auto restored = writeRestoreFile();
+    if (!restored) {
+      return fail(kIcMuRestoreFileStep, restored.error());
+    }
+    reporter.succeed(kIcMuRestoreFileStep, nlohmann::json{{"file", *restored}});
+    return {};
+  };
+
+  auto configured = configure();
+
+  reporter.start(kIcMuRestoreStatusBitsStep);
+  // A cancelled run still turns the status bits on, so this command takes no stop token.
+  auto restoredBits = drive->setIgnoreBissStatusBits(
+      encoder, false,
+      {.timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval});
+  if (!restoredBits) {
+    reporter.fail(kIcMuRestoreStatusBitsStep, restoredBits.error());
+  } else {
+    reporter.succeed(kIcMuRestoreStatusBitsStep);
+  }
+  if (!configured) {
+    return configured;
+  }
+  if (!restoredBits) {
+    return std::unexpected(restoredBits.error());
+  }
   return {};
 }
 

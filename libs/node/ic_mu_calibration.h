@@ -68,7 +68,7 @@ struct IcMuStartValues {
   uint8_t noniusPhase = 0;  ///< @c PH_N with @c PHR_N, register 0x0A.
 
   /// The velocity of the ring of an encoder on the motor shaft, in rpm.
-  double baseVelocityRpm = 0;
+  double motorShaftRingVelocityRpm = 0;
 
   /// The velocity of the ring below which a recording in a narrow range may not converge, in rpm,
   /// for an encoder on the motor shaft and on the driving shaft.
@@ -84,8 +84,11 @@ struct IcMuStartValues {
 std::optional<IcMuStartValues> icMuStartValues(uint8_t masterPolePairs, IcMuRingPosition position,
                                                IcMuPartClass partClass);
 
-/// @brief The velocity of the driving shaft for an encoder on the driving shaft, in rpm.
-inline constexpr double kIcMuDrivingShaftVelocityRpm = 15.0;
+/// @brief The velocity of the ring of an encoder on the driving shaft, in rpm.
+inline constexpr double kIcMuDrivingShaftRingVelocityRpm = 15.0;
+
+/// @brief The velocity of the ring a calibration runs at when the request names none, in rpm.
+double icMuDefaultRingVelocity(const IcMuStartValues& values, EncoderShaft shaft);
 
 /// @brief The phase of one track, as register 0x04 or 0x0A holds it.
 struct IcMuPhase {
@@ -180,8 +183,8 @@ struct IcMuMotionInput {
   double maxMotorSpeedRpm = 0;  ///< 0x6080, in rpm of the motor.
   EncoderShaft shaft{EncoderShaft::kMotor};
 
-  /// The velocity of the ring of a motor-shaft encoder, in rpm: the start values, or the request.
-  double baseVelocityRpm = 0;
+  /// The velocity of the ring, in rpm: the request, or @c icMuDefaultRingVelocity.
+  double ringVelocityRpm = 0;
   double lowVelocityRpm = 0;  ///< Of the ring, from the start values for @c shaft.
 
   double positionRevolutions = 0;  ///< 0x6064.
@@ -208,9 +211,9 @@ struct IcMuMotionPlan {
 
 /// @brief Plans the motion, or says why there is no room for it.
 ///
-/// The velocity is the base velocity of the ring over the gear ratio for a motor-shaft encoder, and
-/// @c kIcMuDrivingShaftVelocityRpm for a driving-shaft encoder. It is capped at 0.95 × the maximum
-/// motor speed over the gear ratio. The acceleration is 1000 rpm/s over the gear ratio.
+/// The velocity of the driving shaft is the velocity of the ring over
+/// @c icMuRingTurnsPerRevolution. It is capped at 0.95 × the maximum motor speed over the gear
+/// ratio. The acceleration is 1000 rpm/s over the gear ratio.
 ///
 /// A move that fits from the current position leaves the axis where it is. One that fits between
 /// the limits from another position starts there. One that does not fit between the limits runs at

@@ -117,6 +117,11 @@ std::optional<IcMuStartValues> icMuStartValues(uint8_t masterPolePairs, IcMuRing
   return row->values;
 }
 
+double icMuDefaultRingVelocity(const IcMuStartValues& values, EncoderShaft shaft) {
+  return shaft == EncoderShaft::kDriving ? kIcMuDrivingShaftRingVelocityRpm
+                                         : values.motorShaftRingVelocityRpm;
+}
+
 uint8_t icMuPhaseRegister(IcMuPhase phase) {
   return static_cast<uint8_t>(((phase.phaseRange & 0x01) << 7) | (phase.phase & 0x7F));
 }
@@ -237,10 +242,8 @@ std::expected<IcMuMotionPlan, std::string> planIcMuMotion(const IcMuMotionInput&
           "calibration of a driving-shaft encoder needs more than {:.0f} rpm",
           maxVelocity, kMinDrivingShaftVelocityRpm));
     }
-    plan.velocityRpm = kIcMuDrivingShaftVelocityRpm;
-  } else {
-    plan.velocityRpm = input.baseVelocityRpm / gear;
   }
+  plan.velocityRpm = input.ringVelocityRpm / icMuRingTurnsPerRevolution(input.shaft, gear);
   auto cap = [&] {
     if (plan.velocityRpm > maxVelocity) {
       plan.velocityRpm = maxVelocity;

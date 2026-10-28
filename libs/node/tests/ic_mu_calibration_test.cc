@@ -30,7 +30,7 @@ TEST(IcMuCalibrationTest, StartValuesOfTheMeasuredRings) {
   ASSERT_TRUE(inner32);
   EXPECT_EQ(inner32->masterPhase, 0x00);
   EXPECT_EQ(inner32->noniusPhase, 0x00);
-  EXPECT_EQ(inner32->baseVelocityRpm, 90);
+  EXPECT_EQ(inner32->motorShaftRingVelocityRpm, 90);
   EXPECT_TRUE(inner32->measured);
 
   const auto outer64 =
@@ -38,7 +38,7 @@ TEST(IcMuCalibrationTest, StartValuesOfTheMeasuredRings) {
   ASSERT_TRUE(outer64);
   EXPECT_EQ(outer64->masterPhase, 0x21);
   EXPECT_EQ(outer64->noniusPhase, 0x1A);
-  EXPECT_EQ(outer64->baseVelocityRpm, 45);
+  EXPECT_EQ(outer64->motorShaftRingVelocityRpm, 45);
   EXPECT_EQ(outer64->motorShaftLowVelocityRpm, 50);
 
   const auto inner64 =
@@ -150,7 +150,7 @@ IcMuMotionInput motorShaftInput() {
   return {.gearRatio = 1,
           .maxMotorSpeedRpm = 3000,
           .shaft = EncoderShaft::kMotor,
-          .baseVelocityRpm = 90,
+          .ringVelocityRpm = 90,
           .lowVelocityRpm = 70,
           .positionRevolutions = 0,
           .limitRevolutions = std::nullopt};
@@ -184,11 +184,32 @@ TEST(IcMuCalibrationTest, MotionIsCappedByTheMaximumMotorSpeed) {
   ASSERT_EQ(plan->warnings.size(), 1u);
 }
 
+TEST(IcMuCalibrationTest, DefaultRingVelocityDependsOnTheShaft) {
+  const auto values =
+      somanet::icMuStartValues(64, IcMuRingPosition::kInner, IcMuPartClass::kIcMu150Or200);
+  ASSERT_TRUE(values);
+  EXPECT_EQ(somanet::icMuDefaultRingVelocity(*values, EncoderShaft::kMotor), 45);
+  EXPECT_EQ(somanet::icMuDefaultRingVelocity(*values, EncoderShaft::kDriving), 15);
+}
+
+TEST(IcMuCalibrationTest, RequestedRingVelocityAppliesOnTheDrivingShaft) {
+  IcMuMotionInput input{.gearRatio = 120,
+                        .maxMotorSpeedRpm = 3000,
+                        .shaft = EncoderShaft::kDriving,
+                        .ringVelocityRpm = 20,
+                        .lowVelocityRpm = 1.1,
+                        .positionRevolutions = 0,
+                        .limitRevolutions = std::nullopt};
+  auto plan = somanet::planIcMuMotion(input);
+  ASSERT_TRUE(plan) << plan.error();
+  EXPECT_EQ(plan->velocityRpm, 20);
+}
+
 TEST(IcMuCalibrationTest, DrivingShaftRunsAt15RpmAndNeedsSpeed) {
   IcMuMotionInput input{.gearRatio = 120,
                         .maxMotorSpeedRpm = 3000,
                         .shaft = EncoderShaft::kDriving,
-                        .baseVelocityRpm = 90,
+                        .ringVelocityRpm = 15,
                         .lowVelocityRpm = 1.1,
                         .positionRevolutions = 0,
                         .limitRevolutions = std::nullopt};
@@ -238,7 +259,7 @@ TEST(IcMuCalibrationTest, NarrowRangeRefusesWithTheDegreesToWiden) {
   IcMuMotionInput input{.gearRatio = 120,
                         .maxMotorSpeedRpm = 3000,
                         .shaft = EncoderShaft::kDriving,
-                        .baseVelocityRpm = 90,
+                        .ringVelocityRpm = 15,
                         .lowVelocityRpm = 1.1,
                         .positionRevolutions = 0,
                         .limitRevolutions = std::pair{-185.0 / 360, 185.0 / 360}};

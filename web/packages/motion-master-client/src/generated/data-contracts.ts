@@ -1282,6 +1282,19 @@ export interface IcMuCalibrationValidation {
   lowerMarginPercent: number;
   /** @example 75 */
   upperMarginPercent: number;
+  /**
+   * The smaller of the two margins.
+   * @example 75
+   */
+  marginPercent: number;
+  /** robust from 50 %, small-displacements from 30 %, avoid-displacements from 10 %, and too-high below 10 %, where the validation fails. */
+  marginBand:
+    | "robust"
+    | "small-displacements"
+    | "avoid-displacements"
+    | "too-high";
+  /** What the band means for the user. */
+  marginMessage: string;
   passed: boolean;
   /** Present after a full calibration of the commutation encoder: the commutation offset must be measured again. */
   commutationWarning?: string;

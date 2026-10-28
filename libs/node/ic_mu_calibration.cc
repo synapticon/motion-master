@@ -216,6 +216,33 @@ bool icMuTrackPasses(IcMuTrack track, const IcMuTrackResidual& residual, int tol
          roundedAbs(residual.phase / step) <= std::max(limit, 1.0);
 }
 
+IcMuMarginBand icMuMarginBand(double marginPercent) {
+  if (marginPercent >= 50.0) {
+    return IcMuMarginBand::kRobust;
+  }
+  if (marginPercent >= 30.0) {
+    return IcMuMarginBand::kSmallDisplacements;
+  }
+  return marginPercent >= 10.0 ? IcMuMarginBand::kAvoidDisplacements : IcMuMarginBand::kTooHigh;
+}
+
+std::string_view icMuMarginMessage(IcMuMarginBand band) {
+  switch (band) {
+    case IcMuMarginBand::kRobust:
+      return "The calibration passed. The encoder system tolerates mechanical displacement and "
+             "thermal expansion.";
+    case IcMuMarginBand::kSmallDisplacements:
+      return "The calibration passed. The encoder system tolerates small mechanical displacement "
+             "and thermal expansion.";
+    case IcMuMarginBand::kAvoidDisplacements:
+      return "The calibration passed. Avoid mechanical displacement and thermal expansion.";
+    case IcMuMarginBand::kTooHigh:
+      return "The phase error is too high to compute the absolute position reliably. Adjust the "
+             "mechanical position and calibrate again.";
+  }
+  return "";
+}
+
 double icMuMoveRevolutions(double velocityRpm, double accelerationRpmPerSecond,
                            std::chrono::milliseconds constant) {
   const double seconds = std::chrono::duration<double>(constant).count();

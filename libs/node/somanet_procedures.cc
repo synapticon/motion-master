@@ -2609,6 +2609,11 @@ std::expected<void, std::string> runIcMuCalibrationProcedure(
         value["phaseMargin"] = curveJson(analysis->phaseMargin, samples);
         value["lowerMarginPercent"] = analysis->lowerMarginPercent;
         value["upperMarginPercent"] = analysis->upperMarginPercent;
+        const double margin = std::min(analysis->lowerMarginPercent, analysis->upperMarginPercent);
+        const auto band = somanet::icMuMarginBand(margin);
+        value["marginPercent"] = margin;
+        value["marginBand"] = somanet::toString(band);
+        value["marginMessage"] = somanet::icMuMarginMessage(band);
         const bool passed = analysis->noniusValid &&
                             analysis->lowerMarginPercent >= kIcMuMinMarginPercent &&
                             analysis->upperMarginPercent >= kIcMuMinMarginPercent;

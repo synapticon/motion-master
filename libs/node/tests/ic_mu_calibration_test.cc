@@ -341,4 +341,16 @@ TEST(IcMuCalibrationTest, StartWritesOfTheOuterRingOfACirculo9) {
   EXPECT_EQ(somanet::icMuStartWrites(*values), expected);
 }
 
+TEST(IcMuCalibrationTest, MarginBandsFollowTheSmallerMargin) {
+  using somanet::IcMuMarginBand;
+  EXPECT_EQ(somanet::icMuMarginBand(75.0), IcMuMarginBand::kRobust);
+  EXPECT_EQ(somanet::icMuMarginBand(50.0), IcMuMarginBand::kRobust);
+  EXPECT_EQ(somanet::icMuMarginBand(49.9), IcMuMarginBand::kSmallDisplacements);
+  EXPECT_EQ(somanet::icMuMarginBand(30.0), IcMuMarginBand::kSmallDisplacements);
+  EXPECT_EQ(somanet::icMuMarginBand(29.9), IcMuMarginBand::kAvoidDisplacements);
+  EXPECT_EQ(somanet::icMuMarginBand(10.0), IcMuMarginBand::kAvoidDisplacements);
+  EXPECT_EQ(somanet::icMuMarginBand(9.9), IcMuMarginBand::kTooHigh);
+  EXPECT_FALSE(somanet::icMuMarginMessage(IcMuMarginBand::kTooHigh).empty());
+}
+
 }  // namespace

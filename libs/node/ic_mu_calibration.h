@@ -182,6 +182,35 @@ inline constexpr int kIcMuMaxIterations = 13;
 /// fails. The phase passes at a tolerance of at least 1.
 bool icMuTrackPasses(IcMuTrack track, const IcMuTrackResidual& residual, int tolerance);
 
+/// @brief How much the nonius phase margin of a calibrated encoder tolerates.
+enum class IcMuMarginBand : uint8_t {
+  kRobust,              ///< 50 % and more.
+  kSmallDisplacements,  ///< From 30 % to below 50 %.
+  kAvoidDisplacements,  ///< From 10 % to below 30 %.
+  kTooHigh,             ///< Below 10 %: the calibration fails.
+};
+
+/// @brief Name of a margin band, as the API renders it. Never returns @c nullptr.
+constexpr std::string_view toString(IcMuMarginBand band) {
+  switch (band) {
+    case IcMuMarginBand::kRobust:
+      return "robust";
+    case IcMuMarginBand::kSmallDisplacements:
+      return "small-displacements";
+    case IcMuMarginBand::kAvoidDisplacements:
+      return "avoid-displacements";
+    case IcMuMarginBand::kTooHigh:
+      return "too-high";
+  }
+  return "unknown";
+}
+
+/// @brief The band of @p marginPercent, the smaller of the two nonius phase margins.
+IcMuMarginBand icMuMarginBand(double marginPercent);
+
+/// @brief What @p band means for the user, in one or two sentences.
+std::string_view icMuMarginMessage(IcMuMarginBand band);
+
 /// @brief The time a recording runs at constant velocity when nothing else is needed.
 inline constexpr std::chrono::milliseconds kIcMuStandardRecording{6000};
 

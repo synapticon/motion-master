@@ -10,6 +10,7 @@ import {
 } from '@synapticon/motion-master-client'
 import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
+import IcMuCalibrationSection from '../components/IcMuCalibrationSection'
 import { useConnection } from '../contexts/ConnectionContext'
 import { isIcMuEncoder } from '../utils/icMuEncoder'
 import { btnOutline, btnPrimary } from '../utils/styles'
@@ -63,6 +64,15 @@ export default function DeviceIcMuEncodersPage() {
     refetchIntervalInBackground: true,
     retry: false,
   })
+  // The calibration exists only on a server built with MU_3SL, so the page asks for it.
+  const proceduresQuery = useQuery({
+    queryKey: ['procedures', slavePosition],
+    queryFn: () => api.listProcedures(slavePosition).then(r => r.data),
+    retry: false,
+  })
+  const calibrationAvailable = (proceduresQuery.data ?? []).some(
+    listing => listing.descriptor.name === 'ic-mu-calibration',
+  )
   const statusQuery = useQuery(snapshotQuery(STATUS_PROCEDURE))
   const configurationQuery = useQuery(snapshotQuery(CONFIGURATION_PROCEDURE))
 
@@ -142,6 +152,8 @@ export default function DeviceIcMuEncodersPage() {
                 : statuses.find(s => s.encoderOrdinal === encoder.encoderOrdinal)
             }
             busy={running || start.isPending}
+            slavePosition={slavePosition}
+            calibrationAvailable={calibrationAvailable}
             onConfigure={batteryMode =>
               start.mutate({
                 name: CONFIGURATION_PROCEDURE,
@@ -163,11 +175,15 @@ function EncoderCard({
   encoder,
   status,
   busy,
+  slavePosition,
+  calibrationAvailable,
   onConfigure,
 }: {
   encoder: EncoderConfiguration
   status: IcMuEncoderStatus | undefined
   busy: boolean
+  slavePosition: number
+  calibrationAvailable: boolean
   onConfigure: (batteryMode: string | null) => void
 }) {
   const [batteryMode, setBatteryMode] = useState('default')
@@ -242,6 +258,9 @@ function EncoderCard({
           configured. Read the status first.
         </p>
       </div>
+      {calibrationAvailable && (
+        <IcMuCalibrationSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
+      )}
     </section>
   )
 }

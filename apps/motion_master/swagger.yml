@@ -6547,7 +6547,8 @@ components:
         The validation pass of an iC-MU calibration: the nonius phase margins the encoder now
         holds. It passes when both are at least 10 %.
       required: [iteration, direction, velocityRpm, samples, recordedRevolutions, phaseRangeLimit,
-                 phaseMargin, lowerMarginPercent, upperMarginPercent, passed]
+                 phaseMargin, lowerMarginPercent, upperMarginPercent, marginPercent, marginBand,
+                 marginMessage, passed]
       properties:
         iteration: { type: integer, example: 3 }
         direction: { type: integer, enum: [1, -1] }
@@ -6559,6 +6560,14 @@ components:
         phaseMargin: { $ref: "#/components/schemas/IcMuCalibrationCurve" }
         lowerMarginPercent: { type: number, example: 78.5 }
         upperMarginPercent: { type: number, example: 75.0 }
+        marginPercent: { type: number, description: The smaller of the two margins., example: 75.0 }
+        marginBand:
+          type: string
+          enum: [robust, small-displacements, avoid-displacements, too-high]
+          description: >
+            robust from 50 %, small-displacements from 30 %, avoid-displacements from 10 %, and
+            too-high below 10 %, where the validation fails.
+        marginMessage: { type: string, description: What the band means for the user. }
         passed: { type: boolean }
         commutationWarning:
           type: string

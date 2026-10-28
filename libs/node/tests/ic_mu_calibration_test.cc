@@ -299,6 +299,8 @@ TEST(IcMuCalibrationTest, RecordedRingRevolutionsUnwrapThePeriods) {
 
 TEST(IcMuCalibrationTest, CoverageWarningNamesTheMissedAngle) {
   EXPECT_EQ(somanet::icMuCoverageWarning(1.0), std::nullopt);
+  // 0.05 degrees short of a turn, as a 10 rpm ring recorded for 6 s on the bench.
+  EXPECT_EQ(somanet::icMuCoverageWarning(0.99986), std::nullopt);
   const auto warning = somanet::icMuCoverageWarning(0.95);
   ASSERT_TRUE(warning);
   EXPECT_NE(warning->find("covered 342 degrees"), std::string::npos) << *warning;
@@ -351,6 +353,27 @@ TEST(IcMuCalibrationTest, MarginBandsFollowTheSmallerMargin) {
   EXPECT_EQ(somanet::icMuMarginBand(10.0), IcMuMarginBand::kAvoidDisplacements);
   EXPECT_EQ(somanet::icMuMarginBand(9.9), IcMuMarginBand::kTooHigh);
   EXPECT_FALSE(somanet::icMuMarginMessage(IcMuMarginBand::kTooHigh).empty());
+}
+
+TEST(IcMuCalibrationTest, ASlowRingTakesTheLongerRecording) {
+  // 10 rpm on the driving shaft turns the ring once in 6 s, without the overlap.
+  IcMuMotionInput input{.gearRatio = 120,
+                        .maxMotorSpeedRpm = 3750,
+                        .shaft = EncoderShaft::kDriving,
+                        .ringVelocityRpm = 10,
+                        .lowVelocityRpm = 1.1,
+                        .positionRevolutions = 0,
+                        .limitRevolutions = std::nullopt};
+  auto plan = somanet::planIcMuMotion(input);
+  ASSERT_TRUE(plan) << plan.error();
+  EXPECT_EQ(plan->velocityRpm, 10);
+  EXPECT_EQ(plan->recording, milliseconds(10000));
+
+  // 6 rpm does not turn it once and 5 degrees even in 10 s.
+  input.ringVelocityRpm = 6;
+  plan = somanet::planIcMuMotion(input);
+  ASSERT_FALSE(plan);
+  EXPECT_NE(plan.error().find("at least 6.1 rpm"), std::string::npos) << plan.error();
 }
 
 }  // namespace

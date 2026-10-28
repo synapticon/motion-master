@@ -322,6 +322,25 @@ std::expected<IcMuMotionPlan, std::string> planIcMuMotion(const IcMuMotionInput&
   };
   cap();
 
+  // A slow ring needs the longer recording to cover a turn and its overlap.
+  const double ringTurnsPerRevolution = icMuRingTurnsPerRevolution(input.shaft, gear);
+  const double requiredTurns = 1.0 + revolutions(kIcMuRingOverlapDegrees);
+  auto ringTurns = [&](std::chrono::milliseconds recording) {
+    return plan.velocityRpm * ringTurnsPerRevolution *
+           std::chrono::duration<double>(recording).count() / 60.0;
+  };
+  if (ringTurns(plan.recording) < requiredTurns) {
+    plan.recording = kIcMuLongestRecording;
+    if (ringTurns(plan.recording) < requiredTurns) {
+      const double minimum =
+          60.0 * requiredTurns / std::chrono::duration<double>(kIcMuLongestRecording).count();
+      return std::unexpected(std::format(
+          "a ring velocity of {:.1f} rpm does not turn the ring once in the longest recording; it "
+          "needs at least {:.1f} rpm",
+          plan.velocityRpm * ringTurnsPerRevolution, minimum));
+    }
+  }
+
   const double travel =
       icMuMoveRevolutions(plan.velocityRpm, plan.accelerationRpmPerSecond, plan.recording);
   if (!input.limitRevolutions ||
@@ -387,10 +406,11 @@ double icMuRecordedRingRevolutions(std::span<const HrdEncoderSample> samples,
 }
 
 std::optional<std::string> icMuCoverageWarning(double recordedRevolutions) {
-  if (recordedRevolutions >= 1.0) {
+  const double recorded = recordedRevolutions * 360.0;
+  // Less than a whole degree missing is a turn, within what a recording can measure.
+  if (360.0 - recorded < 1.0) {
     return std::nullopt;
   }
-  const double recorded = recordedRevolutions * 360.0;
   return std::format(
       "The recording covered {:.0f} degrees of the ring. The other {:.0f} degrees were not "
       "recorded and are not calibrated. Widen the software position limits (0x607D) and calibrate "

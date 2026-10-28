@@ -277,6 +277,9 @@ struct IcMuMotionPlan {
 /// of 6 s, or else 10 s, covers a turn of the ring plus @c kIcMuRingOverlapDegrees. When neither
 /// fits, the plan is refused before the motor moves, and the message says how many degrees to
 /// widen the limits by.
+///
+/// A ring velocity that does not turn the ring once plus @c kIcMuRingOverlapDegrees in 6 s takes
+/// the 10 s recording, and one that does not even then is refused.
 std::expected<IcMuMotionPlan, std::string> planIcMuMotion(const IcMuMotionInput& input);
 
 /// @brief The ring turns per driving shaft revolution: the gear ratio for a motor-shaft encoder,
@@ -301,7 +304,8 @@ std::expected<IcMuMotionPlan, std::string> planIcMuNarrowRange(double travelRevo
 double icMuRecordedRingRevolutions(std::span<const HrdEncoderSample> samples,
                                    uint8_t masterPolePairs);
 
-/// @brief The warning for a recording that covered less than one turn of the ring, or nothing.
+/// @brief The warning for a recording that missed at least one degree of a turn of the ring, or
+///        nothing.
 std::optional<std::string> icMuCoverageWarning(double recordedRevolutions);
 
 /// @brief The samples a calibration analyses, from a recording of @p recording at constant

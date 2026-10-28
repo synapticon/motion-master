@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -232,11 +233,70 @@ inline constexpr uint8_t kIcPvlSyncRegister = 0x0D;
 /// @param icPvlSync       iC-PVL register 0x0D. Only bits 2:0 are used.
 uint8_t icMuSpoMtRegister(uint32_t rawPosition, uint8_t singleturnBits, uint8_t icPvlSync);
 
+/// @brief Whether the status lists @p encoder: a BiSS or internal encoder on sensor port 1 or 2,
+///        with singleturn bits.
+///
+/// Only those two ports carry an iC-MU. An encoder with 0 singleturn bits has no :0C, which is a
+/// board that carries no iC-MU, such as an NGC board with Jasper firmware. The type does not say
+/// which chip is behind the port, so a listed encoder is one the configuration can address, not one
+/// known to be an iC-MU. @c HARD_REV in the status says that.
+bool isIcMuEncoder(const EncoderConfiguration& encoder);
+
+/// @brief Whether an iC-MU holds the output configuration the rules expect.
+enum class IcMuEncoderState : uint8_t {
+  kNotConfigured,  ///< Register 0x11 holds @c kIcMuUnconfiguredOutput.
+  kInvalid,        ///< Register 0x11 holds another value than the expected one.
+  kConfigured,     ///< Register 0x11 holds the expected value.
+};
+
+/// @brief Name of a state, as the API renders it. Never returns @c nullptr.
+constexpr std::string_view toString(IcMuEncoderState state) {
+  switch (state) {
+    case IcMuEncoderState::kNotConfigured:
+      return "not-configured";
+    case IcMuEncoderState::kInvalid:
+      return "invalid";
+    case IcMuEncoderState::kConfigured:
+      return "configured";
+  }
+  return "unknown";
+}
+
+/// @brief The state of an iC-MU whose register 0x11 holds @p outputRegister.
+///
+/// Without an expected value, only @c kNotConfigured can be decided. Every other value is nothing,
+/// because a value cannot be called invalid against a rule that does not apply to the ring.
+std::optional<IcMuEncoderState> icMuEncoderState(uint8_t outputRegister,
+                                                 std::optional<uint8_t> expected);
+
+/// @brief The part that @p hardRev names in its upper nibble, or nothing for a code the iC-MU
+///        datasheet does not list (Rev B1, Table 92).
+std::optional<std::string_view> icMuPartName(uint8_t hardRev);
+
+/// @brief What the status reports for one encoder.
+struct IcMuEncoderStatus {
+  EncoderOrdinal encoder{EncoderOrdinal::kEncoder1};
+  uint8_t sensorPort = 0;                         ///< 0x21x0:01.
+  uint8_t singleturnBits = 0;                     ///< 0x21x0:0C.
+  uint8_t multiturnBits = 0;                      ///< 0x21x0:0A, 0 where the object has none.
+  std::optional<uint8_t> masterPolePairs;         ///< Empty for a ring the rules do not know.
+  uint8_t hardRev = 0;                            ///< iC-MU register 0x74.
+  uint8_t outputRegister = 0;                     ///< iC-MU register 0x11.
+  std::optional<uint8_t> expectedOutputRegister;  ///< Empty for a ring the rules do not know.
+  std::optional<IcMuEncoderState> state;          ///< See @c icMuEncoderState.
+  std::optional<std::string> reason;              ///< Why there is no expected value.
+};
+void to_json(nlohmann::json& j, const IcMuEncoderStatus& status);
+
+/// @brief The status of @p encoder, from the two iC-MU registers the status reads.
+IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t hardRev,
+                                    uint8_t outputRegister);
+
 /// @brief Whether a firmware can run the configuration.
 enum class IcMuFirmwareSupport : uint8_t {
   kSupported,
   kTooOld,      ///< Older than 5.0.0-rc.5, and not calibration firmware.
-  kJasper,      ///< 10.0.0 or newer: refused until the 0x0B value for the board is confirmed.
+  kJasper,      ///< 10.0.0 or newer. Jasper has no iC-PVL, so only the singleturn path runs.
   kUnreadable,  ///< Not a version string.
 };
 

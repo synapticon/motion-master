@@ -866,16 +866,22 @@ std::expected<Encoders, std::string> SomanetDrive::encoders() const {
       return std::unexpected(polarity.error());
     }
     encoder.inverted = *polarity != 0;
-    auto multiturn = device_.readValue<uint8_t>(index, somanet::kEncoderMultiturnBits);
-    if (!multiturn) {
-      return std::unexpected(multiturn.error());
+    // Jasper firmware on an NGC board has neither :0A nor :0C. An encoder without :0A counts no
+    // turns, and one without :0C reports 0 singleturn bits.
+    if (device_.parameter(index, somanet::kEncoderMultiturnBits)) {
+      auto multiturn = device_.readValue<uint8_t>(index, somanet::kEncoderMultiturnBits);
+      if (!multiturn) {
+        return std::unexpected(multiturn.error());
+      }
+      encoder.multiturnBits = *multiturn;
     }
-    encoder.multiturnBits = *multiturn;
-    auto singleturn = device_.readValue<uint8_t>(index, somanet::kEncoderSingleturnBits);
-    if (!singleturn) {
-      return std::unexpected(singleturn.error());
+    if (device_.parameter(index, somanet::kEncoderSingleturnBits)) {
+      auto singleturn = device_.readValue<uint8_t>(index, somanet::kEncoderSingleturnBits);
+      if (!singleturn) {
+        return std::unexpected(singleturn.error());
+      }
+      encoder.singleturnBits = *singleturn;
     }
-    encoder.singleturnBits = *singleturn;
     result.encoders.push_back(encoder);
   }
 

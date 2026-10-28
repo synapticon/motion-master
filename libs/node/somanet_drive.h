@@ -1301,8 +1301,8 @@ struct EncoderConfiguration {
   somanet::EncoderType type{somanet::EncoderType::kNone};  ///< :02.
   uint32_t resolution = 0;                                 ///< :03, counts per revolution.
   bool inverted = false;                                   ///< :05.
-  uint8_t multiturnBits = 0;                               ///< :0A.
-  uint8_t singleturnBits = 0;                              ///< :0C.
+  uint8_t multiturnBits = 0;                               ///< :0A, 0 where it is missing.
+  uint8_t singleturnBits = 0;                              ///< :0C, 0 where it is missing.
 };
 
 /// @brief Both encoder records and which of them each controller uses. One read answers every

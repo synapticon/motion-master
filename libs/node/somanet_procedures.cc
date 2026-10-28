@@ -11,6 +11,7 @@
 #include <format>
 #include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -29,6 +30,8 @@
 #include "core/base64.h"
 #include "core/platform.h"
 #include "core/user_cache.h"
+#include "node/firmware_version.h"
+#include "node/ic_mu_encoder.h"
 #include "node/somanet_control.h"
 
 namespace mm::node {
@@ -1105,6 +1108,98 @@ std::expected<void, std::string> runIcMuCalibrationModeProcedure(
   reporter.succeed(kIcMuCalibrationModeStep,
                    nlohmann::json{{"encoder", static_cast<uint8_t>(request.encoder)},
                                   {"mode", somanet::toString(request.mode)}});
+  return {};
+}
+
+namespace {
+
+// Why the iC-MU procedures refuse @p version, or nothing when they can run on it.
+std::optional<std::string> icMuFirmwareError(std::string_view version) {
+  switch (somanet::icMuFirmwareSupport(version)) {
+    case somanet::IcMuFirmwareSupport::kSupported:
+    case somanet::IcMuFirmwareSupport::kJasper:
+      return std::nullopt;
+    case somanet::IcMuFirmwareSupport::kTooOld:
+      return std::format(
+          "firmware {} is too old: the iC-MU encoder procedures need 5.0.0-rc.5 or newer, or "
+          "calibration firmware from 0.4.0",
+          version);
+    case somanet::IcMuFirmwareSupport::kUnreadable:
+      break;
+  }
+  return std::format("firmware version '{}' in 0x100A is not a version", version);
+}
+
+// Reads one iC-MU register. A read always reports a value, so a missing one is an error.
+std::expected<uint8_t, std::string> readIcMuRegister(SomanetDrive& drive,
+                                                     somanet::EncoderOrdinal encoder,
+                                                     uint8_t registerAddress,
+                                                     const std::stop_token& stop) {
+  auto result = drive.readEncoderRegister(encoder, registerAddress,
+                                          {.timeout = kEncoderRegisterTimeout,
+                                           .pollInterval = kEncoderRegisterPollInterval,
+                                           .stop = stop});
+  if (!result) {
+    return std::unexpected(result.error());
+  }
+  if (!result->value) {
+    return std::unexpected(std::format("{}: the drive reported no value for register 0x{:02X}",
+                                       somanet::toString(encoder), registerAddress));
+  }
+  return *result->value;
+}
+
+}  // namespace
+
+std::vector<ProgressStep> icMuEncoderStatusSteps() {
+  return stepsFrom({kIcMuEncoderStatusEncodersStep, kIcMuEncoderStatusRegistersStep});
+}
+
+std::expected<void, std::string> runIcMuEncoderStatusProcedure(Device& device,
+                                                               ProgressReporter& reporter,
+                                                               const std::stop_token& stop) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kIcMuEncoderStatusEncodersStep);
+  auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+  auto rawVersion = drive->manufacturerSoftwareVersion();
+  if (!rawVersion) {
+    return fail(kIcMuEncoderStatusEncodersStep, rawVersion.error());
+  }
+  const auto version = trimFirmwareVersion(
+      std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
+  if (auto error = icMuFirmwareError(version)) {
+    return fail(kIcMuEncoderStatusEncodersStep, std::move(*error));
+  }
+  auto configurations = drive->encoders();
+  if (!configurations) {
+    return fail(kIcMuEncoderStatusEncodersStep, configurations.error());
+  }
+  std::vector<EncoderConfiguration> listed;
+  std::ranges::copy_if(configurations->encoders, std::back_inserter(listed),
+                       somanet::isIcMuEncoder);
+  reporter.succeed(kIcMuEncoderStatusEncodersStep, listed);
+
+  reporter.start(kIcMuEncoderStatusRegistersStep);
+  std::vector<somanet::IcMuEncoderStatus> statuses;
+  for (const auto& encoder : listed) {
+    auto hardRev = readIcMuRegister(*drive, encoder.encoder, somanet::kIcMuHardRevRegister, stop);
+    if (!hardRev) {
+      return fail(kIcMuEncoderStatusRegistersStep, hardRev.error());
+    }
+    auto output = readIcMuRegister(*drive, encoder.encoder, somanet::kIcMuOutputRegister, stop);
+    if (!output) {
+      return fail(kIcMuEncoderStatusRegistersStep, output.error());
+    }
+    statuses.push_back(somanet::icMuEncoderStatus(encoder, *hardRev, *output));
+  }
+  reporter.succeed(kIcMuEncoderStatusRegistersStep, statuses);
   return {};
 }
 

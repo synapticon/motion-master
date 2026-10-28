@@ -269,6 +269,41 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor icMuEncoderStatus;
+  icMuEncoderStatus.name = std::string(kIcMuEncoderStatusProcedure);
+  icMuEncoderStatus.title = "iC-MU encoder status";
+  icMuEncoderStatus.description =
+      "Reads whether each iC-MU encoder of the drive is configured. It lists every BiSS or "
+      "internal encoder on sensor port 1 or 2. For each one it reads the part from register 0x74 "
+      "and the output configuration from register 0x11, and compares register 0x11 with the value "
+      "that the singleturn and multiturn bits of the encoder need. 0xA5 in register 0x11 means "
+      "that the EEPROM of the iC-MU holds no configuration. Runs OS command 0, and writes "
+      "nothing.";
+  icMuEncoderStatus.caveats = {
+      "Only 18, 19 and 20 singleturn bits have an expected value. For any other value the status "
+      "gives no state other than not configured, and says why.",
+      "The encoder type does not say which chip is behind the port. Check the part from register "
+      "0x74 before you configure an encoder.",
+      "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuEncoderStatus.movesMotor = false;
+  icMuEncoderStatus.requiresEnabled = false;
+  icMuEncoderStatus.steps = icMuEncoderStatusSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuEncoderStatus),
+      // The firmware gate needs 0x100A, which is not known at scan time, so it is in the body.
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter,
+                  const std::stop_token& stop) {
+          Device& device = ctx.device;
+          return runIcMuEncoderStatusProcedure(device, reporter, stop);
+        };
+      },
+  });
+
   ProcedureDescriptor icMuCalibrationMode;
   icMuCalibrationMode.name = std::string(kIcMuCalibrationModeProcedure);
   icMuCalibrationMode.title = "iC-MU calibration mode";

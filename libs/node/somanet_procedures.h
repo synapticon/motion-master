@@ -225,6 +225,35 @@ std::expected<void, std::string> runIcMuCalibrationModeProcedure(
     Device& device, ProgressReporter& reporter, std::stop_token stop,
     const IcMuCalibrationModeRequest& request);
 
+/// @brief Procedure name for reading the iC-MU encoder status, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kIcMuEncoderStatusProcedure = "ic-mu-encoder-status";
+
+/// @brief The step that reads the firmware version and the encoder configurations.
+inline constexpr std::string_view kIcMuEncoderStatusEncodersStep = "read-encoders";
+
+/// @brief The step that reads the iC-MU registers. Its value is the status of each encoder.
+inline constexpr std::string_view kIcMuEncoderStatusRegistersStep = "read-registers";
+
+/// @brief The iC-MU encoder status procedure's step template, idle.
+std::vector<ProgressStep> icMuEncoderStatusSteps();
+
+/// @brief Reads whether each iC-MU encoder of a drive is configured, as a procedure body.
+///
+/// It is a procedure and not a GET route because it runs OS command 0, and an OS command holds the
+/// busy token of the device. It reads @c HARD_REV and register 0x11 of every encoder that
+/// @c somanet::isIcMuEncoder lists, and writes nothing. It prepares nothing and moves nothing.
+///
+/// It refuses a firmware that @c somanet::icMuFirmwareSupport calls too old or unreadable.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token, passed into each register read.
+/// @return Void once every listed encoder was read, otherwise why one was not.
+std::expected<void, std::string> runIcMuEncoderStatusProcedure(Device& device,
+                                                               ProgressReporter& reporter,
+                                                               const std::stop_token& stop);
+
 /// @brief Procedure name for recording a high resolution data stream, as it appears in its URL and
 /// its
 ///        snapshot key.

@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <format>
 #include <iterator>
+#include <nlohmann/json.hpp>
 #include <semver.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mm::node::somanet {
@@ -235,6 +237,78 @@ uint8_t icMuSpoMtRegister(uint32_t rawPosition, uint8_t singleturnBits, uint8_t 
     ++spoMt;
   }
   return static_cast<uint8_t>(((spoMt & 0x0F) << 4) | icMuMasterPeriodCount(singleturnBits));
+}
+
+bool isIcMuEncoder(const EncoderConfiguration& encoder) {
+  const bool port = encoder.sensorPort == 1 || encoder.sensorPort == 2;
+  const bool type = encoder.type == EncoderType::kBiss || encoder.type == EncoderType::kInternal;
+  return port && type && encoder.singleturnBits != 0;
+}
+
+std::optional<IcMuEncoderState> icMuEncoderState(uint8_t outputRegister,
+                                                 std::optional<uint8_t> expected) {
+  if (outputRegister == kIcMuUnconfiguredOutput) {
+    return IcMuEncoderState::kNotConfigured;
+  }
+  if (!expected) {
+    return std::nullopt;
+  }
+  return outputRegister == *expected ? IcMuEncoderState::kConfigured : IcMuEncoderState::kInvalid;
+}
+
+std::optional<std::string_view> icMuPartName(uint8_t hardRev) {
+  switch (hardRev >> 4) {
+    case 0x0:
+      return "iC-MU128";
+    case 0x1:
+      return "iC-MU150";
+    case 0x2:
+      return "iC-MU200";
+    default:
+      return std::nullopt;
+  }
+}
+
+void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
+  auto optional = [](const auto& value) {
+    return value ? nlohmann::json(*value) : nlohmann::json(nullptr);
+  };
+  const auto part = icMuPartName(status.hardRev);
+  j = nlohmann::json{
+      {"encoder", static_cast<int>(status.encoder)},
+      {"sensorPort", status.sensorPort},
+      {"singleturnBits", status.singleturnBits},
+      {"multiturnBits", status.multiturnBits},
+      {"masterPolePairs", optional(status.masterPolePairs)},
+      {"hardRev", status.hardRev},
+      {"part", part ? nlohmann::json(std::string(*part)) : nlohmann::json(nullptr)},
+      {"revision", status.hardRev & 0x0F},
+      {"outputRegister", status.outputRegister},
+      {"expectedOutputRegister", optional(status.expectedOutputRegister)},
+      {"state", status.state ? nlohmann::json(std::string(toString(*status.state)))
+                             : nlohmann::json(nullptr)},
+      {"reason", optional(status.reason)},
+  };
+}
+
+IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t hardRev,
+                                    uint8_t outputRegister) {
+  IcMuEncoderStatus status;
+  status.encoder = encoder.encoder;
+  status.sensorPort = encoder.sensorPort;
+  status.singleturnBits = encoder.singleturnBits;
+  status.multiturnBits = encoder.multiturnBits;
+  status.hardRev = hardRev;
+  status.outputRegister = outputRegister;
+  if (auto error = icMuSingleturnBitsError(encoder.singleturnBits)) {
+    status.reason = std::move(*error);
+  } else {
+    status.masterPolePairs = icMuMasterPolePairs(encoder.singleturnBits);
+    status.expectedOutputRegister = icMuOutMsb(icMuPath(encoder.sensorPort, encoder.multiturnBits),
+                                               encoder.singleturnBits, encoder.multiturnBits);
+  }
+  status.state = icMuEncoderState(outputRegister, status.expectedOutputRegister);
+  return status;
 }
 
 IcMuFirmwareSupport icMuFirmwareSupport(std::string_view version) {

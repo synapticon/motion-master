@@ -4,15 +4,20 @@
 
 #include <array>
 #include <cstdint>
+#include <nlohmann/json.hpp>
+#include <optional>
 #include <vector>
 
 namespace {
 
+using mm::node::EncoderConfiguration;
 using mm::node::Encoders;
 using mm::node::GearRatio;
 using mm::node::somanet::EncoderOrdinal;
 using mm::node::somanet::EncoderShaft;
+using mm::node::somanet::EncoderType;
 using mm::node::somanet::IcMuConfiguration;
+using mm::node::somanet::IcMuEncoderState;
 using mm::node::somanet::IcMuFirmwareSupport;
 using mm::node::somanet::IcMuPath;
 using mm::node::somanet::IcMuRegisterWrite;
@@ -247,6 +252,105 @@ TEST(IcMuEncoderTest, FirmwareSupport) {
   EXPECT_EQ(somanet::icMuFirmwareSupport("v0.4.2"), IcMuFirmwareSupport::kSupported);
   EXPECT_EQ(somanet::icMuFirmwareSupport("v10.0.0-jasper.5"), IcMuFirmwareSupport::kJasper);
   EXPECT_EQ(somanet::icMuFirmwareSupport("not a version"), IcMuFirmwareSupport::kUnreadable);
+}
+
+EncoderConfiguration icMu(uint8_t sensorPort, uint8_t singleturnBits, uint8_t multiturnBits) {
+  EncoderConfiguration encoder;
+  encoder.encoder = sensorPort == 2 ? EncoderOrdinal::kEncoder2 : EncoderOrdinal::kEncoder1;
+  encoder.sensorPort = sensorPort;
+  encoder.type = EncoderType::kInternal;
+  encoder.singleturnBits = singleturnBits;
+  encoder.multiturnBits = multiturnBits;
+  return encoder;
+}
+
+TEST(IcMuEncoderTest, ListsBissAndInternalEncodersOnPortsOneAndTwo) {
+  auto encoder = icMu(1, 19, 0);
+  EXPECT_TRUE(somanet::isIcMuEncoder(encoder));
+  encoder.type = EncoderType::kBiss;
+  EXPECT_TRUE(somanet::isIcMuEncoder(encoder));
+  encoder.sensorPort = 2;
+  EXPECT_TRUE(somanet::isIcMuEncoder(encoder));
+  encoder.sensorPort = 3;
+  EXPECT_FALSE(somanet::isIcMuEncoder(encoder));
+  encoder.sensorPort = 0;
+  EXPECT_FALSE(somanet::isIcMuEncoder(encoder));
+  encoder.sensorPort = 1;
+  encoder.type = EncoderType::kIncremental;
+  EXPECT_FALSE(somanet::isIcMuEncoder(encoder));
+  encoder.type = EncoderType::kNone;
+  EXPECT_FALSE(somanet::isIcMuEncoder(encoder));
+}
+
+TEST(IcMuEncoderTest, DoesNotListAnEncoderWithoutSingleturnBits) {
+  EXPECT_FALSE(somanet::isIcMuEncoder(icMu(1, 0, 0)));
+}
+
+TEST(IcMuEncoderTest, StateComparesTheOutputRegister) {
+  EXPECT_EQ(somanet::icMuEncoderState(0xA5, 0x05), IcMuEncoderState::kNotConfigured);
+  EXPECT_EQ(somanet::icMuEncoderState(0x05, 0x05), IcMuEncoderState::kConfigured);
+  EXPECT_EQ(somanet::icMuEncoderState(0x17, 0x05), IcMuEncoderState::kInvalid);
+}
+
+TEST(IcMuEncoderTest, StateWithoutAnExpectedValueIsOnlyNotConfigured) {
+  EXPECT_EQ(somanet::icMuEncoderState(0xA5, std::nullopt), IcMuEncoderState::kNotConfigured);
+  EXPECT_EQ(somanet::icMuEncoderState(0x05, std::nullopt), std::nullopt);
+}
+
+TEST(IcMuEncoderTest, PartNameFromHardRev) {
+  // The three codes of Table 92.
+  EXPECT_EQ(somanet::icMuPartName(0x0A), "iC-MU128");
+  EXPECT_EQ(somanet::icMuPartName(0x15), "iC-MU150");
+  EXPECT_EQ(somanet::icMuPartName(0x24), "iC-MU200");
+  EXPECT_EQ(somanet::icMuPartName(0x30), std::nullopt);
+}
+
+TEST(IcMuEncoderTest, StatusExpectsTheRulesOfEveryRing) {
+  for (const Ring& ring : kRings) {
+    SCOPED_TRACE(ring.singleturnBits);
+    auto singleturn =
+        somanet::icMuEncoderStatus(icMu(2, ring.singleturnBits, 0), 0x15, ring.singleturnOutMsb);
+    EXPECT_EQ(singleturn.masterPolePairs, ring.masterPolePairs);
+    EXPECT_EQ(singleturn.expectedOutputRegister, ring.singleturnOutMsb);
+    EXPECT_EQ(singleturn.state, IcMuEncoderState::kConfigured);
+    EXPECT_EQ(singleturn.reason, std::nullopt);
+
+    auto multiturn =
+        somanet::icMuEncoderStatus(icMu(1, ring.singleturnBits, 18), 0x15, ring.singleturnOutMsb);
+    EXPECT_EQ(multiturn.expectedOutputRegister, ring.multiturnOutMsb);
+    EXPECT_EQ(multiturn.state, IcMuEncoderState::kInvalid);
+  }
+}
+
+TEST(IcMuEncoderTest, StatusOnPortTwoIgnoresTheMultiturnBits) {
+  auto status = somanet::icMuEncoderStatus(icMu(2, 19, 18), 0x15, 0x05);
+  EXPECT_EQ(status.expectedOutputRegister, 0x05);
+  EXPECT_EQ(status.state, IcMuEncoderState::kConfigured);
+}
+
+TEST(IcMuEncoderTest, StatusOfAnUnknownRingSaysWhy) {
+  auto status = somanet::icMuEncoderStatus(icMu(1, 17, 0), 0x15, 0x03);
+  EXPECT_EQ(status.masterPolePairs, std::nullopt);
+  EXPECT_EQ(status.expectedOutputRegister, std::nullopt);
+  EXPECT_EQ(status.state, std::nullopt);
+  ASSERT_TRUE(status.reason);
+  EXPECT_FALSE(status.reason->empty());
+}
+
+TEST(IcMuEncoderTest, StatusJson) {
+  const nlohmann::json j = somanet::icMuEncoderStatus(icMu(1, 20, 0), 0x24, 0xA5);
+  EXPECT_EQ(j["encoder"], 1);
+  EXPECT_EQ(j["sensorPort"], 1);
+  EXPECT_EQ(j["singleturnBits"], 20);
+  EXPECT_EQ(j["multiturnBits"], 0);
+  EXPECT_EQ(j["masterPolePairs"], 64);
+  EXPECT_EQ(j["hardRev"], 0x24);
+  EXPECT_EQ(j["part"], "iC-MU200");
+  EXPECT_EQ(j["revision"], 4);
+  EXPECT_EQ(j["outputRegister"], 0xA5);
+  EXPECT_EQ(j["expectedOutputRegister"], 0x06);
+  EXPECT_EQ(j["state"], "not-configured");
+  EXPECT_TRUE(j["reason"].is_null());
 }
 
 }  // namespace

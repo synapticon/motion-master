@@ -3281,6 +3281,19 @@ mm::node::IcMuEncoderConfigurationRequest icMuRequest() {
                     .absReset = kNoDelay}};
 }
 
+// Whether every OS command sent so far is an encoder register read: nothing was written and no
+// status bit was ignored.
+bool onlyRegisterReads(const IcMuFakeDriver& driver) {
+  return std::ranges::all_of(driver.commands, [](const auto& c) { return c[0] == 0 && c[2] == 0; });
+}
+
+// The OS commands after the reads that validate makes.
+std::vector<std::vector<uint8_t>> afterReads(const IcMuFakeDriver& driver) {
+  auto first = std::ranges::find_if(driver.commands,
+                                    [](const auto& c) { return !(c[0] == 0 && c[2] == 0); });
+  return {first, driver.commands.end()};
+}
+
 Device makeIcMuDevice(IcMuFakeDriver& driver, std::string_view firmware, uint8_t sensorPort,
                       uint8_t singleturnBits, uint8_t multiturnBits) {
   driver.programIcMuDrive(firmware, sensorPort, singleturnBits, multiturnBits);
@@ -3314,8 +3327,10 @@ TEST(RunIcMuEncoderConfigurationProcedure, WritesTheSingleturnTableOfACirculo7) 
 
   // OS command 14 ignores the status bits before the first write and restores them after the last.
   ASSERT_GE(driver.commandIds.size(), 2u);
-  EXPECT_EQ(driver.commandIds.front(), 14);
-  EXPECT_EQ(driver.commands.front()[1], 0x03);  // encoder 1, ignore
+  // Validate only reads (BANKSEL); the first command after it ignores the status bits.
+  ASSERT_FALSE(afterReads(driver).empty());
+  EXPECT_EQ(afterReads(driver).front()[0], 14);
+  EXPECT_EQ(afterReads(driver).front()[1], 0x03);  // encoder 1, ignore
   EXPECT_EQ(driver.commandIds.back(), 14);
   EXPECT_EQ(driver.commands.back()[1], 0x02);  // encoder 1, stop ignoring
 
@@ -3463,7 +3478,7 @@ TEST(RunIcMuEncoderConfigurationProcedure, RefusesBeforeWritingAnything) {
     auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter,
                                                                  std::stop_token{}, icMuRequest());
     EXPECT_FALSE(result.has_value());
-    EXPECT_TRUE(driver.commands.empty());
+    EXPECT_TRUE(onlyRegisterReads(driver));
     EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
   }
 }
@@ -3498,9 +3513,8 @@ TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnotherChipOnAnExternalPort) {
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("names no iC-MU part"), std::string::npos) << result.error();
   EXPECT_TRUE(driver.registerWrites.empty());
-  // The only OS command is the read of register 0x74: nothing was written or ignored.
-  ASSERT_EQ(driver.commands.size(), 1u);
-  EXPECT_EQ(driver.commands[0][2], 0);
+  // Only the reads of BANKSEL and register 0x74 went out: nothing was written or ignored.
+  EXPECT_TRUE(onlyRegisterReads(driver));
 }
 
 TEST(RunIcMuEncoderConfigurationProcedure, JasperTakesTheSingleturnPath) {
@@ -3528,7 +3542,7 @@ TEST(RunIcMuEncoderConfigurationProcedure, AnEncoderWithoutARoleNeedsABatteryMod
                                                                icMuRequest());
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("assign it"), std::string::npos) << result.error();
-  EXPECT_TRUE(driver.commands.empty());
+  EXPECT_TRUE(onlyRegisterReads(driver));
 }
 
 TEST(ParseIcMuEncoderConfigurationRequest, RequiresTheEncoderAndKnowsTheBatteryModes) {
@@ -3719,5 +3733,18 @@ TEST(RunIcMuCalibrationProcedure, RefusesLimitsTooNarrowForAFullTurn) {
 }
 
 #endif  // MM_HAVE_MU_3SL
+
+TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnIcMuWithAnotherBankSelected) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  driver.icMu[0x40] = 0x01;  // BANKSEL: an EEPROM bank instead of the configuration
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("BANKSEL"), std::string::npos) << result.error();
+  EXPECT_TRUE(onlyRegisterReads(driver));
+}
 
 }  // namespace

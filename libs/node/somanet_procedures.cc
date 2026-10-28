@@ -1186,6 +1186,25 @@ std::expected<uint8_t, std::string> readIcMuRegister(SomanetDrive& drive,
   return *result->value;
 }
 
+// Refuses an iC-MU whose BANKSEL (0x40) is not 0. Addresses 0x00-0x3F reach the bank BANKSEL
+// selects, so with another bank a write meant for the configuration lands in the EEPROM banks, and
+// the read-back of the same address still matches (iC-MU datasheet Rev B1, Table 88).
+std::expected<void, std::string> checkIcMuBank(SomanetDrive& drive, somanet::EncoderOrdinal encoder,
+                                               const std::stop_token& stop) {
+  constexpr uint8_t kBankSelectRegister = 0x40;
+  auto bank = readIcMuRegister(drive, encoder, kBankSelectRegister, stop);
+  if (!bank) {
+    return std::unexpected(bank.error());
+  }
+  if (*bank != 0) {
+    return std::unexpected(std::format(
+        "register 0x40 (BANKSEL) of the iC-MU holds 0x{:02X}, not 0, so its configuration is not "
+        "in reach; power the encoder off and on, which sets it to 0",
+        *bank));
+  }
+  return {};
+}
+
 // Writes the file the drive writes to the encoder when the iC-MU reports a corrupted EEPROM, and
 // returns its name. Requires somanet::isIntegratedSensorPort.
 std::expected<std::string, std::string> writeIcMuRestoreFile(Device& device, SomanetDrive& drive,
@@ -1416,6 +1435,9 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
   }
   if (auto error = somanet::icMuSingleturnBitsError(found->singleturnBits)) {
     return std::unexpected(std::move(*error));
+  }
+  if (auto bank = checkIcMuBank(drive, request.encoderOrdinal, stop); !bank) {
+    return std::unexpected(bank.error());
   }
   if (!somanet::isIntegratedSensorPort(found->sensorPort)) {
     auto hardRev =
@@ -1835,9 +1857,9 @@ constexpr uint8_t kIcMuEepromError = 0x40;
 constexpr uint8_t kIcMuCommandInProgress = 0x01;
 
 // Register 0x10 holds the multiturn interface. An inner encoder with multiturn bits has its cyclic
-// check turned off during the calibration, as the configuration in use today does.
+// check, CHK_MT in bit 6, turned off during the calibration; the other fields keep their values.
 constexpr uint8_t kIcMuMultiturnInterfaceRegister = 0x10;
-constexpr uint8_t kIcMuMultiturnCheckOff = 0x2F;
+constexpr uint8_t kIcMuMultiturnCheck = 0x40;
 
 // Raw mode: the output word ends at bit 27 and carries the two tracks.
 constexpr uint8_t kIcMuModeRegister = 0x12;
@@ -1967,6 +1989,9 @@ std::expected<IcMuCalibrationPlan, std::string> planIcMuCalibration(
     return std::unexpected(std::move(*error));
   }
   plan.masterPolePairs = somanet::icMuMasterPolePairs(found->singleturnBits);
+  if (auto bank = checkIcMuBank(drive, request.encoderOrdinal, stop); !bank) {
+    return std::unexpected(bank.error());
+  }
 
   auto hardRev =
       readIcMuRegister(drive, request.encoderOrdinal, somanet::kIcMuHardRevRegister, stop);
@@ -2424,7 +2449,10 @@ std::expected<void, std::string> runIcMuCalibrationProcedure(
       wroteEncoder = true;
       auto started = write(somanet::icMuStartWrites(plan.startValues));
       if (started && plan.multiturnCheckOff) {
-        started = writeOne(kIcMuMultiturnInterfaceRegister, kIcMuMultiturnCheckOff);
+        const auto interface = std::ranges::find(original, kIcMuMultiturnInterfaceRegister,
+                                                 &somanet::IcMuRegisterWrite::address);
+        started = writeOne(kIcMuMultiturnInterfaceRegister,
+                           static_cast<uint8_t>(interface->value & ~kIcMuMultiturnCheck));
       }
       if (!started) {
         return fail(kIcMuStartValuesStep, started.error());
@@ -2730,25 +2758,41 @@ std::expected<void, std::string> runIcMuCalibrationProcedure(
     }
     if (calibrated) {
       reporter.start(kIcMuSaveStep);
-      auto stored = request.activateHealthMonitoring ? writeOne(0x0C, kIcMuHealthMonitoring)
-                                                     : std::expected<void, std::string>{};
+      // With the accumulated status configured, STATUS1 keeps a bit until it is read, so a read
+      // before WRITE_ALL clears what an earlier event left behind.
+      auto stored = read(kIcMuStatus1Register).transform([](uint8_t) {});
+      if (stored && request.activateHealthMonitoring) {
+        stored = writeOne(0x0C, kIcMuHealthMonitoring);
+      }
       stored = stored.and_then([&] {
         return writeIcMuRegister(
             *drive, encoder,
             {somanet::kIcMuCommandRegister, static_cast<uint8_t>(somanet::IcMuCommand::kWriteAll)},
             stop);
       });
-      // The command register clears when the command is accepted; STATUS1 bit 0 says whether it
-      // still runs.
+      // CMD_MU keeps the command code while the command is queued and turns 0 when it starts, and
+      // STATUS1 bit 0 is set while it runs (iC-MU datasheet Rev B1, p. 61 and Table 97). So the
+      // wait is for both, in that order; bit 0 alone reads 0 for a command still queued.
       uint8_t status1 = kIcMuCommandInProgress;
+      bool started = false;
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (stored && (status1 & kIcMuCommandInProgress) != 0) {
+      while (stored && (!started || (status1 & kIcMuCommandInProgress) != 0)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        auto value = read(kIcMuStatus1Register);
-        if (!value) {
-          stored = std::unexpected(value.error());
-        } else {
-          status1 = *value;
+        if (!started) {
+          auto command = read(somanet::kIcMuCommandRegister);
+          if (!command) {
+            stored = std::unexpected(command.error());
+          } else {
+            started = *command == 0;
+          }
+        }
+        if (stored && started) {
+          auto value = read(kIcMuStatus1Register);
+          if (!value) {
+            stored = std::unexpected(value.error());
+          } else {
+            status1 = *value;
+          }
         }
         if (stored && std::chrono::steady_clock::now() > deadline) {
           stored = std::unexpected("the encoder did not finish WRITE_ALL within 5 s");

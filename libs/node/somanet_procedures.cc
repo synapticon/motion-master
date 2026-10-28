@@ -1783,7 +1783,8 @@ std::vector<ProcedureParameter> icMuCalibrationParameters() {
                     "Where the ring of an external encoder sits, inner or outer. Sensor port 1 is "
                     "always inner and port 2 always outer, so a request for those ports leaves it "
                     "out. The calibration starts from the values measured for that position.",
-                    nullptr,
+                    // Empty, not null: the field is optional, and only an external port needs it.
+                    nlohmann::json(""),
                     {ParameterOption{.value = "inner", .title = "Inner"},
                      ParameterOption{.value = "outer", .title = "Outer"}}),
       booleanParameter("measurementOnly", "Validation only",
@@ -1798,7 +1799,7 @@ std::vector<ProcedureParameter> icMuCalibrationParameters() {
                        "The velocity of the ring of the encoder. Without it a motor-shaft encoder "
                        "runs at the velocity measured for its ring and a driving-shaft encoder at "
                        "15 rpm.",
-                       nullptr, 1, static_cast<int64_t>(kIcMuMaxRingVelocityRpm)),
+                       nlohmann::json(""), 1, static_cast<int64_t>(kIcMuMaxRingVelocityRpm)),
   };
 }
 

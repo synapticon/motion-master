@@ -306,6 +306,12 @@ export default function ProcedureParameters({
                     Select…
                   </option>
                 )}
+                {/* An optional enum whose default is none of its options is left out of the
+                    request when nothing is chosen, so "nothing" has to be a choice too. */}
+                {!parameter.required &&
+                  !(parameter.options ?? []).some(o => o.value === parameter.defaultValue) && (
+                    <option value="">None</option>
+                  )}
                 {(parameter.options ?? []).map(option => (
                   <option key={String(option.value)} value={String(option.value)}>
                     {option.title}

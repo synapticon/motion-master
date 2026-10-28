@@ -3570,6 +3570,12 @@ TEST(ParseIcMuCalibrationRequest, ReadsEveryField) {
       osCommandBody(R"({"encoderOrdinal": 1, "ringVelocity": 0})")));
 }
 
+TEST(IcMuCalibrationParameters, OnlyTheEncoderOrdinalIsRequired) {
+  for (const auto& parameter : mm::node::icMuCalibrationParameters()) {
+    EXPECT_EQ(parameter.required(), parameter.name == "encoderOrdinal") << parameter.name;
+  }
+}
+
 TEST(IcMuCalibrationSteps, ListEveryIterationThenTheValidationAndTheRestore) {
   const auto steps = mm::node::icMuCalibrationSteps();
   std::vector<std::string> ids;

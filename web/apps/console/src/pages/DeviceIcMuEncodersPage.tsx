@@ -154,6 +154,9 @@ export default function DeviceIcMuEncodersPage() {
             busy={running || start.isPending}
             slavePosition={slavePosition}
             calibrationAvailable={calibrationAvailable}
+            roles={(['position', 'velocity', 'commutation'] as const).filter(
+              role => encodersQuery.data?.[role] === encoder.encoderOrdinal,
+            )}
             onConfigure={batteryMode =>
               start.mutate({
                 name: CONFIGURATION_PROCEDURE,
@@ -177,6 +180,7 @@ function EncoderCard({
   busy,
   slavePosition,
   calibrationAvailable,
+  roles,
   onConfigure,
 }: {
   encoder: EncoderConfiguration
@@ -184,6 +188,8 @@ function EncoderCard({
   busy: boolean
   slavePosition: number
   calibrationAvailable: boolean
+  /** The controllers that use this encoder, as GET /encoders names them. */
+  roles: readonly ('position' | 'velocity' | 'commutation')[]
   onConfigure: (batteryMode: string | null) => void
 }) {
   const [batteryMode, setBatteryMode] = useState('default')
@@ -192,10 +198,23 @@ function EncoderCard({
   return (
     <section className="border border-grey-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-grey-200">
+        <div className="flex flex-wrap items-center gap-3">
         <h3 className="font-display uppercase tracking-wide text-sm">
           Encoder {encoder.encoderOrdinal} · sensor port {encoder.sensorPort}
           {encoder.sensorPort >= 3 ? ' · external' : ''}
         </h3>
+        <span className="flex flex-wrap gap-1.5 text-xs text-grey-700">
+          {roles.length === 0 ? (
+            <span className="text-grey-500">no controller uses it</span>
+          ) : (
+            roles.map(role => (
+              <span key={role} className="border border-grey-300 px-1.5 py-0.5">
+                {role}
+              </span>
+            ))
+          )}
+        </span>
+        </div>
         {status?.state ? (
           <span className={`px-2 py-0.5 text-xs ${STATE_BADGE[status.state]}`}>{status.state}</span>
         ) : (

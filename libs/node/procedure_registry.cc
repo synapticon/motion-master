@@ -274,7 +274,8 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
   icMuEncoderStatus.title = "iC-MU encoder status";
   icMuEncoderStatus.description =
       "Reads whether each iC-MU encoder of the drive is configured. It lists every BiSS or "
-      "internal encoder on sensor port 1 or 2. For each one it reads the part from register 0x74 "
+      "internal encoder with singleturn bits on a sensor port. For each one it reads the part from "
+      "register 0x74 "
       "and the output configuration from register 0x11, and compares register 0x11 with the value "
       "that the singleturn and multiturn bits of the encoder need. 0xA5 in register 0x11 means "
       "that the EEPROM of the iC-MU holds no configuration. Runs OS command 0, and writes "
@@ -284,6 +285,9 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "gives no state other than not configured, and says why.",
       "The encoder type does not say which chip is behind the port. Check the part from register "
       "0x74 before you configure an encoder.",
+      "Sensor ports 3 to 5 take an external encoder, which can be another BiSS chip. There an "
+      "encoder counts as an iC-MU only when register 0x74 names an iC-MU part, and it has no state "
+      "otherwise. Another chip can hold a matching value in register 0x74.",
       "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
       "The mailbox must be active, so the device has to be in PRE-OP or above.",
   };
@@ -317,6 +321,9 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
   icMuEncoderConfiguration.caveats = {
       "It writes the EEPROM of the encoder. The calibration registers are not written and keep "
       "their values.",
+      "An external encoder on sensor port 3 to 5 is configured only when register 0x74 names an "
+      "iC-MU part, and always on the singleturn path. The drive keeps no restore file for those "
+      "ports, so none is written.",
       "The encoder does not report position while it is configured. A drive in Operation Enabled "
       "is refused. The BiSS status bits are ignored during the run and turned on again at the end, "
       "a failed or cancelled run included.",

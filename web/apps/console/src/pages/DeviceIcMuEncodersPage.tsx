@@ -112,7 +112,9 @@ export default function DeviceIcMuEncodersPage() {
           come from the singleturn and multiturn bits of the encoder object, 0x2110 or 0x2112. On
           sensor port 1, an encoder with multiturn bits also gets the iC-PVL beside it configured.
           The configuration ends with the restore file the drive uses when the EEPROM of the iC-MU
-          is corrupted.
+          is corrupted. Sensor ports 3 to 5 take an external encoder: it is treated as an iC-MU only
+          when register 0x74 names an iC-MU part, always takes the singleturn path, and gets no
+          restore file, because the drive keeps one only for ports 1 and 2.
         </Callout>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -143,7 +145,7 @@ export default function DeviceIcMuEncodersPage() {
         )}
         {encodersQuery.isSuccess && encoders.length === 0 && (
           <Callout variant="info">
-            This drive has no BiSS or internal encoder with singleturn bits on sensor port 1 or 2.
+            This drive has no BiSS or internal encoder with singleturn bits on a sensor port.
           </Callout>
         )}
 
@@ -194,6 +196,7 @@ function EncoderCard({
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-grey-200">
         <h3 className="font-display uppercase tracking-wide text-sm">
           Encoder {encoder.encoderOrdinal} · sensor port {encoder.sensorPort}
+          {encoder.sensorPort >= 3 ? ' · external' : ''}
         </h3>
         {status?.state ? (
           <span className={`px-2 py-0.5 text-xs ${STATE_BADGE[status.state]}`}>{status.state}</span>

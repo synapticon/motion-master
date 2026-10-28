@@ -3447,7 +3447,7 @@ TEST(RunIcMuEncoderConfigurationProcedure, RefusesBeforeWritingAnything) {
   const std::array cases = {
       Case{"old firmware", "v4.4.1", 1, 19, 0, 0x0040},
       Case{"unknown ring", "v5.6.11", 1, 17, 0, 0x0040},
-      Case{"port 3", "v5.6.11", 3, 19, 0, 0x0040},
+      Case{"no sensor port", "v5.6.11", 0, 19, 0, 0x0040},
       Case{"operation enabled", "v5.6.11", 1, 19, 0, 0x0027},
       Case{"Jasper multiturn", "v10.0.0-jasper.5", 1, 19, 18, 0x0040},
   };
@@ -3466,6 +3466,41 @@ TEST(RunIcMuEncoderConfigurationProcedure, RefusesBeforeWritingAnything) {
     EXPECT_TRUE(driver.commands.empty());
     EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
   }
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, AnExternalIcMuIsConfiguredWithoutARestoreFile) {
+  IcMuFakeDriver driver;
+  // Multiturn bits on port 3 do not take the iC-PVL path: only port 1 has an iC-PVL.
+  Device device = makeIcMuDevice(driver, "v5.6.11", 3, 19, 18);
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_TRUE(driver.fileWrites.empty());
+  const auto steps = reporter.steps();
+  auto step = [&steps](std::string_view id) {
+    return *std::ranges::find(steps, id, &mm::node::ProgressStep::id);
+  };
+  EXPECT_EQ(step(mm::node::kIcMuValidateStep).value["path"], "singleturn");
+  EXPECT_TRUE(step(mm::node::kIcMuRestoreFileStep).value["file"].is_null());
+  EXPECT_EQ(step(mm::node::kIcPvlRegistersStep).status, ProgressStatus::kIdle);
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnotherChipOnAnExternalPort) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 3, 19, 0);
+  driver.icMu[0x74] = 0x30;  // no iC-MU part code
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("names no iC-MU part"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.registerWrites.empty());
+  // The only OS command is the read of register 0x74: nothing was written or ignored.
+  ASSERT_EQ(driver.commands.size(), 1u);
+  EXPECT_EQ(driver.commands[0][2], 0);
 }
 
 TEST(RunIcMuEncoderConfigurationProcedure, JasperTakesTheSingleturnPath) {

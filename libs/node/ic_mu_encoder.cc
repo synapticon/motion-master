@@ -240,7 +240,7 @@ uint8_t icMuSpoMtRegister(uint32_t rawPosition, uint8_t singleturnBits, uint8_t 
 }
 
 bool isIcMuEncoder(const EncoderConfiguration& encoder) {
-  const bool port = encoder.sensorPort == 1 || encoder.sensorPort == 2;
+  const bool port = encoder.sensorPort >= 1 && encoder.sensorPort <= kMaxSensorPort;
   const bool type = encoder.type == EncoderType::kBiss || encoder.type == EncoderType::kInternal;
   return port && type && encoder.singleturnBits != 0;
 }
@@ -299,6 +299,16 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
   };
 }
 
+std::optional<std::string> icMuPartError(uint8_t sensorPort, uint8_t hardRev) {
+  if (isIntegratedSensorPort(sensorPort) || icMuPartName(hardRev)) {
+    return std::nullopt;
+  }
+  return std::format(
+      "register 0x74 of the encoder on external sensor port {} holds 0x{:02X}, which names no "
+      "iC-MU part, so the encoder is not taken for an iC-MU",
+      sensorPort, hardRev);
+}
+
 IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t hardRev,
                                     uint8_t outputRegister) {
   IcMuEncoderStatus status;
@@ -308,7 +318,9 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
   status.multiturnBits = encoder.multiturnBits;
   status.hardRev = hardRev;
   status.outputRegister = outputRegister;
-  if (auto error = icMuSingleturnBitsError(encoder.singleturnBits)) {
+  if (auto error = icMuPartError(encoder.sensorPort, hardRev)) {
+    status.reason = std::move(*error);
+  } else if (auto error = icMuSingleturnBitsError(encoder.singleturnBits)) {
     status.reason = std::move(*error);
   } else {
     status.masterPolePairs = icMuMasterPolePairs(encoder.singleturnBits);
@@ -325,7 +337,9 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
       }
     }
   }
-  status.state = icMuEncoderState(outputRegister, status.expectedOutputRegister);
+  if (!icMuPartError(encoder.sensorPort, hardRev)) {
+    status.state = icMuEncoderState(outputRegister, status.expectedOutputRegister);
+  }
   return status;
 }
 

@@ -1336,7 +1336,8 @@ struct IcMuPlan {
 };
 
 std::expected<IcMuPlan, std::string> planIcMuConfiguration(
-    Device& device, SomanetDrive& drive, const IcMuEncoderConfigurationRequest& request) {
+    Device& device, SomanetDrive& drive, const IcMuEncoderConfigurationRequest& request,
+    const std::stop_token& stop) {
   auto rawVersion = drive.manufacturerSoftwareVersion();
   if (!rawVersion) {
     return std::unexpected(rawVersion.error());
@@ -1356,12 +1357,22 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
   const auto found = std::ranges::find(configurations->encoders, request.encoderOrdinal,
                                        &EncoderConfiguration::encoderOrdinal);
   if (found == configurations->encoders.end() || !somanet::isIcMuEncoder(*found)) {
-    return std::unexpected(std::format(
-        "{} is not a BiSS or internal encoder with singleturn bits on sensor port 1 or 2",
-        somanet::toString(request.encoderOrdinal)));
+    return std::unexpected(
+        std::format("{} is not a BiSS or internal encoder with singleturn bits on a sensor port",
+                    somanet::toString(request.encoderOrdinal)));
   }
   if (auto error = somanet::icMuSingleturnBitsError(found->singleturnBits)) {
     return std::unexpected(std::move(*error));
+  }
+  if (!somanet::isIntegratedSensorPort(found->sensorPort)) {
+    auto hardRev =
+        readIcMuRegister(drive, request.encoderOrdinal, somanet::kIcMuHardRevRegister, stop);
+    if (!hardRev) {
+      return std::unexpected(hardRev.error());
+    }
+    if (auto error = somanet::icMuPartError(found->sensorPort, *hardRev)) {
+      return std::unexpected(std::move(*error));
+    }
   }
 
   auto state = drive.state();
@@ -1454,7 +1465,7 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
       .timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval, .stop = stop};
 
   reporter.start(kIcMuValidateStep);
-  auto plan = planIcMuConfiguration(device, *drive, request);
+  auto plan = planIcMuConfiguration(device, *drive, request, stop);
   if (!plan) {
     return fail(kIcMuValidateStep, plan.error());
   }
@@ -1644,6 +1655,16 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     reporter.succeed(kIcMuVerifyStep, *verified);
 
     reporter.start(kIcMuRestoreFileStep);
+    if (!somanet::isIntegratedSensorPort(plan->encoder.sensorPort)) {
+      // The drive reads a restore file only for ports 1 and 2, so a file for this port would never
+      // be used.
+      reporter.succeed(kIcMuRestoreFileStep,
+                       nlohmann::json{{"file", nullptr},
+                                      {"reason",
+                                       "the drive keeps a restore file only for sensor "
+                                       "ports 1 and 2"}});
+      return {};
+    }
     auto restored = writeRestoreFile();
     if (!restored) {
       return fail(kIcMuRestoreFileStep, restored.error());

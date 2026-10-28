@@ -44,6 +44,7 @@
 #include "node/eni_request.h"
 #include "node/firmware_package.h"
 #include "node/ic_haus_registers.h"
+#include "node/ic_mu_encoder.h"
 #include "node/kuebler_registers.h"
 #include "node/monitoring_manager.h"
 #include "node/operation_modes.h"
@@ -872,6 +873,19 @@ void HttpServer::run() {
                   return mm::api::badRequest(description.error());
                 }
                 return mm::api::json(nlohmann::json(*description));
+              });
+
+  // Decodes an iC-MU restore file supplied in the body, the circulo_integrated_encoder_<port>
+  // _config.bin a configuration writes. Binary, like /api/integro-variant/parse.
+  router.post("/api/ic-mu-restore-file/parse",
+              [](const mm::api::Request& req) -> mm::api::Response {
+                std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(req.body().data()),
+                                               req.body().size()};
+                auto entries = mm::node::somanet::parseIcMuRestoreFile(bytes);
+                if (!entries) {
+                  return mm::api::badRequest(entries.error());
+                }
+                return mm::api::json(nlohmann::json{{"entries", *entries}});
               });
 
   // Decodes a .variant supplied in the body. Binary rather than text, hence a POST with bytes like

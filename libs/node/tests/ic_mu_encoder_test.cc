@@ -353,4 +353,38 @@ TEST(IcMuEncoderTest, StatusJson) {
   EXPECT_TRUE(j["reason"].is_null());
 }
 
+TEST(IcMuEncoderTest, StatusOffersTheBatteryModesOfTheRingOnTheMultiturnPath) {
+  auto multiturn = somanet::icMuEncoderStatus(icMu(1, 19, 18), 0x15, 0x17);
+  EXPECT_EQ(multiturn.path, IcMuPath::kMultiturn);
+  ASSERT_EQ(multiturn.batteryModes.size(), somanet::icPvlBatteryModes().size());
+  EXPECT_EQ(multiturn.batteryModes[0].name, "6-microamperes");
+  EXPECT_EQ(multiturn.batteryModes[0].maxAccelerationKrpmPerSecond, 3.5);
+
+  // 16 master pole pairs offer no mode, and the singleturn path takes none.
+  EXPECT_TRUE(somanet::icMuEncoderStatus(icMu(1, 18, 18), 0x15, 0x16).batteryModes.empty());
+  EXPECT_TRUE(somanet::icMuEncoderStatus(icMu(2, 19, 0), 0x15, 0x05).batteryModes.empty());
+}
+
+TEST(IcMuEncoderTest, RestoreFileRoundTrips) {
+  const std::vector<uint8_t> values(somanet::icMuRestoreRegisters().size(), 0x42);
+  const auto file = somanet::icMuRestoreFile(values);
+  ASSERT_EQ(file.size(), somanet::kIcMuRestoreFileMaxBytes);
+  auto entries = somanet::parseIcMuRestoreFile(file);
+  ASSERT_TRUE(entries) << entries.error();
+  ASSERT_EQ(entries->size(), 33u);
+  EXPECT_EQ((*entries)[0x0C].address, 0x0C);
+  EXPECT_EQ((*entries)[0x0C].value, 0x42);
+  ASSERT_NE((*entries)[0x0C].icMuRegister, nullptr);
+  EXPECT_EQ((*entries)[0x0C].icMuRegister->namedFields()[0].name, "CFGEW");
+  EXPECT_EQ(entries->back().address, 0x59);
+  EXPECT_NE(entries->back().icMuRegister, nullptr);
+  EXPECT_EQ(somanet::icMuRestoreFileName(2), "circulo_integrated_encoder_2_config.bin");
+}
+
+TEST(IcMuEncoderTest, RestoreFileRefusesWhatTheDriveRefuses) {
+  EXPECT_FALSE(somanet::parseIcMuRestoreFile(std::vector<uint8_t>{0x00, 0x01, 0x02}));
+  EXPECT_FALSE(somanet::parseIcMuRestoreFile(std::vector<uint8_t>(68, 0)));
+  EXPECT_TRUE(somanet::parseIcMuRestoreFile(std::vector<uint8_t>{}));
+}
+
 }  // namespace

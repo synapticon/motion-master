@@ -1070,6 +1070,71 @@ export interface ProcedureListing {
   snapshot: ProcedureSnapshot;
 }
 
+export interface IcHausRegister {
+  /**
+   * The address, or the first of a printed range.
+   * @example 15
+   */
+  address: number;
+  /**
+   * The last address of the range; equal to address for a single-address row.
+   * @example 15
+   */
+  lastAddress: number;
+  /**
+   * The fields rendered as the datasheet prints the row. "RESERVED" for a reserved row.
+   * @example "SPO_MT(3:0) | MPC(3:0)"
+   */
+  layout: string;
+  /** The named pieces of this register, most significant bit first. Empty when reserved. */
+  fields: {
+    /**
+     * The datasheet's own name for the field.
+     * @example "SPO_MT"
+     */
+    name: string;
+    /**
+     * The field's own bit slice as the register map prints it, empty where it prints a bare name. Not the position within the byte.
+     * @example "3:0"
+     */
+    bits: string;
+    /**
+     * The datasheet's one-line description of the field.
+     * @example "Offset external multiturn"
+     */
+    description: string;
+  }[];
+  /** @example false */
+  reserved: boolean;
+  /**
+   * Reachable over SPI only, so the register communication service cannot touch it.
+   * @example false
+   */
+  spiOnly: boolean;
+}
+
+/** A decoded iC-MU restore file, `circulo_integrated_encoder_<sensor port>_config.bin`. The drive writes these pairs into the encoder when the iC-MU reports a corrupted EEPROM. */
+export interface IcMuRestoreFile {
+  /** One entry for each pair, in the order of the file. */
+  entries: {
+    /**
+     * The iC-MU RAM address the drive writes the value into.
+     * @min 0
+     * @max 255
+     * @example 12
+     */
+    address: number;
+    /**
+     * @min 0
+     * @max 255
+     * @example 108
+     */
+    value: number;
+    /** The iC-MU register at the address, as `/api/meta/ic-haus-registers` lists it, or null for an address the register map does not list. */
+    register: IcHausRegister | null;
+  }[];
+}
+
 /** A procedure's parameters. Which fields apply is per procedure, and each descriptor reports its own in `parameters` — so this schema is open, and a procedure that takes none may be started with no body at all. The properties below are the union of every procedure's, each naming the procedure it belongs to. */
 export interface ProcedureRequest {
   /**
@@ -1103,7 +1168,7 @@ export interface ProcedureRequest {
   /** `os-command` only, and required when `fsBuffer` is `write`: the bytes to send, base64-encoded into this JSON string. Rejected for the other two directions rather than ignored, so a request that names one and forgets the other is told rather than running a command that moves nothing. (Deliberately not `format: byte`, for the reason spelled out on `packageContent`.) */
   fsBufferData?: string;
   /**
-   * `encoder-register-communication` and `ic-mu-calibration-mode`: which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder.
+   * `encoder-register-communication`, `ic-mu-calibration-mode` and `ic-mu-encoder-configuration`: which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder. Required for `ic-mu-encoder-configuration`, because a default would write the EEPROM of an encoder that nobody named.
    * @default 1
    * @example 1
    */
@@ -1145,6 +1210,18 @@ export interface ProcedureRequest {
    * @example "configuration"
    */
   mode?: "configuration" | "raw" | "standard";
+  /**
+   * `ic-mu-encoder-configuration` only, and only on the multiturn path: the current the iC-PVL draws from the battery while the drive has no power. A higher current lets it count revolutions at a higher acceleration. `default` takes iC-PVL code 0x5D for an encoder on the motor shaft and 0x68 for one on the driving shaft, and refuses an encoder that serves no controller. A ring of 16 master pole pairs takes only `default`. The `ic-mu-encoder-status` result lists the modes of each encoder with the acceleration each one allows.
+   * @default "default"
+   * @example "18-microamperes"
+   */
+  batteryMode?:
+    | "default"
+    | "6-microamperes"
+    | "10-microamperes"
+    | "18-microamperes"
+    | "36-microamperes"
+    | "72-microamperes";
   /**
    * `restore-default-parameters` only: which group of defaults to restore — all (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer (0x1011:04).
    * @default "all"

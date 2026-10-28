@@ -269,6 +269,12 @@ std::optional<std::string_view> icMuPartName(uint8_t hardRev) {
   }
 }
 
+void to_json(nlohmann::json& j, const IcPvlBatteryModeChoice& choice) {
+  j = nlohmann::json{{"name", choice.name},
+                     {"maxCurrentMicroamps", choice.maxCurrentMicroamps},
+                     {"maxAccelerationKrpmPerSecond", choice.maxAccelerationKrpmPerSecond}};
+}
+
 void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
   auto optional = [](const auto& value) {
     return value ? nlohmann::json(*value) : nlohmann::json(nullptr);
@@ -288,6 +294,8 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
       {"state", status.state ? nlohmann::json(std::string(toString(*status.state)))
                              : nlohmann::json(nullptr)},
       {"reason", optional(status.reason)},
+      {"path", status.path == IcMuPath::kMultiturn ? "multiturn" : "singleturn"},
+      {"batteryModes", status.batteryModes},
   };
 }
 
@@ -306,6 +314,16 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
     status.masterPolePairs = icMuMasterPolePairs(encoder.singleturnBits);
     status.expectedOutputRegister = icMuOutMsb(icMuPath(encoder.sensorPort, encoder.multiturnBits),
                                                encoder.singleturnBits, encoder.multiturnBits);
+  }
+  status.path = icMuPath(encoder.sensorPort, encoder.multiturnBits);
+  if (status.path == IcMuPath::kMultiturn) {
+    for (const auto& mode : icPvlBatteryModes()) {
+      if (auto acceleration = icPvlMaxAcceleration(mode, encoder.singleturnBits)) {
+        status.batteryModes.push_back({.name = mode.name,
+                                       .maxCurrentMicroamps = mode.maxCurrentMicroamps,
+                                       .maxAccelerationKrpmPerSecond = *acceleration});
+      }
+    }
   }
   status.state = icMuEncoderState(outputRegister, status.expectedOutputRegister);
   return status;
@@ -333,6 +351,45 @@ std::vector<uint8_t> icMuRestoreFile(std::span<const uint8_t> values) {
     file.push_back(values[i]);
   }
   return file;
+}
+
+void to_json(nlohmann::json& j, const IcMuRestoreEntry& entry) {
+  j = nlohmann::json{{"address", entry.address},
+                     {"value", entry.value},
+                     {"register", entry.icMuRegister ? nlohmann::json(*entry.icMuRegister)
+                                                     : nlohmann::json(nullptr)}};
+}
+
+std::expected<std::vector<IcMuRestoreEntry>, std::string> parseIcMuRestoreFile(
+    std::span<const uint8_t> bytes) {
+  if (bytes.size() % 2 != 0) {
+    return std::unexpected(std::format(
+        "a restore file holds [address, value] pairs, and {} bytes is not a whole number of pairs",
+        bytes.size()));
+  }
+  if (bytes.size() > kIcMuRestoreFileMaxBytes) {
+    return std::unexpected(std::format("a restore file holds at most {} bytes, and this one has {}",
+                                       kIcMuRestoreFileMaxBytes, bytes.size()));
+  }
+  auto find = [](uint8_t address) -> const IcHausRegister* {
+    for (const auto& space : icHausRegisterSpaces()) {
+      if (space.chip != IcHausChip::kIcMu) {
+        continue;
+      }
+      const auto r = std::ranges::find_if(space.registers, [address](const IcHausRegister& row) {
+        return address >= row.address && address <= row.lastAddress;
+      });
+      if (r != space.registers.end()) {
+        return &*r;
+      }
+    }
+    return nullptr;
+  };
+  std::vector<IcMuRestoreEntry> entries;
+  for (size_t i = 0; i < bytes.size(); i += 2) {
+    entries.push_back({.address = bytes[i], .value = bytes[i + 1], .icMuRegister = find(bytes[i])});
+  }
+  return entries;
 }
 
 IcMuFirmwareSupport icMuFirmwareSupport(std::string_view version) {

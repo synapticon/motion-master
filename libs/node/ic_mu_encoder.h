@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <span>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "node/cia402_drive.h"
+#include "node/ic_haus_registers.h"
 #include "node/somanet_drive.h"
 
 namespace mm::node::somanet {
@@ -273,6 +275,15 @@ std::optional<IcMuEncoderState> icMuEncoderState(uint8_t outputRegister,
 ///        datasheet does not list (Rev B1, Table 92).
 std::optional<std::string_view> icMuPartName(uint8_t hardRev);
 
+/// @brief One battery mode a configuration request can name for an encoder, with the acceleration
+///        it allows on that encoder's ring.
+struct IcPvlBatteryModeChoice {
+  std::string_view name;
+  uint8_t maxCurrentMicroamps = 0;
+  double maxAccelerationKrpmPerSecond = 0;
+};
+void to_json(nlohmann::json& j, const IcPvlBatteryModeChoice& choice);
+
 /// @brief What the status reports for one encoder.
 struct IcMuEncoderStatus {
   EncoderOrdinal encoder{EncoderOrdinal::kEncoder1};
@@ -285,6 +296,11 @@ struct IcMuEncoderStatus {
   std::optional<uint8_t> expectedOutputRegister;  ///< Empty for a ring the rules do not know.
   std::optional<IcMuEncoderState> state;          ///< See @c icMuEncoderState.
   std::optional<std::string> reason;              ///< Why there is no expected value.
+  IcMuPath path{IcMuPath::kSingleturn};           ///< The path a configuration takes.
+
+  /// The battery modes a configuration request can name besides the default. Empty on the
+  /// singleturn path, and on a ring that offers no mode.
+  std::vector<IcPvlBatteryModeChoice> batteryModes;
 };
 void to_json(nlohmann::json& j, const IcMuEncoderStatus& status);
 
@@ -307,6 +323,24 @@ std::string icMuRestoreFileName(uint8_t sensorPort);
 /// @brief The restore file: one @c [address, value] pair for each register of
 ///        @c icMuRestoreRegisters. @p values holds the value of each register in that order.
 std::vector<uint8_t> icMuRestoreFile(std::span<const uint8_t> values);
+
+/// @brief One @c [address, value] pair of a restore file, with the iC-MU register at that address.
+struct IcMuRestoreEntry {
+  uint8_t address = 0;
+  uint8_t value = 0;
+  const IcHausRegister* icMuRegister = nullptr;  ///< Nothing for an address the map does not list.
+};
+void to_json(nlohmann::json& j, const IcMuRestoreEntry& entry);
+
+/// @brief The largest restore file the drive takes: 33 pairs.
+inline constexpr size_t kIcMuRestoreFileMaxBytes = 66;
+
+/// @brief Decodes a restore file into its pairs.
+///
+/// The drive refuses a file of odd length or over @c kIcMuRestoreFileMaxBytes with error 0x6320,
+/// so this refuses the same files.
+std::expected<std::vector<IcMuRestoreEntry>, std::string> parseIcMuRestoreFile(
+    std::span<const uint8_t> bytes);
 
 /// @brief Whether a firmware can run the configuration.
 enum class IcMuFirmwareSupport : uint8_t {

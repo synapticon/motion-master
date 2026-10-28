@@ -67,6 +67,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
 | `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc` | `CAPTURE=<seconds>` records the adapter with `motion-master-capture` beside the runs, as do `flaky-bus.sh` and `al-state-loop.sh`
 | `al-state-loop.sh` | Walk one drive INIT, PRE-OP, SAFE-OP, OP, INIT again and again against a running server, with an optional `netem` rule during the rounds, and count the short maps and the map attempts in the server log. The loop of `NEXTGEN.md` Session 2026-10-22. Needs passwordless `sudo tc` |
+| `adapter-report.sh` | Print the settings of a Linux bus adapter and its host that can hold a frame: qdisc, coalescing, offloads, EEE, `cdc_ncm`, USB path and power management. Read-only, no root. For #138 |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
 

@@ -174,16 +174,21 @@ function CalibrationRun({
     ...done.flatMap(i => (i.warning ? [i.warning] : [])),
     ...(validation?.commutationWarning ? [validation.commutationWarning] : []),
   ]
-  const curves: { label: string; className: string; points: IcMuCalibrationCurve }[] = []
+  const curves: Curve[] = []
   if (done.length > 0) {
-    curves.push({ label: 'Iteration 1', className: 'text-grey-400', points: done[0].phaseError })
+    curves.push({ label: 'Iteration 1', color: CURVE_COLOR.first, points: done[0].phaseError })
   }
   if (done.length > 1) {
     const last = done[done.length - 1]
-    curves.push({ label: `Iteration ${last.iteration}`, className: 'text-ocean', points: last.phaseError })
+    curves.push({ label: `Iteration ${last.iteration}`, color: CURVE_COLOR.latest, points: last.phaseError })
   }
   if (validation) {
-    curves.push({ label: 'Validation margin', className: 'text-syn-red', points: validation.phaseMargin })
+    curves.push({
+      label: 'Validation',
+      color: CURVE_COLOR.validation,
+      points: validation.phaseMargin,
+      worst: validation.marginPercent,
+    })
   }
   const limit = validation?.phaseRangeLimit ?? done[0]?.phaseRangeLimit
 
@@ -245,39 +250,172 @@ function iterationSummary(step: ProgressStep): string {
   )} · ${value.recordedRevolutions.toFixed(2)} ring turns`
 }
 
-/** The phase curves over one ring turn, with the permissible error as dashed lines. */
-function PhasePlot({
-  curves,
-  limit,
-}: {
-  curves: { label: string; className: string; points: IcMuCalibrationCurve }[]
-  limit: number
-}) {
-  const width = 720
-  const height = 240
-  const range = Math.max(limit * 1.2, ...curves.flatMap(c => c.points.map(p => Math.abs(p[1]))))
-  const x = (angle: number) => (angle / 360) * width
-  const y = (value: number) => height / 2 - (value / range) * (height / 2)
+interface Curve {
+  label: string
+  color: string
+  points: IcMuCalibrationCurve
+  /** The margin at the worst point, marked on the curve. Only the validation has one. */
+  worst?: number
+}
+
+// Checked with the dataviz palette validator on the light surface: ocean and orange pass every check
+// (CVD ΔE 14.7, normal-vision ΔE 29.5). Iteration 1 is context, so it stays neutral. Red is kept for
+// the permissible error and used for nothing else.
+const CURVE_COLOR = { first: '#a9a9a9', latest: '#00849b', validation: '#eb6834' } as const
+const LIMIT_COLOR = '#8c072f'
+
+const PLOT = { width: 760, height: 280, left: 48, right: 16, top: 12, bottom: 28 } as const
+
+// The value nearest @p angle on a curve, for the hover readout.
+function nearest(points: IcMuCalibrationCurve, angle: number): number[] | undefined {
+  let best: number[] | undefined
+  for (const point of points) {
+    if (!best || Math.abs(point[0] - angle) < Math.abs(best[0] - angle)) {
+      best = point
+    }
+  }
+  return best
+}
+
+/**
+ * The phase over one turn of the ring, with the permissible error as a band. The validation curve
+ * is the one the run is judged by: its worst point sets the margin.
+ */
+function PhasePlot({ curves, limit }: { curves: Curve[]; limit: number }) {
+  const [hover, setHover] = useState<number | null>(null)
+  const plotWidth = PLOT.width - PLOT.left - PLOT.right
+  const plotHeight = PLOT.height - PLOT.top - PLOT.bottom
+  const extreme = Math.max(limit, ...curves.flatMap(c => c.points.map(p => Math.abs(p[1]))))
+  const range = Math.ceil((extreme * 1.1) / 64) * 64
+  const x = (angle: number) => PLOT.left + (angle / 360) * plotWidth
+  const y = (value: number) => PLOT.top + plotHeight / 2 - (value / range) * (plotHeight / 2)
+  const valueTicks = [-range, -limit, 0, limit, range].filter(
+    (v, i, all) => all.indexOf(v) === i && Math.abs(v) <= range,
+  )
+  const path = (points: IcMuCalibrationCurve) =>
+    [...points]
+      .sort((a, b) => a[0] - b[0])
+      .map(([angle, value], i) => `${i === 0 ? 'M' : 'L'}${x(angle).toFixed(1)},${y(value).toFixed(1)}`)
+      .join('')
+  const validation = curves.find(c => c.worst !== undefined)
+  const worstPoint = validation?.points.reduce(
+    (worst, p) => (Math.abs(p[1]) > Math.abs(worst[1]) ? p : worst),
+    validation.points[0],
+  )
+
   return (
-    <figure>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full max-w-3xl border border-grey-200 bg-white">
-        <line x1={0} x2={width} y1={y(0)} y2={y(0)} className="stroke-grey-200" />
-        {[limit, -limit].map(l => (
-          <line key={l} x1={0} x2={width} y1={y(l)} y2={y(l)} className="stroke-syn-red" strokeDasharray="4 4" />
-        ))}
+    <figure className="max-w-4xl">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2 text-xs text-grey-800">
         {curves.map(curve => (
-          <g key={curve.label} className={curve.className}>
-            {[...curve.points]
-              .sort((a, b) => a[0] - b[0])
-              .map(([angle, value], i) => (
-                <circle key={i} cx={x(angle)} cy={y(value)} r={1.2} className="fill-current" />
-              ))}
+          <span key={curve.label} className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-0.5 w-4" style={{ background: curve.color }} />
+            {curve.label}
+            {curve.worst !== undefined && ' · the marked point sets the margin'}
+          </span>
+        ))}
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block h-0.5 w-4" style={{ background: LIMIT_COLOR }} />
+          Permissible ±{limit}
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${PLOT.width} ${PLOT.height}`}
+        className="w-full bg-white border border-grey-200 cursor-crosshair"
+        onMouseMove={event => {
+          const box = event.currentTarget.getBoundingClientRect()
+          const svgX = ((event.clientX - box.left) / box.width) * PLOT.width
+          const angle = ((svgX - PLOT.left) / plotWidth) * 360
+          setHover(angle >= 0 && angle <= 360 ? angle : null)
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {/* Beyond the permissible error, a light wash; inside it, the plain surface. */}
+        <rect x={PLOT.left} y={PLOT.top} width={plotWidth} height={y(limit) - PLOT.top} fill={LIMIT_COLOR} opacity={0.1} />
+        <rect x={PLOT.left} y={y(-limit)} width={plotWidth} height={PLOT.top + plotHeight - y(-limit)} fill={LIMIT_COLOR} opacity={0.1} />
+        {[0, 90, 180, 270, 360].map(angle => (
+          <g key={angle}>
+            <line x1={x(angle)} x2={x(angle)} y1={PLOT.top} y2={PLOT.top + plotHeight} stroke="#eeeeee" strokeWidth={1} />
+            <text x={x(angle)} y={PLOT.height - 8} textAnchor="middle" className="fill-grey-700 text-[11px]">
+              {angle}°
+            </text>
           </g>
         ))}
+        {valueTicks.map(value => (
+          <g key={value}>
+            <line
+              x1={PLOT.left}
+              x2={PLOT.left + plotWidth}
+              y1={y(value)}
+              y2={y(value)}
+              stroke={Math.abs(value) === limit ? LIMIT_COLOR : '#eeeeee'}
+              strokeWidth={1}
+            />
+            <text x={PLOT.left - 6} y={y(value) + 4} textAnchor="end" className="fill-grey-700 text-[11px]">
+              {value}
+            </text>
+          </g>
+        ))}
+        {curves.map(curve => (
+          <path
+            key={curve.label}
+            d={path(curve.points)}
+            fill="none"
+            stroke={curve.color}
+            strokeWidth={curve.worst !== undefined ? 2 : 1.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        ))}
+        {validation && worstPoint && (
+          // The margin is the headroom between the worst point and the limit on its side, so the
+          // bracket draws exactly that distance.
+          (() => {
+            const px = x(worstPoint[0])
+            const py = y(worstPoint[1])
+            const ly = y(worstPoint[1] >= 0 ? limit : -limit)
+            const midY = (py + ly) / 2
+            const left = worstPoint[0] > 300
+            const label = `${validation.worst?.toFixed(1)} % margin`
+            const labelWidth = label.length * 6.4 + 12
+            const labelX = left ? px - 10 - labelWidth : px + 10
+            return (
+              <g>
+                <line x1={px} x2={px} y1={py} y2={ly} stroke="#191817" strokeWidth={1.5} />
+                <line x1={px - 5} x2={px + 5} y1={ly} y2={ly} stroke="#191817" strokeWidth={1.5} />
+                <circle cx={px} cy={py} r={9} fill="#ffffff" opacity={0.85} />
+                <circle cx={px} cy={py} r={6} fill={validation.color} stroke="#191817" strokeWidth={2} />
+                <rect
+                  x={labelX}
+                  y={midY - 10}
+                  width={labelWidth}
+                  height={20}
+                  rx={2}
+                  fill="#ffffff"
+                  stroke="#191817"
+                  strokeWidth={1}
+                />
+                <text x={labelX + 6} y={midY + 4} className="fill-grey-900 text-[11px] font-semibold">
+                  {label}
+                </text>
+              </g>
+            )
+          })()
+        )}
+        {hover !== null && (
+          <line x1={x(hover)} x2={x(hover)} y1={PLOT.top} y2={PLOT.top + plotHeight} stroke="#656565" strokeWidth={1} />
+        )}
       </svg>
-      <figcaption className="text-xs text-grey-600 mt-1">
-        Phase over the ring angle, 0° to 360°. Dashed: the permissible phase error.{' '}
-        {curves.map(c => c.label).join(', ')}.
+      <div className="h-5 mt-1 text-xs text-grey-700">
+        {hover !== null &&
+          `${hover.toFixed(1)}° · ` +
+            curves
+              .map(curve => `${curve.label} ${nearest(curve.points, hover)?.[1] ?? '—'}`)
+              .join(' · ')}
+      </div>
+      <figcaption className="text-xs text-grey-600">
+        Phase over one turn of the ring, in the unit of the permissible error. The iterations show the
+        phase error MU_3SL reports for each recording; the validation shows the phase margin, and its
+        worst point sets the margin of the run.
       </figcaption>
     </figure>
   )

@@ -43,7 +43,7 @@ target_link_libraries(mm_node_tests PRIVATE mm::node mm::comm_spoe_fake GTest::g
 # mu_3sl_test.cc checks that the vendored MU_3SL links and loads. On Windows, test discovery runs
 # the test binary at build time, so the DLL must sit next to it by then.
 if(MM_HAVE_MU_3SL)
-  target_sources(mm_node_tests PRIVATE mu_3sl_test.cc)
+  target_sources(mm_node_tests PRIVATE ic_mu_calibration_engine_test.cc mu_3sl_test.cc)
   mm_link_mu_3sl(mm_node_tests)
 endif()
 

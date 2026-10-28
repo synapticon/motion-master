@@ -124,6 +124,39 @@ std::vector<IcMuRegisterWrite> icMuNoniusTableWrites(const IcMuNoniusOffsetTable
 /// @brief The table registers 0x52 to 0x59 hold, from their eight values in that order.
 IcMuNoniusOffsetTable icMuNoniusTableFromRegisters(std::span<const uint8_t, 8> registers);
 
+/// @brief The two tracks of an iC-MU.
+enum class IcMuTrack : uint8_t {
+  kMaster,
+  kNonius,
+};
+
+/// @brief The analog adjustment registers of one track, as the encoder holds them.
+struct IcMuAnalogAdjustments {
+  uint8_t gain = 0;          ///< @c GX, register 0x01 or 0x07.
+  uint8_t sineOffset = 0;    ///< @c VOSS, register 0x02 or 0x08.
+  uint8_t cosineOffset = 0;  ///< @c VOSC, register 0x03 or 0x09.
+  IcMuPhase phase;           ///< @c PH and @c PHR, register 0x04 or 0x0A.
+
+  bool operator==(const IcMuAnalogAdjustments&) const = default;
+};
+
+/// @brief The registers of @p track that hold its adjustments, in the order @c GX, @c VOSS,
+///        @c VOSC, @c PH.
+std::array<uint8_t, 4> icMuAnalogRegisters(IcMuTrack track);
+
+/// @brief The adjustments of a track from its four registers, in the order of
+///        @c icMuAnalogRegisters.
+IcMuAnalogAdjustments icMuAnalogFromRegisters(std::span<const uint8_t, 4> values);
+
+/// @brief The writes of @p adjustments into the registers of @p track: @c VOSS, @c VOSC, @c GX,
+///        then @c PH.
+std::vector<IcMuRegisterWrite> icMuAnalogWrites(IcMuTrack track,
+                                                const IcMuAnalogAdjustments& adjustments);
+
+/// @brief The writes a full calibration starts with: @c PH_M and @c PH_N from @p values, the
+///        offsets and gains of both tracks at 0, and the nonius table at 0.
+std::vector<IcMuRegisterWrite> icMuStartWrites(const IcMuStartValues& values);
+
 /// @brief What MU_3SL reports for one track after an iteration: the error that remains, in LSB of
 ///        each register, and the phase range of the track.
 struct IcMuTrackResidual {
@@ -132,12 +165,6 @@ struct IcMuTrackResidual {
   double gain = 0;
   double phase = 0;
   uint8_t phaseRange = 0;
-};
-
-/// @brief The two tracks of an iC-MU.
-enum class IcMuTrack : uint8_t {
-  kMaster,
-  kNonius,
 };
 
 /// @brief The tolerance of the pass test in @p iteration, counted from 1, in LSB.

@@ -155,6 +155,47 @@ IcMuNoniusOffsetTable icMuNoniusTableFromRegisters(std::span<const uint8_t, 8> r
   return table;
 }
 
+std::array<uint8_t, 4> icMuAnalogRegisters(IcMuTrack track) {
+  if (track == IcMuTrack::kMaster) {
+    return {0x01, 0x02, 0x03, 0x04};
+  }
+  return {0x07, 0x08, 0x09, 0x0A};
+}
+
+IcMuAnalogAdjustments icMuAnalogFromRegisters(std::span<const uint8_t, 4> values) {
+  return {.gain = values[0],
+          .sineOffset = values[1],
+          .cosineOffset = values[2],
+          .phase = icMuPhaseFromRegister(values[3])};
+}
+
+std::vector<IcMuRegisterWrite> icMuAnalogWrites(IcMuTrack track,
+                                                const IcMuAnalogAdjustments& adjustments) {
+  const auto r = icMuAnalogRegisters(track);
+  return {{r[1], adjustments.sineOffset},
+          {r[2], adjustments.cosineOffset},
+          {r[0], adjustments.gain},
+          {r[3], icMuPhaseRegister(adjustments.phase)}};
+}
+
+std::vector<IcMuRegisterWrite> icMuStartWrites(const IcMuStartValues& values) {
+  const auto master = icMuAnalogRegisters(IcMuTrack::kMaster);
+  const auto nonius = icMuAnalogRegisters(IcMuTrack::kNonius);
+  std::vector<IcMuRegisterWrite> writes = {
+      {master[3], values.masterPhase},
+      {nonius[3], values.noniusPhase},
+      {master[1], 0x00},
+      {nonius[1], 0x00},
+      {master[2], 0x00},
+      {nonius[2], 0x00},
+      {master[0], 0x00},
+      {nonius[0], 0x00},
+  };
+  const auto table = icMuNoniusTableWrites({});
+  writes.insert(writes.end(), table.begin(), table.end());
+  return writes;
+}
+
 int icMuTolerance(int iteration) {
   if (iteration <= 5) {
     return 1;

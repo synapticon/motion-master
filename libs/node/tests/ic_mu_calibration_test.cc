@@ -314,4 +314,31 @@ TEST(IcMuCalibrationTest, CalibrationSamplesCutThePaddingOfAOneKilohertzRecordin
   EXPECT_EQ(somanet::icMuCalibrationSamples(short_, milliseconds(6000)).size(), 5000u);
 }
 
+TEST(IcMuCalibrationTest, AnalogRegistersOfBothTracks) {
+  using somanet::IcMuAnalogAdjustments;
+  const IcMuAnalogAdjustments nonius{.gain = 0x11,
+                                     .sineOffset = 0x22,
+                                     .cosineOffset = 0x33,
+                                     .phase = {.phase = 5, .phaseRange = 1}};
+  const std::vector<IcMuRegisterWrite> expected = {
+      {0x08, 0x22}, {0x09, 0x33}, {0x07, 0x11}, {0x0A, 0x85}};
+  EXPECT_EQ(somanet::icMuAnalogWrites(IcMuTrack::kNonius, nonius), expected);
+  EXPECT_EQ(somanet::icMuAnalogRegisters(IcMuTrack::kMaster), (std::array<uint8_t, 4>{1, 2, 3, 4}));
+  const std::array<uint8_t, 4> values = {0x11, 0x22, 0x33, 0x85};
+  EXPECT_EQ(somanet::icMuAnalogFromRegisters(values), nonius);
+}
+
+TEST(IcMuCalibrationTest, StartWritesOfTheOuterRingOfACirculo9) {
+  const auto values =
+      somanet::icMuStartValues(64, IcMuRingPosition::kOuter, IcMuPartClass::kIcMu150Or200);
+  ASSERT_TRUE(values);
+  // The order of the configuration in use today: the phases, the offsets, the gains, the table.
+  const std::vector<IcMuRegisterWrite> expected = {
+      {0x04, 0x21}, {0x0A, 0x1A}, {0x02, 0x00}, {0x08, 0x00}, {0x03, 0x00}, {0x09, 0x00},
+      {0x01, 0x00}, {0x07, 0x00}, {0x52, 0x00}, {0x53, 0x00}, {0x54, 0x00}, {0x55, 0x00},
+      {0x56, 0x00}, {0x57, 0x00}, {0x58, 0x00}, {0x59, 0x00},
+  };
+  EXPECT_EQ(somanet::icMuStartWrites(*values), expected);
+}
+
 }  // namespace

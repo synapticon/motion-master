@@ -1980,7 +1980,8 @@ std::expected<IcMuCalibrationPlan, std::string> planIcMuCalibration(
   const auto partClass = somanet::icMuPartClass(*hardRev);
   if (!partClass) {
     return std::unexpected(
-        std::format("register 0x74 holds 0x{:02X}, which names no iC-MU part", *hardRev));
+        std::format("the calibration has no start values for the {} (register 0x74 = 0x{:02X})",
+                    somanet::icMuPartName(*hardRev).value_or("part"), *hardRev));
   }
 
   if (const auto portPosition = somanet::icMuRingPositionOfPort(found->sensorPort)) {
@@ -2468,8 +2469,10 @@ std::expected<void, std::string> runIcMuCalibrationProcedure(
       current[track == somanet::IcMuTrack::kMaster ? 0 : 1] =
           somanet::icMuAnalogFromRegisters(values);
     }
+    // The model starts from the table the encoder holds: the one a full run just zeroed, or the
+    // calibrated one a validation measures.
     auto modelled = engine->setAdjustments(current[0], current[1]);
-    if (modelled && request.measurementOnly) {
+    if (modelled) {
       std::array<uint8_t, 8> table{};
       for (size_t i = 0; i < table.size() && modelled; ++i) {
         auto value = read(static_cast<uint8_t>(somanet::kIcMuNoniusTableRegister + i));

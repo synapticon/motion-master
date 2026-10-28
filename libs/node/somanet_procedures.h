@@ -16,6 +16,7 @@
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/firmware_package.h"
+#include "node/ic_mu_calibration.h"
 #include "node/kuebler_registers.h"
 #include "node/plant_identification.h"
 #include "node/procedure.h"
@@ -335,6 +336,83 @@ std::vector<ProgressStep> icMuEncoderConfigurationSteps();
 std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     Device& device, ProgressReporter& reporter, const std::stop_token& stop,
     const IcMuEncoderConfigurationRequest& request);
+
+/// @brief Procedure name for calibrating an iC-MU encoder, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kIcMuCalibrationProcedure = "ic-mu-calibration";
+
+/// @brief The steps of the iC-MU calibration that are not shared with the configuration.
+inline constexpr std::string_view kIcMuStartValuesStep = "start-values";
+inline constexpr std::string_view kIcMuRawModeStep = "raw-mode";
+inline constexpr std::string_view kIcMuValidationStep = "validation";
+inline constexpr std::string_view kIcMuStandardModeStep = "standard-mode";
+inline constexpr std::string_view kIcMuSaveStep = "save";
+inline constexpr std::string_view kIcMuAbsResetStep = "abs-reset";
+inline constexpr std::string_view kIcMuReturnStep = "return-to-start";
+inline constexpr std::string_view kIcMuRestoreEncoderStep = "restore-encoder";
+
+/// @brief The step of calibration iteration @p iteration, counted from 1: "iteration-1" and on.
+std::string icMuIterationStep(int iteration);
+
+/// @brief What an iC-MU calibration is asked to do.
+struct IcMuCalibrationRequest {
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};
+
+  /// Where the ring sits. Required on an external sensor port, refused on port 1 and 2, which
+  /// decide it themselves.
+  std::optional<somanet::IcMuRingPosition> ringPosition;
+
+  /// Runs the validation pass only, and writes nothing to the encoder.
+  bool measurementOnly = false;
+
+  /// Shows the @c NON_CTR error in the BiSS error bit after the calibration, register 0x0C =
+  /// 0x2C.
+  bool activateHealthMonitoring = false;
+
+  /// The velocity of the ring in rpm, or nothing for @c somanet::icMuDefaultRingVelocity.
+  std::optional<double> ringVelocityRpm;
+
+  /// The time between two reads of the drive while it moves. Not part of a request.
+  std::chrono::milliseconds pollInterval{2};
+};
+
+/// @brief Parses and validates a client's iC-MU calibration request body.
+///
+/// Accepts `{"encoderOrdinal": 1, "ringPosition": "inner", "measurementOnly": false,
+/// "activateHealthMonitoring": false, "ringVelocity": 90}`. @c encoderOrdinal is required.
+std::expected<IcMuCalibrationRequest, std::string> parseIcMuCalibrationRequest(
+    const nlohmann::json& body);
+
+/// @brief What the iC-MU calibration accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> icMuCalibrationParameters();
+
+/// @brief The iC-MU calibration's step template, idle. Iterations a run does not need stay idle.
+std::vector<ProgressStep> icMuCalibrationSteps();
+
+/// @brief Calibrates the analog tracks and the nonius table of one iC-MU, as a procedure body.
+///
+/// The motor turns in profile velocity mode, several revolutions in both directions, while the
+/// drive records the raw tracks. MU_3SL computes the corrections from each recording, and the body
+/// writes them until both tracks pass, then the optimised nonius table. A validation pass checks
+/// that both phase margins are at least 10 %. A full run then stores the encoder EEPROM and writes
+/// the restore file; @c IcMuCalibrationRequest::measurementOnly runs the validation pass only.
+///
+/// Every exit path, a failure and a cancel included, returns the BiSS frame to standard mode,
+/// restores the encoder registers a failed full run changed, turns the BiSS status bits on again,
+/// and restores the mode, the state, 0x60FF, 0x6083 and 0x6084. The axis returns to where it
+/// started when the run ends without a fault or a cancel.
+///
+/// Defined only where @c MM_HAVE_MU_3SL is set.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token. A cancel quick-stops the drive and aborts a recording.
+/// @param request  Which encoder, and how.
+/// @return Void once the encoder is calibrated or validated, otherwise why it is not.
+std::expected<void, std::string> runIcMuCalibrationProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             const std::stop_token& stop,
+                                                             const IcMuCalibrationRequest& request);
 
 /// @brief Procedure name for recording a high resolution data stream, as it appears in its URL and
 /// its

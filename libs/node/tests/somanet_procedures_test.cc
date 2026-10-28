@@ -3550,4 +3550,166 @@ TEST(ParseIcMuEncoderConfigurationRequest, RequiresTheEncoderAndKnowsTheBatteryM
       osCommandBody(R"({"encoderOrdinal": 1, "batteryMode": "5g"})")));
 }
 
+// --- iC-MU calibration ---------------------------------------------------------------------------
+
+TEST(ParseIcMuCalibrationRequest, ReadsEveryField) {
+  EXPECT_FALSE(mm::node::parseIcMuCalibrationRequest(osCommandBody("{}")));
+  auto request = mm::node::parseIcMuCalibrationRequest(osCommandBody(
+      R"({"encoderOrdinal": 2, "ringPosition": "outer", "measurementOnly": true,
+          "activateHealthMonitoring": true, "ringVelocity": 45})"));
+  ASSERT_TRUE(request) << request.error();
+  EXPECT_EQ(request->encoderOrdinal, somanet::EncoderOrdinal::kEncoder2);
+  EXPECT_EQ(request->ringPosition, somanet::IcMuRingPosition::kOuter);
+  EXPECT_TRUE(request->measurementOnly);
+  EXPECT_TRUE(request->activateHealthMonitoring);
+  EXPECT_EQ(request->ringVelocityRpm, 45);
+
+  EXPECT_FALSE(mm::node::parseIcMuCalibrationRequest(
+      osCommandBody(R"({"encoderOrdinal": 1, "ringPosition": "middle"})")));
+  EXPECT_FALSE(mm::node::parseIcMuCalibrationRequest(
+      osCommandBody(R"({"encoderOrdinal": 1, "ringVelocity": 0})")));
+}
+
+TEST(IcMuCalibrationSteps, ListEveryIterationThenTheValidationAndTheRestore) {
+  const auto steps = mm::node::icMuCalibrationSteps();
+  std::vector<std::string> ids;
+  for (const auto& step : steps) {
+    ids.push_back(step.id);
+  }
+  ASSERT_GE(ids.size(), 5u + 13u);
+  EXPECT_EQ(ids[0], "validate");
+  EXPECT_EQ(ids[5], "iteration-1");
+  EXPECT_EQ(ids[5 + 12], "iteration-13");
+  EXPECT_EQ(ids[5 + 13], "validation");
+  EXPECT_EQ(ids.back(), "restore");
+}
+
+#ifdef MM_HAVE_MU_3SL
+
+// The objects the calibration reads before the motor moves, on top of the iC-MU drive: a 19-bit
+// position encoder, rpm, no gearbox, a feed constant of 1, and limits of ±10 turns.
+void programCalibrationObjects(IcMuFakeDriver& driver) {
+  auto u32 = [](uint32_t v) {
+    return std::vector<uint8_t>{static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8),
+                                static_cast<uint8_t>(v >> 16), static_cast<uint8_t>(v >> 24)};
+  };
+  driver.programObject(0x6502, 0, ObjectDataType::UNSIGNED32, u32(0x0000006D));
+  driver.programObject(0x6092, 0, ObjectDataType::UNSIGNED8, {2});
+  driver.programObject(0x6092, 1, ObjectDataType::UNSIGNED32, u32(1));
+  driver.programObject(0x6092, 2, ObjectDataType::UNSIGNED32, u32(1));
+  driver.programObject(0x60A9, 0, ObjectDataType::UNSIGNED32, u32(0x00B44700));
+  driver.programObject(0x607D, 0, ObjectDataType::UNSIGNED8, {2});
+  driver.programObject(0x607D, 1, ObjectDataType::INTEGER32,
+                       u32(static_cast<uint32_t>(-10 * 524288)));
+  driver.programObject(0x607D, 2, ObjectDataType::INTEGER32, u32(10 * 524288));
+  driver.programObject(0x6064, 0, ObjectDataType::INTEGER32, u32(0));
+  driver.programObject(0x6080, 0, ObjectDataType::UNSIGNED32, u32(3000));
+  driver.programObject(0x606B, 0, ObjectDataType::INTEGER32, u32(0));
+  driver.programObject(0x6083, 0, ObjectDataType::UNSIGNED32, u32(1000));
+  driver.programObject(0x6084, 0, ObjectDataType::UNSIGNED32, u32(1000));
+  driver.programObject(0x60FF, 0, ObjectDataType::INTEGER32, u32(0));
+}
+
+Device makeCalibrationDevice(IcMuFakeDriver& driver, uint8_t sensorPort, uint8_t singleturnBits,
+                             const std::function<void(IcMuFakeDriver&)>& change = {}) {
+  driver.programIcMuDrive("v5.6.11", sensorPort, singleturnBits, 0);
+  programCalibrationObjects(driver);
+  if (change) {
+    change(driver);
+  }
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters().has_value());
+  return device;
+}
+
+mm::node::IcMuCalibrationRequest calibrationRequest() {
+  mm::node::IcMuCalibrationRequest request;
+  request.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1;
+  return request;
+}
+
+// Runs the calibration and expects validate to refuse with @p message before anything moves.
+void expectRefusal(Device& device, IcMuFakeDriver& driver,
+                   const mm::node::IcMuCalibrationRequest& request, std::string_view message) {
+  ProgressReporter reporter(mm::node::icMuCalibrationSteps());
+  auto result = mm::node::runIcMuCalibrationProcedure(device, reporter, std::stop_token{}, request);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find(message), std::string::npos) << result.error();
+  EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
+  EXPECT_TRUE(driver.registerWrites.empty());
+  // No controlword was written, so the drive was never enabled.
+  EXPECT_EQ(std::ranges::count_if(driver.writeLog,
+                                  [](const auto& w) { return w.first == Object::kControlword; }),
+            0);
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesAnExternalEncoderWithoutARingPosition) {
+  IcMuFakeDriver driver;
+  Device device = makeCalibrationDevice(driver, 3, 19);
+  expectRefusal(device, driver, calibrationRequest(), "needs 'ringPosition'");
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesARingPositionOnAnIntegratedPort) {
+  IcMuFakeDriver driver;
+  Device device = makeCalibrationDevice(driver, 1, 19);
+  auto request = calibrationRequest();
+  request.ringPosition = somanet::IcMuRingPosition::kOuter;
+  expectRefusal(device, driver, request, "always inner");
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesARingWithoutStartValues) {
+  IcMuFakeDriver driver;
+  // 16 master pole pairs on the outer ring: nobody measured that row, and no placeholder exists.
+  Device device = makeCalibrationDevice(driver, 2, 18);
+  expectRefusal(device, driver, calibrationRequest(), "no start values exist");
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesAnEncoderThatIsNotThePositionSource) {
+  IcMuFakeDriver driver;
+  Device device = makeCalibrationDevice(
+      driver, 1, 19, [](IcMuFakeDriver& d) { d.store[OsCommandFakeDriver::key(0x2012, 9)] = {2}; });
+  expectRefusal(device, driver, calibrationRequest(), "neither the position source");
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesWithoutACommutationSource) {
+  IcMuFakeDriver driver;
+  Device device = makeCalibrationDevice(driver, 1, 19, [](IcMuFakeDriver& d) {
+    d.store[OsCommandFakeDriver::key(0x2010, 12)] = {0};
+  });
+  expectRefusal(device, driver, calibrationRequest(), "commutation source");
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesAFeedConstantOfZero) {
+  IcMuFakeDriver driver;
+  Device device = makeCalibrationDevice(driver, 1, 19, [](IcMuFakeDriver& d) {
+    d.store[OsCommandFakeDriver::key(0x6092, 1)] = {0, 0, 0, 0};
+  });
+  expectRefusal(device, driver, calibrationRequest(), "feed constant");
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesADriveInOperationEnabled) {
+  IcMuFakeDriver driver;
+  Device device = makeCalibrationDevice(driver, 1, 19, [](IcMuFakeDriver& d) {
+    d.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x27, 0x00};
+  });
+  expectRefusal(device, driver, calibrationRequest(), "Operation Enabled");
+}
+
+TEST(RunIcMuCalibrationProcedure, RefusesLimitsTooNarrowForAFullTurn) {
+  IcMuFakeDriver driver;
+  // 30 degrees between the limits: far less than a turn of the ring.
+  Device device = makeCalibrationDevice(driver, 1, 19, [](IcMuFakeDriver& d) {
+    const auto quarter = static_cast<uint32_t>(524288 / 24);
+    d.store[OsCommandFakeDriver::key(0x607D, 1)] = {
+        static_cast<uint8_t>(-quarter), static_cast<uint8_t>(-quarter >> 8),
+        static_cast<uint8_t>(-quarter >> 16), static_cast<uint8_t>(-quarter >> 24)};
+    d.store[OsCommandFakeDriver::key(0x607D, 2)] = {
+        static_cast<uint8_t>(quarter), static_cast<uint8_t>(quarter >> 8),
+        static_cast<uint8_t>(quarter >> 16), static_cast<uint8_t>(quarter >> 24)};
+  });
+  expectRefusal(device, driver, calibrationRequest(), "widen the range");
+}
+
+#endif  // MM_HAVE_MU_3SL
+
 }  // namespace

@@ -358,6 +358,58 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+#ifdef MM_HAVE_MU_3SL
+  ProcedureDescriptor icMuCalibration;
+  icMuCalibration.name = std::string(kIcMuCalibrationProcedure);
+  icMuCalibration.title = "iC-MU calibration";
+  icMuCalibration.description =
+      "Calibrates the master and the nonius track of one iC-MU encoder, and its nonius table. The "
+      "motor turns at constant velocity in both directions while the drive records the raw "
+      "tracks, and the iC-Haus MU_3SL library computes the corrections from each recording. The "
+      "corrections are written until both tracks pass, then a validation pass checks that both "
+      "nonius phase margins are at least 10 %. A full run stores the encoder EEPROM and writes the "
+      "restore file. Validation only reports the margins of the calibration the encoder holds and "
+      "writes nothing. Runs OS commands 0, 1, 3 and 14.";
+  icMuCalibration.caveats = {
+      "The motor turns several revolutions in both directions. Tune the velocity controller first, "
+      "with a bandwidth below 30 Hz, and keep the axis free to move within its software position "
+      "limits.",
+      "A range between the software position limits too narrow to record a full turn of the ring "
+      "is refused before the motor moves, with the degrees to widen it by.",
+      "The drive must not be in Operation Enabled when the run starts. It is enabled in profile "
+      "velocity mode, and the mode, the state, 0x60FF, 0x6083 and 0x6084 are restored on every "
+      "path out. The axis returns to where it started unless the run ends in a fault or a cancel.",
+      "A cancel quick-stops the drive. A failed or cancelled full run writes back the encoder "
+      "registers it changed.",
+      "When the encoder is the commutation source, measure the commutation offset again after the "
+      "calibration, and store the parameters.",
+      "An encoder on sensor port 3 to 5 needs ringPosition. Start values that nobody measured for "
+      "the ring are used with a warning.",
+      "Runs only on a build with MU_3SL: Linux x86_64 and Windows x64.",
+  };
+  icMuCalibration.movesMotor = true;
+  icMuCalibration.requiresEnabled = false;
+  icMuCalibration.parameters = icMuCalibrationParameters();
+  icMuCalibration.steps = icMuCalibrationSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuCalibration),
+      // The firmware gate needs 0x100A, which is not known at scan time, so it is in the body.
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuCalibrationRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          Device& device = ctx.device;
+          return runIcMuCalibrationProcedure(device, reporter, stop, spec);
+        };
+      },
+  });
+#endif
+
   ProcedureDescriptor icMuCalibrationMode;
   icMuCalibrationMode.name = std::string(kIcMuCalibrationModeProcedure);
   icMuCalibrationMode.title = "iC-MU calibration mode";

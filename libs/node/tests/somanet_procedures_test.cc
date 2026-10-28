@@ -3664,10 +3664,12 @@ TEST(RunIcMuCalibrationProcedure, RefusesARingWithoutStartValues) {
   expectRefusal(device, driver, calibrationRequest(), "no start values exist");
 }
 
-TEST(RunIcMuCalibrationProcedure, RefusesAnEncoderThatIsNotThePositionSource) {
+TEST(RunIcMuCalibrationProcedure, RefusesAnEncoderThatIsNeitherPositionNorVelocitySource) {
   IcMuFakeDriver driver;
-  Device device = makeCalibrationDevice(
-      driver, 1, 19, [](IcMuFakeDriver& d) { d.store[OsCommandFakeDriver::key(0x2012, 9)] = {2}; });
+  Device device = makeCalibrationDevice(driver, 1, 19, [](IcMuFakeDriver& d) {
+    d.store[OsCommandFakeDriver::key(0x2012, 9)] = {2};
+    d.store[OsCommandFakeDriver::key(0x2011, 5)] = {2};
+  });
   expectRefusal(device, driver, calibrationRequest(), "neither the position source");
 }
 

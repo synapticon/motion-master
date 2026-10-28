@@ -2031,13 +2031,11 @@ std::expected<IcMuCalibrationPlan, std::string> planIcMuCalibration(
   if (!configurations->commutation) {
     return std::unexpected("no encoder is the commutation source (0x2010:0C)");
   }
-  const bool role =
-      configurations->position == request.encoderOrdinal ||
-      (!configurations->position && configurations->velocity == request.encoderOrdinal);
+  const bool role = configurations->position == request.encoderOrdinal ||
+                    configurations->velocity == request.encoderOrdinal;
   if (!role) {
     return std::unexpected(std::format(
-        "{} is neither the position source (0x2012:09) nor, without a position source, the "
-        "velocity source (0x2011:05)",
+        "{} is neither the position source (0x2012:09) nor the velocity source (0x2011:05)",
         somanet::toString(request.encoderOrdinal)));
   }
 

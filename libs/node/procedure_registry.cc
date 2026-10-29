@@ -467,6 +467,89 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor icMuRestoreFile;
+  icMuRestoreFile.name = std::string(kIcMuRestoreFileProcedure);
+  icMuRestoreFile.title = "iC-MU restore file";
+  icMuRestoreFile.description =
+      "Reads the 33 key registers of one iC-MU encoder from its RAM and writes them as [address, "
+      "value] pairs to circulo_integrated_encoder_<sensor port>_config.bin, the file from which "
+      "the drive restores the encoder when the iC-MU reports a corrupted EEPROM. Then it reads the "
+      "file back and compares it. Runs OS command 0 and FoE, and writes nothing to the encoder.";
+  icMuRestoreFile.caveats = {
+      "It replaces the restore file of the sensor port with what the RAM of the iC-MU holds now. "
+      "Save it from an encoder that works.",
+      "The drive keeps a restore file only for sensor ports 1 and 2. An encoder on another port "
+      "is refused.",
+      "The drive writes the file to the encoder only at start-up, and only when the iC-MU reports "
+      "CRC_ERR or EPR_ERR.",
+      "An iC-MU whose BANKSEL (0x40) is not 0 is refused, because 0x00-0x18 then reach another "
+      "bank.",
+      "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuRestoreFile.movesMotor = false;
+  icMuRestoreFile.requiresEnabled = false;
+  icMuRestoreFile.parameters = icMuEncoderParameters();
+  icMuRestoreFile.steps = icMuRestoreFileSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuRestoreFile),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuEncoderRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          return runIcMuRestoreFileProcedure(ctx.device, reporter, stop, spec);
+        };
+      },
+  });
+
+  ProcedureDescriptor icMuEepromErase;
+  icMuEepromErase.name = std::string(kIcMuEepromEraseProcedure);
+  icMuEepromErase.title = "iC-MU EEPROM erase";
+  icMuEepromErase.description =
+      "Writes 0xFF to EEPROM 0x00-0x4C of one iC-MU encoder through the I²C bridge of the iC-MU, "
+      "reads the range back, and deletes the restore file of its sensor port. Use it to reset a "
+      "wrongly configured encoder before you configure it again. Runs OS commands 0 and 14, and "
+      "FoE.";
+  icMuEepromErase.caveats = {
+      "It erases the configuration of the iC-MU and of the iC-PVL from the EEPROM, the calibration "
+      "of the iC-MU included. Export the EEPROM first if you may want it back.",
+      "The encoder reports no valid position after the next soft reset or power cycle, until it "
+      "is configured again with the iC-MU encoder configuration and calibrated again.",
+      "It deletes circulo_integrated_encoder_<sensor port>_config.bin. Otherwise the drive would "
+      "see the erased EEPROM at the next start-up and write the old configuration back from the "
+      "file. The drive keeps a restore file only for sensor ports 1 and 2.",
+      "The chips keep what their RAM holds until the next soft reset or power cycle.",
+      "The encoder does not report position while the I²C bridge is in use. A drive in Operation "
+      "Enabled is refused. The BiSS status bits are ignored during the run and turned on again at "
+      "the end, a failed or cancelled run included.",
+      "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuEepromErase.movesMotor = false;
+  icMuEepromErase.requiresEnabled = false;
+  icMuEepromErase.parameters = icMuEncoderParameters();
+  icMuEepromErase.steps = icMuEepromEraseSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuEepromErase),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuEncoderRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          return runIcMuEepromEraseProcedure(ctx.device, reporter, stop, spec);
+        };
+      },
+  });
+
 #ifdef MM_HAVE_MU_3SL
   ProcedureDescriptor icMuCalibration;
   icMuCalibration.name = std::string(kIcMuCalibrationProcedure);

@@ -427,6 +427,43 @@ std::expected<void, std::string> runIcMuI2cRegisterProcedure(Device& device,
                                                              const std::stop_token& stop,
                                                              const IcMuI2cRegisterRequest& request);
 
+/// @brief Procedure names of the two iC-MU EEPROM tools that write.
+inline constexpr std::string_view kIcMuRestoreFileProcedure = "ic-mu-restore-file";
+inline constexpr std::string_view kIcMuEepromEraseProcedure = "ic-mu-eeprom-erase";
+
+/// @brief The step that writes 0xFF to EEPROM 0x00-0x4C.
+inline constexpr std::string_view kIcMuEepromEraseStep = "erase-eeprom";
+
+/// @brief The step that deletes the restore file of the sensor port.
+inline constexpr std::string_view kIcMuDeleteRestoreFileStep = "delete-restore-file";
+
+/// @brief The step templates of the restore file and the EEPROM erase, idle.
+std::vector<ProgressStep> icMuRestoreFileSteps();
+std::vector<ProgressStep> icMuEepromEraseSteps();
+
+/// @brief Writes the 33 key registers of an iC-MU encoder, read from its RAM, to the restore file
+///        of its sensor port, and reads the file back.
+///
+/// The drive keeps a restore file only for sensor ports 1 and 2, so an encoder on another port is
+/// refused. It writes nothing to the encoder.
+std::expected<void, std::string> runIcMuRestoreFileProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             const std::stop_token& stop,
+                                                             const IcMuEncoderRequest& request);
+
+/// @brief Writes 0xFF to EEPROM 0x00-0x4C of an iC-MU encoder, reads the range back, and deletes
+///        the restore file of its sensor port.
+///
+/// It removes the configuration and the calibration of the iC-MU and the configuration of the
+/// iC-PVL from the EEPROM. The chips keep what their RAM holds until the next soft reset or power
+/// cycle. The restore file goes too, because the drive would otherwise write the old configuration
+/// back at the next start-up. It refuses a drive in Operation Enabled, and turns the BiSS status
+/// bits off and on again like the other bridge tools.
+std::expected<void, std::string> runIcMuEepromEraseProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             const std::stop_token& stop,
+                                                             const IcMuEncoderRequest& request);
+
 /// @brief Procedure name for calibrating an iC-MU encoder, as it appears in its URL and its
 ///        snapshot key.
 inline constexpr std::string_view kIcMuCalibrationProcedure = "ic-mu-calibration";

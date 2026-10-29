@@ -327,6 +327,13 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
       uint16_t, const std::string& name, std::chrono::milliseconds) override {
     fileReads.push_back(name);
+    // A SOMANET drive removes a file on a read of "fs-remove=<name>". A file that is not there
+    // reads as not found, as on a drive.
+    if (constexpr std::string_view kRemove = "fs-remove="; name.starts_with(kRemove)) {
+      if (files.erase(name.substr(kRemove.size())) == 1) {
+        return std::vector<uint8_t>{};
+      }
+    }
     auto it = files.find(name);
     if (it == files.end()) {
       return std::unexpected(
@@ -337,6 +344,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string& name,
                                                     std::span<const uint8_t> data) override {
     fileWrites.emplace_back(name, std::vector<uint8_t>(data.begin(), data.end()));
+    files[name] = std::vector<uint8_t>(data.begin(), data.end());
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
@@ -3217,6 +3225,8 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
   // Whether an iC-PVL answers on the I²C bus. Without one, a transfer to it sets EPR_ERR in
   // STATUS1, and only a transfer that succeeds clears it again, as on a drive.
   bool icPvlFitted = true;
+  // An EEPROM address that keeps its value whatever is written to it.
+  std::optional<uint8_t> stuckEepromAddress;
   // The (address, value) of every register write, in order.
   std::vector<std::pair<uint8_t, uint8_t>> registerWrites;
   // Whether the next OS command 0 write echoes another value than it was given.
@@ -3272,9 +3282,10 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
     for (int i = 0; i <= icMu[0x5D] - icMu[0x5C]; ++i) {
       auto& device = (*chip)[static_cast<uint8_t>(icMu[0x5B] + i)];
       auto& exchange = icMu[static_cast<uint8_t>(icMu[0x5C] + i)];
+      const auto address = static_cast<uint8_t>(icMu[0x5B] + i);
       if ((id & 0x01) != 0) {
         exchange = device;
-      } else {
+      } else if (chip != &eeprom || address != stuckEepromAddress) {
         device = exchange;
       }
     }
@@ -4010,6 +4021,78 @@ TEST(RunIcMuI2cRegisterProcedure, ClearsEprErrBeforeTheStatusBitsAreOnAgain) {
   EXPECT_EQ(driver.commandIds.back(), 14);
   EXPECT_EQ(stepOf(reporter.steps(), mm::node::kIcMuRestoreStatusBitsStep).status,
             ProgressStatus::kSucceeded);
+}
+
+TEST(RunIcMuRestoreFileProcedure, WritesTheKeyRegistersAndReadsTheFileBack) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  driver.icMu[0x52] = 0x2F;
+  ProgressReporter reporter(mm::node::icMuRestoreFileSteps());
+
+  auto result = mm::node::runIcMuRestoreFileProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  ASSERT_EQ(driver.fileWrites.size(), 1u);
+  EXPECT_EQ(driver.fileWrites[0].first, "circulo_integrated_encoder_2_config.bin");
+  EXPECT_EQ(driver.fileWrites[0].second.size(), 66u);
+  EXPECT_EQ(driver.fileReads.back(), "circulo_integrated_encoder_2_config.bin");
+  const auto value = stepOf(reporter.steps(), mm::node::kIcMuRestoreFileStep).value;
+  ASSERT_EQ(value["entries"].size(), 33u);
+  EXPECT_EQ(value["entries"][25]["address"], 0x52);
+  EXPECT_EQ(value["entries"][25]["value"], 0x2F);
+  EXPECT_TRUE(onlyRegisterReads(driver));
+}
+
+TEST(RunIcMuRestoreFileProcedure, RefusesAnExternalSensorPort) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 3, 19, 0);
+  driver.icMu[0x74] = 0x15;  // an iC-MU150, so the encoder counts as an iC-MU
+  ProgressReporter reporter(mm::node::icMuRestoreFileSteps());
+  auto result = mm::node::runIcMuRestoreFileProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("sensor ports 1 and 2"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.fileWrites.empty());
+}
+
+TEST(RunIcMuEepromEraseProcedure, ErasesInPagesChecksAndDeletesTheRestoreFile) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.eeprom.fill(0x12);
+  driver.files["circulo_integrated_encoder_1_config.bin"] = std::vector<uint8_t>(66, 0);
+  ProgressReporter reporter(mm::node::icMuEepromEraseSteps());
+
+  auto result = mm::node::runIcMuEepromEraseProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  for (int address = 0; address <= 0x4C; ++address) {
+    EXPECT_EQ(driver.eeprom[address], 0xFF) << address;
+  }
+  EXPECT_EQ(driver.eeprom[0x4D], 0x12);  // nothing past the configuration
+  EXPECT_FALSE(driver.files.contains("circulo_integrated_encoder_1_config.bin"));
+  // Ten page writes of at most 8 bytes, then five reads of at most 16.
+  EXPECT_EQ(std::ranges::count(driver.registerWrites, std::pair<uint8_t, uint8_t>{0x5E, 0xA0}), 10);
+  EXPECT_EQ(std::ranges::count(driver.registerWrites, std::pair<uint8_t, uint8_t>{0x5E, 0xA1}), 5);
+  EXPECT_EQ(driver.commandIds.back(), 14);
+}
+
+TEST(RunIcMuEepromEraseProcedure, FailsWhenAByteKeepsItsValueAndKeepsTheRestoreFile) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.files["circulo_integrated_encoder_1_config.bin"] = std::vector<uint8_t>(66, 0);
+  driver.stuckEepromAddress = 0x0A;  // keeps 0x00 whatever is written
+  ProgressReporter reporter(mm::node::icMuEepromEraseSteps());
+
+  auto result = mm::node::runIcMuEepromEraseProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("0x0A reads 0x00"), std::string::npos) << result.error();
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepOf(steps, mm::node::kIcMuEepromReadStep).status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepOf(steps, mm::node::kIcMuDeleteRestoreFileStep).status, ProgressStatus::kIdle);
+  EXPECT_EQ(stepOf(steps, mm::node::kIcMuRestoreStatusBitsStep).status, ProgressStatus::kSucceeded);
+  // The restore file stays: with the erase not done, it is still the way back.
+  EXPECT_TRUE(driver.files.contains("circulo_integrated_encoder_1_config.bin"));
 }
 
 TEST(ParseIcMuI2cRegisterRequest, NeedsATargetAnAddressAndForAWriteAValue) {

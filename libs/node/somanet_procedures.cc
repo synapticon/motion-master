@@ -253,6 +253,8 @@ class DriveRestorer {
     }
     reporter_.start(kRestoreStep);
     std::string failures;
+    // What the restore could not put back and is not a failure, for the step's value.
+    std::vector<std::string> notes;
     const auto note = [&failures](const std::string& what) {
       failures += failures.empty() ? what : "; " + what;
     };
@@ -295,7 +297,19 @@ class DriveRestorer {
         note(std::format("failed to return the drive to {}: {}", cia402::toString(resting_),
                          r.error()));
       }
-      if (auto r = drive_.setOperationModeValue(*mode_); !r) {
+      // A SOMANET drive takes 0x6060 = 0 as "keep the mode" (somanet_software, state_machine.xc,
+      // opmode_update), so a drive found in no mode cannot be put back there. Any other mode is
+      // confirmed in 0x6061, because the drive answers a mode it refuses with a successful write.
+      if (*mode_ == 0) {
+        if (auto r = drive_.setOperationModeValue(0); !r) {
+          note(std::format("failed to restore operation mode 0: {}", r.error()));
+        } else if (auto shown = drive_.operationModeValueDisplay(); shown && *shown != 0) {
+          notes.push_back(std::format(
+              "the drive was in no operation mode, and a SOMANET drive cannot be returned to "
+              "none, so it stays in mode {}",
+              *shown));
+        }
+      } else if (auto r = drive_.applyOperationMode(*mode_); !r) {
         note(std::format("failed to restore operation mode {}: {}", *mode_, r.error()));
       }
     }
@@ -314,7 +328,8 @@ class DriveRestorer {
       }
     }
     if (failures.empty()) {
-      reporter_.succeed(kRestoreStep);
+      reporter_.succeed(kRestoreStep,
+                        notes.empty() ? nlohmann::json() : nlohmann::json{{"notes", notes}});
     } else {
       spdlog::error("Device {}: {} restore: {}", drive_.device().slavePosition(), procedure_,
                     failures);

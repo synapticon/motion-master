@@ -175,6 +175,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
     programObject(kOsCommand, 3, ObjectDataType::OCTET_STRING, std::vector<uint8_t>(8, 0));
     programObject(kOsCommandMode, 0, ObjectDataType::UNSIGNED8, {0});
     programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {8});  // CSP, to restore
+    programObject(Object::kModeOfOperationDisplay, 0, ObjectDataType::INTEGER8, {8});
     programObject(somanet::kBrakeOptions, somanet::kBrakePullVoltage, ObjectDataType::UNSIGNED32,
                   {0, 0, 0, 0});
     programObject(somanet::kBrakeOptions, somanet::kBrakeHoldVoltage, ObjectDataType::UNSIGNED32,
@@ -226,6 +227,10 @@ class OsCommandFakeDriver : public FieldbusDriver {
                                             std::span<const uint8_t> data) override {
     store[key(index, subindex)] = std::vector<uint8_t>(data.begin(), data.end());
     writeLog.push_back({index, subindex});
+    // The drive shows a requested mode in 0x6061, and takes 0 as "keep the mode".
+    if (index == Object::kModeOfOperation && !data.empty() && data[0] != 0) {
+      store[key(Object::kModeOfOperationDisplay, 0)] = {data[0]};
+    }
     if (index == kOsCommand && subindex == 1) {
       ++commandWrites;
       awaitingCommand = false;
@@ -4296,6 +4301,25 @@ TEST(RunOpenLoopFieldControlProcedure, RefusesADeviceThatIsNotInOp) {
   EXPECT_EQ(std::ranges::count(driver.writeLog,
                                std::pair<uint16_t, uint8_t>{Object::kModeOfOperation, 0}),
             0);
+}
+
+TEST(RunOpenLoopFieldControlProcedure, SaysWhenTheDriveCannotGoBackToNoMode) {
+  OsCommandFakeDriver driver;
+  Device device = makeOpenLoopDevice(driver, 5);
+  driver.enabledStatusword = 0x0427;
+  driver.store[OsCommandFakeDriver::key(Object::kModeOfOperation, 0)] = {0};
+  driver.store[OsCommandFakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {0};
+  ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
+
+  ASSERT_TRUE(mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},
+                                                         openLoopRequest(90))
+                  .has_value());
+  const auto restore = stepById(reporter.steps(), "restore");
+  EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
+  ASSERT_TRUE(restore->value.contains("notes"));
+  EXPECT_NE(restore->value["notes"][0].get<std::string>().find("stays in mode -3"),
+            std::string::npos)
+      << restore->value.dump();
 }
 
 TEST(ParseOpenLoopFieldControlRequest, NeedsAnAngleAndDefaultsTheRest) {

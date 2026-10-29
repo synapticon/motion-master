@@ -29,6 +29,12 @@ struct IcMuAnalysis {
   /// The revolutions of the ring the library found in the recording.
   double revolutions = 0;
 
+  /// What the library reports about the recording itself: the master periods it calculated, and
+  /// the fewest samples it saw in one master period. Reported, not judged: the library does not
+  /// say which values it takes as sound.
+  int calculatedMasterPeriods = 0;
+  double minimalSamplesPerMasterPeriod = 0;
+
   /// Whether the nonius analysis is valid. The curves and the margins below are empty or 0
   /// otherwise.
   bool noniusValid = false;

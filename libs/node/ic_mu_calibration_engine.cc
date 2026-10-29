@@ -6,6 +6,7 @@
 #include <array>
 #include <format>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -46,12 +47,20 @@ std::vector<int64_t> curve(const long* values, size_t count) {
   return {values, values + count};
 }
 
+// The text in @p buffer up to its first NUL, or the whole buffer. The library writes at most the
+// buffer size, and its header does not say that a cut text still ends in a NUL.
+template <size_t N>
+std::string bufferText(const std::array<char, N>& buffer) {
+  const std::string_view text(buffer.data(), buffer.size());
+  return std::string(text.substr(0, text.find('\0')));
+}
+
 // The log of an analysis. The library writes at most the buffer size, so a long log is cut.
 std::string analyzeLog(const MU_CalibrationAnalyzeResult* result) {
   std::array<char, 1024> buffer{};
   MU_Calibration_getAnalyzeResultLog(result, buffer.data(), buffer.size(),
                                      MU_CALIBRATION_ANALYZE_RESULT_LOG_ALL);
-  return {buffer.data()};
+  return bufferText(buffer);
 }
 
 }  // namespace
@@ -146,6 +155,9 @@ std::expected<IcMuAnalysis, std::string> IcMuCalibrationEngine::analyze(
   analysis.master = residual(relativeMaster, adjustments(IcMuTrack::kMaster).phase.phaseRange);
   analysis.nonius = residual(relativeNonius, adjustments(IcMuTrack::kNonius).phase.phaseRange);
   analysis.revolutions = MU_Calibration_numberOfRevolutions(result_.get());
+  analysis.calculatedMasterPeriods = MU_Calibration_numberOfCalculatedMasterPeriods(result_.get());
+  analysis.minimalSamplesPerMasterPeriod =
+      MU_Calibration_minimalNumberOfSamplesPerMasterPeriod(result_.get());
   analysis.noniusValid = MU_Calibration_isNoniusAnalysesValid(result_.get());
   if (analysis.noniusValid) {
     const size_t count = MU_Calibration_numberOfNoniusCurveSamples(result_.get());
@@ -167,7 +179,7 @@ std::expected<void, std::string> IcMuCalibrationEngine::adjust(bool master, bool
                                                       message.data(), message.size(),
                                                       MU_ADJUSTMENT_MESSAGE_LOG_ALL)) {
     return std::unexpected(
-        std::format("MU_3SL cannot apply the analysis: {}", std::string(message.data())));
+        std::format("MU_3SL cannot apply the analysis: {}", bufferText(message)));
   }
   // The library moves both tracks. A track that is not named keeps what the encoder holds, so the
   // model and the encoder stay the same.
@@ -191,6 +203,12 @@ std::expected<IcMuNoniusOffsetTable, std::string> IcMuCalibrationEngine::optimiz
   }
   MU_NoniusTrackOffsetTableParameters parameters{};
   MU_getNoniusTrackOffsetTableParameters(&libraryTable, &parameters);
+  // Each value is a nibble of 0x52-0x59. Packing a larger one would cut it without a word.
+  constexpr uint8_t kMaxNibble = 0x0F;
+  if (parameters.spoBase > kMaxNibble ||
+      std::ranges::any_of(parameters.spoN, [](uint8_t v) { return v > kMaxNibble; })) {
+    return std::unexpected("MU_3SL optimised a nonius table with a value above 15");
+  }
   IcMuNoniusOffsetTable table;
   table.base = parameters.spoBase;
   std::ranges::copy(parameters.spoN, table.offsets.begin());

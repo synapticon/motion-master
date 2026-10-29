@@ -6696,6 +6696,18 @@ components:
         velocityRpm: { type: number, example: 0.75 }
         samples: { type: integer, description: The samples analysed., example: 6000 }
         recordedRevolutions: { type: number, description: Turns of the ring the recording covered., example: 8.9 }
+        calculatedMasterPeriods:
+          type: integer
+          description: >
+            The master periods MU_3SL calculated from the recording. Reported as the library gives
+            it; nothing judges it.
+          example: 32
+        minimalSamplesPerMasterPeriod:
+          type: number
+          description: >
+            The fewest samples MU_3SL saw in one master period of the recording. Reported as the
+            library gives it; nothing judges it.
+          example: 12.5
         warning:
           type: string
           description: Present when the recording covered less than one turn of the ring.
@@ -6718,6 +6730,11 @@ components:
         velocityRpm: { type: number, example: 0.75 }
         samples: { type: integer, example: 6000 }
         recordedRevolutions: { type: number, example: 8.9 }
+        calculatedMasterPeriods: { type: integer, description: As in IcMuCalibrationIteration., example: 32 }
+        minimalSamplesPerMasterPeriod:
+          type: number
+          description: As in IcMuCalibrationIteration.
+          example: 12.5
         warning: { type: string }
         phaseRangeLimit: { type: integer }
         phaseMargin: { $ref: "#/components/schemas/IcMuCalibrationCurve" }

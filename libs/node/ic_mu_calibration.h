@@ -310,12 +310,19 @@ double icMuRecordedRingRevolutions(std::span<const HrdEncoderSample> samples,
 std::optional<std::string> icMuCoverageWarning(double recordedRevolutions);
 
 /// @brief The samples a calibration analyses, from a recording of @p recording at constant
-/// velocity.
+/// velocity: at most one per millisecond of it.
 ///
-/// A drive that records at 1 kHz pads its last file, so a recording of at least the expected count
-/// and less than twice that is cut to the expected count. A drive that records faster delivers at
-/// least twice the count, and every sample is kept. A shorter recording is kept as it is.
+/// The drive writes one sample per millisecond for the duration it was given and flushes its last
+/// file at its real length (somanet_software, drive_control_service.xc and storage_service.xc), so
+/// a recording holds that count. Anything past it is cut; a shorter recording is kept as it is.
 std::span<const HrdEncoderSample> icMuCalibrationSamples(std::span<const HrdEncoderSample> samples,
                                                          std::chrono::milliseconds recording);
+
+/// @brief Why the calibration refuses firmware @p version, or nothing.
+///
+/// The pre-releases v5.4.0-rc.2 and v5.4.0-rc.3 record a number of samples per millisecond that
+/// depends on the control loop period, so a recording of them does not hold one sample per
+/// millisecond (somanet_software f74b4e262, fixed in 4406850b1).
+std::optional<std::string> icMuRecordingFirmwareError(std::string_view version);
 
 }  // namespace mm::node::somanet

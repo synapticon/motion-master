@@ -54,6 +54,22 @@ void GameLoop::run() {
     spdlog::info("GameLoop: RT thread pinned to CPU {}", cpuAffinity_);
   }
 #endif
+#ifdef _WIN32
+  if (rt.highQos) {
+    spdlog::info("GameLoop: Windows power throttling of the CPU is off (HighQoS)");
+  } else {
+    spdlog::warn(
+        "GameLoop: Windows did not turn power throttling of the CPU off — the loop may slow down "
+        "when Windows saves power");
+  }
+  if (rt.timerResolutionHonoured) {
+    spdlog::info("GameLoop: Windows always honours the timer resolution of this process");
+  } else {
+    spdlog::warn(
+        "GameLoop: Windows did not agree to always honour the timer resolution of this process — "
+        "it needs Windows 11");
+  }
+#endif
   schedFifo_.store(rt.schedFifo, std::memory_order_relaxed);
   memLocked_.store(rt.memLocked, std::memory_order_relaxed);
   cpuPinned_.store(rt.cpuPinned, std::memory_order_relaxed);
@@ -62,6 +78,13 @@ void GameLoop::run() {
 
   std::chrono::microseconds currentPeriod = period_.load(std::memory_order_relaxed);
   mm::core::CyclicTimer timer(currentPeriod);
+  // Without an OS timer the loop would not wait at all. main refuses such a host at startup with
+  // checkCyclicTimer, so this holds only if the timer fails here alone.
+  if (!timer.valid()) {
+    spdlog::critical("GameLoop: the cycle timer could not be created, so the loop does not run");
+    running_.store(false, std::memory_order_relaxed);
+    return;
+  }
   while (running_.load(std::memory_order_relaxed)) {
     const uint64_t skipped = timer.waitForNextCycle();
 

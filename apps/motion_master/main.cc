@@ -25,9 +25,11 @@
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "comm/spoe_fieldbus_driver.h"
+#include "core/cyclic_timer.h"
 #include "core/platform.h"
 #include "core/user_cache.h"
 #include "core/version.h"
+#include "cycle_rate_source.h"
 #include "example/example_cyclic_task.h"
 #include "example/example_routes.h"
 #include "game_loop.h"
@@ -260,6 +262,13 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // The RT loop needs an OS timer that can wait a fraction of a millisecond. Refused here, before
+  // anything starts, rather than when the loop is entered.
+  if (auto timer = mm::core::checkCyclicTimer(); !timer) {
+    spdlog::critical("Cannot run the RT loop on this host: {}", timer.error());
+    return 1;
+  }
+
   // The tuning calculations run in a separate executable, started here as a child process. Started
   // before the servers, and long before GameLoop::run() raises this thread to SCHED_FIFO, because a
   // child inherits the scheduling policy of the thread that spawned it and this one runs a
@@ -463,6 +472,7 @@ int main(int argc, char** argv) {
     wsServer.publish(std::move(topic), std::move(json));
   });
   notificationBus.addSource(mm::busHealthSource(deviceManager));
+  notificationBus.addSource(mm::cycleRateSource(gameLoop));
   notificationBus.start();
 
   // A driver that refuses state changes leaves them to another master, as SPoE does in Monitor

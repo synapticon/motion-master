@@ -7,6 +7,14 @@ struct RtSetupResult {
   bool schedFifo = false;  ///< SCHED_FIFO acquired (false on Windows / on failure).
   bool memLocked = false;  ///< mlockall succeeded (Linux only; false elsewhere).
   bool cpuPinned = false;  ///< Affinity applied (Linux only; false if unrequested or failed).
+
+  /// Windows only: the process asked for HighQoS, so Windows does not lower its CPU frequency or
+  /// move it to efficiency cores to save power.
+  bool highQos = false;
+
+  /// Windows only: the process asked Windows to always honour its timer resolution requests,
+  /// which since Windows 11 it may withhold from a process that cannot be seen.
+  bool timerResolutionHonoured = false;
 };
 
 /// @brief Priority requested for the real-time cyclic thread.
@@ -58,8 +66,10 @@ inline constexpr int kRtThreadPriority = 80;
 /// fork from here.  (`mlockall(MCL_FUTURE)` is process-wide and survives fork
 /// regardless; an `exec` clears it.)
 ///
-/// Windows has no equivalent to any of the steps: the call is a no-op returning
-/// an all-false result.
+/// Windows has no equivalent to any of the three steps. There it asks Windows instead not to
+/// throttle the process to save power, with two separate `SetProcessInformation` calls, so that a
+/// Windows that knows only one of the flags still takes that one: HighQoS (`highQos`) and "always
+/// honour timer resolution requests" (`timerResolutionHonoured`). Both apply to the whole process.
 ///
 /// @param cpuAffinity  Core to pin the calling thread to, or a negative value (the
 ///             default) to leave affinity untouched.  Ignored off Linux —

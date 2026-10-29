@@ -37,3 +37,9 @@ target_link_libraries(
   PRIVATE OpenSSL::Crypto)
 
 add_subdirectory(tests)
+
+# SetProcessInformation and the power-throttling state need Windows 8 or newer. 0x0A00 is Windows
+# 10, the same target as comm.
+if(WIN32)
+  target_compile_definitions(core PRIVATE _WIN32_WINNT=0x0A00)
+endif()

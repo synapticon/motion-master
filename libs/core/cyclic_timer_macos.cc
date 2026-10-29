@@ -2,6 +2,7 @@
 #include <time.h>
 
 #include <cstdint>
+#include <string>
 
 #include "core/cyclic_timer.h"
 
@@ -81,5 +82,9 @@ uint64_t CyclicTimer::waitForNextCycle() {
   }
   return skipped;
 }
+
+bool CyclicTimer::valid() const { return true; }
+
+std::expected<void, std::string> checkCyclicTimer() { return {}; }
 
 }  // namespace mm::core

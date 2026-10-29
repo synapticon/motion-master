@@ -488,7 +488,7 @@ export interface ProgressStep {
   /** @example "succeeded" */
   status: "idle" | "running" | "succeeded" | "failed";
   /**
-   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`. For `ic-mu-key-registers` the `read-key-registers` step holds an array of `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and `entries`, the pairs written, as `IcMuRestoreFile` lists them. For `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null with a `reason`.
+   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`. For `ic-mu-key-registers` the `read-key-registers` step holds an array of `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and `entries`, the pairs written, as `IcMuRestoreFile` lists them. For `open-loop-field-control` the `validate` step holds an `OpenLoopFieldPlan`. For `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null with a `reason`.
    * @example {"status":1,"data":[1,2,3,4,5,6]}
    */
   value?: any;
@@ -1190,6 +1190,35 @@ export interface IcMuEncoderStatus {
   encoderStatusBits: IcMuStatusBit[];
 }
 
+/** The `validate` step of `open-loop-field-control`: the move in the electrical units the drive takes, as OS command 2 writes them. */
+export interface OpenLoopFieldPlan {
+  /** @example 360 */
+  angleDegrees: number;
+  /**
+   * 0x2003:01.
+   * @example 5
+   */
+  polePairs: number;
+  /**
+   * The end electrical angle. The drive takes 2π as 6.28, so this is the mechanical angle times the pole pairs times 6280 / 360.
+   * @example 31400
+   */
+  angleEndMilliRadian: number;
+  /** @example 3 */
+  speedRadPerSecond: number;
+  /** @example 523 */
+  accelerationRadPerSquaredSecond: number;
+  /** @example 1000 */
+  lengthEndPerMille: number;
+  /** @example 10000 */
+  lengthRatePerMillePerSecond: number;
+  /**
+   * The velocity of the motor shaft the rounded speed gives.
+   * @example 5.73
+   */
+  velocityRpm: number;
+}
+
 /** One key register of an iC-MU, read from its RAM: the step value of `ic-mu-key-registers` is a list of 33 of them, in the order of the restore file. */
 export interface IcMuKeyRegister {
   /** @example 82 */
@@ -1421,7 +1450,7 @@ export interface ProcedureRequest {
    */
   command?: number[];
   /**
-   * Ceiling on the whole command. Not a liveness check — the drive fails a command no service acknowledges within 5 s on its own — so size it for the command being run. Hitting it aborts the command on the drive.
+   * Ceiling on the whole command. Not a liveness check — the drive fails a command no service acknowledges within 5 s on its own — so size it for the command being run. Hitting it aborts the command on the drive. For `open-loop-field-control` it is how long the move may take after the drive is enabled, from 1000 ms, with 60000 ms as its default.
    * @min 1
    * @max 600000
    * @default 1000
@@ -1567,6 +1596,35 @@ export interface ProcedureRequest {
    * @example 2
    */
   finalState?: 1 | 2 | 3 | 4 | 8;
+  /**
+   * `open-loop-field-control` only, and required for it: how far to turn the motor shaft, in mechanical degrees. Negative turns the other way.
+   * @example 360
+   */
+  angle?: number;
+  /**
+   * `open-loop-field-control` only: the highest velocity of the motor shaft, in rpm. The drive takes whole electrical rad/s, so a slow move is rounded; the `validate` step reports the velocity the drive runs.
+   * @default 5
+   * @example 5
+   */
+  velocity?: number;
+  /**
+   * `open-loop-field-control` only: the acceleration and the deceleration of the motor shaft, in rpm/s.
+   * @default 1000
+   * @example 1000
+   */
+  acceleration?: number;
+  /**
+   * `open-loop-field-control` only: the current of the rotating field, in per mille of the rated current.
+   * @default 1000
+   * @example 1000
+   */
+  fieldLength?: number;
+  /**
+   * `open-loop-field-control` only: how fast the field length rises from 0, in per mille of the rated current per second.
+   * @default 10000
+   * @example 10000
+   */
+  fieldLengthRate?: number;
   [key: string]: any;
 }
 

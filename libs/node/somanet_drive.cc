@@ -6,8 +6,10 @@
 #include <bit>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
@@ -450,6 +452,68 @@ std::optional<IcMuCalibrationMode> parseIcMuCalibrationMode(std::string_view tok
   return std::nullopt;
 }
 
+namespace {
+
+// 2π as the drive takes it: it converts radians with 6280 in integer maths.
+constexpr double kDriveTwoPi = 6.28;
+
+}  // namespace
+
+void to_json(nlohmann::json& j, const OpenLoopFieldProfile& profile) {
+  j = nlohmann::json{{"angleEndMilliRadian", profile.angleEndMilliRadian},
+                     {"speedRadPerSecond", profile.speedRadPerSecond},
+                     {"accelerationRadPerSquaredSecond", profile.accelerationRadPerSquaredSecond},
+                     {"lengthEndPerMille", profile.lengthEndPerMille},
+                     {"lengthRatePerMillePerSecond", profile.lengthRatePerMillePerSecond},
+                     {"velocityRpm", profile.velocityRpm}};
+}
+
+std::expected<OpenLoopFieldProfile, std::string> openLoopFieldProfile(const OpenLoopFieldMove& move,
+                                                                      uint8_t polePairs) {
+  if (polePairs == 0) {
+    return std::unexpected(
+        "the motor has 0 pole pairs in 0x2003:01, so no electrical angle exists");
+  }
+  if (!(move.velocityRpm > 0) || !(move.accelerationRpmPerSecond > 0)) {
+    return std::unexpected("the velocity and the acceleration must be greater than 0");
+  }
+  if (move.fieldLengthPerMille <= 0 || move.fieldLengthRatePerMillePerSecond <= 0) {
+    return std::unexpected("the field length and its rate must be greater than 0");
+  }
+  // One mechanical turn is polePairs electrical turns. rpm / 60 is turns per second.
+  const double electricalTurnsPerMechanical = polePairs;
+  const double angle =
+      std::round(move.angleDegrees / 360.0 * kDriveTwoPi * 1000.0 * electricalTurnsPerMechanical);
+  if (angle < std::numeric_limits<int32_t>::min() || angle > std::numeric_limits<int32_t>::max()) {
+    return std::unexpected(std::format(
+        "{} degrees is {} electrical milliradians, which does not fit the drive's 32 bits",
+        move.angleDegrees, angle));
+  }
+  const double speed =
+      std::round(move.velocityRpm / 60.0 * kDriveTwoPi * electricalTurnsPerMechanical);
+  const double acceleration =
+      std::round(move.accelerationRpmPerSecond / 60.0 * kDriveTwoPi * electricalTurnsPerMechanical);
+  if (speed < 1 || acceleration < 1) {
+    return std::unexpected(std::format(
+        "{} rpm and {} rpm/s are {:.2f} rad/s and {:.2f} rad/s² electrical, and the drive takes "
+        "whole rad/s, so one of them would be 0; ask for more",
+        move.velocityRpm, move.accelerationRpmPerSecond,
+        move.velocityRpm / 60.0 * kDriveTwoPi * electricalTurnsPerMechanical,
+        move.accelerationRpmPerSecond / 60.0 * kDriveTwoPi * electricalTurnsPerMechanical));
+  }
+  if (speed > std::numeric_limits<int32_t>::max() ||
+      acceleration > std::numeric_limits<int32_t>::max()) {
+    return std::unexpected("the velocity or the acceleration does not fit the drive's 32 bits");
+  }
+  return OpenLoopFieldProfile{
+      .angleEndMilliRadian = static_cast<int32_t>(angle),
+      .speedRadPerSecond = static_cast<int32_t>(speed),
+      .accelerationRadPerSquaredSecond = static_cast<int32_t>(acceleration),
+      .lengthEndPerMille = move.fieldLengthPerMille,
+      .lengthRatePerMillePerSecond = move.fieldLengthRatePerMillePerSecond,
+      .velocityRpm = speed * 60.0 / (kDriveTwoPi * electricalTurnsPerMechanical),
+  };
+}
 }  // namespace somanet
 
 std::optional<FsBufferTransfer> parseFsBufferTransfer(std::string_view token) {
@@ -2095,6 +2159,45 @@ std::expected<TriggerErrorResult, std::string> SomanetDrive::triggerError(
 // big-endian across the next four bytes — the one command here that carries a 32-bit argument.
 constexpr size_t kSystemIdParameterByte = 1;
 constexpr size_t kSystemIdValueMsbByte = 2;
+
+// OS command 2 has the same layout: the index in byte 1, the value from byte 2, MSB first.
+constexpr size_t kOpenLoopFieldParameterByte = 1;
+constexpr size_t kOpenLoopFieldValueMsbByte = 2;
+
+std::expected<void, std::string> SomanetDrive::setOpenLoopFieldParameter(
+    somanet::OpenLoopFieldParameter parameter, int32_t value, const OsCommandConfig& config) {
+  const std::string what =
+      std::format("setting the open-loop field {} to {}", somanet::toString(parameter), value);
+  const auto bits = static_cast<uint32_t>(value);
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kOpenLoopFieldMode);
+  command[kOpenLoopFieldParameterByte] = static_cast<uint8_t>(parameter);
+  command[kOpenLoopFieldValueMsbByte] = static_cast<uint8_t>(bits >> 24);
+  command[kOpenLoopFieldValueMsbByte + 1] = static_cast<uint8_t>(bits >> 16);
+  command[kOpenLoopFieldValueMsbByte + 2] = static_cast<uint8_t>(bits >> 8);
+  command[kOpenLoopFieldValueMsbByte + 3] = static_cast<uint8_t>(bits);
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(std::format("{} failed: {}", what, response.error()));
+  }
+  if (response->failed()) {
+    if (!response->errorCode) {
+      // The command's own failure has one cause: the drive did not recognise the index.
+      return std::unexpected(
+          std::format("{} failed: the drive does not recognise parameter index {}", what,
+                      static_cast<int>(parameter)));
+    }
+    const uint8_t code = *response->errorCode;
+    if (auto general = osCommandErrorName(code)) {
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+  return {};
+}
 
 std::expected<void, std::string> SomanetDrive::setSystemIdentificationParameter(
     somanet::SystemIdentificationParameter parameter, uint32_t value,

@@ -119,6 +119,10 @@ bool Device::exchangesProcessData() const {
   return mm::comm::exchangesProcessData(driver_.slaveState(slavePosition_));
 }
 
+mm::comm::EtherCatState Device::alState() const {
+  return mm::comm::alState(driver_.slaveState(slavePosition_));
+}
+
 std::expected<std::vector<uint8_t>, std::string> Device::readSdo(uint16_t index,
                                                                  uint8_t subindex) const {
   return driver_.readSdo(slavePosition_, index, subindex);

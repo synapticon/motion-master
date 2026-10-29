@@ -5664,6 +5664,7 @@ components:
             `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an
             `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and
             `entries`, the pairs written, as `IcMuRestoreFile` lists them. For
+            `open-loop-field-control` the `validate` step holds an `OpenLoopFieldPlan`. For
             `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as
             `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null
             with a `reason`.
@@ -6537,6 +6538,31 @@ components:
           type: array
           description: One entry for each set bit of encoderStatus, lowest bit first.
           items: { $ref: "#/components/schemas/IcMuStatusBit" }
+    OpenLoopFieldPlan:
+      type: object
+      description: >
+        The `validate` step of `open-loop-field-control`: the move in the electrical units the
+        drive takes, as OS command 2 writes them.
+      required: [angleDegrees, polePairs, angleEndMilliRadian, speedRadPerSecond,
+                 accelerationRadPerSquaredSecond, lengthEndPerMille, lengthRatePerMillePerSecond,
+                 velocityRpm]
+      properties:
+        angleDegrees: { type: number, example: 360 }
+        polePairs: { type: integer, description: 0x2003:01., example: 5 }
+        angleEndMilliRadian:
+          type: integer
+          description: >
+            The end electrical angle. The drive takes 2π as 6.28, so this is the mechanical angle
+            times the pole pairs times 6280 / 360.
+          example: 31400
+        speedRadPerSecond: { type: integer, example: 3 }
+        accelerationRadPerSquaredSecond: { type: integer, example: 523 }
+        lengthEndPerMille: { type: integer, example: 1000 }
+        lengthRatePerMillePerSecond: { type: integer, example: 10000 }
+        velocityRpm:
+          type: number
+          description: The velocity of the motor shaft the rounded speed gives.
+          example: 5.73
     IcMuKeyRegister:
       type: object
       description: >
@@ -6769,7 +6795,8 @@ components:
           description: >
             Ceiling on the whole command. Not a liveness check — the drive fails a command no service
             acknowledges within 5 s on its own — so size it for the command being run. Hitting it
-            aborts the command on the drive.
+            aborts the command on the drive. For `open-loop-field-control` it is how long the move
+            may take after the drive is enabled, from 1000 ms, with 60000 ms as its default.
           example: 30000
         pollIntervalMs:
           type: integer
@@ -7003,6 +7030,41 @@ components:
             device. The state the device was in beforehand is not restored. Over SPoE the drive
             restarts into the new firmware and comes up in PRE-OP, so `3` cannot keep it in BOOT.
           example: 2
+        angle:
+          type: number
+          description: >
+            `open-loop-field-control` only, and required for it: how far to turn the motor shaft, in
+            mechanical degrees. Negative turns the other way.
+          example: 360
+        velocity:
+          type: number
+          default: 5
+          description: >
+            `open-loop-field-control` only: the highest velocity of the motor shaft, in rpm. The
+            drive takes whole electrical rad/s, so a slow move is rounded; the `validate` step
+            reports the velocity the drive runs.
+          example: 5
+        acceleration:
+          type: number
+          default: 1000
+          description: >
+            `open-loop-field-control` only: the acceleration and the deceleration of the motor
+            shaft, in rpm/s.
+          example: 1000
+        fieldLength:
+          type: integer
+          default: 1000
+          description: >
+            `open-loop-field-control` only: the current of the rotating field, in per mille of the
+            rated current.
+          example: 1000
+        fieldLengthRate:
+          type: integer
+          default: 10000
+          description: >
+            `open-loop-field-control` only: how fast the field length rises from 0, in per mille of
+            the rated current per second.
+          example: 10000
     OutputStageResult:
       type: object
       required: [slavePosition, index, subindex, staged, error]

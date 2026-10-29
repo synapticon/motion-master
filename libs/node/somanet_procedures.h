@@ -1632,4 +1632,54 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
     DeviceManager& deviceManager, uint16_t devicePosition, ProgressReporter& reporter,
     std::stop_token stop, const FirmwareInstallationRequest& request);
 
+// --- Open-loop field control ---------------------------------------------------------------------
+
+/// @brief Procedure name for turning the motor with a rotating field, as it appears in its URL and
+///        its snapshot key.
+inline constexpr std::string_view kOpenLoopFieldControlProcedure = "open-loop-field-control";
+
+/// @brief The step that converts the move and reads the pole pairs. Its value is the profile.
+inline constexpr std::string_view kOpenLoopFieldValidateStep = "validate";
+
+/// @brief The step that waits for the profile to end.
+inline constexpr std::string_view kOpenLoopFieldMoveStep = "move";
+
+/// @brief One open-loop move, as a client describes it.
+struct OpenLoopFieldControlRequest {
+  somanet::OpenLoopFieldMove move{.angleDegrees = 0,
+                                  .velocityRpm = 5,
+                                  .accelerationRpmPerSecond = 1000,
+                                  .fieldLengthPerMille = 1000,
+                                  .fieldLengthRatePerMillePerSecond = 10000};
+
+  /// How long the move may take before the run fails, from the moment the drive is enabled.
+  std::chrono::milliseconds timeout{60000};
+};
+
+/// @brief Parses `{"angle": 360, "velocity": 5, "acceleration": 1000, "fieldLength": 1000,
+///        "fieldLengthRate": 10000, "timeoutMs": 60000}`. @c angle is required, in mechanical
+///        degrees, and may be negative. The rest default as @c OpenLoopFieldControlRequest
+///        declares.
+std::expected<OpenLoopFieldControlRequest, std::string> parseOpenLoopFieldControlRequest(
+    const nlohmann::json& body);
+
+/// @brief What the open-loop field control accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> openLoopFieldControlParameters();
+
+/// @brief The open-loop field control's step template, idle.
+std::vector<ProgressStep> openLoopFieldControlSteps();
+
+/// @brief Turns the motor by an angle with a rotating field of a set length, and no position
+///        feedback.
+///
+/// It needs a configured motor but no encoder and no commutation offset. It converts the move with
+/// the pole pairs of 0x2003:01, brings an enabled drive down to Switched On, sets mode -3, writes
+/// the seven parameters of the profile with OS command 2, and only then enables the drive, which
+/// starts the profile. It releases a manual brake, and waits for statusword bit 10. On every way
+/// out it engages a brake it released, returns the drive to Switched On, and puts the operation
+/// mode back.
+std::expected<void, std::string> runOpenLoopFieldControlProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const OpenLoopFieldControlRequest& request);
+
 }  // namespace mm::node

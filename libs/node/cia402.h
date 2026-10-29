@@ -199,6 +199,10 @@ constexpr State decodeState(uint16_t statusword) {
 ///        limit the drive has stopped at.
 constexpr bool isInternalLimitActive(uint16_t statusword) { return (statusword & 0x0800) != 0; }
 
+/// @brief Whether the statusword reports target reached (bit 10). In open-loop field mode it means
+///        the profile has ended.
+constexpr bool isTargetReached(uint16_t statusword) { return (statusword & 0x0400) != 0; }
+
 /// @brief The units of the velocity objects per rpm, from the SI unit velocity 0x60A9, or nothing
 ///        for a unit that is neither revolutions per minute nor per second.
 ///

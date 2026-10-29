@@ -519,6 +519,76 @@ enum class SystemIdentificationParameter : uint8_t {
   kStartProcedure = 5,   ///< Arms the run; see @c SystemIdentificationStart.
 };
 
+/// @brief One parameter of the open-loop field profile, the index of OS command 2.
+///
+/// The drive takes each as a signed 32-bit value, in electrical units, and keeps it until it is
+/// written again. It starts the profile from what it holds when it enters Operation Enabled in
+/// mode -3, so every parameter is written before the drive is enabled (somanet_software,
+/// oscmd_downstream_communication.h, OsCmd2ParameterIndex).
+enum class OpenLoopFieldParameter : uint8_t {
+  kAngleStart = 0,    ///< The start electrical angle, in mrad.
+  kAngleEnd = 1,      ///< The end electrical angle, in mrad.
+  kMaxSpeed = 2,      ///< The maximum electrical rotational speed, in rad/s.
+  kAcceleration = 3,  ///< The electrical rotational acceleration and deceleration, in rad/s².
+  kLengthStart = 4,   ///< The start field length, in per mille of the rated current.
+  kLengthEnd = 5,     ///< The end field length, in per mille of the rated current.
+  kLengthRate = 6,    ///< How fast the length rises, in per mille of the rated current per second.
+};
+
+/// @brief Name of an open-loop field parameter, as a message should render it.
+constexpr std::string_view toString(OpenLoopFieldParameter parameter) {
+  switch (parameter) {
+    case OpenLoopFieldParameter::kAngleStart:
+      return "start angle";
+    case OpenLoopFieldParameter::kAngleEnd:
+      return "end angle";
+    case OpenLoopFieldParameter::kMaxSpeed:
+      return "maximum speed";
+    case OpenLoopFieldParameter::kAcceleration:
+      return "acceleration";
+    case OpenLoopFieldParameter::kLengthStart:
+      return "start field length";
+    case OpenLoopFieldParameter::kLengthEnd:
+      return "end field length";
+    case OpenLoopFieldParameter::kLengthRate:
+      return "field length rate";
+  }
+  return "unknown parameter";
+}
+
+/// @brief A move in mechanical units, as a request states it.
+struct OpenLoopFieldMove {
+  double angleDegrees = 0;                       ///< Mechanical; negative turns the other way.
+  double velocityRpm = 0;                        ///< Mechanical, greater than 0.
+  double accelerationRpmPerSecond = 0;           ///< Mechanical, greater than 0.
+  int32_t fieldLengthPerMille = 0;               ///< Of the rated current, greater than 0.
+  int32_t fieldLengthRatePerMillePerSecond = 0;  ///< Greater than 0.
+};
+
+/// @brief The values of OS command 2 for a move, in the electrical units of the drive. The start
+///        angle and the start length are 0.
+struct OpenLoopFieldProfile {
+  int32_t angleEndMilliRadian = 0;
+  int32_t speedRadPerSecond = 0;
+  int32_t accelerationRadPerSquaredSecond = 0;
+  int32_t lengthEndPerMille = 0;
+  int32_t lengthRatePerMillePerSecond = 0;
+
+  /// The mechanical velocity the rounded speed gives, in rpm.
+  double velocityRpm = 0;
+};
+void to_json(nlohmann::json& j, const OpenLoopFieldProfile& profile);
+
+/// @brief Converts @p move to electrical units with @p polePairs.
+///
+/// The drive converts with 2π taken as 6.28 (motion_control_service.xc,
+/// initialize_open_loop_field_profiler), so this does too, and the mechanical angle comes out
+/// exact. The speed and the acceleration are whole rad/s, so they are rounded, and a slow move
+/// rounds coarsely: @c velocityRpm says what the drive will run. Refuses no pole pairs, a speed
+/// or acceleration that rounds to 0, and an angle that does not fit 32 bits.
+std::expected<OpenLoopFieldProfile, std::string> openLoopFieldProfile(const OpenLoopFieldMove& move,
+                                                                      uint8_t polePairs);
+
 /// @brief Name of a system-identification parameter, as a message should render it. Never
 ///        @c nullptr.
 constexpr std::string_view toString(SystemIdentificationParameter parameter) {
@@ -826,6 +896,7 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 enum class OsCommandId : uint8_t {
   kEncoderRegisterCommunication = 0,  ///< Reads or writes one register of a BiSS encoder.
   kIcMuCalibrationMode = 1,           ///< Sets how the BiSS service clocks an iC-MU encoder.
+  kOpenLoopFieldMode = 2,             ///< Sets one parameter of the open-loop field profile.
   kHrdStreaming = 3,              ///< Records a signal into the drive's high resolution data files.
   kMotorPhaseOrderDetection = 4,  ///< Detects the motor phase order. Rotates the rotor.
   kCommutationOffsetMeasurement = 5,  ///< Measures the commutation angle offset; see
@@ -2475,6 +2546,18 @@ class SomanetDrive : public Cia402Drive {
   ///         comes back as the drive's status 2, reported as such.
   std::expected<void, std::string> setSystemIdentificationParameter(
       somanet::SystemIdentificationParameter parameter, uint32_t value,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Writes one parameter of the open-loop field profile with OS command 2.
+  ///
+  /// The drive takes it in any CiA402 state and refuses it while a limit switch is active. It
+  /// starts the profile when it enters Operation Enabled in mode -3, so write all seven before
+  /// that.
+  ///
+  /// @return Void once the drive stored it, otherwise why it did not.
+  std::expected<void, std::string> setOpenLoopFieldParameter(
+      somanet::OpenLoopFieldParameter parameter, int32_t value,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 

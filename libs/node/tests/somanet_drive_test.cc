@@ -2435,6 +2435,96 @@ TEST(TriggerError, TheResettableTypeIsReportedTheSameFromEitherService) {
   }
 }
 
+// --- Open-loop field (command 2) -----------------------------------------------------------------
+
+TEST(SetOpenLoopFieldParameter, PutsTheIndexInByteOneAndASignedValueBigEndian) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setOpenLoopFieldParameter(somanet::OpenLoopFieldParameter::kAngleEnd, -7850,
+                                              {.pollInterval = kNoDelay})
+                  .has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 2);
+  EXPECT_EQ(written[1], 1);
+  // -7850 = 0xFFFFE156.
+  EXPECT_EQ(written[2], 0xFF);
+  EXPECT_EQ(written[3], 0xFF);
+  EXPECT_EQ(written[4], 0xE1);
+  EXPECT_EQ(written[5], 0x56);
+}
+
+TEST(SetOpenLoopFieldParameter, StatusTwoNamesTheUnknownParameterIndex) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->setOpenLoopFieldParameter(somanet::OpenLoopFieldParameter::kLengthRate, 1,
+                                                 {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("does not recognise parameter index 6"), std::string::npos)
+      << result.error();
+}
+
+TEST(OpenLoopFieldProfile, ConvertsWithTheDrivesOwnTwoPi) {
+  // Five pole pairs: one mechanical turn is five electrical ones, 5 x 6280 mrad as the drive
+  // counts them.
+  auto profile = somanet::openLoopFieldProfile({.angleDegrees = 360,
+                                                .velocityRpm = 60,
+                                                .accelerationRpmPerSecond = 1000,
+                                                .fieldLengthPerMille = 1000,
+                                                .fieldLengthRatePerMillePerSecond = 10000},
+                                               5);
+  ASSERT_TRUE(profile.has_value()) << profile.error();
+  EXPECT_EQ(profile->angleEndMilliRadian, 31400);
+  EXPECT_EQ(profile->speedRadPerSecond, 31);                 // 31.4
+  EXPECT_EQ(profile->accelerationRadPerSquaredSecond, 523);  // 523.3
+  EXPECT_EQ(profile->lengthEndPerMille, 1000);
+  EXPECT_EQ(profile->lengthRatePerMillePerSecond, 10000);
+  EXPECT_NEAR(profile->velocityRpm, 59.24, 0.01);  // what 31 rad/s gives back
+
+  auto back = somanet::openLoopFieldProfile({.angleDegrees = -90,
+                                             .velocityRpm = 5,
+                                             .accelerationRpmPerSecond = 1000,
+                                             .fieldLengthPerMille = 500,
+                                             .fieldLengthRatePerMillePerSecond = 1000},
+                                            5);
+  ASSERT_TRUE(back.has_value()) << back.error();
+  EXPECT_EQ(back->angleEndMilliRadian, -7850);
+  EXPECT_EQ(back->speedRadPerSecond, 3);  // 2.62 rounds up, so the drive runs 5.73 rpm
+  EXPECT_NEAR(back->velocityRpm, 5.73, 0.01);
+}
+
+TEST(OpenLoopFieldProfile, RefusesWhatTheDriveCannotRun) {
+  const somanet::OpenLoopFieldMove move{.angleDegrees = 360,
+                                        .velocityRpm = 5,
+                                        .accelerationRpmPerSecond = 1000,
+                                        .fieldLengthPerMille = 1000,
+                                        .fieldLengthRatePerMillePerSecond = 10000};
+  EXPECT_FALSE(somanet::openLoopFieldProfile(move, 0));
+  auto slow = move;
+  slow.velocityRpm = 0.5;  // 0.05 rad/s on one pole pair
+  auto refused = somanet::openLoopFieldProfile(slow, 1);
+  ASSERT_FALSE(refused);
+  EXPECT_NE(refused.error().find("whole rad/s"), std::string::npos) << refused.error();
+  auto none = move;
+  none.velocityRpm = 0;
+  EXPECT_FALSE(somanet::openLoopFieldProfile(none, 5));
+  auto weak = move;
+  weak.fieldLengthPerMille = 0;
+  EXPECT_FALSE(somanet::openLoopFieldProfile(weak, 5));
+  auto far = move;
+  far.angleDegrees = 1e9;
+  EXPECT_FALSE(somanet::openLoopFieldProfile(far, 5));
+}
+
 // --- System identification (command 15) ----------------------------------------------------------
 
 TEST(SetSystemIdentificationParameter, PutsTheIndexInByteOneAndTheValueBigEndian) {

@@ -1544,6 +1544,44 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
   };
   auto save = [&]() { return saveIcMuEeprom(*drive, encoder, stop).transform([](uint8_t) {}); };
   auto read = [&](uint8_t address) { return readIcMuRegister(*drive, encoder, address, stop); };
+  // Writes the iC-PVL configuration into EEPROM 0x40-0x4C and reads it back. Each write stays
+  // inside an aligned page of 8 bytes, because the EEPROM can be a 24C01 or 24C02, whose page
+  // write wraps, and 0x40-0x4C crosses the page at 0x48.
+  auto writeIcPvlEeprom =
+      [&](const std::array<uint8_t, 13>& bytes) -> std::expected<void, std::string> {
+    const auto first = somanet::kIcPvlEepromStart;
+    const auto last = static_cast<uint8_t>(first + bytes.size() - 1);
+    for (const auto& chunk : somanet::icMuEepromWriteChunks(first, last)) {
+      const auto values = std::span(bytes).subspan(chunk.deviceStart - first, chunk.count);
+      if (auto r = writeIcMuI2c(*drive, encoder, somanet::IcMuI2cTarget::kEeprom, chunk.deviceStart,
+                                values, stop);
+          !r) {
+        return r;
+      }
+    }
+    if (auto r = waitForEncoder(waits.icPvlEeprom, stop); !r) {
+      return r;
+    }
+    for (const auto& chunk : somanet::icMuEepromReadChunks(first, last)) {
+      auto read = readIcMuI2c(*drive, encoder, somanet::IcMuI2cTarget::kEeprom, chunk.deviceStart,
+                              chunk.count, stop);
+      if (!read) {
+        return std::unexpected(read.error());
+      }
+      for (size_t i = 0; i < read->size(); ++i) {
+        const auto address = static_cast<uint8_t>(chunk.deviceStart + i);
+        const uint8_t expected = bytes[address - first];
+        if ((*read)[i] != expected) {
+          return std::unexpected(std::format(
+              "EEPROM 0x{:02X} reads 0x{:02X} after the iC-PVL configuration was written, not "
+              "0x{:02X}",
+              address, (*read)[i], expected));
+        }
+      }
+    }
+    return {};
+  };
+
   // SCLR clears the iC-PVL status, and ABS_RESET has the iC-MU read the revolution count again.
   auto clearAndReset = [&]() -> std::expected<void, std::string> {
     if (auto r = transfer(somanet::icPvlCommand(somanet::IcPvlCommand::kSclr)); !r) {
@@ -1638,8 +1676,7 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
 
     if (multiturn) {
       reporter.start(kIcPvlRegistersStep);
-      auto pvl = transfer(somanet::icPvlEepromWrites(configuration))
-                     .and_then([&] { return waitForEncoder(waits.icPvlEeprom, stop); })
+      auto pvl = writeIcPvlEeprom(somanet::icPvlEepromBytes(configuration))
                      .and_then([&] {
                        return transfer(somanet::icPvlCommand(somanet::IcPvlCommand::kReboot));
                      })
@@ -1717,6 +1754,12 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
   auto configured = configure();
 
   reporter.start(kIcMuRestoreStatusBitsStep);
+  // The multiturn path talks to the iC-PVL over I²C, and a transfer that failed leaves EPR_ERR set.
+  if (auto cleared = clearIcMuI2cError(*drive, encoder); !cleared) {
+    configured = configured
+                     ? std::unexpected(cleared.error())
+                     : std::unexpected(std::format("{}; {}", configured.error(), cleared.error()));
+  }
   // A cancelled run still turns the status bits on, so this command takes no stop token.
   auto restoredBits = drive->setIgnoreBissStatusBits(
       encoder, false,
@@ -1895,20 +1938,9 @@ std::expected<void, std::string> withStatusBitsIgnored(SomanetDrive& drive,
   std::expected<void, std::string> result = body();
 
   reporter.start(kIcMuRestoreStatusBitsStep);
-  // A failed I²C transfer leaves EPR_ERR set until a transfer succeeds, and a read of STATUS1 does
-  // not clear it. With the status bits on again, the drive takes it for a BiSS error and faults. A
-  // one-byte read of the EEPROM clears it. These reads take no stop token, like the restore.
-  if (auto status1 = readIcMuRegister(drive, encoder, kIcMuStatus1Register, {});
-      status1 && (*status1 & kIcMuEepromError) != 0) {
-    if (auto cleared = readIcMuI2c(drive, encoder, somanet::IcMuI2cTarget::kEeprom, 0x00, 1, {});
-        !cleared) {
-      const auto warning = std::format(
-          "EPR_ERR could not be cleared, so the drive may fault when the status bits are on again: "
-          "{}",
-          cleared.error());
-      result = result ? std::unexpected(warning)
-                      : std::unexpected(std::format("{}; {}", result.error(), warning));
-    }
+  if (auto cleared = clearIcMuI2cError(drive, encoder); !cleared) {
+    result = result ? std::unexpected(cleared.error())
+                    : std::unexpected(std::format("{}; {}", result.error(), cleared.error()));
   }
   // A cancelled run still turns the status bits on, so this command takes no stop token.
   auto restored = drive.setIgnoreBissStatusBits(
@@ -2393,6 +2425,9 @@ std::expected<IcMuCalibrationPlan, std::string> planIcMuCalibration(
   const auto version = trimFirmwareVersion(
       std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
   if (auto error = icMuFirmwareError(version)) {
+    return std::unexpected(std::move(*error));
+  }
+  if (auto error = somanet::icMuRecordingFirmwareError(version)) {
     return std::unexpected(std::move(*error));
   }
 
@@ -3070,6 +3105,8 @@ std::expected<void, std::string> runIcMuCalibrationProcedure(
         return fail(step, analysis.error());
       }
       value["phaseRangeLimit"] = analysis->phaseRangeLimit;
+      value["calculatedMasterPeriods"] = analysis->calculatedMasterPeriods;
+      value["minimalSamplesPerMasterPeriod"] = analysis->minimalSamplesPerMasterPeriod;
 
       if (validation) {
         value["phaseMargin"] = curveJson(analysis->phaseMargin, samples);

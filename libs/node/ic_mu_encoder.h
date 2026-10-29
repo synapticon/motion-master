@@ -207,12 +207,14 @@ struct IcMuConfiguration {
 /// The calibration owns 0x01-0x04 and 0x07-0x0A, so they are not written.
 std::vector<IcMuRegisterWrite> icMuRamWrites(const IcMuConfiguration& configuration);
 
-/// @brief The iC-PVL configuration into EEPROM 0x40-0x4C, ending with the @c I2C_COM that writes
-///        it.
+/// @brief Where the EEPROM keeps the iC-PVL configuration: 0x40-0x4C, after the iC-MU's own bank.
+inline constexpr uint8_t kIcPvlEepromStart = 0x40;
+
+/// @brief The iC-PVL configuration as EEPROM 0x40-0x4C holds it.
 ///
 /// The thirteen bytes are iC-PVL registers 0x00-0x0C. Registers 0x06 and 0x0C are the CRCs over
 /// 0x00-0x05 and 0x07-0x0B, computed over the bytes actually written.
-std::vector<IcMuRegisterWrite> icPvlEepromWrites(const IcMuConfiguration& configuration);
+std::array<uint8_t, 13> icPvlEepromBytes(const IcMuConfiguration& configuration);
 
 /// @brief Writes @p value into iC-PVL register @p icPvlRegister, ending with the @c I2C_COM.
 std::vector<IcMuRegisterWrite> icPvlRegisterWrite(uint8_t icPvlRegister, uint8_t value);

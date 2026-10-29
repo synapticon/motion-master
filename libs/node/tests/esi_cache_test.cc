@@ -28,8 +28,12 @@ constexpr uint32_t kCirculo = 0x00000301;
 fs::path fixturePath() { return fs::path(MM_ETG_TEST_DATA_DIR) / "somanet-v5.6.6.xml"; }
 
 // A fresh directory unique to one test, removed first so a previous run never leaks in.
+// A directory of its own for each test. ctest runs every test as a process of its own, in
+// parallel, so a directory shared by the tests of one fixture is removed under another test.
 fs::path makeTempDir(const std::string& tag) {
-  const fs::path dir = fs::temp_directory_path() / ("mm-esi-cache-test-" + tag);
+  const auto* test = ::testing::UnitTest::GetInstance()->current_test_info();
+  const fs::path dir = fs::temp_directory_path() / ("mm-esi-cache-test-" + tag + "-" +
+                                                    test->test_suite_name() + "-" + test->name());
   std::error_code ec;
   fs::remove_all(dir, ec);
   fs::create_directories(dir);

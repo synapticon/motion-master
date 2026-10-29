@@ -83,6 +83,16 @@ std::optional<std::string> icMuSingleturnBitsError(uint8_t singleturnBits) {
       singleturnBits);
 }
 
+std::optional<std::string> icMuMultiturnBitsWarning(IcMuPath path, uint8_t multiturnBits) {
+  if (path != IcMuPath::kMultiturn || multiturnBits == kIcMuMultiturnBits) {
+    return std::nullopt;
+  }
+  return std::format(
+      "the encoder has {} multiturn bits, and the iC-MU and the iC-PVL are configured for {}; the "
+      "position word the drive reads will not match the one the encoder sends",
+      multiturnBits, kIcMuMultiturnBits);
+}
+
 uint8_t icMuMasterPolePairs(uint8_t singleturnBits) {
   return static_cast<uint8_t>(1U << icMuMasterPeriodCount(singleturnBits));
 }

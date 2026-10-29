@@ -1492,6 +1492,7 @@ std::expected<void, std::string> runIcMuI2cTransfer(
 struct IcMuPlan {
   EncoderConfiguration encoder;
   somanet::IcMuConfiguration configuration;
+  std::vector<std::string> warnings;
 };
 
 std::expected<IcMuPlan, std::string> planIcMuConfiguration(
@@ -1547,11 +1548,14 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
         "position while it is configured");
   }
 
-  IcMuPlan plan{.encoder = *found, .configuration = {}};
+  IcMuPlan plan{.encoder = *found, .configuration = {}, .warnings = {}};
   auto& configuration = plan.configuration;
   configuration.path = somanet::icMuPath(found->sensorPort, found->multiturnBits);
   configuration.singleturnBits = found->singleturnBits;
   configuration.multiturnBits = found->multiturnBits;
+  if (auto warning = somanet::icMuMultiturnBitsWarning(configuration.path, found->multiturnBits)) {
+    plan.warnings.push_back(std::move(*warning));
+  }
   configuration.safeMotion = device
                                  .parameter(somanet::objects::kEncoderSourceTypeCount.index,
                                             somanet::objects::kEncoderSourceTypeCount.subindex)
@@ -1602,6 +1606,7 @@ nlohmann::json toJson(const IcMuPlan& plan) {
       {"singleturnBits", c.singleturnBits},
       {"multiturnBits", c.multiturnBits},
       {"outputPorts", somanet::icMuOutputPorts(c.safeMotion)},
+      {"warnings", plan.warnings},
   };
   j["batteryMode"] = c.path == somanet::IcMuPath::kMultiturn ? nlohmann::json(c.batteryMode)
                                                              : nlohmann::json(nullptr);

@@ -100,6 +100,17 @@ constexpr bool isIcMuSingleturnBits(uint8_t singleturnBits) {
 /// @brief Why @p singleturnBits cannot be configured, or nothing when it can.
 std::optional<std::string> icMuSingleturnBitsError(uint8_t singleturnBits);
 
+/// @brief The multiturn bits of the multiturn path. MODE_MT (0x10) and the iC-PVL MT_BW are
+///        written for 18 bits, and only OUT_MSB follows the multiturn bits of the drive.
+inline constexpr uint8_t kIcMuMultiturnBits = 18;
+
+/// @brief A warning when the multiturn path is configured with other multiturn bits than
+///        @c kIcMuMultiturnBits, or nothing.
+///
+/// Then OUT_MSB gives the drive a frame of another length than the iC-PVL fills. A warning and
+/// not a refusal, because the firmware sets the multiturn bits of sensor port 1 itself.
+std::optional<std::string> icMuMultiturnBitsWarning(IcMuPath path, uint8_t multiturnBits);
+
 /// @brief The master pole pairs of the ring, 2^(st − 14). Requires @c isIcMuSingleturnBits.
 uint8_t icMuMasterPolePairs(uint8_t singleturnBits);
 

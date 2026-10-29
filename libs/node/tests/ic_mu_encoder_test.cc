@@ -20,6 +20,7 @@ using mm::node::somanet::EncoderType;
 using mm::node::somanet::IcMuConfiguration;
 using mm::node::somanet::IcMuEncoderState;
 using mm::node::somanet::IcMuFirmwareSupport;
+using mm::node::somanet::icMuMultiturnBitsWarning;
 using mm::node::somanet::IcMuPath;
 using mm::node::somanet::IcMuRegisterWrite;
 using mm::node::somanet::IcPvlCommand;
@@ -419,6 +420,15 @@ TEST(IcMuEncoderTest, AnExternalEncoderIsAnIcMuOnlyWhenHardRevSaysSo) {
   EXPECT_EQ(icMuOnPort3.path, IcMuPath::kSingleturn);
   EXPECT_EQ(icMuOnPort3.expectedOutputRegister, 0x05);
   EXPECT_EQ(icMuOnPort3.state, IcMuEncoderState::kConfigured);
+}
+
+TEST(IcMuMultiturnBitsWarning, WarnsOnlyOnTheMultiturnPathWithOtherThan18Bits) {
+  EXPECT_FALSE(icMuMultiturnBitsWarning(IcMuPath::kMultiturn, 18));
+  EXPECT_FALSE(icMuMultiturnBitsWarning(IcMuPath::kSingleturn, 0));
+  EXPECT_FALSE(icMuMultiturnBitsWarning(IcMuPath::kSingleturn, 12));
+  auto warning = icMuMultiturnBitsWarning(IcMuPath::kMultiturn, 16);
+  ASSERT_TRUE(warning);
+  EXPECT_NE(warning->find("16 multiturn bits"), std::string::npos) << *warning;
 }
 
 }  // namespace

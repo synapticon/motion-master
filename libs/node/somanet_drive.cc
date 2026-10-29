@@ -850,6 +850,7 @@ std::expected<ObjectDictionaryValues, std::string> SomanetDrive::readObjectDicti
 
 void to_json(nlohmann::json& j, const BrakeState& state) {
   j = nlohmann::json{
+      {"present", state.present},
       {"status", somanet::toString(state.status)},
       {"releaseStrategy", somanet::toString(state.releaseStrategy)},
       {"pullTimeMs", state.pullTime.count()},
@@ -866,7 +867,14 @@ std::expected<std::string, std::string> SomanetDrive::errorReport() const {
   return device_.readValue<std::string>(somanet::kErrorReport, somanet::kErrorReportDescription);
 }
 
+bool SomanetDrive::hasBrakeObject() const {
+  return device_.parameter(somanet::kBrakeOptions, somanet::kBrakeStatus).has_value();
+}
+
 std::expected<somanet::BrakeStatus, std::string> SomanetDrive::brakeStatus() const {
+  if (!hasBrakeObject()) {
+    return somanet::BrakeStatus::kNotConfigured;
+  }
   auto raw = device_.readValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeStatus);
   if (!raw) {
     return std::unexpected(raw.error());
@@ -875,6 +883,9 @@ std::expected<somanet::BrakeStatus, std::string> SomanetDrive::brakeStatus() con
 }
 
 std::expected<void, std::string> SomanetDrive::setBrakeStatus(somanet::BrakeStatus status) {
+  if (!hasBrakeObject()) {
+    return {};
+  }
   return device_.writeValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeStatus,
                                      static_cast<uint8_t>(status));
 }
@@ -982,6 +993,10 @@ std::expected<Encoders, std::string> SomanetDrive::encoders() const {
 
 std::expected<BrakeState, std::string> SomanetDrive::brakeState() const {
   BrakeState state;
+  if (!hasBrakeObject()) {
+    state.present = false;
+    return state;
+  }
 
   auto status = brakeStatus();
   if (!status) {

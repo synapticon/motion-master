@@ -647,6 +647,11 @@ export interface Encoders {
 /** A drive's brake configuration and current state — the parts of object 0x2004 that decide what commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a release or engage arrives in the same shape as a plain read. */
 export interface BrakeState {
   /**
+   * Whether the drive has the brake object 0x2004. A drive with no brake, such as one running Jasper firmware, has none: then `status` is `notConfigured`, `softwareControllable` is false, and release and engage write nothing and succeed.
+   * @example true
+   */
+  present: boolean;
+  /**
    * Brake state (0x2004:07). A brake is spring-engaged, so `engaged` is also its powered-off state.
    * @example "engaged"
    */

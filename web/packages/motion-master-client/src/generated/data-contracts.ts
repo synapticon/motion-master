@@ -1180,6 +1180,52 @@ export interface IcMuEncoderStatus {
     /** @example 56 */
     maxAccelerationKrpmPerSecond: number;
   }[];
+  /**
+   * The encoder status word, 0x2111:04 for encoder 1 and 0x2113:04 for encoder 2, read with an SDO upload. It is a snapshot, not a live view of the chips. The drive writes it after a BiSS error bit and at start-up: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits 8-15 and iC-MU STATUS0 in bits 16-23, each with only the bits the drive watches. 0 means that nothing was latched since the encoder was last configured. The chips themselves are not read, because a read of STATUS1 clears the iC-MU errors.
+   * @format int64
+   * @example 4096
+   */
+  encoderStatus: number;
+  /** One entry for each set bit of encoderStatus, lowest bit first. */
+  encoderStatusBits: IcMuStatusBit[];
+}
+
+/** One set bit of the encoder status word. A set bit that the drive masks out has no name, title, description or remedy. */
+export interface IcMuStatusBit {
+  /**
+   * The bit in the encoder status word.
+   * @example 12
+   */
+  bit: number;
+  /**
+   * The chip the bit comes from, null for bits 24-31.
+   * @example "iC-PVL"
+   */
+  chip: "iC-MU" | "iC-PVL" | null;
+  /**
+   * The status register of the chip, null for bits 24-31.
+   * @example "STATUS"
+   */
+  register: "STATUS0" | "STATUS1" | "STATUS" | null;
+  /**
+   * The bit in that register.
+   * @example 4
+   */
+  registerBit: number;
+  /**
+   * The datasheet name.
+   * @example "BAT_ERR"
+   */
+  name: string | null;
+  /** @example "Battery error" */
+  title: string | null;
+  /** @example "The battery voltage is too low (iC-PVL datasheet, Elec. Char. No. 404). The position is not valid." */
+  description: string | null;
+  /**
+   * What to do, null where there is nothing to do.
+   * @example "Change the battery, then reset the fault of the drive."
+   */
+  remedy: string | null;
 }
 
 /** What an iC-MU calibration decided before the motor moved. */

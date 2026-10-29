@@ -875,6 +875,22 @@ void HttpServer::run() {
                 return mm::api::json(nlohmann::json(*description));
               });
 
+  // Decodes an iC-MU encoder status word, the value of 0x2111:04 or 0x2113:04. A query, like
+  // /api/firmware-package-name, because the input is one number.
+  router.get("/api/ic-mu-encoder-status", [](const mm::api::Request& req) -> mm::api::Response {
+    const auto text = req.query("encoderStatus");
+    if (!text || text->empty()) {
+      return mm::api::badRequest("an 'encoderStatus' query parameter is required");
+    }
+    auto value = mm::node::somanet::parseIcMuEncoderStatus(*text);
+    if (!value) {
+      return mm::api::badRequest(value.error());
+    }
+    return mm::api::json(
+        nlohmann::json{{"encoderStatus", *value},
+                       {"encoderStatusBits", mm::node::somanet::decodeIcMuEncoderStatus(*value)}});
+  });
+
   // Decodes an iC-MU restore file supplied in the body, the circulo_integrated_encoder_<port>
   // _config.bin a configuration writes. Binary, like /api/integro-variant/parse.
   router.post("/api/ic-mu-restore-file/parse",

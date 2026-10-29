@@ -34,6 +34,7 @@ import {
   HrdRecording,
   IcHausRegister,
   IcMuRestoreFile,
+  IcMuStatusBit,
   IdentifiedPlantModel,
   IntegroVariant,
   IntegroVariantOption,
@@ -1933,6 +1934,40 @@ export class Api<
       method: "POST",
       body: data,
       type: ContentType.Text,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Decodes an encoder status word, the value of 0x2111:04 or 0x2113:04, into the same bits the `ic-mu-encoder-status` procedure reports. Bus-independent: it reads nothing from a drive, so a value from a log can be decoded with no hardware present. A `GET` with a query, like `/api/firmware-package-name`, because the input is one number.
+   *
+   * @name GetIcMuEncoderStatus
+   * @summary Decode an iC-MU encoder status word
+   * @request GET:/api/ic-mu-encoder-status
+   */
+  getIcMuEncoderStatus = (
+    query: {
+      /**
+       * The word, in decimal or in hexadecimal with a 0x prefix.
+       * @example "0x1000"
+       */
+      encoderStatus: string;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        /**
+         * @format int64
+         * @example 4096
+         */
+        encoderStatus: number;
+        encoderStatusBits: IcMuStatusBit[];
+      },
+      void
+    >({
+      path: `/api/ic-mu-encoder-status`,
+      method: "GET",
+      query: query,
       format: "json",
       ...params,
     });

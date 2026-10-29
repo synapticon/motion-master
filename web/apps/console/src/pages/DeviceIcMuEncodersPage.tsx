@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -241,6 +241,11 @@ function EncoderCard({
       {status?.reason && (
         <p className="px-5 pb-3 text-xs text-status-bad">{status.reason}</p>
       )}
+      <EncoderStatusBits
+        slavePosition={slavePosition}
+        encoderOrdinal={encoder.encoderOrdinal}
+        latched={status?.encoderStatus}
+      />
 
       <div className="flex flex-wrap items-end gap-3 px-5 py-4 border-t border-grey-100">
         {multiturn && (
@@ -281,6 +286,129 @@ function EncoderCard({
         <IcMuCalibrationSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
       )}
     </section>
+  )
+}
+
+function statusHex(value: number): string {
+  return `0x${value.toString(16).toUpperCase().padStart(6, '0')}`
+}
+
+// The encoder status word in an input. Read fills it from the drive; a person can also type a value,
+// for example one from a support log. The server decodes whatever the input holds.
+function EncoderStatusBits({
+  slavePosition,
+  encoderOrdinal,
+  latched,
+}: {
+  slavePosition: number
+  encoderOrdinal: number
+  /** What the last status run read, if it ran. */
+  latched: number | undefined
+}) {
+  const { api } = useConnection()
+  const index = encoderOrdinal === 1 ? 0x2111 : 0x2113
+  const object = `0x${index.toString(16)}:04`
+  const [text, setText] = useState('')
+  const [typed, setTyped] = useState(false)
+
+  useEffect(() => {
+    if (latched !== undefined) {
+      setText(statusHex(latched))
+      setTyped(false)
+    }
+  }, [latched])
+
+  const read = useMutation({
+    mutationFn: () => api.readParameter(slavePosition, index, 4).then(r => r.data),
+    onSuccess: parameter => {
+      setText(statusHex(Number(parameter.value)))
+      setTyped(false)
+    },
+  })
+
+  const value = text.trim()
+  const decoded = useQuery({
+    queryKey: ['ic-mu-encoder-status', value],
+    queryFn: () => api.getIcMuEncoderStatus({ encoderStatus: value }).then(r => r.data),
+    enabled: value !== '',
+    retry: false,
+  })
+
+  return (
+    <div className="px-5 py-4 border-t border-grey-100 text-sm">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className={labelCls} htmlFor={`encoder-status-${encoderOrdinal}`}>
+            Encoder status ({object})
+          </label>
+          <input
+            id={`encoder-status-${encoderOrdinal}`}
+            className={`${inputCls} font-mono w-40`}
+            placeholder="0x000000"
+            value={text}
+            onChange={event => {
+              setText(event.target.value)
+              setTyped(true)
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          className={`${btnOutline} h-[38px]`}
+          disabled={read.isPending}
+          onClick={() => read.mutate()}
+        >
+          Read
+        </button>
+        {value !== '' && (
+          <span className={`text-xs ${typed ? 'text-status-warn' : 'text-grey-600'}`}>
+            {typed ? 'Typed, not read from the drive' : 'Read from the drive'}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-grey-600 mt-2 mb-2 max-w-3xl">
+        What the drive latched at the last BiSS error or at start-up, read with an SDO upload, not a
+        live view of the chips. It is cleared when the encoder is configured again. Type a value to
+        decode one from a log.
+      </p>
+      {read.isError && <p className="text-xs text-status-bad">{apiErrorMessage(read.error)}</p>}
+      {decoded.isError && (
+        <p className="text-xs text-status-bad">{apiErrorMessage(decoded.error)}</p>
+      )}
+      {decoded.data &&
+        (decoded.data.encoderStatusBits.length === 0 ? (
+          <p className="text-grey-600">No error latched.</p>
+        ) : (
+          <ul className="space-y-2">
+            {decoded.data.encoderStatusBits.map(bit => (
+              <li key={bit.bit} className="border-l-2 border-status-bad pl-3">
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-mono font-semibold">{bit.name ?? `bit ${bit.bit}`}</span>
+                  <span className="text-xs text-grey-600">
+                    {bit.chip ? `${bit.chip} ${bit.register} bit ${bit.registerBit}` : `bit ${bit.bit}`}
+                  </span>
+                  {bit.title && <span className="text-grey-800">{bit.title}</span>}
+                </div>
+                {bit.name === null ? (
+                  <p className="text-xs text-grey-600">
+                    The drive never latches this bit, so this is not a value the drive wrote.
+                  </p>
+                ) : (
+                  <>
+                    {bit.description && <p className="text-xs text-grey-700">{bit.description}</p>}
+                    {bit.remedy && (
+                      <p className="text-xs text-grey-900">
+                        <span className="font-semibold">What to do: </span>
+                        {bit.remedy}
+                      </p>
+                    )}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        ))}
+    </div>
   )
 }
 

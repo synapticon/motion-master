@@ -1,8 +1,10 @@
 #include "node/ic_mu_encoder.h"
 
 #include <algorithm>
+#include <charconv>
 #include <format>
 #include <iterator>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <semver.hpp>
 #include <string>
@@ -319,7 +321,210 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
       {"reason", optional(status.reason)},
       {"path", status.path == IcMuPath::kMultiturn ? "multiturn" : "singleturn"},
       {"batteryModes", status.batteryModes},
+      {"encoderStatus", status.encoderStatus},
+      {"encoderStatusBits", decodeIcMuEncoderStatus(status.encoderStatus)},
   };
+}
+
+namespace {
+
+constexpr std::string_view kMultiturnRemedy =
+    "Connect the multiturn battery and check its voltage. Run the iC-MU encoder configuration, "
+    "then "
+    "power cycle the drive. If the error stays, contact support.";
+
+// On a fault reset the drive sends SCLR to the iC-PVL, which clears every latched iC-PVL error
+// that is no longer present, and then synchronises the multiturn again (somanet_software,
+// biss_service.xc, reset_fault and TRIGGER_ICPVL_SCLR). A power cycle does not reboot an iC-PVL on
+// its battery.
+constexpr std::string_view kIcPvlChecksumRemedy =
+    "Reset the fault of the drive. If the error comes back, run the iC-MU encoder configuration, "
+    "which writes the iC-PVL configuration and reboots the iC-PVL. If it still comes back, contact "
+    "support.";
+
+constexpr IcMuStatusBit icMuStatus1Bit(uint8_t registerBit, std::string_view name,
+                                       std::string_view title, std::string_view description,
+                                       std::string_view remedy) {
+  return {registerBit, IcHausChip::kIcMu, "STATUS1", registerBit, name, title, description, remedy};
+}
+
+constexpr IcMuStatusBit icPvlStatusBit(uint8_t registerBit, std::string_view name,
+                                       std::string_view title, std::string_view description,
+                                       std::string_view remedy) {
+  return {static_cast<uint8_t>(8 + registerBit),
+          IcHausChip::kIcPvl,
+          "STATUS",
+          registerBit,
+          name,
+          title,
+          description,
+          remedy};
+}
+
+constexpr IcMuStatusBit icMuStatus0Bit(uint8_t registerBit, std::string_view name,
+                                       std::string_view title, std::string_view description,
+                                       std::string_view remedy) {
+  return {static_cast<uint8_t>(16 + registerBit),
+          IcHausChip::kIcMu,
+          "STATUS0",
+          registerBit,
+          name,
+          title,
+          description,
+          remedy};
+}
+
+// The bits the firmware masks in (somanet_software, biss_icpvl_icmu.h: ICMU_STATUS1_MASK,
+// ICPVL_STATUS_MASK, ICMU_STATUS0_MASK), with the names of the ESI. The titles are the datasheets'.
+constexpr std::array<IcMuStatusBit, 17> kIcMuStatusBits = {
+    icMuStatus1Bit(1, "FRQ_CNV", "Excessive signal frequency for the internal 12-bit converter",
+                   "The encoder turned faster than its maximum speed.", ""),
+    icMuStatus1Bit(2, "FRQ_ABZ", "Excessive signal frequency for the ABZ converter",
+                   "The encoder turned faster than its maximum speed.", ""),
+    icMuStatus1Bit(3, "NON_CTR",
+                   "Period counter consistency error: counted period against the calculated nonius "
+                   "position",
+                   "The absolute position cannot be computed reliably at the current position. The "
+                   "encoder is not calibrated, its mechanics changed, the ring expanded with heat, "
+                   "or the magnetic ring is damaged.",
+                   "Run the iC-MU calibration again."),
+    icMuStatus1Bit(4, "MT_CTR",
+                   "Multiturn data consistency error: counted multiturn against the external "
+                   "multiturn data",
+                   "The multiturn counter is not synchronised. The multiturn configuration may not "
+                   "be saved.",
+                   kMultiturnRemedy),
+    icMuStatus1Bit(5, "MT_ERR", "Multiturn communication error",
+                   "The multiturn counter is in an error state.", kMultiturnRemedy),
+    icMuStatus1Bit(6, "EPR_ERR",
+                   "I2C communication error: no EEPROM, or an I2C communication error",
+                   "The communication with the EEPROM of the encoder failed.",
+                   "Power cycle the drive. If the error stays, there is a hardware problem: "
+                   "contact support."),
+    icPvlStatusBit(0, "STUP_ERR", "Startup error",
+                   "The iC-PVL did not start correctly, for example because the I2C line is stuck, "
+                   "the EEPROM read failed, or the checksum in the EEPROM is not valid. The iC-PVL "
+                   "acquires no position, and its interfaces are blocked.",
+                   kIcPvlChecksumRemedy),
+    icPvlStatusBit(1, "CFG_ERR", "Internal configuration error",
+                   "The configuration in the RAM of the iC-PVL does not match its checksum. The "
+                   "position is not valid. A write to the RAM configuration over I2C also sets "
+                   "this bit, and an SCLR command clears it.",
+                   kIcPvlChecksumRemedy),
+    icPvlStatusBit(2, "CTR_ERR", "Internal counter error",
+                   "The multiturn counter in the iC-PVL does not match its checksum. The position "
+                   "is not valid. A write to MT_COUNT over I2C also sets this bit, and an SCLR "
+                   "command clears it.",
+                   kIcPvlChecksumRemedy),
+    icPvlStatusBit(3, "POS_ERR", "Position error",
+                   "The iC-PVL saw an unexpected position jump, for example from too high a speed "
+                   "or acceleration of the ring, from a weak or disturbed magnetic signal, or from "
+                   "a lost magnet. The position is not valid.",
+                   "Check the position of the magnet, and the speed and acceleration of the axis. "
+                   "Then reset the fault of the drive."),
+    icPvlStatusBit(4, "BAT_ERR", "Battery error",
+                   "The battery voltage is too low (iC-PVL datasheet, Elec. Char. No. 404). The "
+                   "position is not valid.",
+                   "Change the battery, then reset the fault of the drive."),
+    icPvlStatusBit(5, "BAT_WRN", "Battery early warning",
+                   "The battery voltage is low (iC-PVL datasheet, Elec. Char. No. 405).",
+                   "Change the battery soon. Switch the system off, change the battery and start "
+                   "again."),
+    icPvlStatusBit(6, "PDR", "Power down reset detected",
+                   "The iC-PVL was reset, because both the supply and the battery voltage fell far "
+                   "below the battery error threshold. The counter was set to zero.",
+                   "Reset the fault of the drive."),
+    icPvlStatusBit(
+        7, "PRESET", "Pin preset detected",
+        "The iC-PVL came from a power-down, a pin preset, a sleep mode or an I2C REBOOT. Set "
+        "later during operation, the bit means an unintended loss of power or a fault on the "
+        "preset line.",
+        "Reset the fault of the drive."),
+    icMuStatus0Bit(0, "AM_MIN", "Signal error: poor level (master track)",
+                   "The magnetic field is too weak for the encoder. The magnetic ring is too far "
+                   "from the encoder chip or is not detected.",
+                   "Check the position of the magnetic ring and the mechanical assembly."),
+    icMuStatus0Bit(2, "AN_MIN", "Signal error: poor level (nonius track)",
+                   "The magnetic field is too weak for the encoder. The magnetic ring is too far "
+                   "from the encoder chip or is not detected.",
+                   "Check the position of the magnetic ring and the mechanical assembly."),
+    icMuStatus0Bit(4, "STUP", "Startup iC-MU",
+                   "The encoder did not start correctly. The multiturn configuration may not be "
+                   "saved.",
+                   kMultiturnRemedy),
+};
+
+// The chip and the register of a bit the table does not name.
+IcMuStatusBit reservedStatusBit(uint8_t bit) {
+  IcMuStatusBit reserved{};
+  reserved.bit = bit;
+  if (bit < 8) {
+    reserved.chip = IcHausChip::kIcMu;
+    reserved.registerName = "STATUS1";
+    reserved.registerBit = bit;
+  } else if (bit < 16) {
+    reserved.chip = IcHausChip::kIcPvl;
+    reserved.registerName = "STATUS";
+    reserved.registerBit = static_cast<uint8_t>(bit - 8);
+  } else if (bit < 24) {
+    reserved.chip = IcHausChip::kIcMu;
+    reserved.registerName = "STATUS0";
+    reserved.registerBit = static_cast<uint8_t>(bit - 16);
+  }
+  return reserved;
+}
+
+}  // namespace
+
+void to_json(nlohmann::json& j, const IcMuStatusBit& bit) {
+  auto text = [](std::string_view value) {
+    return value.empty() ? nlohmann::json(nullptr) : nlohmann::json(std::string(value));
+  };
+  j = nlohmann::json{
+      {"bit", bit.bit},
+      {"chip",
+       bit.chip ? nlohmann::json(std::string(toString(*bit.chip))) : nlohmann::json(nullptr)},
+      {"register", text(bit.registerName)},
+      {"registerBit", bit.registerBit},
+      {"name", text(bit.name)},
+      {"title", text(bit.title)},
+      {"description", text(bit.description)},
+      {"remedy", text(bit.remedy)},
+  };
+}
+
+std::span<const IcMuStatusBit> icMuStatusBits() { return kIcMuStatusBits; }
+
+std::vector<IcMuStatusBit> decodeIcMuEncoderStatus(uint32_t encoderStatus) {
+  std::vector<IcMuStatusBit> bits;
+  for (uint8_t bit = 0; bit < 32; ++bit) {
+    if ((encoderStatus & (1U << bit)) == 0) {
+      continue;
+    }
+    const auto named = std::ranges::find(kIcMuStatusBits, bit, &IcMuStatusBit::bit);
+    bits.push_back(named != kIcMuStatusBits.end() ? *named : reservedStatusBit(bit));
+  }
+  return bits;
+}
+
+std::expected<uint32_t, std::string> parseIcMuEncoderStatus(std::string_view text) {
+  int base = 10;
+  std::string_view digits = text;
+  if (digits.starts_with("0x") || digits.starts_with("0X")) {
+    base = 16;
+    digits.remove_prefix(2);
+  }
+  uint32_t value = 0;
+  const auto* first = std::to_address(digits.begin());
+  const auto* end = std::to_address(digits.end());
+  const auto [ptr, error] = std::from_chars(first, end, value, base);
+  if (digits.empty() || error != std::errc() || ptr != end) {
+    return std::unexpected(std::format(
+        "'{}' is not an encoder status word: give a number from 0 to 4294967295, in decimal or "
+        "with a 0x prefix",
+        text));
+  }
+  return value;
 }
 
 std::optional<std::string> icMuPartError(uint8_t sensorPort, uint8_t hardRev) {

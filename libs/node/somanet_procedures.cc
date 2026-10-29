@@ -1276,7 +1276,17 @@ std::expected<void, std::string> runIcMuEncoderStatusProcedure(Device& device,
     if (!output) {
       return fail(kIcMuEncoderStatusRegistersStep, output.error());
     }
-    statuses.push_back(somanet::icMuEncoderStatus(encoder, *hardRev, *output));
+    // An SDO read of what the drive latched, not a read of the chips: a read of STATUS1 clears the
+    // iC-MU errors it would show.
+    auto encoderStatus = encoder.encoderOrdinal == somanet::EncoderOrdinal::kEncoder1
+                             ? device.readValue(somanet::objects::kEncoder1FeedbackEncoderStatus)
+                             : device.readValue(somanet::objects::kEncoder2FeedbackEncoderStatus);
+    if (!encoderStatus) {
+      return fail(kIcMuEncoderStatusRegistersStep, encoderStatus.error());
+    }
+    auto status = somanet::icMuEncoderStatus(encoder, *hardRev, *output);
+    status.encoderStatus = *encoderStatus;
+    statuses.push_back(std::move(status));
   }
   reporter.succeed(kIcMuEncoderStatusRegistersStep, statuses);
   return {};

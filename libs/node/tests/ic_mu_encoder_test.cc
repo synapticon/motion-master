@@ -431,4 +431,86 @@ TEST(IcMuMultiturnBitsWarning, WarnsOnlyOnTheMultiturnPathWithOtherThan18Bits) {
   EXPECT_NE(warning->find("16 multiturn bits"), std::string::npos) << *warning;
 }
 
+TEST(IcMuStatusBits, NameExactlyTheBitsTheFirmwareLatches) {
+  // STATUS0 << 16 | iC-PVL status << 8 | STATUS1, each with the firmware's mask.
+  constexpr uint32_t kLatched = (0x15U << 16) | (0xFFU << 8) | 0x7EU;
+  uint32_t named = 0;
+  for (const auto& bit : mm::node::somanet::icMuStatusBits()) {
+    EXPECT_FALSE(bit.name.empty());
+    EXPECT_FALSE(bit.title.empty()) << bit.name;
+    EXPECT_FALSE(bit.description.empty()) << bit.name;
+    EXPECT_EQ(named & (1U << bit.bit), 0U) << bit.name << " is named twice";
+    named |= 1U << bit.bit;
+  }
+  EXPECT_EQ(named, kLatched);
+}
+
+TEST(DecodeIcMuEncoderStatus, NamesEachBitWithItsChipAndRegister) {
+  struct Case {
+    uint8_t bit;
+    std::string_view name;
+    std::string_view chip;
+    std::string_view registerName;
+    uint8_t registerBit;
+  };
+  const std::array cases = {
+      Case{1, "FRQ_CNV", "iC-MU", "STATUS1", 1},  Case{2, "FRQ_ABZ", "iC-MU", "STATUS1", 2},
+      Case{3, "NON_CTR", "iC-MU", "STATUS1", 3},  Case{4, "MT_CTR", "iC-MU", "STATUS1", 4},
+      Case{5, "MT_ERR", "iC-MU", "STATUS1", 5},   Case{6, "EPR_ERR", "iC-MU", "STATUS1", 6},
+      Case{8, "STUP_ERR", "iC-PVL", "STATUS", 0}, Case{9, "CFG_ERR", "iC-PVL", "STATUS", 1},
+      Case{10, "CTR_ERR", "iC-PVL", "STATUS", 2}, Case{11, "POS_ERR", "iC-PVL", "STATUS", 3},
+      Case{12, "BAT_ERR", "iC-PVL", "STATUS", 4}, Case{13, "BAT_WRN", "iC-PVL", "STATUS", 5},
+      Case{14, "PDR", "iC-PVL", "STATUS", 6},     Case{15, "PRESET", "iC-PVL", "STATUS", 7},
+      Case{16, "AM_MIN", "iC-MU", "STATUS0", 0},  Case{18, "AN_MIN", "iC-MU", "STATUS0", 2},
+      Case{20, "STUP", "iC-MU", "STATUS0", 4},
+  };
+  for (const auto& c : cases) {
+    const auto bits = mm::node::somanet::decodeIcMuEncoderStatus(1U << c.bit);
+    ASSERT_EQ(bits.size(), 1u) << c.name;
+    EXPECT_EQ(bits[0].bit, c.bit);
+    EXPECT_EQ(bits[0].name, c.name);
+    ASSERT_TRUE(bits[0].chip) << c.name;
+    EXPECT_EQ(mm::node::somanet::toString(*bits[0].chip), c.chip) << c.name;
+    EXPECT_EQ(bits[0].registerName, c.registerName) << c.name;
+    EXPECT_EQ(bits[0].registerBit, c.registerBit) << c.name;
+  }
+}
+
+TEST(DecodeIcMuEncoderStatus, ReportsAReservedBitWithoutAName) {
+  // STATUS0 bit 1, AM_MAX, which the firmware masks out.
+  auto bits = mm::node::somanet::decodeIcMuEncoderStatus(1U << 17);
+  ASSERT_EQ(bits.size(), 1u);
+  EXPECT_EQ(bits[0].bit, 17);
+  EXPECT_TRUE(bits[0].name.empty());
+  EXPECT_EQ(bits[0].registerName, "STATUS0");
+  EXPECT_EQ(bits[0].registerBit, 1);
+  EXPECT_EQ(nlohmann::json(bits[0])["name"], nullptr);
+
+  // Bits 24-31 belong to no chip.
+  bits = mm::node::somanet::decodeIcMuEncoderStatus(1U << 31);
+  ASSERT_EQ(bits.size(), 1u);
+  EXPECT_FALSE(bits[0].chip);
+  EXPECT_EQ(nlohmann::json(bits[0])["chip"], nullptr);
+}
+
+TEST(DecodeIcMuEncoderStatus, ListsSeveralBitsLowestFirstAndNothingForZero) {
+  EXPECT_TRUE(mm::node::somanet::decodeIcMuEncoderStatus(0).empty());
+  // BAT_ERR, BAT_WRN, PDR and PRESET.
+  const auto bits = mm::node::somanet::decodeIcMuEncoderStatus(0xF000);
+  ASSERT_EQ(bits.size(), 4u);
+  EXPECT_EQ(bits[0].name, "BAT_ERR");
+  EXPECT_EQ(bits[3].name, "PRESET");
+}
+
+TEST(ParseIcMuEncoderStatus, TakesDecimalAndHexadecimal) {
+  using mm::node::somanet::parseIcMuEncoderStatus;
+  EXPECT_EQ(parseIcMuEncoderStatus("4096"), 4096u);
+  EXPECT_EQ(parseIcMuEncoderStatus("0x1000"), 4096u);
+  EXPECT_EQ(parseIcMuEncoderStatus("0XFFFFFFFF"), 0xFFFFFFFFu);
+  EXPECT_EQ(parseIcMuEncoderStatus("0"), 0u);
+  for (const auto* bad : {"", "0x", "-1", "1000a", "4294967296", "0x100000000", " 1"}) {
+    EXPECT_FALSE(parseIcMuEncoderStatus(bad)) << bad;
+  }
+}
+
 }  // namespace

@@ -1308,6 +1308,12 @@ std::expected<IcMuEncoderConfigurationRequest, std::string> parseIcMuEncoderConf
   }
   request.encoderOrdinal = *encoder;
 
+  auto restoreFile = readBool(body, "writeRestoreFile", request.writeRestoreFile);
+  if (!restoreFile) {
+    return std::unexpected(restoreFile.error());
+  }
+  request.writeRestoreFile = *restoreFile;
+
   auto battery = body.find("batteryMode");
   if (battery == body.end() || battery->is_null()) {
     return request;
@@ -1348,6 +1354,12 @@ std::vector<ProcedureParameter> icMuEncoderConfigurationParameters() {
           "encoder on the motor shaft and 0x68 for one on the driving shaft. Only the multiturn "
           "path takes a battery mode, and a ring of 16 master pole pairs takes only the default.",
           std::string(kDefaultBatteryMode), std::move(batteryModes)),
+      booleanParameter("writeRestoreFile", "Write the restore file",
+                       "Writes the configured registers to the restore file of the sensor port. "
+                       "The drive writes that file back into the encoder when the iC-MU reports a "
+                       "corrupted EEPROM. Leave it off to keep the file there now. The drive keeps "
+                       "a restore file only for sensor ports 1 and 2.",
+                       true),
   };
 }
 
@@ -1814,6 +1826,11 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     reporter.succeed(kIcMuVerifyStep, *verified);
 
     reporter.start(kIcMuRestoreFileStep);
+    if (!request.writeRestoreFile) {
+      reporter.succeed(kIcMuRestoreFileStep,
+                       nlohmann::json{{"file", nullptr}, {"reason", "the request left it out"}});
+      return {};
+    }
     if (!somanet::isIntegratedSensorPort(plan->encoder.sensorPort)) {
       // The drive reads a restore file only for ports 1 and 2, so a file for this port would never
       // be used.

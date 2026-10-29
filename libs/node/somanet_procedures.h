@@ -293,6 +293,11 @@ struct IcMuEncoderConfigurationRequest {
   /// the multiturn path takes it.
   std::optional<uint8_t> batteryMode;
 
+  /// Write the restore file after the configuration. The drive writes the file back into the
+  /// encoder when the iC-MU reports a corrupted EEPROM, so leaving it out keeps the file that is
+  /// there now.
+  bool writeRestoreFile = true;
+
   IcMuConfigurationWaits waits;
 };
 
@@ -301,7 +306,7 @@ struct IcMuEncoderConfigurationRequest {
 /// Accepts `{"encoderOrdinal": 1, "batteryMode": "18-microamperes"}`. @c encoderOrdinal is
 /// required, because a default would write the EEPROM of an encoder that nobody named. @c
 /// batteryMode is @c "default" or a name from @c somanet::icPvlBatteryModes, and defaults to @c
-/// "default".
+/// "default". @c writeRestoreFile defaults to true.
 std::expected<IcMuEncoderConfigurationRequest, std::string> parseIcMuEncoderConfigurationRequest(
     const nlohmann::json& body);
 

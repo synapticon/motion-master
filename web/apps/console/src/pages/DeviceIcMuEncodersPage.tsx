@@ -9,6 +9,7 @@ import {
   type ProgressStep,
 } from '@synapticon/motion-master-client'
 import Callout from '../components/Callout'
+import Checkbox from '../components/Checkbox'
 import DevicePageHeader from '../components/DevicePageHeader'
 import IcMuCalibrationSection from '../components/IcMuCalibrationSection'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -157,10 +158,14 @@ export default function DeviceIcMuEncodersPage() {
             roles={(['position', 'velocity', 'commutation'] as const).filter(
               role => encodersQuery.data?.[role] === encoder.encoderOrdinal,
             )}
-            onConfigure={batteryMode =>
+            onConfigure={(batteryMode, writeRestoreFile) =>
               start.mutate({
                 name: CONFIGURATION_PROCEDURE,
-                body: { encoderOrdinal: encoder.encoderOrdinal, ...(batteryMode ? { batteryMode } : {}) },
+                body: {
+                  encoderOrdinal: encoder.encoderOrdinal,
+                  writeRestoreFile,
+                  ...(batteryMode ? { batteryMode } : {}),
+                },
               })
             }
           />
@@ -190,10 +195,13 @@ function EncoderCard({
   calibrationAvailable: boolean
   /** The controllers that use this encoder, as GET /encoders names them. */
   roles: readonly ('position' | 'velocity' | 'commutation')[]
-  onConfigure: (batteryMode: string | null) => void
+  onConfigure: (batteryMode: string | null, writeRestoreFile: boolean) => void
 }) {
   const [batteryMode, setBatteryMode] = useState('default')
   const multiturn = status?.path === 'multiturn'
+  // The drive keeps a restore file only for sensor ports 1 and 2.
+  const restoreFilePort = encoder.sensorPort === 1 || encoder.sensorPort === 2
+  const [writeRestoreFile, setWriteRestoreFile] = useState(true)
 
   return (
     <section className="border border-grey-200 bg-white">
@@ -268,18 +276,31 @@ function EncoderCard({
             </select>
           </div>
         )}
+        {restoreFilePort && (
+          <label className="flex items-center gap-2 h-[38px] text-sm">
+            <Checkbox checked={writeRestoreFile} onChange={setWriteRestoreFile} />
+            Write the restore file
+          </label>
+        )}
         <button
           type="button"
           className={`${btnPrimary} h-[38px]`}
           disabled={busy || !status?.expectedOutputRegister}
-          onClick={() => onConfigure(multiturn && batteryMode !== 'default' ? batteryMode : null)}
+          onClick={() =>
+            onConfigure(
+              multiturn && batteryMode !== 'default' ? batteryMode : null,
+              restoreFilePort && writeRestoreFile,
+            )
+          }
         >
           Configure
         </button>
         <p className="text-xs text-grey-600 max-w-xl">
           Writes the EEPROM of the encoder. The calibration registers keep their values. The drive
           must not be in Operation Enabled, and the encoder reports no position while it is
-          configured. Read the status first.
+          configured. Read the status first. The restore file is what the drive writes back into
+          the encoder when the iC-MU reports a corrupted EEPROM. Leave it off to keep the file that
+          is there now.
         </p>
       </div>
       {calibrationAvailable && (

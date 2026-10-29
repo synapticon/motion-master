@@ -1456,6 +1456,11 @@ export interface ProcedureRequest {
     | "36-microamperes"
     | "72-microamperes";
   /**
+   * `ic-mu-encoder-configuration` only: writes the configured registers to the restore file of the sensor port, `circulo_integrated_encoder_<sensor port>_config.bin`. The drive writes that file back into the encoder when the iC-MU reports a corrupted EEPROM. False keeps the file there now. The drive keeps a restore file only for sensor ports 1 and 2.
+   * @default true
+   */
+  writeRestoreFile?: boolean;
+  /**
    * `ic-mu-calibration` only: where the ring of an external encoder on sensor port 3 to 5 sits. Required there, and refused for port 1, which is always inner, and port 2, which is always outer. The calibration starts from the values measured for that position.
    * @example "inner"
    */

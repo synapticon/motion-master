@@ -3759,6 +3759,36 @@ TEST(RunIcMuEncoderStatusProcedure, DecodesWhatTheDriveLatched) {
   }
 }
 
+TEST(RunIcMuEncoderConfigurationProcedure, KeepsTheRestoreFileWhenTheRequestLeavesItOut) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+  auto request = icMuRequest();
+  request.writeRestoreFile = false;
+
+  auto result =
+      mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{}, request);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_TRUE(driver.fileWrites.empty());
+  const auto steps = reporter.steps();
+  const auto& step =
+      *std::ranges::find(steps, mm::node::kIcMuRestoreFileStep, &mm::node::ProgressStep::id);
+  EXPECT_EQ(step.status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(step.value["file"], nullptr);
+}
+
+TEST(ParseIcMuEncoderConfigurationRequest, WritesTheRestoreFileUnlessTold) {
+  auto request = mm::node::parseIcMuEncoderConfigurationRequest({{"encoderOrdinal", 1}});
+  ASSERT_TRUE(request.has_value());
+  EXPECT_TRUE(request->writeRestoreFile);
+  request = mm::node::parseIcMuEncoderConfigurationRequest(
+      {{"encoderOrdinal", 1}, {"writeRestoreFile", false}});
+  ASSERT_TRUE(request.has_value());
+  EXPECT_FALSE(request->writeRestoreFile);
+  EXPECT_FALSE(mm::node::parseIcMuEncoderConfigurationRequest(
+      {{"encoderOrdinal", 1}, {"writeRestoreFile", "no"}}));
+}
+
 TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnIcMuWithAnotherBankSelected) {
   IcMuFakeDriver driver;
   Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);

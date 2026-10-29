@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <optional>
 #include <vector>
 
@@ -110,8 +111,8 @@ std::vector<HrdEncoderSample> gainErrorRecording(double cosineScale) {
     auto counts = [](double fraction) {
       return static_cast<uint16_t>(static_cast<unsigned>(fraction * 16384.0) & 0x3FFFU);
     };
-    const double phi = 2 * M_PI * ideal(kPolePairs - 1.0);
-    double distorted = std::atan2(std::sin(phi), cosineScale * std::cos(phi)) / (2 * M_PI);
+    const double phi = 2 * std::numbers::pi * ideal(kPolePairs - 1.0);
+    double distorted = std::atan2(std::sin(phi), cosineScale * std::cos(phi)) / (2 * std::numbers::pi);
     if (distorted < 0) {
       distorted += 1;
     }

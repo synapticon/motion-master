@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.117] - 2026-10-29
+
 ### Added
 
 - **Read the firmware descriptors a device accepts.** `GET /api/devices/{slavePosition}/firmware-descriptors` returns the device descriptor and, where the hardware description names an assembly, the assembly descriptor, without a package to compare. The Firmware page shows them from it, so they appear before any package is in the cache.
@@ -1018,7 +1020,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.116...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.117...HEAD
+[6.0.0-alpha.117]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.116...v6.0.0-alpha.117
 [6.0.0-alpha.116]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.115...v6.0.0-alpha.116
 [6.0.0-alpha.115]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.114...v6.0.0-alpha.115
 [6.0.0-alpha.114]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.113...v6.0.0-alpha.114

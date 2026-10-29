@@ -5,11 +5,13 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
@@ -32,6 +34,9 @@
 #include "core/user_cache.h"
 #include "node/firmware_version.h"
 #include "node/ic_mu_encoder.h"
+#ifdef MM_HAVE_MU_3SL
+#include "node/ic_mu_calibration_engine.h"
+#endif
 #include "node/somanet_control.h"
 #include "node/somanet_drive_objects.h"
 
@@ -53,6 +58,9 @@ constexpr auto kMaxPollInterval = std::chrono::seconds(1);
 // token, which replaces the whole default config rather than adding to it.
 constexpr auto kEncoderRegisterTimeout = std::chrono::seconds(5);
 constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
+
+// A bound on the requested ring velocity, which catches a typo; the plan caps it by 0x6080.
+constexpr double kIcMuMaxRingVelocityRpm = 1000.0;
 
 // The battery mode token that leaves the choice to the shaft the encoder measures.
 constexpr std::string_view kDefaultBatteryMode = "default";
@@ -239,7 +247,7 @@ class DriveRestorer {
   // it would hide a failed restore.
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~DriveRestorer() {
-    if (!mode_ && !brake_ && !disarmChirp_) {
+    if (!mode_ && !brake_ && !disarmChirp_ && !profile_ && !targetVelocity_) {
       return;
     }
     reporter_.start(kRestoreStep);
@@ -290,6 +298,20 @@ class DriveRestorer {
         note(std::format("failed to restore operation mode {}: {}", *mode_, r.error()));
       }
     }
+    // The setpoints after the drive is disabled, so that none of them is followed on the way out.
+    if (targetVelocity_) {
+      if (auto r = drive_.setTargetVelocity(*targetVelocity_); !r) {
+        note(std::format("failed to restore the target velocity: {}", r.error()));
+      }
+    }
+    if (profile_) {
+      if (auto r = drive_.setProfileAcceleration(profile_->first); !r) {
+        note(std::format("failed to restore the profile acceleration: {}", r.error()));
+      }
+      if (auto r = drive_.setProfileDeceleration(profile_->second); !r) {
+        note(std::format("failed to restore the profile deceleration: {}", r.error()));
+      }
+    }
     if (failures.empty()) {
       reporter_.succeed(kRestoreStep);
     } else {
@@ -313,6 +335,14 @@ class DriveRestorer {
   // Arms the disarm of the chirp.
   void disarmChirp() { disarmChirp_ = true; }
 
+  // Arms the restore of the profile acceleration and deceleration, 0x6083 and 0x6084.
+  void restoreProfile(uint32_t acceleration, uint32_t deceleration) {
+    profile_ = std::pair{acceleration, deceleration};
+  }
+
+  // Arms the restore of the target velocity, 0x60FF.
+  void restoreTargetVelocity(int32_t velocity) { targetVelocity_ = velocity; }
+
  private:
   SomanetDrive& drive_;
   ProgressReporter& reporter_;
@@ -321,6 +351,8 @@ class DriveRestorer {
   cia402::State resting_{cia402::State::kSwitchOnDisabled};
   std::optional<somanet::BrakeStatus> brake_;
   bool disarmChirp_ = false;
+  std::optional<std::pair<uint32_t, uint32_t>> profile_;
+  std::optional<int32_t> targetVelocity_;
 };
 
 // The preparation every diagnostics-mode OS command needs: SOMANET's diagnostics operation mode and
@@ -1154,6 +1186,46 @@ std::expected<uint8_t, std::string> readIcMuRegister(SomanetDrive& drive,
   return *result->value;
 }
 
+// Refuses an iC-MU whose BANKSEL (0x40) is not 0. Addresses 0x00-0x3F reach the bank BANKSEL
+// selects, so with another bank a write meant for the configuration lands in the EEPROM banks, and
+// the read-back of the same address still matches (iC-MU datasheet Rev B1, Table 88).
+std::expected<void, std::string> checkIcMuBank(SomanetDrive& drive, somanet::EncoderOrdinal encoder,
+                                               const std::stop_token& stop) {
+  constexpr uint8_t kBankSelectRegister = 0x40;
+  auto bank = readIcMuRegister(drive, encoder, kBankSelectRegister, stop);
+  if (!bank) {
+    return std::unexpected(bank.error());
+  }
+  if (*bank != 0) {
+    return std::unexpected(std::format(
+        "register 0x40 (BANKSEL) of the iC-MU holds 0x{:02X}, not 0, so its configuration is not "
+        "in reach; power the encoder off and on, which sets it to 0",
+        *bank));
+  }
+  return {};
+}
+
+// Writes the file the drive writes to the encoder when the iC-MU reports a corrupted EEPROM, and
+// returns its name. Requires somanet::isIntegratedSensorPort.
+std::expected<std::string, std::string> writeIcMuRestoreFile(Device& device, SomanetDrive& drive,
+                                                             somanet::EncoderOrdinal encoder,
+                                                             uint8_t sensorPort,
+                                                             const std::stop_token& stop) {
+  std::vector<uint8_t> values;
+  for (const uint8_t address : somanet::icMuRestoreRegisters()) {
+    auto value = readIcMuRegister(drive, encoder, address, stop);
+    if (!value) {
+      return std::unexpected(value.error());
+    }
+    values.push_back(*value);
+  }
+  auto name = somanet::icMuRestoreFileName(sensorPort);
+  if (auto written = device.writeFile(name, somanet::icMuRestoreFile(values)); !written) {
+    return std::unexpected(std::format("could not write '{}': {}", name, written.error().message));
+  }
+  return name;
+}
+
 }  // namespace
 
 std::vector<ProgressStep> icMuEncoderStatusSteps() {
@@ -1329,14 +1401,103 @@ somanet::IcMuRegisterWrite icMuCommand(somanet::IcMuCommand command) {
   return {somanet::kIcMuCommandRegister, static_cast<uint8_t>(command)};
 }
 
+// Bits of iC-MU STATUS1 (register 0x77, iC-MU datasheet Rev B1, Table 97).
+constexpr uint8_t kIcMuStatus1Register = 0x77;
+constexpr uint8_t kIcMuCrcError = 0x80;
+constexpr uint8_t kIcMuEepromError = 0x40;
+constexpr uint8_t kIcMuCommandInProgress = 0x01;
+
+constexpr auto kIcMuCommandTimeout = std::chrono::seconds(5);
+constexpr auto kIcMuCommandPollInterval = std::chrono::milliseconds(20);
+
+// Runs one iC-MU command, waits until it is done, and returns STATUS1. CMD_MU keeps the command
+// code while the command is queued and turns 0 when it starts, and STATUS1 bit 0 is set while it
+// runs (iC-MU datasheet Rev B1, p. 61 and Table 97). So the wait is for both, in that order; bit 0
+// alone reads 0 for a command still queued. STATUS1 is read first, because with the accumulated
+// status configured it keeps a bit until it is read. EPR_ERR fails the command: it reports an I²C
+// transfer that failed, and the datasheet checks an EEPROM write with it.
+std::expected<uint8_t, std::string> runIcMuCommand(SomanetDrive& drive,
+                                                   somanet::EncoderOrdinal encoder,
+                                                   somanet::IcMuCommand command,
+                                                   const std::stop_token& stop) {
+  if (auto before = readIcMuRegister(drive, encoder, kIcMuStatus1Register, stop); !before) {
+    return std::unexpected(before.error());
+  }
+  if (auto r = writeIcMuRegister(drive, encoder, icMuCommand(command), stop); !r) {
+    return std::unexpected(r.error());
+  }
+  const auto code = static_cast<uint8_t>(command);
+  const auto deadline = std::chrono::steady_clock::now() + kIcMuCommandTimeout;
+  bool started = false;
+  uint8_t status1 = kIcMuCommandInProgress;
+  while (!started || (status1 & kIcMuCommandInProgress) != 0) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      return std::unexpected(
+          std::format("{}: the encoder did not finish command 0x{:02X} within 5 s",
+                      somanet::toString(encoder), code));
+    }
+    if (!sleepUnlessStopped(kIcMuCommandPollInterval, stop)) {
+      return std::unexpected("the configuration was cancelled");
+    }
+    if (!started) {
+      auto queued = readIcMuRegister(drive, encoder, somanet::kIcMuCommandRegister, stop);
+      if (!queued) {
+        return std::unexpected(queued.error());
+      }
+      started = *queued == 0;
+    }
+    if (started) {
+      auto value = readIcMuRegister(drive, encoder, kIcMuStatus1Register, stop);
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+      status1 = *value;
+    }
+  }
+  if ((status1 & kIcMuEepromError) != 0) {
+    return std::unexpected(std::format(
+        "{}: the encoder reports an I²C error (EPR_ERR) after command 0x{:02X}: STATUS1 = 0x{:02X}",
+        somanet::toString(encoder), code, status1));
+  }
+  return status1;
+}
+
+// Copies the RAM configuration into the EEPROM. A CRC_ERR after it means the RAM the copy came
+// from does not match its checksum.
+std::expected<uint8_t, std::string> saveIcMuEeprom(SomanetDrive& drive,
+                                                   somanet::EncoderOrdinal encoder,
+                                                   const std::stop_token& stop) {
+  return runIcMuCommand(drive, encoder, somanet::IcMuCommand::kWriteAll, stop)
+      .and_then([&](uint8_t status1) -> std::expected<uint8_t, std::string> {
+        if ((status1 & kIcMuCrcError) != 0) {
+          return std::unexpected(std::format(
+              "{}: the encoder reports a CRC error (CRC_ERR) after WRITE_ALL: STATUS1 = 0x{:02X}",
+              somanet::toString(encoder), status1));
+        }
+        return status1;
+      });
+}
+
+// Runs an I²C transfer: @p writes set it up and end with I2C_COM, which runs it.
+std::expected<void, std::string> runIcMuI2cTransfer(
+    SomanetDrive& drive, somanet::EncoderOrdinal encoder,
+    std::span<const somanet::IcMuRegisterWrite> writes, const std::stop_token& stop) {
+  return writeIcMuRegisters(drive, encoder, writes.first(writes.size() - 1), stop).and_then([&] {
+    return runIcMuCommand(drive, encoder, somanet::IcMuCommand::kI2cCom, stop)
+        .transform([](uint8_t) {});
+  });
+}
+
 // What the validate step decides before anything is written.
 struct IcMuPlan {
   EncoderConfiguration encoder;
   somanet::IcMuConfiguration configuration;
+  std::vector<std::string> warnings;
 };
 
 std::expected<IcMuPlan, std::string> planIcMuConfiguration(
-    Device& device, SomanetDrive& drive, const IcMuEncoderConfigurationRequest& request) {
+    Device& device, SomanetDrive& drive, const IcMuEncoderConfigurationRequest& request,
+    const std::stop_token& stop) {
   auto rawVersion = drive.manufacturerSoftwareVersion();
   if (!rawVersion) {
     return std::unexpected(rawVersion.error());
@@ -1356,12 +1517,25 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
   const auto found = std::ranges::find(configurations->encoders, request.encoderOrdinal,
                                        &EncoderConfiguration::encoderOrdinal);
   if (found == configurations->encoders.end() || !somanet::isIcMuEncoder(*found)) {
-    return std::unexpected(std::format(
-        "{} is not a BiSS or internal encoder with singleturn bits on sensor port 1 or 2",
-        somanet::toString(request.encoderOrdinal)));
+    return std::unexpected(
+        std::format("{} is not a BiSS or internal encoder with singleturn bits on a sensor port",
+                    somanet::toString(request.encoderOrdinal)));
   }
   if (auto error = somanet::icMuSingleturnBitsError(found->singleturnBits)) {
     return std::unexpected(std::move(*error));
+  }
+  if (auto bank = checkIcMuBank(drive, request.encoderOrdinal, stop); !bank) {
+    return std::unexpected(bank.error());
+  }
+  if (!somanet::isIntegratedSensorPort(found->sensorPort)) {
+    auto hardRev =
+        readIcMuRegister(drive, request.encoderOrdinal, somanet::kIcMuHardRevRegister, stop);
+    if (!hardRev) {
+      return std::unexpected(hardRev.error());
+    }
+    if (auto error = somanet::icMuPartError(found->sensorPort, *hardRev)) {
+      return std::unexpected(std::move(*error));
+    }
   }
 
   auto state = drive.state();
@@ -1374,11 +1548,14 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
         "position while it is configured");
   }
 
-  IcMuPlan plan{.encoder = *found, .configuration = {}};
+  IcMuPlan plan{.encoder = *found, .configuration = {}, .warnings = {}};
   auto& configuration = plan.configuration;
   configuration.path = somanet::icMuPath(found->sensorPort, found->multiturnBits);
   configuration.singleturnBits = found->singleturnBits;
   configuration.multiturnBits = found->multiturnBits;
+  if (auto warning = somanet::icMuMultiturnBitsWarning(configuration.path, found->multiturnBits)) {
+    plan.warnings.push_back(std::move(*warning));
+  }
   configuration.safeMotion = device
                                  .parameter(somanet::objects::kEncoderSourceTypeCount.index,
                                             somanet::objects::kEncoderSourceTypeCount.subindex)
@@ -1429,6 +1606,7 @@ nlohmann::json toJson(const IcMuPlan& plan) {
       {"singleturnBits", c.singleturnBits},
       {"multiturnBits", c.multiturnBits},
       {"outputPorts", somanet::icMuOutputPorts(c.safeMotion)},
+      {"warnings", plan.warnings},
   };
   j["batteryMode"] = c.path == somanet::IcMuPath::kMultiturn ? nlohmann::json(c.batteryMode)
                                                              : nlohmann::json(nullptr);
@@ -1454,7 +1632,7 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
       .timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval, .stop = stop};
 
   reporter.start(kIcMuValidateStep);
-  auto plan = planIcMuConfiguration(device, *drive, request);
+  auto plan = planIcMuConfiguration(device, *drive, request, stop);
   if (!plan) {
     return fail(kIcMuValidateStep, plan.error());
   }
@@ -1474,10 +1652,14 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
   auto command = [&](somanet::IcMuCommand c) {
     return writeIcMuRegister(*drive, encoder, icMuCommand(c), stop);
   };
+  auto transfer = [&](std::span<const somanet::IcMuRegisterWrite> writes) {
+    return runIcMuI2cTransfer(*drive, encoder, writes, stop);
+  };
+  auto save = [&]() { return saveIcMuEeprom(*drive, encoder, stop).transform([](uint8_t) {}); };
   auto read = [&](uint8_t address) { return readIcMuRegister(*drive, encoder, address, stop); };
   // SCLR clears the iC-PVL status, and ABS_RESET has the iC-MU read the revolution count again.
   auto clearAndReset = [&]() -> std::expected<void, std::string> {
-    if (auto r = write(somanet::icPvlCommand(somanet::IcPvlCommand::kSclr)); !r) {
+    if (auto r = transfer(somanet::icPvlCommand(somanet::IcPvlCommand::kSclr)); !r) {
       return r;
     }
     return command(somanet::IcMuCommand::kAbsReset);
@@ -1503,10 +1685,10 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     if (!rawPosition) {
       return std::unexpected(rawPosition.error());
     }
-    if (auto r =
-            write(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOn)).and_then([&] {
-              return write(somanet::icPvlRegisterRead(somanet::kIcPvlSyncRegister));
-            });
+    if (auto r = transfer(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOn))
+                     .and_then([&] {
+                       return transfer(somanet::icPvlRegisterRead(somanet::kIcPvlSyncRegister));
+                     });
         !r) {
       return std::unexpected(r.error());
     }
@@ -1516,14 +1698,13 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     }
     const uint8_t spoMt =
         somanet::icMuSpoMtRegister(*rawPosition, configuration.singleturnBits, *sync);
-    if (auto r =
-            write(std::array{somanet::IcMuRegisterWrite{somanet::kIcMuMpcRegister, spoMt}})
-                .and_then([&] {
-                  return write(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOff));
-                })
-                .and_then([&] { return command(somanet::IcMuCommand::kWriteAll); })
-                .and_then([&] { return waitForEncoder(waits.writeAll, stop); })
-                .and_then(clearAndReset);
+    if (auto r = write(std::array{somanet::IcMuRegisterWrite{somanet::kIcMuMpcRegister, spoMt}})
+                     .and_then([&] {
+                       return transfer(
+                           somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOff));
+                     })
+                     .and_then(save)
+                     .and_then(clearAndReset);
         !r) {
       return std::unexpected(r.error());
     }
@@ -1531,8 +1712,8 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
         {"rawPosition", *rawPosition}, {"icPvlSync", *sync & 0x07}, {"mpcRegister", spoMt}};
   };
 
-  // Reads back what the EEPROM holds now. A ring the chip does not have shows in MPC, and an output
-  // word the drive does not expect shows in OUT_MSB.
+  // Reads back the RAM, which WRITE_ALL copied into the EEPROM without an error. A ring the chip
+  // does not have shows in MPC, and an output word the drive does not expect shows in OUT_MSB.
   auto verify = [&]() -> std::expected<somanet::IcMuEncoderStatus, std::string> {
     auto mpc = read(somanet::kIcMuMpcRegister);
     if (!mpc) {
@@ -1560,24 +1741,6 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     return status;
   };
 
-  // The file the drive writes to the encoder when the iC-MU reports a corrupted EEPROM.
-  auto writeRestoreFile = [&]() -> std::expected<std::string, std::string> {
-    std::vector<uint8_t> values;
-    for (const uint8_t address : somanet::icMuRestoreRegisters()) {
-      auto value = read(address);
-      if (!value) {
-        return std::unexpected(value.error());
-      }
-      values.push_back(*value);
-    }
-    auto name = somanet::icMuRestoreFileName(plan->encoder.sensorPort);
-    if (auto written = device.writeFile(name, somanet::icMuRestoreFile(values)); !written) {
-      return std::unexpected(
-          std::format("could not write '{}': {}", name, written.error().message));
-    }
-    return name;
-  };
-
   // Every step that writes the encoder, so that the status bits come back on whatever it returns.
   auto configure = [&]() -> std::expected<void, std::string> {
     reporter.start(kIcMuRegistersStep);
@@ -1588,10 +1751,10 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
 
     if (multiturn) {
       reporter.start(kIcPvlRegistersStep);
-      auto pvl = write(somanet::icPvlEepromWrites(configuration))
+      auto pvl = transfer(somanet::icPvlEepromWrites(configuration))
                      .and_then([&] { return waitForEncoder(waits.icPvlEeprom, stop); })
                      .and_then([&] {
-                       return write(somanet::icPvlCommand(somanet::IcPvlCommand::kReboot));
+                       return transfer(somanet::icPvlCommand(somanet::IcPvlCommand::kReboot));
                      })
                      .and_then([&] { return waitForEncoder(waits.icPvlReboot, stop); });
       if (!pvl) {
@@ -1601,12 +1764,9 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     }
 
     reporter.start(kIcMuEepromWriteStep);
-    auto eeprom =
-        command(somanet::IcMuCommand::kWriteAll)
-            .and_then([&] { return waitForEncoder(waits.writeAll, stop); })
-            .and_then([&]() -> std::expected<void, std::string> {
-              return multiturn ? clearAndReset() : command(somanet::IcMuCommand::kAbsReset);
-            });
+    auto eeprom = save().and_then([&]() -> std::expected<void, std::string> {
+      return multiturn ? clearAndReset() : command(somanet::IcMuCommand::kAbsReset);
+    });
     if (!eeprom) {
       return fail(kIcMuEepromWriteStep, eeprom.error());
     }
@@ -1644,7 +1804,17 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     reporter.succeed(kIcMuVerifyStep, *verified);
 
     reporter.start(kIcMuRestoreFileStep);
-    auto restored = writeRestoreFile();
+    if (!somanet::isIntegratedSensorPort(plan->encoder.sensorPort)) {
+      // The drive reads a restore file only for ports 1 and 2, so a file for this port would never
+      // be used.
+      reporter.succeed(kIcMuRestoreFileStep,
+                       nlohmann::json{{"file", nullptr},
+                                      {"reason",
+                                       "the drive keeps a restore file only for sensor "
+                                       "ports 1 and 2"}});
+      return {};
+    }
+    auto restored = writeIcMuRestoreFile(device, *drive, encoder, plan->encoder.sensorPort, stop);
     if (!restored) {
       return fail(kIcMuRestoreFileStep, restored.error());
     }
@@ -1672,6 +1842,1124 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
   }
   return {};
 }
+
+std::string icMuIterationStep(int iteration) { return std::format("iteration-{}", iteration); }
+
+std::expected<IcMuCalibrationRequest, std::string> parseIcMuCalibrationRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  IcMuCalibrationRequest request;
+  if (auto it = body.find("encoderOrdinal"); it == body.end() || it->is_null()) {
+    return std::unexpected("'encoderOrdinal' is required");
+  }
+  auto encoder = readEncoderOrdinal(body, request.encoderOrdinal);
+  if (!encoder) {
+    return std::unexpected(encoder.error());
+  }
+  request.encoderOrdinal = *encoder;
+
+  if (auto it = body.find("ringPosition"); it != body.end() && !it->is_null()) {
+    const auto position =
+        it->is_string() ? somanet::parseIcMuRingPosition(it->get<std::string>()) : std::nullopt;
+    if (!position) {
+      return std::unexpected("'ringPosition' must be inner or outer");
+    }
+    request.ringPosition = position;
+  }
+  auto measurementOnly = readBool(body, "measurementOnly", request.measurementOnly);
+  if (!measurementOnly) {
+    return std::unexpected(measurementOnly.error());
+  }
+  request.measurementOnly = *measurementOnly;
+  auto health = readBool(body, "activateHealthMonitoring", request.activateHealthMonitoring);
+  if (!health) {
+    return std::unexpected(health.error());
+  }
+  request.activateHealthMonitoring = *health;
+
+  if (auto it = body.find("ringVelocity"); it != body.end() && !it->is_null()) {
+    if (!it->is_number() || it->get<double>() <= 0 || it->get<double>() > kIcMuMaxRingVelocityRpm) {
+      return std::unexpected(
+          std::format("'ringVelocity' must be a number of rpm above 0 and at most {:.0f}",
+                      kIcMuMaxRingVelocityRpm));
+    }
+    request.ringVelocityRpm = it->get<double>();
+  }
+  return request;
+}
+
+std::vector<ProcedureParameter> icMuCalibrationParameters() {
+  return {
+      encoderParameter(std::nullopt),
+      enumParameter("ringPosition", "Ring position",
+                    "Where the ring of an external encoder sits, inner or outer. Sensor port 1 is "
+                    "always inner and port 2 always outer, so a request for those ports leaves it "
+                    "out. The calibration starts from the values measured for that position.",
+                    // Empty, not null: the field is optional, and only an external port needs it.
+                    nlohmann::json(""),
+                    {ParameterOption{.value = "inner", .title = "Inner"},
+                     ParameterOption{.value = "outer", .title = "Outer"}}),
+      booleanParameter("measurementOnly", "Validation only",
+                       "Runs one validation pass, which reports the phase margins of the "
+                       "calibration the encoder holds, and writes nothing to the encoder.",
+                       false),
+      booleanParameter("activateHealthMonitoring", "Health monitoring",
+                       "After a full calibration, shows the NON_CTR error of the iC-MU in the "
+                       "BiSS error bit, register 0x0C = 0x2C.",
+                       false),
+      integerParameter("ringVelocity", "Ring velocity (rpm)",
+                       "The velocity of the ring of the encoder. Without it a motor-shaft encoder "
+                       "runs at the velocity measured for its ring and a driving-shaft encoder at "
+                       "15 rpm.",
+                       nlohmann::json(""), 1, static_cast<int64_t>(kIcMuMaxRingVelocityRpm)),
+  };
+}
+
+std::vector<ProgressStep> icMuCalibrationSteps() {
+  std::vector<std::string> ids = {std::string(kIcMuValidateStep), std::string(kPrepareStep),
+                                  std::string(kIcMuIgnoreStatusBitsStep),
+                                  std::string(kIcMuStartValuesStep), std::string(kIcMuRawModeStep)};
+  for (int iteration = 1; iteration <= somanet::kIcMuMaxIterations; ++iteration) {
+    ids.push_back(icMuIterationStep(iteration));
+  }
+  for (const auto id : {kIcMuValidationStep, kIcMuStandardModeStep, kIcMuSaveStep,
+                        kIcMuAbsResetStep, kIcMuRestoreFileStep, kIcMuReturnStep,
+                        kIcMuRestoreEncoderStep, kIcMuRestoreStatusBitsStep, kRestoreStep}) {
+    ids.emplace_back(id);
+  }
+  std::vector<ProgressStep> steps;
+  for (auto& id : ids) {
+    ProgressStep step;
+    step.id = std::move(id);
+    steps.push_back(std::move(step));
+  }
+  return steps;
+}
+
+#ifdef MM_HAVE_MU_3SL
+
+namespace {
+
+// Register 0x10 holds the multiturn interface. An inner encoder with multiturn bits has its cyclic
+// check, CHK_MT in bit 6, turned off during the calibration; the other fields keep their values.
+constexpr uint8_t kIcMuMultiturnInterfaceRegister = 0x10;
+constexpr uint8_t kIcMuMultiturnCheck = 0x40;
+
+// Raw mode: the output word ends at bit 27 and carries the two tracks.
+constexpr uint8_t kIcMuModeRegister = 0x12;
+constexpr uint8_t kIcMuRawOutMsb = 0x0E;
+constexpr uint8_t kIcMuRawMode = 0x20;
+
+// Register 0x0C with the NON_CTR error shown in the BiSS error bit.
+constexpr uint8_t kIcMuHealthMonitoring = 0x2C;
+
+// The validation fails below this phase margin, in percent.
+constexpr double kIcMuMinMarginPercent = 10.0;
+
+// The position may move by this many counts of the position encoder in an ABS_RESET without a
+// warning.
+constexpr double kIcMuAbsResetJump = 4096.0;
+
+// The recording starts this long before the velocity is reached, because the start command takes
+// a mailbox round trip.
+constexpr double kIcMuRecordingLead = 0.02;
+
+// A curve in a step value keeps at most this many points, so that a fast recording does not make
+// a snapshot of megabytes.
+constexpr size_t kIcMuCurvePoints = 720;
+
+// Moves to a position: the velocity profile of the configuration in use today.
+constexpr double kMoveAccelerationRpmPerSecond = 30.0;
+constexpr double kMoveMinVelocityRpm = 3.0;
+constexpr double kMoveMaxVelocityRpm = 120.0;
+constexpr auto kMoveStationaryTimeout = std::chrono::seconds(10);
+
+// The units of one drive, and the conversions between them and revolutions of the driving shaft.
+struct IcMuUnits {
+  double velocityPerRpm = 1;         // 0x60FF units per rpm of the driving shaft.
+  double positionPerRevolution = 1;  // 0x6064 units per revolution of the driving shaft.
+  uint32_t positionEncoderResolution = 0;
+  double feedRatio = 1;
+
+  int32_t velocity(double speedRpm) const {
+    return static_cast<int32_t>(std::lround(speedRpm * velocityPerRpm * feedRatio));
+  }
+  uint32_t acceleration(double rpmPerSecond) const {
+    return static_cast<uint32_t>(std::lround(rpmPerSecond * velocityPerRpm * feedRatio));
+  }
+  double revolutions(int64_t units) const {
+    return static_cast<double>(units) / positionPerRevolution;
+  }
+  int64_t position(double turns) const { return std::llround(turns * positionPerRevolution); }
+};
+
+// Everything validate decides before the motor moves.
+struct IcMuCalibrationPlan {
+  EncoderConfiguration encoder;
+  Encoders encoders;
+  uint8_t hardRev = 0;
+  uint8_t masterPolePairs = 0;
+  somanet::IcMuRingPosition ringPosition{somanet::IcMuRingPosition::kInner};
+  somanet::IcMuStartValues startValues;
+  somanet::EncoderShaft shaft{somanet::EncoderShaft::kMotor};
+  IcMuUnits units;
+  somanet::IcMuMotionPlan motion;
+  SoftwarePositionLimit limits;
+  int32_t startPosition = 0;
+  double gearRatio = 1;
+  double maxVelocityRpm = 0;  // On the driving shaft.
+  bool multiturnCheckOff = false;
+  std::vector<std::string> warnings;
+};
+
+nlohmann::json toJson(const IcMuCalibrationPlan& plan) {
+  return nlohmann::json{
+      {"encoderOrdinal", static_cast<int>(plan.encoder.encoderOrdinal)},
+      {"sensorPort", plan.encoder.sensorPort},
+      {"ringPosition", somanet::toString(plan.ringPosition)},
+      {"part", somanet::icMuPartName(plan.hardRev).value_or("unknown")},
+      {"masterPolePairs", plan.masterPolePairs},
+      {"shaft", somanet::toString(plan.shaft)},
+      {"startValuesMeasured", plan.startValues.measured},
+      {"velocityRpm", plan.motion.velocityRpm},
+      {"accelerationRpmPerSecond", plan.motion.accelerationRpmPerSecond},
+      {"recordingMs", plan.motion.recording.count()},
+      {"limitedRange", plan.motion.limitedRange},
+      {"warnings", plan.warnings},
+  };
+}
+
+std::string refuse(std::string_view why) { return std::string(why); }
+
+std::expected<IcMuCalibrationPlan, std::string> planIcMuCalibration(
+    Device& device, SomanetDrive& drive, const IcMuCalibrationRequest& request,
+    const std::stop_token& stop) {
+  IcMuCalibrationPlan plan;
+
+  auto rawVersion = drive.manufacturerSoftwareVersion();
+  if (!rawVersion) {
+    return std::unexpected(rawVersion.error());
+  }
+  const auto version = trimFirmwareVersion(
+      std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
+  if (auto error = icMuFirmwareError(version)) {
+    return std::unexpected(std::move(*error));
+  }
+
+  auto state = drive.state();
+  if (!state) {
+    return std::unexpected(state.error());
+  }
+  if (*state == cia402::State::kOperationEnabled) {
+    return std::unexpected(
+        refuse("the drive is in Operation Enabled; disable it first, because the calibration "
+               "enables it in profile velocity mode"));
+  }
+
+  auto configurations = drive.encoders();
+  if (!configurations) {
+    return std::unexpected(configurations.error());
+  }
+  plan.encoders = *configurations;
+  const auto found = std::ranges::find(configurations->encoders, request.encoderOrdinal,
+                                       &EncoderConfiguration::encoderOrdinal);
+  if (found == configurations->encoders.end() || !somanet::isIcMuEncoder(*found)) {
+    return std::unexpected(
+        std::format("{} is not a BiSS or internal encoder with singleturn bits on a sensor port",
+                    somanet::toString(request.encoderOrdinal)));
+  }
+  plan.encoder = *found;
+  if (auto error = somanet::icMuSingleturnBitsError(found->singleturnBits)) {
+    return std::unexpected(std::move(*error));
+  }
+  plan.masterPolePairs = somanet::icMuMasterPolePairs(found->singleturnBits);
+  if (auto bank = checkIcMuBank(drive, request.encoderOrdinal, stop); !bank) {
+    return std::unexpected(bank.error());
+  }
+
+  auto hardRev =
+      readIcMuRegister(drive, request.encoderOrdinal, somanet::kIcMuHardRevRegister, stop);
+  if (!hardRev) {
+    return std::unexpected(hardRev.error());
+  }
+  plan.hardRev = *hardRev;
+  if (auto error = somanet::icMuPartError(found->sensorPort, *hardRev)) {
+    return std::unexpected(std::move(*error));
+  }
+  const auto partClass = somanet::icMuPartClass(*hardRev);
+  if (!partClass) {
+    return std::unexpected(
+        std::format("the calibration has no start values for the {} (register 0x74 = 0x{:02X})",
+                    somanet::icMuPartName(*hardRev).value_or("part"), *hardRev));
+  }
+
+  if (const auto portPosition = somanet::icMuRingPositionOfPort(found->sensorPort)) {
+    if (request.ringPosition) {
+      return std::unexpected(
+          std::format("'ringPosition' is refused for sensor port {}, which is always {}",
+                      found->sensorPort, somanet::toString(*portPosition)));
+    }
+    plan.ringPosition = *portPosition;
+  } else if (request.ringPosition) {
+    plan.ringPosition = *request.ringPosition;
+  } else {
+    return std::unexpected(
+        std::format("the encoder on external sensor port {} needs 'ringPosition', inner or outer",
+                    found->sensorPort));
+  }
+
+  const auto startValues =
+      somanet::icMuStartValues(plan.masterPolePairs, plan.ringPosition, *partClass);
+  if (!startValues) {
+    return std::unexpected(
+        std::format("no start values exist for an {} with {} master pole pairs at the {} position",
+                    somanet::icMuPartName(*hardRev).value_or("iC-MU"), plan.masterPolePairs,
+                    somanet::toString(plan.ringPosition)));
+  }
+  plan.startValues = *startValues;
+  if (!startValues->measured) {
+    plan.warnings.push_back(std::format(
+        "The start values for an {} with {} master pole pairs at the {} position were not "
+        "measured; the calibration uses those of another ring.",
+        somanet::icMuPartName(*hardRev).value_or("iC-MU"), plan.masterPolePairs,
+        somanet::toString(plan.ringPosition)));
+  }
+
+  // A safety module that monitors an encoder trips a safe state when the encoder changes.
+  if (device.parameter(somanet::objects::kEncoderSourceType.index,
+                       somanet::objects::kEncoderSourceType.subindex)) {
+    auto source = device.readValue(somanet::objects::kEncoderSourceType);
+    if (!source) {
+      return std::unexpected(source.error());
+    }
+    if (*source != 0) {
+      return std::unexpected(
+          "the safety module monitors an encoder (0x2630:01 is not 0); set its encoder source "
+          "type to none before the calibration");
+    }
+  }
+
+  if (!configurations->commutation) {
+    return std::unexpected("no encoder is the commutation source (0x2010:0C)");
+  }
+  const bool role = configurations->position == request.encoderOrdinal ||
+                    configurations->velocity == request.encoderOrdinal;
+  if (!role) {
+    return std::unexpected(std::format(
+        "{} is neither the position source (0x2012:09) nor the velocity source (0x2011:05)",
+        somanet::toString(request.encoderOrdinal)));
+  }
+
+  auto modes = drive.supportedDriveModes();
+  if (!modes) {
+    return std::unexpected(modes.error());
+  }
+  if ((*modes & (1U << 2)) == 0) {
+    return std::unexpected("the drive does not support profile velocity mode (0x6502 bit 2)");
+  }
+
+  auto gear = drive.gearRatio();
+  if (!gear) {
+    return std::unexpected(gear.error());
+  }
+  plan.gearRatio = gear->motorRevolutions == 0 || gear->shaftRevolutions == 0
+                       ? 1.0
+                       : static_cast<double>(gear->motorRevolutions) / gear->shaftRevolutions;
+  plan.gearRatio = std::max(plan.gearRatio, 1.0);
+  plan.shaft = somanet::encoderShaft(*configurations, request.encoderOrdinal, *gear)
+                   .value_or(somanet::EncoderShaft::kMotor);
+
+  auto feed = drive.feedConstant();
+  if (!feed) {
+    return std::unexpected(feed.error());
+  }
+  if (feed->feed == 0 || feed->shaftRevolutions == 0) {
+    return std::unexpected("the feed constant (0x6092) is 0");
+  }
+  plan.units.feedRatio = feed->feed == std::numeric_limits<uint32_t>::max()
+                             ? 1.0
+                             : static_cast<double>(feed->feed) / feed->shaftRevolutions;
+  const auto positionSource = configurations->position.value_or(request.encoderOrdinal);
+  const auto positionEncoder = std::ranges::find(configurations->encoders, positionSource,
+                                                 &EncoderConfiguration::encoderOrdinal);
+  plan.units.positionEncoderResolution =
+      positionEncoder == configurations->encoders.end() ? 0 : positionEncoder->resolution;
+  plan.units.positionPerRevolution = plan.units.feedRatio == 1.0
+                                         ? static_cast<double>(plan.units.positionEncoderResolution)
+                                         : plan.units.feedRatio;
+  if (plan.units.positionPerRevolution <= 0) {
+    return std::unexpected("the position encoder reports no resolution");
+  }
+
+  auto siUnit = drive.siUnitVelocity();
+  if (!siUnit) {
+    return std::unexpected(siUnit.error());
+  }
+  const auto perRpm = cia402::velocityUnitsPerRpm(*siUnit);
+  if (!perRpm) {
+    return std::unexpected(std::format(
+        "the SI unit velocity 0x60A9 = 0x{:08X} is neither revolutions per minute nor per second",
+        *siUnit));
+  }
+  plan.units.velocityPerRpm = *perRpm;
+  if (plan.gearRatio > 1 && configurations->position &&
+      configurations->position != configurations->velocity &&
+      configurations->position != configurations->commutation &&
+      *perRpm * plan.units.feedRatio / plan.gearRatio < 0.1) {
+    return std::unexpected(
+        "the velocity resolution is too coarse for the driving shaft; choose a finer unit in the "
+        "SI unit velocity 0x60A9");
+  }
+
+  auto limits = drive.softwarePositionLimit();
+  if (!limits) {
+    return std::unexpected(limits.error());
+  }
+  plan.limits = *limits;
+  if (limits->min >= limits->max) {
+    return std::unexpected(
+        "the software position limits (0x607D) are invalid: min is not below max");
+  }
+  auto position = drive.positionActualValue();
+  if (!position) {
+    return std::unexpected(position.error());
+  }
+  plan.startPosition = *position;
+  if (*position < limits->min || *position > limits->max) {
+    return std::unexpected("the position is outside the software position limits (0x607D)");
+  }
+
+  auto maxSpeed = drive.maxMotorSpeed();
+  if (!maxSpeed) {
+    return std::unexpected(maxSpeed.error());
+  }
+  const double maxMotorSpeedRpm = *maxSpeed / (*perRpm * plan.units.feedRatio);
+  plan.maxVelocityRpm = 0.95 * maxMotorSpeedRpm / plan.gearRatio;
+
+  somanet::IcMuMotionInput input;
+  input.gearRatio = plan.gearRatio;
+  input.maxMotorSpeedRpm = maxMotorSpeedRpm;
+  input.shaft = plan.shaft;
+  input.ringVelocityRpm = request.ringVelocityRpm.value_or(
+      somanet::icMuDefaultRingVelocity(plan.startValues, plan.shaft));
+  input.lowVelocityRpm = plan.shaft == somanet::EncoderShaft::kMotor
+                             ? plan.startValues.motorShaftLowVelocityRpm
+                             : plan.startValues.drivingShaftLowVelocityRpm;
+  input.positionRevolutions = plan.units.revolutions(*position);
+  input.limitRevolutions =
+      std::pair{plan.units.revolutions(limits->min), plan.units.revolutions(limits->max)};
+  auto motion = somanet::planIcMuMotion(input);
+  if (!motion) {
+    return std::unexpected(motion.error());
+  }
+  plan.motion = std::move(*motion);
+  plan.warnings.insert(plan.warnings.end(), plan.motion.warnings.begin(),
+                       plan.motion.warnings.end());
+
+  plan.multiturnCheckOff = plan.ringPosition == somanet::IcMuRingPosition::kInner &&
+                           found->sensorPort == 1 && found->multiturnBits != 0;
+  return plan;
+}
+
+// A curve reduced to at most kIcMuCurvePoints points of [ring angle in degrees, value].
+nlohmann::json curveJson(const std::vector<int64_t>& values,
+                         std::span<const HrdEncoderSample> samples) {
+  nlohmann::json points = nlohmann::json::array();
+  if (values.empty()) {
+    return points;
+  }
+  const size_t stride = std::max<size_t>(1, values.size() / kIcMuCurvePoints);
+  for (size_t i = 0; i < values.size(); i += stride) {
+    double angle = 360.0 * static_cast<double>(i) / static_cast<double>(values.size());
+    if (values.size() == samples.size()) {
+      const auto difference = (samples[i].masterCount - samples[i].noniusCount) & 0x3FFF;
+      angle = 360.0 * difference / 16384.0;
+    }
+    points.push_back(nlohmann::json::array({angle, values[i]}));
+  }
+  return points;
+}
+
+nlohmann::json residualJson(const somanet::IcMuTrackResidual& residual, bool passed) {
+  return nlohmann::json{{"sineOffset", residual.sineOffset},
+                        {"cosineOffset", residual.cosineOffset},
+                        {"gain", residual.gain},
+                        {"phase", residual.phase},
+                        {"phaseRange", residual.phaseRange},
+                        {"passed", passed}};
+}
+
+}  // namespace
+
+std::expected<void, std::string> runIcMuCalibrationProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const IcMuCalibrationRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+  const auto encoder = request.encoderOrdinal;
+
+  reporter.start(kIcMuValidateStep);
+  auto planned = planIcMuCalibration(device, *drive, request, stop);
+  if (!planned) {
+    return fail(kIcMuValidateStep, planned.error());
+  }
+  auto& plan = *planned;
+  reporter.succeed(kIcMuValidateStep, toJson(plan));
+  const auto& units = plan.units;
+  auto& motion = plan.motion;
+
+  auto read = [&](uint8_t address) { return readIcMuRegister(*drive, encoder, address, stop); };
+  auto write = [&](std::span<const somanet::IcMuRegisterWrite> writes) {
+    return writeIcMuRegisters(*drive, encoder, writes, stop);
+  };
+  auto writeOne = [&](uint8_t address, uint8_t value) {
+    return writeIcMuRegister(*drive, encoder, {address, value}, stop);
+  };
+  const OsCommandConfig bissConfig{
+      .timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval, .stop = stop};
+
+  // What the run has changed, so that the restore path undoes exactly that.
+  DriveRestorer restorer(*drive, reporter, kIcMuCalibrationProcedure);
+  bool enabled = false;
+  bool ignoring = false;
+  bool rawMode = false;
+  bool wroteEncoder = false;
+  bool saved = false;
+  bool interrupted = false;  // A fault or a cancel: the axis is not moved again.
+  // The registers a full run writes, with the values they held before it.
+  std::vector<somanet::IcMuRegisterWrite> original;
+
+  // Fails the run the way the drive ended it: cancelled, faulted, or at a limit.
+  auto checkMotion = [&]() -> std::expected<void, std::string> {
+    if (stop.stop_requested()) {
+      interrupted = true;
+      (void)drive->quickStop();
+      return std::unexpected("the calibration was cancelled");
+    }
+    auto statusword = drive->statusword();
+    if (!statusword) {
+      return std::unexpected(statusword.error());
+    }
+    if (cia402::isFaulted(*statusword)) {
+      interrupted = true;
+      auto report = drive->errorReport();
+      return std::unexpected(
+          std::format("the drive faulted: {}", report ? *report : std::string("no error report")));
+    }
+    if (cia402::isInternalLimitActive(*statusword)) {
+      interrupted = true;
+      (void)drive->quickStop();
+      return std::unexpected(
+          "the drive reached an internal limit, such as a software position limit");
+    }
+    if (cia402::decodeState(*statusword) != cia402::State::kOperationEnabled) {
+      interrupted = true;
+      return std::unexpected("the drive left Operation Enabled");
+    }
+    return {};
+  };
+
+  auto setAcceleration = [&](double rpmPerSecond) -> std::expected<void, std::string> {
+    const auto value = units.acceleration(rpmPerSecond);
+    return drive->setProfileAcceleration(value).and_then(
+        [&] { return drive->setProfileDeceleration(value); });
+  };
+
+  // Waits until the velocity demand is 0, so that a mode or frame switch never happens in motion.
+  auto waitForStandstill = [&]() -> std::expected<void, std::string> {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (true) {
+      if (auto r = checkMotion(); !r) {
+        return r;
+      }
+      auto demand = drive->velocityDemandValue();
+      if (!demand) {
+        return std::unexpected(demand.error());
+      }
+      if (*demand == 0) {
+        return {};
+      }
+      if (std::chrono::steady_clock::now() > deadline) {
+        return std::unexpected("the drive did not come to a standstill within 30 s");
+      }
+      std::this_thread::sleep_for(request.pollInterval);
+    }
+  };
+
+  // Moves to @p target in profile velocity mode: slower near the target, stopped as it is crossed.
+  auto moveTo = [&](int32_t target) -> std::expected<void, std::string> {
+    auto position = drive->positionActualValue();
+    if (!position) {
+      return std::unexpected(position.error());
+    }
+    const double distance = std::abs(units.revolutions(int64_t{target} - *position));
+    double velocity = 150.0 * (std::sqrt(1.0 + distance / 12.5) - 1.0);
+    velocity = std::clamp(std::min(velocity, plan.maxVelocityRpm), kMoveMinVelocityRpm,
+                          kMoveMaxVelocityRpm);
+    const int direction = target > *position ? 1 : -1;
+    if (auto r = setAcceleration(kMoveAccelerationRpmPerSecond); !r) {
+      return r;
+    }
+    if (auto r = drive->setTargetVelocity(units.velocity(direction * velocity)); !r) {
+      return r;
+    }
+    const auto oneDegree = std::abs(units.position(1.0 / 360));
+    auto lastMoved = std::chrono::steady_clock::now();
+    int32_t lastPosition = *position;
+    while (true) {
+      if (auto r = checkMotion(); !r) {
+        return r;
+      }
+      position = drive->positionActualValue();
+      if (!position) {
+        return std::unexpected(position.error());
+      }
+      const int64_t remaining = int64_t{target} - *position;
+      if (remaining * direction <= 0) {
+        break;
+      }
+      const double left = std::abs(units.revolutions(remaining)) / std::max(distance, 1e-9);
+      if (left < 0.05) {
+        (void)drive->setTargetVelocity(units.velocity(direction * velocity * (0.1 + left)));
+      }
+      if (std::abs(int64_t{*position} - lastPosition) > oneDegree) {
+        lastPosition = *position;
+        lastMoved = std::chrono::steady_clock::now();
+      } else if (std::chrono::steady_clock::now() - lastMoved > kMoveStationaryTimeout) {
+        (void)drive->setTargetVelocity(0);
+        return std::unexpected("the axis did not move towards its target for 10 s");
+      }
+      std::this_thread::sleep_for(request.pollInterval);
+    }
+    if (auto r = drive->setTargetVelocity(0); !r) {
+      return r;
+    }
+    return waitForStandstill().and_then(
+        [&] { return setAcceleration(motion.accelerationRpmPerSecond); });
+  };
+
+  auto calibrate = [&]() -> std::expected<void, std::string> {
+    // Prepare: remember what the run changes, enable in profile velocity mode, and move to the
+    // start the plan asks for.
+    reporter.start(kPrepareStep);
+    auto mode = drive->operationModeValue();
+    auto acceleration = drive->profileAcceleration();
+    auto deceleration = drive->profileDeceleration();
+    auto targetVelocity = drive->targetVelocity();
+    auto state = drive->state();
+    for (const auto* error :
+         {mode ? nullptr : &mode.error(), acceleration ? nullptr : &acceleration.error(),
+          deceleration ? nullptr : &deceleration.error(),
+          targetVelocity ? nullptr : &targetVelocity.error(), state ? nullptr : &state.error()}) {
+      if (error != nullptr) {
+        return fail(kPrepareStep, *error);
+      }
+    }
+    restorer.restoreMode(*mode, *state);
+    restorer.restoreProfile(*acceleration, *deceleration);
+    restorer.restoreTargetVelocity(*targetVelocity);
+    auto prepared = drive->setTargetVelocity(0)
+                        .and_then([&] { return setAcceleration(motion.accelerationRpmPerSecond); })
+                        .and_then([&] {
+                          return drive->setOperationMode(cia402::OperationMode::kProfileVelocity);
+                        })
+                        .and_then([&] { return drive->enable(); });
+    if (!prepared) {
+      return fail(kPrepareStep, prepared.error());
+    }
+    enabled = true;
+    if (motion.startRevolutions) {
+      if (auto r = moveTo(static_cast<int32_t>(units.position(*motion.startRevolutions))); !r) {
+        return fail(kPrepareStep, r.error());
+      }
+    }
+    if (motion.limitedRange) {
+      // Plan the recording again from where the axis really stopped.
+      auto position = drive->positionActualValue();
+      if (!position) {
+        return fail(kPrepareStep, position.error());
+      }
+      const double travel =
+          units.revolutions(plan.limits.max) - (3.0 / 360) - units.revolutions(*position);
+      auto narrow = somanet::planIcMuNarrowRange(
+          travel, motion.accelerationRpmPerSecond,
+          somanet::icMuRingTurnsPerRevolution(plan.shaft, plan.gearRatio),
+          plan.shaft == somanet::EncoderShaft::kMotor
+              ? plan.startValues.motorShaftLowVelocityRpm
+              : plan.startValues.drivingShaftLowVelocityRpm);
+      if (!narrow) {
+        return fail(kPrepareStep, narrow.error());
+      }
+      motion.velocityRpm = std::min(narrow->velocityRpm, plan.maxVelocityRpm);
+      motion.recording = narrow->recording;
+    }
+    reporter.succeed(kPrepareStep, nlohmann::json{{"velocityRpm", motion.velocityRpm},
+                                                  {"recordingMs", motion.recording.count()}});
+
+    reporter.start(kIcMuIgnoreStatusBitsStep);
+    if (auto r = drive->setIgnoreBissStatusBits(encoder, true, bissConfig); !r) {
+      return fail(kIcMuIgnoreStatusBitsStep, r.error());
+    }
+    ignoring = true;
+    reporter.succeed(kIcMuIgnoreStatusBitsStep);
+
+    // The registers a full run changes, read before it changes any of them.
+    std::vector<uint8_t> touched = {somanet::kIcMuOutputRegister, kIcMuModeRegister};
+    if (!request.measurementOnly) {
+      for (const auto& w : somanet::icMuStartWrites(plan.startValues)) {
+        touched.push_back(w.address);
+      }
+      if (plan.multiturnCheckOff) {
+        touched.push_back(kIcMuMultiturnInterfaceRegister);
+      }
+    }
+    for (const uint8_t address : touched) {
+      auto value = read(address);
+      if (!value) {
+        return fail(request.measurementOnly ? kIcMuRawModeStep : kIcMuStartValuesStep,
+                    value.error());
+      }
+      original.push_back({address, *value});
+    }
+
+    if (!request.measurementOnly) {
+      reporter.start(kIcMuStartValuesStep);
+      wroteEncoder = true;
+      auto started = write(somanet::icMuStartWrites(plan.startValues));
+      if (started && plan.multiturnCheckOff) {
+        const auto interface = std::ranges::find(original, kIcMuMultiturnInterfaceRegister,
+                                                 &somanet::IcMuRegisterWrite::address);
+        started = writeOne(kIcMuMultiturnInterfaceRegister,
+                           static_cast<uint8_t>(interface->value & ~kIcMuMultiturnCheck));
+      }
+      if (!started) {
+        return fail(kIcMuStartValuesStep, started.error());
+      }
+      reporter.succeed(kIcMuStartValuesStep);
+    }
+
+    reporter.start(kIcMuRawModeStep);
+    rawMode = true;
+    auto raw = waitForStandstill()
+                   .and_then([&] {
+                     return drive->setIcMuCalibrationMode(
+                         encoder, somanet::IcMuCalibrationMode::kConfiguration, bissConfig);
+                   })
+                   .and_then([&] { return writeOne(somanet::kIcMuOutputRegister, kIcMuRawOutMsb); })
+                   .and_then([&] { return writeOne(kIcMuModeRegister, kIcMuRawMode); })
+                   .and_then([&] {
+                     return drive->setIcMuCalibrationMode(
+                         encoder, somanet::IcMuCalibrationMode::kRaw, bissConfig);
+                   });
+    if (!raw) {
+      return fail(kIcMuRawModeStep, raw.error());
+    }
+    reporter.succeed(kIcMuRawModeStep);
+
+    // The model of MU_3SL starts from what the encoder holds now.
+    auto engine = somanet::IcMuCalibrationEngine::create(plan.hardRev, plan.masterPolePairs);
+    if (!engine) {
+      return fail(icMuIterationStep(1), engine.error());
+    }
+    std::array<somanet::IcMuAnalogAdjustments, 2> current{};
+    for (const auto track : {somanet::IcMuTrack::kMaster, somanet::IcMuTrack::kNonius}) {
+      std::array<uint8_t, 4> values{};
+      const auto registers = somanet::icMuAnalogRegisters(track);
+      for (size_t i = 0; i < registers.size(); ++i) {
+        auto value = read(registers[i]);
+        if (!value) {
+          return fail(icMuIterationStep(1), value.error());
+        }
+        values[i] = *value;
+      }
+      current[track == somanet::IcMuTrack::kMaster ? 0 : 1] =
+          somanet::icMuAnalogFromRegisters(values);
+    }
+    // The model starts from the table the encoder holds: the one a full run just zeroed, or the
+    // calibrated one a validation measures.
+    auto modelled = engine->setAdjustments(current[0], current[1]);
+    if (modelled) {
+      std::array<uint8_t, 8> table{};
+      for (size_t i = 0; i < table.size() && modelled; ++i) {
+        auto value = read(static_cast<uint8_t>(somanet::kIcMuNoniusTableRegister + i));
+        if (!value) {
+          modelled = std::unexpected(value.error());
+        } else {
+          table[i] = *value;
+        }
+      }
+      if (modelled) {
+        modelled = engine->setNoniusTable(somanet::icMuNoniusTableFromRegisters(table));
+      }
+    }
+    if (!modelled) {
+      return fail(icMuIterationStep(1), modelled.error());
+    }
+
+    // One move and one recording.
+    auto record = [&](int direction) -> std::expected<std::vector<HrdEncoderSample>, std::string> {
+      auto configured =
+          drive->configureHrdStream(somanet::HrdData::kEncoderRawData, motion.recording,
+                                    {.timeout = std::chrono::seconds(10),
+                                     .pollInterval = std::chrono::milliseconds(100),
+                                     .stop = stop});
+      if (!configured) {
+        return std::unexpected(configured.error());
+      }
+      const double velocity = direction * motion.velocityRpm;
+      const int32_t target = units.velocity(velocity);
+      const double leadRpm =
+          motion.velocityRpm / motion.accelerationRpmPerSecond > kIcMuRecordingLead
+              ? motion.velocityRpm - kIcMuRecordingLead * motion.accelerationRpmPerSecond
+              : 0.0;
+      const int32_t lead = std::abs(units.velocity(leadRpm));
+      std::future<std::expected<void, std::string>> recording;
+      auto startRecording = [&] {
+        if (!recording.valid()) {
+          recording = std::async(std::launch::async, [&] {
+            return drive->startHrdStream({.timeout = motion.recording + std::chrono::seconds(20),
+                                          .pollInterval = std::chrono::milliseconds(100),
+                                          .stop = stop});
+          });
+        }
+      };
+      auto finish = [&](std::expected<void, std::string> moved)
+          -> std::expected<std::vector<HrdEncoderSample>, std::string> {
+        if (recording.valid()) {
+          auto recorded = recording.get();
+          if (moved && !recorded) {
+            moved = std::unexpected(recorded.error());
+          }
+        }
+        if (!moved) {
+          return std::unexpected(moved.error());
+        }
+        auto file = drive->readHrdRecording(somanet::HrdData::kEncoderRawData);
+        if (!file) {
+          return std::unexpected(file.error());
+        }
+        const auto* samples = std::get_if<std::vector<HrdEncoderSample>>(&file->samples);
+        if (samples == nullptr || samples->empty()) {
+          return std::unexpected("the drive recorded no encoder raw data");
+        }
+        return *samples;
+      };
+
+      if (auto r = drive->setTargetVelocity(target); !r) {
+        return finish(std::unexpected(r.error()));
+      }
+      std::optional<std::chrono::steady_clock::time_point> reached;
+      bool stopping = false;
+      const auto deadline =
+          std::chrono::steady_clock::now() + motion.recording + std::chrono::seconds(60);
+      while (true) {
+        if (auto r = checkMotion(); !r) {
+          return finish(std::unexpected(r.error()));
+        }
+        auto demand = drive->velocityDemandValue();
+        if (!demand) {
+          return finish(std::unexpected(demand.error()));
+        }
+        const int32_t magnitude = std::abs(*demand);
+        if (!stopping && magnitude >= lead) {
+          startRecording();
+        }
+        if (!stopping && !reached && magnitude >= std::abs(target)) {
+          reached = std::chrono::steady_clock::now();
+        }
+        if (!stopping && reached &&
+            std::chrono::steady_clock::now() - *reached >= motion.recording) {
+          if (auto r = drive->setTargetVelocity(0); !r) {
+            return finish(std::unexpected(r.error()));
+          }
+          stopping = true;
+        }
+        if (stopping && *demand == 0) {
+          break;
+        }
+        if (std::chrono::steady_clock::now() > deadline) {
+          (void)drive->setTargetVelocity(0);
+          return finish(std::unexpected("the drive did not reach the calibration velocity"));
+        }
+        std::this_thread::sleep_for(request.pollInterval);
+      }
+      return finish({});
+    };
+
+    bool bothPassed = false;
+    bool coverageWarned = false;
+    int direction = 1;
+    for (int iteration = 1;; ++iteration) {
+      const bool validation = bothPassed || request.measurementOnly;
+      const std::string step =
+          validation ? std::string(kIcMuValidationStep) : icMuIterationStep(iteration);
+      reporter.start(step);
+      auto recorded = record(direction);
+      if (!recorded) {
+        return fail(step, recorded.error());
+      }
+      const auto samples = somanet::icMuCalibrationSamples(*recorded, motion.recording);
+      nlohmann::json value{{"iteration", iteration},
+                           {"direction", direction},
+                           {"velocityRpm", motion.velocityRpm},
+                           {"samples", samples.size()}};
+      const double covered = somanet::icMuRecordedRingRevolutions(samples, plan.masterPolePairs);
+      value["recordedRevolutions"] = covered;
+      if (auto warning = somanet::icMuCoverageWarning(covered); warning && !coverageWarned) {
+        coverageWarned = true;
+        value["warning"] = *warning;
+      }
+      auto analysis = engine->analyze(samples);
+      if (!analysis) {
+        return fail(step, analysis.error());
+      }
+      value["phaseRangeLimit"] = analysis->phaseRangeLimit;
+
+      if (validation) {
+        value["phaseMargin"] = curveJson(analysis->phaseMargin, samples);
+        value["lowerMarginPercent"] = analysis->lowerMarginPercent;
+        value["upperMarginPercent"] = analysis->upperMarginPercent;
+        const double margin = std::min(analysis->lowerMarginPercent, analysis->upperMarginPercent);
+        const auto band = somanet::icMuMarginBand(margin);
+        value["marginPercent"] = margin;
+        value["marginBand"] = somanet::toString(band);
+        value["marginMessage"] = somanet::icMuMarginMessage(band);
+        const bool passed = analysis->noniusValid &&
+                            analysis->lowerMarginPercent >= kIcMuMinMarginPercent &&
+                            analysis->upperMarginPercent >= kIcMuMinMarginPercent;
+        value["passed"] = passed;
+        if (encoder == plan.encoders.commutation && !request.measurementOnly) {
+          value["commutationWarning"] =
+              "The calibrated encoder is the commutation source. Measure the commutation offset "
+              "again, and store the parameters to keep the new 0x2001.";
+        }
+        if (!passed) {
+          const std::string why =
+              request.measurementOnly
+                  ? "The nonius phase margin is below 10 %. The encoder system changed after the "
+                    "last calibration, so the absolute position at startup is not reliable; "
+                    "calibrate the encoder again."
+                  : "The nonius phase margin is below 10 %, too low to compute the absolute "
+                    "position reliably. Check the mechanical assembly, the ring for damage, and "
+                    "eccentricity.";
+          reporter.fail(step, why);
+          return std::unexpected(why);
+        }
+        reporter.succeed(step, value);
+        return {};
+      }
+
+      const int tolerance = somanet::icMuTolerance(iteration);
+      const bool masterPassed =
+          somanet::icMuTrackPasses(somanet::IcMuTrack::kMaster, analysis->master, tolerance);
+      const bool noniusPassed =
+          somanet::icMuTrackPasses(somanet::IcMuTrack::kNonius, analysis->nonius, tolerance);
+      value["tolerance"] = tolerance;
+      value["master"] = residualJson(analysis->master, masterPassed);
+      value["nonius"] = residualJson(analysis->nonius, noniusPassed);
+      value["phaseError"] = curveJson(analysis->phaseError, samples);
+
+      std::expected<void, std::string> written;
+      if (masterPassed && noniusPassed) {
+        auto table = engine->optimizeNoniusTable();
+        written = table ? write(somanet::icMuNoniusTableWrites(*table))
+                        : std::expected<void, std::string>(std::unexpected(table.error()));
+        bothPassed = true;
+      } else if (iteration == somanet::kIcMuMaxIterations) {
+        const std::string why = std::format(
+            "the tracks did not pass in {} iterations; the recordings are not stable enough to "
+            "calibrate the encoder",
+            somanet::kIcMuMaxIterations);
+        reporter.fail(step, why);
+        return std::unexpected(why);
+      } else {
+        written = engine->adjust(!masterPassed, !noniusPassed).and_then([&] {
+          std::vector<somanet::IcMuRegisterWrite> writes;
+          for (const auto track : {somanet::IcMuTrack::kMaster, somanet::IcMuTrack::kNonius}) {
+            const bool passed = track == somanet::IcMuTrack::kMaster ? masterPassed : noniusPassed;
+            if (!passed) {
+              const auto w = somanet::icMuAnalogWrites(track, engine->adjustments(track));
+              writes.insert(writes.end(), w.begin(), w.end());
+            }
+          }
+          return write(writes);
+        });
+      }
+      if (!written) {
+        return fail(step, written.error());
+      }
+      reporter.succeed(step, value);
+      direction = -direction;
+    }
+  };
+
+  // The frame back to standard, with the output registers the run found.
+  auto leaveRawMode = [&]() -> std::expected<void, std::string> {
+    auto original11 = std::ranges::find(original, somanet::kIcMuOutputRegister,
+                                        &somanet::IcMuRegisterWrite::address);
+    auto original12 =
+        std::ranges::find(original, kIcMuModeRegister, &somanet::IcMuRegisterWrite::address);
+    auto restored = drive->setIcMuCalibrationMode(
+        encoder, somanet::IcMuCalibrationMode::kConfiguration,
+        {.timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval});
+    if (restored && original11 != original.end()) {
+      restored = writeIcMuRegister(*drive, encoder, *original11, {});
+    }
+    if (restored && original12 != original.end()) {
+      restored = writeIcMuRegister(*drive, encoder, *original12, {});
+    }
+    if (restored) {
+      restored = drive->setIcMuCalibrationMode(
+          encoder, somanet::IcMuCalibrationMode::kStandard,
+          {.timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval});
+    }
+    rawMode = false;
+    return restored;
+  };
+
+  auto calibrated = calibrate();
+
+  if (calibrated && !request.measurementOnly) {
+    // The save: standard frame first, so the EEPROM never stores raw mode.
+    reporter.start(kIcMuStandardModeStep);
+    if (auto r = waitForStandstill().and_then(leaveRawMode); !r) {
+      calibrated = fail(kIcMuStandardModeStep, r.error());
+    } else {
+      reporter.succeed(kIcMuStandardModeStep);
+    }
+    if (calibrated && plan.multiturnCheckOff) {
+      auto value = std::ranges::find(original, kIcMuMultiturnInterfaceRegister,
+                                     &somanet::IcMuRegisterWrite::address);
+      if (auto r = writeIcMuRegister(*drive, encoder, *value, stop); !r) {
+        calibrated = fail(kIcMuStandardModeStep, r.error());
+      }
+    }
+    if (calibrated) {
+      reporter.start(kIcMuSaveStep);
+      std::expected<uint8_t, std::string> stored = 0;
+      if (request.activateHealthMonitoring) {
+        stored = writeOne(0x0C, kIcMuHealthMonitoring).transform([] { return uint8_t{0}; });
+      }
+      stored = stored.and_then([&](uint8_t) { return saveIcMuEeprom(*drive, encoder, stop); });
+      if (!stored) {
+        calibrated = fail(kIcMuSaveStep, stored.error());
+      } else {
+        saved = true;
+        reporter.succeed(kIcMuSaveStep, nlohmann::json{{"status1", *stored}});
+      }
+    }
+    if (calibrated) {
+      reporter.start(kIcMuAbsResetStep);
+      auto before = drive->positionActualValue();
+      auto reset = before.and_then([&](int32_t) {
+        return writeIcMuRegister(
+            *drive, encoder,
+            {somanet::kIcMuCommandRegister, static_cast<uint8_t>(somanet::IcMuCommand::kAbsReset)},
+            stop);
+      });
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      if (!reset) {
+        calibrated = fail(kIcMuAbsResetStep, reset.error());
+      } else {
+        nlohmann::json value = nlohmann::json::object();
+        auto after = drive->positionActualValue();
+        if (after && plan.encoders.position == encoder) {
+          const double jump = std::abs(static_cast<double>(int64_t{*after} - *before)) /
+                              units.positionPerRevolution * units.positionEncoderResolution;
+          value["jumpCounts"] = jump;
+          if (jump > kIcMuAbsResetJump) {
+            value["warning"] =
+                "The absolute position changed after the calibration. Reference the machine "
+                "again and set the software position limits again.";
+          }
+        }
+        reporter.succeed(kIcMuAbsResetStep, value);
+      }
+    }
+    if (calibrated) {
+      reporter.start(kIcMuRestoreFileStep);
+      if (!somanet::isIntegratedSensorPort(plan.encoder.sensorPort)) {
+        reporter.succeed(kIcMuRestoreFileStep,
+                         nlohmann::json{{"file", nullptr},
+                                        {"reason",
+                                         "the drive keeps a restore file only for sensor "
+                                         "ports 1 and 2"}});
+      } else if (auto file =
+                     writeIcMuRestoreFile(device, *drive, encoder, plan.encoder.sensorPort, stop);
+                 !file) {
+        calibrated = fail(kIcMuRestoreFileStep, file.error());
+      } else {
+        reporter.succeed(kIcMuRestoreFileStep, nlohmann::json{{"file", *file}});
+      }
+    }
+  }
+
+  // The restore path. Its commands take no stop token: a cancelled run is what it exists for.
+  if (rawMode) {
+    reporter.start(kIcMuStandardModeStep);
+    if (enabled && !interrupted) {
+      (void)drive->setTargetVelocity(0);
+    }
+    if (auto r = leaveRawMode(); !r) {
+      reporter.fail(kIcMuStandardModeStep, r.error());
+    } else {
+      reporter.succeed(kIcMuStandardModeStep);
+    }
+  }
+  if (wroteEncoder && !saved) {
+    reporter.start(kIcMuRestoreEncoderStep);
+    std::expected<void, std::string> restored;
+    for (const auto& w : original) {
+      if (restored) {
+        restored = writeIcMuRegister(*drive, encoder, w, {});
+      }
+    }
+    if (!restored) {
+      reporter.fail(kIcMuRestoreEncoderStep, restored.error());
+    } else {
+      reporter.succeed(kIcMuRestoreEncoderStep);
+    }
+  }
+  if (enabled && !interrupted) {
+    reporter.start(kIcMuReturnStep);
+    auto position = drive->positionActualValue();
+    const auto twoDegrees = units.position(2.0 / 360);
+    const auto threeDegrees = units.position(3.0 / 360);
+    const bool inside = plan.startPosition > plan.limits.min + twoDegrees &&
+                        plan.startPosition < plan.limits.max - twoDegrees;
+    if (position && inside && std::abs(int64_t{*position} - plan.startPosition) > threeDegrees) {
+      if (auto r = moveTo(plan.startPosition); !r) {
+        reporter.fail(kIcMuReturnStep, r.error());
+      } else {
+        reporter.succeed(kIcMuReturnStep);
+      }
+    } else {
+      reporter.succeed(kIcMuReturnStep, nlohmann::json{{"moved", false}});
+    }
+  }
+  if (ignoring) {
+    reporter.start(kIcMuRestoreStatusBitsStep);
+    if (auto r = drive->setIgnoreBissStatusBits(
+            encoder, false,
+            {.timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval});
+        !r) {
+      reporter.fail(kIcMuRestoreStatusBitsStep, r.error());
+    } else {
+      reporter.succeed(kIcMuRestoreStatusBitsStep);
+    }
+  }
+  return calibrated;
+}
+
+#endif  // MM_HAVE_MU_3SL
 
 std::expected<HrdStreamingRequest, std::string> parseHrdStreamingRequest(
     const nlohmann::json& body) {

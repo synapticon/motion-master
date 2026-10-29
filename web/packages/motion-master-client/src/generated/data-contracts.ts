@@ -488,7 +488,7 @@ export interface ProgressStep {
   /** @example "succeeded" */
   status: "idle" | "running" | "succeeded" | "failed";
   /**
-   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`.
+   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`.
    * @example {"status":1,"data":[1,2,3,4,5,6]}
    */
   value?: any;
@@ -1113,6 +1113,193 @@ export interface IcHausRegister {
   spiOnly: boolean;
 }
 
+/** Whether one iC-MU encoder holds the output configuration that its encoder configuration object asks for. */
+export interface IcMuEncoderStatus {
+  /** @example 1 */
+  encoderOrdinal: 1 | 2;
+  /**
+   * 0x21x0:01. 3 to 5 is an external encoder.
+   * @example 1
+   */
+  sensorPort: number;
+  /**
+   * 0x21x0:0C.
+   * @example 19
+   */
+  singleturnBits: number;
+  /**
+   * 0x21x0:0A, 0 where the object has none.
+   * @example 0
+   */
+  multiturnBits: number;
+  /**
+   * The pole pairs of the ring, null for a ring the rules do not know.
+   * @example 32
+   */
+  masterPolePairs: number | null;
+  /**
+   * iC-MU register 0x74.
+   * @example 21
+   */
+  hardRev: number;
+  /**
+   * The part register 0x74 names, null for a code no iC-MU uses.
+   * @example "iC-MU150"
+   */
+  part: string | null;
+  /**
+   * The low nibble of register 0x74.
+   * @example 5
+   */
+  revision: number;
+  /**
+   * iC-MU register 0x11.
+   * @example 5
+   */
+  outputRegister: number;
+  /**
+   * The value of register 0x11 the rules give, null where they do not apply.
+   * @example 5
+   */
+  expectedOutputRegister: number | null;
+  /**
+   * not-configured when register 0x11 holds 0xA5, configured when it holds the expected value, invalid otherwise. null without an expected value, and for another chip on an external port.
+   * @example "configured"
+   */
+  state: "not-configured" | "invalid" | "configured" | null;
+  /** Why there is no expected value. */
+  reason: string | null;
+  /** @example "singleturn" */
+  path: "singleturn" | "multiturn";
+  /** The battery modes a configuration request can name besides default. Empty on the singleturn path and on a ring that offers no mode. */
+  batteryModes: {
+    /** @example "18-microamperes" */
+    name: string;
+    /** @example 18 */
+    maxCurrentMicroamps: number;
+    /** @example 56 */
+    maxAccelerationKrpmPerSecond: number;
+  }[];
+}
+
+/** What an iC-MU calibration decided before the motor moved. */
+export interface IcMuCalibrationPlan {
+  /** @example 2 */
+  encoderOrdinal: 1 | 2;
+  /** @example 2 */
+  sensorPort: number;
+  /** @example "outer" */
+  ringPosition: "inner" | "outer";
+  /** @example "iC-MU200" */
+  part: string;
+  /** @example 32 */
+  masterPolePairs: number;
+  /** @example "motor" */
+  shaft: "motor" | "driving";
+  /** False when the start values of another ring are used. */
+  startValuesMeasured: boolean;
+  /**
+   * On the driving shaft.
+   * @example 0.75
+   */
+  velocityRpm: number;
+  /**
+   * On the driving shaft.
+   * @example 8.33
+   */
+  accelerationRpmPerSecond: number;
+  /**
+   * The time at constant velocity.
+   * @example 6000
+   */
+  recordingMs: number;
+  /** Whether the software position limits bound the motion. */
+  limitedRange: boolean;
+  warnings: string[];
+}
+
+/** The error that remains on one track after a recording, in LSB of its registers. */
+export interface IcMuTrackResidual {
+  sineOffset: number;
+  cosineOffset: number;
+  gain: number;
+  phase: number;
+  phaseRange: 0 | 1;
+  /** Whether the track passed the test of this iteration. */
+  passed: boolean;
+}
+
+/** A curve over the ring: at most 720 points of [ring angle in degrees, value]. The value is in the unit of phaseRangeLimit. */
+export type IcMuCalibrationCurve = number[][];
+
+/** What one calibration iteration recorded and wrote. */
+export interface IcMuCalibrationIteration {
+  /** @example 1 */
+  iteration: number;
+  direction: 1 | -1;
+  /** @example 0.75 */
+  velocityRpm: number;
+  /**
+   * The samples analysed.
+   * @example 6000
+   */
+  samples: number;
+  /**
+   * Turns of the ring the recording covered.
+   * @example 8.9
+   */
+  recordedRevolutions: number;
+  /** Present when the recording covered less than one turn of the ring. */
+  warning?: string;
+  /** The permissible nonius phase error. */
+  phaseRangeLimit: number;
+  /** The tolerance of the pass test */
+  tolerance: 1 | 3 | 5;
+  /** The error that remains on one track after a recording, in LSB of its registers. */
+  master: IcMuTrackResidual;
+  /** The error that remains on one track after a recording, in LSB of its registers. */
+  nonius: IcMuTrackResidual;
+  /** A curve over the ring: at most 720 points of [ring angle in degrees, value]. The value is in the unit of phaseRangeLimit. */
+  phaseError: IcMuCalibrationCurve;
+}
+
+/** The validation pass of an iC-MU calibration: the nonius phase margins the encoder now holds. It passes when both are at least 10 %. */
+export interface IcMuCalibrationValidation {
+  /** @example 3 */
+  iteration: number;
+  direction: 1 | -1;
+  /** @example 0.75 */
+  velocityRpm: number;
+  /** @example 6000 */
+  samples: number;
+  /** @example 8.9 */
+  recordedRevolutions: number;
+  warning?: string;
+  phaseRangeLimit: number;
+  /** A curve over the ring: at most 720 points of [ring angle in degrees, value]. The value is in the unit of phaseRangeLimit. */
+  phaseMargin: IcMuCalibrationCurve;
+  /** @example 78.5 */
+  lowerMarginPercent: number;
+  /** @example 75 */
+  upperMarginPercent: number;
+  /**
+   * The smaller of the two margins.
+   * @example 75
+   */
+  marginPercent: number;
+  /** robust from 50 %, small-displacements from 30 %, avoid-displacements from 10 %, and too-high below 10 %, where the validation fails. */
+  marginBand:
+    | "robust"
+    | "small-displacements"
+    | "avoid-displacements"
+    | "too-high";
+  /** What the band means for the user. */
+  marginMessage: string;
+  passed: boolean;
+  /** Present after a full calibration of the commutation encoder: the commutation offset must be measured again. */
+  commutationWarning?: string;
+}
+
 /** A decoded iC-MU restore file, `circulo_integrated_encoder_<sensor port>_config.bin`. The drive writes these pairs into the encoder when the iC-MU reports a corrupted EEPROM. */
 export interface IcMuRestoreFile {
   /** One entry for each pair, in the order of the file. */
@@ -1168,7 +1355,7 @@ export interface ProcedureRequest {
   /** `os-command` only, and required when `fsBuffer` is `write`: the bytes to send, base64-encoded into this JSON string. Rejected for the other two directions rather than ignored, so a request that names one and forgets the other is told rather than running a command that moves nothing. (Deliberately not `format: byte`, for the reason spelled out on `packageContent`.) */
   fsBufferData?: string;
   /**
-   * `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits` and `ic-mu-encoder-configuration`: the encoder ordinal of the OS commands, which picks the drive's encoder to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder. Required for `ic-mu-encoder-configuration`, because a default would write the EEPROM of an encoder that nobody named.
+   * `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits`, `ic-mu-encoder-configuration` and `ic-mu-calibration`: the encoder ordinal of the OS commands, which picks the drive's encoder to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder. Required for `ic-mu-encoder-configuration` and `ic-mu-calibration`, because a default would write the EEPROM of an encoder that nobody named.
    * @default 1
    * @example 1
    */
@@ -1222,6 +1409,28 @@ export interface ProcedureRequest {
     | "18-microamperes"
     | "36-microamperes"
     | "72-microamperes";
+  /**
+   * `ic-mu-calibration` only: where the ring of an external encoder on sensor port 3 to 5 sits. Required there, and refused for port 1, which is always inner, and port 2, which is always outer. The calibration starts from the values measured for that position.
+   * @example "inner"
+   */
+  ringPosition?: "inner" | "outer";
+  /**
+   * `ic-mu-calibration` only: runs one validation pass, which reports the nonius phase margins of the calibration the encoder holds, and writes nothing to the encoder.
+   * @default false
+   */
+  measurementOnly?: boolean;
+  /**
+   * `ic-mu-calibration` only: after a full calibration, shows the NON_CTR error of the iC-MU in the BiSS error bit, register 0x0C = 0x2C.
+   * @default false
+   */
+  activateHealthMonitoring?: boolean;
+  /**
+   * `ic-mu-calibration` only: the velocity of the encoder's ring in rpm, on whichever shaft the encoder sits. Without it a motor-shaft encoder runs at the velocity measured for its ring and a driving-shaft encoder at 15 rpm. The 0.95 × 0x6080 cap still applies, and a narrow range between the software position limits replaces it with the velocity that fits.
+   * @min 1
+   * @max 1000
+   * @example 90
+   */
+  ringVelocity?: number;
   /**
    * `restore-default-parameters` only: which group of defaults to restore — all (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer (0x1011:04).
    * @default "all"

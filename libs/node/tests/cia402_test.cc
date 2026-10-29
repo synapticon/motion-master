@@ -261,4 +261,19 @@ TEST(Cia402ParseState, RoundTripsEveryName) {
   EXPECT_FALSE(mm::node::cia402::parseState("Unknown").has_value());
 }
 
+TEST(Cia402Test, VelocityUnitsPerRpmFollowTheSiUnit) {
+  using mm::node::cia402::velocityUnitsPerRpm;
+  EXPECT_EQ(velocityUnitsPerRpm(0x00B44700), 1.0);
+  EXPECT_NEAR(*velocityUnitsPerRpm(0xFDB44700), 1000.0, 1e-9);
+  EXPECT_NEAR(*velocityUnitsPerRpm(0xFFB44700), 10.0, 1e-9);
+  EXPECT_NEAR(*velocityUnitsPerRpm(0x03B44700), 0.001, 1e-12);
+  EXPECT_NEAR(*velocityUnitsPerRpm(0x00B40300), 1.0 / 60, 1e-12);
+  EXPECT_EQ(velocityUnitsPerRpm(0x00B50000), std::nullopt);
+}
+
+TEST(Cia402Test, InternalLimitIsBitEleven) {
+  EXPECT_TRUE(mm::node::cia402::isInternalLimitActive(0x0827));
+  EXPECT_FALSE(mm::node::cia402::isInternalLimitActive(0x0027));
+}
+
 }  // namespace

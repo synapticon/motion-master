@@ -4,11 +4,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   apiErrorMessage,
   type EncoderConfiguration,
+  type IcMuEncoderStatus,
   type ProcedureSnapshot,
   type ProgressStep,
 } from '@synapticon/motion-master-client'
 import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
+import IcMuCalibrationSection from '../components/IcMuCalibrationSection'
 import { useConnection } from '../contexts/ConnectionContext'
 import { isIcMuEncoder } from '../utils/icMuEncoder'
 import { btnOutline, btnPrimary } from '../utils/styles'
@@ -18,25 +20,6 @@ const CONFIGURATION_PROCEDURE = 'ic-mu-encoder-configuration'
 
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
-
-// The status of one encoder, as the status procedure reports it in its read-registers step and the
-// configuration in its verify step.
-interface IcMuEncoderStatus {
-  encoderOrdinal: 1 | 2
-  sensorPort: number
-  singleturnBits: number
-  multiturnBits: number
-  masterPolePairs: number | null
-  hardRev: number
-  part: string | null
-  revision: number
-  outputRegister: number
-  expectedOutputRegister: number | null
-  state: 'not-configured' | 'invalid' | 'configured' | null
-  reason: string | null
-  path: 'singleturn' | 'multiturn'
-  batteryModes: { name: string; maxCurrentMicroamps: number; maxAccelerationKrpmPerSecond: number }[]
-}
 
 const STEP_DOT: Record<ProgressStep['status'], string> = {
   idle: 'bg-grey-300',
@@ -81,6 +64,15 @@ export default function DeviceIcMuEncodersPage() {
     refetchIntervalInBackground: true,
     retry: false,
   })
+  // The calibration exists only on a server built with MU_3SL, so the page asks for it.
+  const proceduresQuery = useQuery({
+    queryKey: ['procedures', slavePosition],
+    queryFn: () => api.listProcedures(slavePosition).then(r => r.data),
+    retry: false,
+  })
+  const calibrationAvailable = (proceduresQuery.data ?? []).some(
+    listing => listing.descriptor.name === 'ic-mu-calibration',
+  )
   const statusQuery = useQuery(snapshotQuery(STATUS_PROCEDURE))
   const configurationQuery = useQuery(snapshotQuery(CONFIGURATION_PROCEDURE))
 
@@ -112,7 +104,9 @@ export default function DeviceIcMuEncodersPage() {
           come from the singleturn and multiturn bits of the encoder object, 0x2110 or 0x2112. On
           sensor port 1, an encoder with multiturn bits also gets the iC-PVL beside it configured.
           The configuration ends with the restore file the drive uses when the EEPROM of the iC-MU
-          is corrupted.
+          is corrupted. Sensor ports 3 to 5 take an external encoder: it is treated as an iC-MU only
+          when register 0x74 names an iC-MU part, always takes the singleturn path, and gets no
+          restore file, because the drive keeps one only for ports 1 and 2.
         </Callout>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -143,7 +137,7 @@ export default function DeviceIcMuEncodersPage() {
         )}
         {encodersQuery.isSuccess && encoders.length === 0 && (
           <Callout variant="info">
-            This drive has no BiSS or internal encoder with singleturn bits on sensor port 1 or 2.
+            This drive has no BiSS or internal encoder with singleturn bits on a sensor port.
           </Callout>
         )}
 
@@ -158,6 +152,11 @@ export default function DeviceIcMuEncodersPage() {
                 : statuses.find(s => s.encoderOrdinal === encoder.encoderOrdinal)
             }
             busy={running || start.isPending}
+            slavePosition={slavePosition}
+            calibrationAvailable={calibrationAvailable}
+            roles={(['position', 'velocity', 'commutation'] as const).filter(
+              role => encodersQuery.data?.[role] === encoder.encoderOrdinal,
+            )}
             onConfigure={batteryMode =>
               start.mutate({
                 name: CONFIGURATION_PROCEDURE,
@@ -179,11 +178,18 @@ function EncoderCard({
   encoder,
   status,
   busy,
+  slavePosition,
+  calibrationAvailable,
+  roles,
   onConfigure,
 }: {
   encoder: EncoderConfiguration
   status: IcMuEncoderStatus | undefined
   busy: boolean
+  slavePosition: number
+  calibrationAvailable: boolean
+  /** The controllers that use this encoder, as GET /encoders names them. */
+  roles: readonly ('position' | 'velocity' | 'commutation')[]
   onConfigure: (batteryMode: string | null) => void
 }) {
   const [batteryMode, setBatteryMode] = useState('default')
@@ -192,9 +198,23 @@ function EncoderCard({
   return (
     <section className="border border-grey-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-grey-200">
+        <div className="flex flex-wrap items-center gap-3">
         <h3 className="font-display uppercase tracking-wide text-sm">
           Encoder {encoder.encoderOrdinal} · sensor port {encoder.sensorPort}
+          {encoder.sensorPort >= 3 ? ' · external' : ''}
         </h3>
+        <span className="flex flex-wrap gap-1.5 text-xs text-grey-700">
+          {roles.length === 0 ? (
+            <span className="text-grey-500">no controller uses it</span>
+          ) : (
+            roles.map(role => (
+              <span key={role} className="border border-grey-300 px-1.5 py-0.5">
+                {role}
+              </span>
+            ))
+          )}
+        </span>
+        </div>
         {status?.state ? (
           <span className={`px-2 py-0.5 text-xs ${STATE_BADGE[status.state]}`}>{status.state}</span>
         ) : (
@@ -257,6 +277,9 @@ function EncoderCard({
           configured. Read the status first.
         </p>
       </div>
+      {calibrationAvailable && (
+        <IcMuCalibrationSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
+      )}
     </section>
   )
 }

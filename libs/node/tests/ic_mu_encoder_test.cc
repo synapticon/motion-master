@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace {
@@ -19,6 +20,7 @@ using mm::node::somanet::EncoderType;
 using mm::node::somanet::IcMuConfiguration;
 using mm::node::somanet::IcMuEncoderState;
 using mm::node::somanet::IcMuFirmwareSupport;
+using mm::node::somanet::icMuMultiturnBitsWarning;
 using mm::node::somanet::IcMuPath;
 using mm::node::somanet::IcMuRegisterWrite;
 using mm::node::somanet::IcPvlCommand;
@@ -272,6 +274,10 @@ TEST(IcMuEncoderTest, ListsBissAndInternalEncodersOnPortsOneAndTwo) {
   encoder.sensorPort = 2;
   EXPECT_TRUE(somanet::isIcMuEncoder(encoder));
   encoder.sensorPort = 3;
+  EXPECT_TRUE(somanet::isIcMuEncoder(encoder));
+  encoder.sensorPort = 5;
+  EXPECT_TRUE(somanet::isIcMuEncoder(encoder));
+  encoder.sensorPort = 6;
   EXPECT_FALSE(somanet::isIcMuEncoder(encoder));
   encoder.sensorPort = 0;
   EXPECT_FALSE(somanet::isIcMuEncoder(encoder));
@@ -303,6 +309,17 @@ TEST(IcMuEncoderTest, PartNameFromHardRev) {
   EXPECT_EQ(somanet::icMuPartName(0x15), "iC-MU150");
   EXPECT_EQ(somanet::icMuPartName(0x24), "iC-MU200");
   EXPECT_EQ(somanet::icMuPartName(0x30), std::nullopt);
+}
+
+TEST(IcMuEncoderTest, NibbleZeroHoldsTwoParts) {
+  // MU_3SL_defs.h: 0x05-0x07 the plain iC-MU, 0x09-0x0A the iC-MU128. A register that reads 0
+  // names no part.
+  EXPECT_EQ(somanet::icMuPartName(0x05), "iC-MU");
+  EXPECT_EQ(somanet::icMuPartName(0x07), "iC-MU");
+  EXPECT_EQ(somanet::icMuPartName(0x09), "iC-MU128");
+  EXPECT_EQ(somanet::icMuPartName(0x00), std::nullopt);
+  EXPECT_EQ(somanet::icMuPartName(0x03), std::nullopt);
+  EXPECT_NE(somanet::icMuPartError(3, 0x00), std::nullopt);
 }
 
 TEST(IcMuEncoderTest, StatusExpectsTheRulesOfEveryRing) {
@@ -385,6 +402,33 @@ TEST(IcMuEncoderTest, RestoreFileRefusesWhatTheDriveRefuses) {
   EXPECT_FALSE(somanet::parseIcMuRestoreFile(std::vector<uint8_t>{0x00, 0x01, 0x02}));
   EXPECT_FALSE(somanet::parseIcMuRestoreFile(std::vector<uint8_t>(68, 0)));
   EXPECT_TRUE(somanet::parseIcMuRestoreFile(std::vector<uint8_t>{}));
+}
+
+TEST(IcMuEncoderTest, AnExternalEncoderIsAnIcMuOnlyWhenHardRevSaysSo) {
+  // An integrated port takes any part code; an external one needs an iC-MU code.
+  EXPECT_EQ(somanet::icMuPartError(1, 0x30), std::nullopt);
+  EXPECT_EQ(somanet::icMuPartError(3, 0x15), std::nullopt);
+  EXPECT_NE(somanet::icMuPartError(3, 0x30), std::nullopt);
+
+  auto other = somanet::icMuEncoderStatus(icMu(4, 19, 0), 0x30, 0xA5);
+  EXPECT_EQ(other.state, std::nullopt);
+  EXPECT_EQ(other.expectedOutputRegister, std::nullopt);
+  ASSERT_TRUE(other.reason);
+  EXPECT_NE(other.reason->find("external sensor port 4"), std::string::npos);
+
+  auto icMuOnPort3 = somanet::icMuEncoderStatus(icMu(3, 19, 18), 0x24, 0x05);
+  EXPECT_EQ(icMuOnPort3.path, IcMuPath::kSingleturn);
+  EXPECT_EQ(icMuOnPort3.expectedOutputRegister, 0x05);
+  EXPECT_EQ(icMuOnPort3.state, IcMuEncoderState::kConfigured);
+}
+
+TEST(IcMuMultiturnBitsWarning, WarnsOnlyOnTheMultiturnPathWithOtherThan18Bits) {
+  EXPECT_FALSE(icMuMultiturnBitsWarning(IcMuPath::kMultiturn, 18));
+  EXPECT_FALSE(icMuMultiturnBitsWarning(IcMuPath::kSingleturn, 0));
+  EXPECT_FALSE(icMuMultiturnBitsWarning(IcMuPath::kSingleturn, 12));
+  auto warning = icMuMultiturnBitsWarning(IcMuPath::kMultiturn, 16);
+  ASSERT_TRUE(warning);
+  EXPECT_NE(warning->find("16 multiturn bits"), std::string::npos) << *warning;
 }
 
 }  // namespace

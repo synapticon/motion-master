@@ -78,6 +78,8 @@ syntaxError:*/firmware_package_test.cc
 syntaxError:*/hardware_description_test.cc
 syntaxError:*/integro_variant_test.cc
 syntaxError:*/ic_haus_registers_test.cc
+syntaxError:*/ic_mu_calibration_engine_test.cc
+syntaxError:*/ic_mu_calibration_test.cc
 syntaxError:*/ic_mu_encoder_test.cc
 syntaxError:*/kuebler_registers_test.cc
 syntaxError:*/router_test.cc

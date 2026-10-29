@@ -100,6 +100,17 @@ constexpr bool isIcMuSingleturnBits(uint8_t singleturnBits) {
 /// @brief Why @p singleturnBits cannot be configured, or nothing when it can.
 std::optional<std::string> icMuSingleturnBitsError(uint8_t singleturnBits);
 
+/// @brief The multiturn bits of the multiturn path. MODE_MT (0x10) and the iC-PVL MT_BW are
+///        written for 18 bits, and only OUT_MSB follows the multiturn bits of the drive.
+inline constexpr uint8_t kIcMuMultiturnBits = 18;
+
+/// @brief A warning when the multiturn path is configured with other multiturn bits than
+///        @c kIcMuMultiturnBits, or nothing.
+///
+/// Then OUT_MSB gives the drive a frame of another length than the iC-PVL fills. A warning and
+/// not a refusal, because the firmware sets the multiturn bits of sensor port 1 itself.
+std::optional<std::string> icMuMultiturnBitsWarning(IcMuPath path, uint8_t multiturnBits);
+
 /// @brief The master pole pairs of the ring, 2^(st − 14). Requires @c isIcMuSingleturnBits.
 uint8_t icMuMasterPolePairs(uint8_t singleturnBits);
 
@@ -235,13 +246,23 @@ inline constexpr uint8_t kIcPvlSyncRegister = 0x0D;
 /// @param icPvlSync       iC-PVL register 0x0D. Only bits 2:0 are used.
 uint8_t icMuSpoMtRegister(uint32_t rawPosition, uint8_t singleturnBits, uint8_t icPvlSync);
 
-/// @brief Whether the status lists @p encoder: a BiSS or internal encoder on sensor port 1 or 2,
-///        with singleturn bits.
+/// @brief The highest sensor port 0x21x0:01 accepts.
+inline constexpr uint8_t kMaxSensorPort = 5;
+
+/// @brief Whether @p sensorPort carries the integrated encoder of the board: port 1 or 2.
 ///
-/// Only those two ports carry an iC-MU. An encoder with 0 singleturn bits has no :0C, which is a
-/// board that carries no iC-MU, such as an NGC board with Jasper firmware. The type does not say
-/// which chip is behind the port, so a listed encoder is one the configuration can address, not one
-/// known to be an iC-MU. @c HARD_REV in the status says that.
+/// Ports 3 to @c kMaxSensorPort take an external encoder. The drive keeps a restore file only for
+/// ports 1 and 2, and only port 1 has an iC-PVL beside it.
+constexpr bool isIntegratedSensorPort(uint8_t sensorPort) {
+  return sensorPort == 1 || sensorPort == 2;
+}
+
+/// @brief Whether the status lists @p encoder: a BiSS or internal encoder with singleturn bits on
+///        a sensor port.
+///
+/// An encoder with 0 singleturn bits has no :0C, which is a board that carries no iC-MU, such as an
+/// NGC board with Jasper firmware. The type does not say which chip is behind the port. On an
+/// external port, @c icMuEncoderStatus decides it from @c HARD_REV.
 bool isIcMuEncoder(const EncoderConfiguration& encoder);
 
 /// @brief Whether an iC-MU holds the output configuration the rules expect.
@@ -271,8 +292,11 @@ constexpr std::string_view toString(IcMuEncoderState state) {
 std::optional<IcMuEncoderState> icMuEncoderState(uint8_t outputRegister,
                                                  std::optional<uint8_t> expected);
 
-/// @brief The part that @p hardRev names in its upper nibble, or nothing for a code the iC-MU
-///        datasheet does not list (Rev B1, Table 92).
+/// @brief The part that @p hardRev names, or nothing for a code that names no iC-MU.
+///
+/// From the iC-MU150 on, the upper nibble names the part (iC-MU datasheet Rev B1, Table 92). The
+/// nibble 0 covers the plain iC-MU, 0x05-0x07, and the iC-MU128, 0x09-0x0A, which MU_3SL_defs.h
+/// lists; any other code in it names nothing known.
 std::optional<std::string_view> icMuPartName(uint8_t hardRev);
 
 /// @brief One battery mode a configuration request can name for an encoder, with the acceleration
@@ -304,6 +328,15 @@ struct IcMuEncoderStatus {
 };
 void to_json(nlohmann::json& j, const IcMuEncoderStatus& status);
 
+/// @brief Why the encoder on @p sensorPort with @p hardRev cannot be configured as an iC-MU, or
+///        nothing when it can.
+///
+/// An external port can carry any BiSS encoder, and writing iC-MU registers into another chip can
+/// leave it unable to report position. So an encoder on an external port counts as an iC-MU only
+/// when @c HARD_REV names an iC-MU part. Another chip can hold a matching value in its register
+/// 0x74, so this narrows the risk and does not remove it.
+std::optional<std::string> icMuPartError(uint8_t sensorPort, uint8_t hardRev);
+
 /// @brief The status of @p encoder, from the two iC-MU registers the status reads.
 IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t hardRev,
                                     uint8_t outputRegister);
@@ -315,9 +348,11 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
 /// as well as the ones the configuration writes.
 std::span<const uint8_t> icMuRestoreRegisters();
 
-/// @brief The name of the restore file for the encoder on @p sensorPort.
+/// @brief The name of the restore file for the encoder on @p sensorPort. Requires
+///        @c isIntegratedSensorPort.
 ///
-/// The drive picks the file by the sensor port, not by the encoder ordinal.
+/// The drive picks the file by the sensor port, not by the encoder ordinal, and reads one only for
+/// ports 1 and 2.
 std::string icMuRestoreFileName(uint8_t sensorPort);
 
 /// @brief The restore file: one @c [address, value] pair for each register of

@@ -13,6 +13,7 @@ add_library(
   hardware_description.cc
   integro_variant.cc
   ic_haus_registers.cc
+  ic_mu_calibration.cc
   ic_mu_encoder.cc
   kuebler_registers.cc
   monitoring.cc
@@ -50,5 +51,12 @@ target_link_libraries(
   node
   PUBLIC mm::comm mm::etg nlohmann_json::nlohmann_json spdlog::spdlog
   PRIVATE libzip::zip)
+
+# The calibration engine wraps MU_3SL, which exists only for Linux x86_64 and Windows x64. The
+# executables that link node copy the library next to themselves with mm_link_mu_3sl.
+if(MM_HAVE_MU_3SL)
+  target_sources(node PRIVATE ic_mu_calibration_engine.cc)
+  target_link_libraries(node PRIVATE mm::mu_3sl)
+endif()
 
 add_subdirectory(tests)

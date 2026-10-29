@@ -195,6 +195,35 @@ constexpr State decodeState(uint16_t statusword) {
   return State::kNotReadyToSwitchOn;
 }
 
+/// @brief Whether the statusword reports an internal limit (bit 11), such as a software position
+///        limit the drive has stopped at.
+constexpr bool isInternalLimitActive(uint16_t statusword) { return (statusword & 0x0800) != 0; }
+
+/// @brief The units of the velocity objects per rpm, from the SI unit velocity 0x60A9, or nothing
+///        for a unit that is neither revolutions per minute nor per second.
+///
+/// 0x60A9 packs @c [prefix, numerator, denominator, reserved], most significant byte first. The
+/// prefix is a power of ten, so milli-rpm, 0xFDB44700, is 1000 units per rpm.
+constexpr std::optional<double> velocityUnitsPerRpm(uint32_t siUnitVelocity) {
+  constexpr uint8_t kRevolution = 0xB4;
+  constexpr uint8_t kMinute = 0x47;
+  constexpr uint8_t kSecond = 0x03;
+  const auto prefix = static_cast<int8_t>((siUnitVelocity >> 24) & 0xFF);
+  const auto numerator = static_cast<uint8_t>((siUnitVelocity >> 16) & 0xFF);
+  const auto denominator = static_cast<uint8_t>((siUnitVelocity >> 8) & 0xFF);
+  if (numerator != kRevolution || (denominator != kMinute && denominator != kSecond)) {
+    return std::nullopt;
+  }
+  double perRpm = denominator == kMinute ? 1.0 : 1.0 / 60.0;
+  for (int8_t i = 0; i < prefix; ++i) {
+    perRpm /= 10.0;
+  }
+  for (int8_t i = 0; i > prefix; --i) {
+    perRpm *= 10.0;
+  }
+  return perRpm;
+}
+
 /// @brief Whether the statusword's fault bit (bit 3) is set, gated to the faulted states.
 constexpr bool isFaulted(uint16_t statusword) {
   const State s = decodeState(statusword);

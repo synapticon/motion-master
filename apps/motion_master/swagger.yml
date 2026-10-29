@@ -5622,7 +5622,11 @@ components:
             produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode`
             when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For
             `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per
-            object with its `index`, `subindex` and `value`.
+            object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the
+            `read-registers` step holds an array of `IcMuEncoderStatus`, and for
+            `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the
+            `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an
+            `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`.
           example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
         error:
           type: string
@@ -6419,6 +6423,157 @@ components:
             Reachable over SPI only, so the register communication service cannot
             touch it.
           example: false
+    IcMuEncoderStatus:
+      type: object
+      description: >
+        Whether one iC-MU encoder holds the output configuration that its encoder configuration
+        object asks for.
+      required: [encoderOrdinal, sensorPort, singleturnBits, multiturnBits, masterPolePairs, hardRev,
+                 part, revision, outputRegister, expectedOutputRegister, state, reason, path,
+                 batteryModes]
+      properties:
+        encoderOrdinal: { type: integer, enum: [1, 2], example: 1 }
+        sensorPort: { type: integer, description: "0x21x0:01. 3 to 5 is an external encoder.", example: 1 }
+        singleturnBits: { type: integer, description: 0x21x0:0C., example: 19 }
+        multiturnBits: { type: integer, description: "0x21x0:0A, 0 where the object has none.", example: 0 }
+        masterPolePairs:
+          type: integer
+          nullable: true
+          description: The pole pairs of the ring, null for a ring the rules do not know.
+          example: 32
+        hardRev: { type: integer, description: iC-MU register 0x74., example: 21 }
+        part:
+          type: string
+          nullable: true
+          description: The part register 0x74 names, null for a code no iC-MU uses.
+          example: iC-MU150
+        revision: { type: integer, description: The low nibble of register 0x74., example: 5 }
+        outputRegister: { type: integer, description: iC-MU register 0x11., example: 5 }
+        expectedOutputRegister:
+          type: integer
+          nullable: true
+          description: The value of register 0x11 the rules give, null where they do not apply.
+          example: 5
+        state:
+          type: string
+          nullable: true
+          enum: [not-configured, invalid, configured, null]
+          description: >
+            not-configured when register 0x11 holds 0xA5, configured when it holds the expected
+            value, invalid otherwise. null without an expected value, and for another chip on an
+            external port.
+          example: configured
+        reason:
+          type: string
+          nullable: true
+          description: Why there is no expected value.
+        path: { type: string, enum: [singleturn, multiturn], example: singleturn }
+        batteryModes:
+          type: array
+          description: >
+            The battery modes a configuration request can name besides default. Empty on the
+            singleturn path and on a ring that offers no mode.
+          items:
+            type: object
+            required: [name, maxCurrentMicroamps, maxAccelerationKrpmPerSecond]
+            properties:
+              name: { type: string, example: 18-microamperes }
+              maxCurrentMicroamps: { type: integer, example: 18 }
+              maxAccelerationKrpmPerSecond: { type: number, example: 56 }
+    IcMuCalibrationPlan:
+      type: object
+      description: What an iC-MU calibration decided before the motor moved.
+      required: [encoderOrdinal, sensorPort, ringPosition, part, masterPolePairs, shaft,
+                 startValuesMeasured, velocityRpm, accelerationRpmPerSecond, recordingMs,
+                 limitedRange, warnings]
+      properties:
+        encoderOrdinal: { type: integer, enum: [1, 2], example: 2 }
+        sensorPort: { type: integer, example: 2 }
+        ringPosition: { type: string, enum: [inner, outer], example: outer }
+        part: { type: string, example: iC-MU200 }
+        masterPolePairs: { type: integer, example: 32 }
+        shaft: { type: string, enum: [motor, driving], example: motor }
+        startValuesMeasured:
+          type: boolean
+          description: False when the start values of another ring are used.
+        velocityRpm: { type: number, description: On the driving shaft., example: 0.75 }
+        accelerationRpmPerSecond: { type: number, description: On the driving shaft., example: 8.33 }
+        recordingMs: { type: integer, description: The time at constant velocity., example: 6000 }
+        limitedRange: { type: boolean, description: Whether the software position limits bound the motion. }
+        warnings: { type: array, items: { type: string } }
+    IcMuTrackResidual:
+      type: object
+      description: The error that remains on one track after a recording, in LSB of its registers.
+      required: [sineOffset, cosineOffset, gain, phase, phaseRange, passed]
+      properties:
+        sineOffset: { type: number }
+        cosineOffset: { type: number }
+        gain: { type: number }
+        phase: { type: number }
+        phaseRange: { type: integer, enum: [0, 1] }
+        passed: { type: boolean, description: Whether the track passed the test of this iteration. }
+    IcMuCalibrationCurve:
+      type: array
+      description: >
+        A curve over the ring: at most 720 points of [ring angle in degrees, value]. The value is
+        in the unit of phaseRangeLimit.
+      items:
+        type: array
+        minItems: 2
+        maxItems: 2
+        items: { type: number }
+    IcMuCalibrationIteration:
+      type: object
+      description: What one calibration iteration recorded and wrote.
+      required: [iteration, direction, velocityRpm, samples, recordedRevolutions, phaseRangeLimit,
+                 tolerance, master, nonius, phaseError]
+      properties:
+        iteration: { type: integer, example: 1 }
+        direction: { type: integer, enum: [1, -1] }
+        velocityRpm: { type: number, example: 0.75 }
+        samples: { type: integer, description: The samples analysed., example: 6000 }
+        recordedRevolutions: { type: number, description: Turns of the ring the recording covered., example: 8.9 }
+        warning:
+          type: string
+          description: Present when the recording covered less than one turn of the ring.
+        phaseRangeLimit: { type: integer, description: The permissible nonius phase error. }
+        tolerance: { type: integer, enum: [1, 3, 5], description: The tolerance of the pass test, in LSB. }
+        master: { $ref: "#/components/schemas/IcMuTrackResidual" }
+        nonius: { $ref: "#/components/schemas/IcMuTrackResidual" }
+        phaseError: { $ref: "#/components/schemas/IcMuCalibrationCurve" }
+    IcMuCalibrationValidation:
+      type: object
+      description: >
+        The validation pass of an iC-MU calibration: the nonius phase margins the encoder now
+        holds. It passes when both are at least 10 %.
+      required: [iteration, direction, velocityRpm, samples, recordedRevolutions, phaseRangeLimit,
+                 phaseMargin, lowerMarginPercent, upperMarginPercent, marginPercent, marginBand,
+                 marginMessage, passed]
+      properties:
+        iteration: { type: integer, example: 3 }
+        direction: { type: integer, enum: [1, -1] }
+        velocityRpm: { type: number, example: 0.75 }
+        samples: { type: integer, example: 6000 }
+        recordedRevolutions: { type: number, example: 8.9 }
+        warning: { type: string }
+        phaseRangeLimit: { type: integer }
+        phaseMargin: { $ref: "#/components/schemas/IcMuCalibrationCurve" }
+        lowerMarginPercent: { type: number, example: 78.5 }
+        upperMarginPercent: { type: number, example: 75.0 }
+        marginPercent: { type: number, description: The smaller of the two margins., example: 75.0 }
+        marginBand:
+          type: string
+          enum: [robust, small-displacements, avoid-displacements, too-high]
+          description: >
+            robust from 50 %, small-displacements from 30 %, avoid-displacements from 10 %, and
+            too-high below 10 %, where the validation fails.
+        marginMessage: { type: string, description: What the band means for the user. }
+        passed: { type: boolean }
+        commutationWarning:
+          type: string
+          description: >
+            Present after a full calibration of the commutation encoder: the commutation offset
+            must be measured again.
     IcMuRestoreFile:
       type: object
       required: [entries]
@@ -6513,13 +6668,13 @@ components:
           enum: [1, 2]
           default: 1
           description: >
-            `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits`
-            and `ic-mu-encoder-configuration`: the encoder ordinal of the OS commands, which picks
-            the drive's encoder to address. Encoder 1 is the encoder configured in 0x2110 and
-            encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object
-            rather than a kind of encoder. Required for
-            `ic-mu-encoder-configuration`, because a default would write the EEPROM of an encoder
-            that nobody named.
+            `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits`,
+            `ic-mu-encoder-configuration` and `ic-mu-calibration`: the encoder ordinal of the OS
+            commands, which picks the drive's encoder to address. Encoder 1 is the encoder
+            configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a
+            configuration object rather than a kind of encoder. Required for
+            `ic-mu-encoder-configuration` and `ic-mu-calibration`, because a default would write the
+            EEPROM of an encoder that nobody named.
           example: 1
         write:
           type: boolean
@@ -6586,6 +6741,37 @@ components:
             The `ic-mu-encoder-status` result lists the modes of each encoder with the acceleration
             each one allows.
           example: 18-microamperes
+        ringPosition:
+          type: string
+          enum: [inner, outer]
+          description: >
+            `ic-mu-calibration` only: where the ring of an external encoder on sensor port 3 to 5
+            sits. Required there, and refused for port 1, which is always inner, and port 2, which
+            is always outer. The calibration starts from the values measured for that position.
+          example: inner
+        measurementOnly:
+          type: boolean
+          default: false
+          description: >
+            `ic-mu-calibration` only: runs one validation pass, which reports the nonius phase
+            margins of the calibration the encoder holds, and writes nothing to the encoder.
+        activateHealthMonitoring:
+          type: boolean
+          default: false
+          description: >
+            `ic-mu-calibration` only: after a full calibration, shows the NON_CTR error of the iC-MU
+            in the BiSS error bit, register 0x0C = 0x2C.
+        ringVelocity:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: >
+            `ic-mu-calibration` only: the velocity of the encoder's ring in rpm, on whichever shaft
+            the encoder sits. Without it a motor-shaft encoder runs at the velocity measured for its
+            ring and a driving-shaft encoder at 15 rpm. The 0.95 × 0x6080 cap still applies, and a
+            narrow range between the software position limits replaces it with the velocity that
+            fits.
+          example: 90
         group:
           type: string
           enum: [all, communication, application, manufacturer]

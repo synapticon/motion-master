@@ -19,7 +19,8 @@ constexpr uint8_t kI2cRamStart = 0x5C;
 constexpr uint8_t kI2cRamEnd = 0x5D;
 constexpr uint8_t kI2cDeviceId = 0x5E;
 
-// I²C device ids, the R/W bit included (iC-MU datasheet, Table 103; iC-PVL datasheet, Table 6).
+// I²C device ids, the R/W bit included: the EEPROM from iC-MU datasheet Table 103, the iC-PVL
+// from iC-PVL datasheet Table 6.
 constexpr uint8_t kWriteEeprom = 0xA0;
 constexpr uint8_t kWriteIcPvl = 0xC2;
 constexpr uint8_t kReadIcPvl = 0xC3;
@@ -80,6 +81,16 @@ std::optional<std::string> icMuSingleturnBitsError(uint8_t singleturnBits) {
       "the encoder has {} singleturn bits, and an iC-MU ring has 18, 19 or 20 (16, 32 or 64 master "
       "pole pairs)",
       singleturnBits);
+}
+
+std::optional<std::string> icMuMultiturnBitsWarning(IcMuPath path, uint8_t multiturnBits) {
+  if (path != IcMuPath::kMultiturn || multiturnBits == kIcMuMultiturnBits) {
+    return std::nullopt;
+  }
+  return std::format(
+      "the encoder has {} multiturn bits, and the iC-MU and the iC-PVL are configured for {}; the "
+      "position word the drive reads will not match the one the encoder sends",
+      multiturnBits, kIcMuMultiturnBits);
 }
 
 uint8_t icMuMasterPolePairs(uint8_t singleturnBits) {
@@ -152,7 +163,8 @@ std::vector<IcMuRegisterWrite> icMuRamWrites(const IcMuConfiguration& configurat
       {0x05, 0x88},
       {0x06, 0x00},
       {0x0B, icMuOutputPorts(configuration.safeMotion)},
-      // Masks the AN_MAX error.
+      // Keeps NON_CTR, the amplitude errors of both tracks, CRC_ERR and CMD_EXE out of the error
+      // bit (iC-MU datasheet Rev B1, Table 100).
       {0x0C, 0x6C},
       {0x0D, 0xC0},
       {0x0E, static_cast<uint8_t>(multiturn ? 0x44 : 0x04)},
@@ -240,7 +252,7 @@ uint8_t icMuSpoMtRegister(uint32_t rawPosition, uint8_t singleturnBits, uint8_t 
 }
 
 bool isIcMuEncoder(const EncoderConfiguration& encoder) {
-  const bool port = encoder.sensorPort == 1 || encoder.sensorPort == 2;
+  const bool port = encoder.sensorPort >= 1 && encoder.sensorPort <= kMaxSensorPort;
   const bool type = encoder.type == EncoderType::kBiss || encoder.type == EncoderType::kInternal;
   return port && type && encoder.singleturnBits != 0;
 }
@@ -257,9 +269,20 @@ std::optional<IcMuEncoderState> icMuEncoderState(uint8_t outputRegister,
 }
 
 std::optional<std::string_view> icMuPartName(uint8_t hardRev) {
-  switch (hardRev >> 4) {
-    case 0x0:
+  // The upper nibble 0 is shared by the plain iC-MU and the iC-MU128, so those codes are named one
+  // by one, as MU_3SL_defs.h lists them. From the iC-MU150 on, the nibble names the part.
+  switch (hardRev) {
+    case 0x05:
+    case 0x06:
+    case 0x07:
+      return "iC-MU";
+    case 0x09:
+    case 0x0A:
       return "iC-MU128";
+    default:
+      break;
+  }
+  switch (hardRev >> 4) {
     case 0x1:
       return "iC-MU150";
     case 0x2:
@@ -299,6 +322,16 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status) {
   };
 }
 
+std::optional<std::string> icMuPartError(uint8_t sensorPort, uint8_t hardRev) {
+  if (isIntegratedSensorPort(sensorPort) || icMuPartName(hardRev)) {
+    return std::nullopt;
+  }
+  return std::format(
+      "register 0x74 of the encoder on external sensor port {} holds 0x{:02X}, which names no "
+      "iC-MU part, so the encoder is not taken for an iC-MU",
+      sensorPort, hardRev);
+}
+
 IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t hardRev,
                                     uint8_t outputRegister) {
   IcMuEncoderStatus status;
@@ -308,8 +341,10 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
   status.multiturnBits = encoder.multiturnBits;
   status.hardRev = hardRev;
   status.outputRegister = outputRegister;
-  if (auto error = icMuSingleturnBitsError(encoder.singleturnBits)) {
-    status.reason = std::move(*error);
+  if (auto partError = icMuPartError(encoder.sensorPort, hardRev)) {
+    status.reason = std::move(*partError);
+  } else if (auto bitsError = icMuSingleturnBitsError(encoder.singleturnBits)) {
+    status.reason = std::move(*bitsError);
   } else {
     status.masterPolePairs = icMuMasterPolePairs(encoder.singleturnBits);
     status.expectedOutputRegister = icMuOutMsb(icMuPath(encoder.sensorPort, encoder.multiturnBits),
@@ -325,7 +360,9 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
       }
     }
   }
-  status.state = icMuEncoderState(outputRegister, status.expectedOutputRegister);
+  if (!icMuPartError(encoder.sensorPort, hardRev)) {
+    status.state = icMuEncoderState(outputRegister, status.expectedOutputRegister);
+  }
   return status;
 }
 

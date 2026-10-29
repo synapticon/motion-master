@@ -21,6 +21,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- **A Firmware page for each SOMANET device.** It shows the firmware version the device runs, its hardware description, its Integro variant where it has one, and the descriptors it accepts. It lists the packages in `firmwares/` of the user cache, each with the server's verdict for this device, and adds a package from disk to that list. Install runs `firmware-installation` with the chosen package, the final state and the files to skip, shows each step as it runs, and reads the firmware version again afterwards. A package built for other hardware gets a warning and still installs. (#167)
 - **Set the integral limits of the controllers from the drive's own maxima.** `set-integral-limits` writes 0x2011:04 and 0x2012:08 as the maximum torque in mNm, 0x6072 / 1000 × 0x6076, and 0x2012:04 as the maximum motor speed on the driving shaft, 0x6080 × feed constant / gear ratio, with the cascaded position controller, where a feed of 0xFFFFFFFF turns the feed constant off as on the drive, or as the maximum torque with the simple PID controller. It needs firmware 5.1.0 or newer, refuses before anything is written when an input cannot be read, skips and names a limit object the drive does not have, and stores nothing to flash. The result gives each limit before and after. The Tuning page shows the three limits and sets them. (#19)
 
 ## [6.0.0-alpha.116] - 2026-10-29

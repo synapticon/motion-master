@@ -128,6 +128,18 @@ std::expected<std::optional<PlantModel>, std::string> readPlantModel(DeviceManag
 std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant(
     DeviceManager& deviceManager, uint16_t slavePosition);
 
+/// @brief Reads the full firmware descriptors a device accepts firmware under.
+///
+/// Thin forward to @c SomanetDrive::readFullFirmwareDescriptors. Two FoE reads, the hardware
+/// description and the Integro variant; only the first is required.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @return The device descriptor and, where there is one, the assembly descriptor, or why they
+///         could not be read.
+std::expected<FullFirmwareDescriptors, std::string> readFirmwareDescriptors(
+    DeviceManager& deviceManager, uint16_t slavePosition);
+
 /// @brief Reads what a device is and decides whether a firmware package belongs on it.
 ///
 /// Thin forward to @c SomanetDrive::checkFirmwarePackage. Two FoE reads; an incompatible package is

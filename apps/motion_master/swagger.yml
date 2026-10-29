@@ -2968,6 +2968,39 @@ paths:
           description: >
             The device is not a SOMANET drive, the file could not be read, or its content is not a
             plant model
+  /api/devices/{slavePosition}/firmware-descriptors:
+    get:
+      summary: Read the firmware descriptors a device accepts
+      operationId: getDeviceFirmwareDescriptors
+      description: >
+        Reads the device's `.hardware_description` and `.variant` and assembles the full firmware
+        descriptors it accepts: the device's own, and the assembly's where the hardware description
+        names one. These are the descriptors `firmware-compatibility` compares a package against,
+        without a package to compare.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The descriptors
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FullFirmwareDescriptors"
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >
+            The device is not a SOMANET drive, or its hardware description could not be read
   /api/devices/{slavePosition}/firmware-compatibility:
     get:
       summary: Check whether a firmware package belongs on a device

@@ -1745,6 +1745,28 @@ void HttpServer::run() {
                return mm::api::json(nlohmann::json(**variant));
              });
 
+  // The descriptors a package must carry to fit this device, without a package to compare.
+  router.get("/api/devices/:slavePosition/firmware-descriptors",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed(
+                   [&]() -> std::expected<nlohmann::json, std::string> {
+                     auto descriptors =
+                         mm::node::readFirmwareDescriptors(deviceManager_, *position);
+                     if (!descriptors) {
+                       return std::unexpected(descriptors.error());
+                     }
+                     return nlohmann::json(*descriptors);
+                   },
+                   "409 Conflict");
+             });
+
   // Whether a package belongs on this device. A mismatch is a 200 carrying `compatible: false` and
   // both descriptors, not an error status: the client asked a question and got an answer. A 4xx
   // here means the question could not be asked — the filename is not a package name, or the

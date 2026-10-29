@@ -73,6 +73,11 @@ export default function DeviceFirmwarePage() {
     queryFn: () => api.getDeviceHardwareDescription(slavePosition).then(r => r.data),
     retry: false,
   })
+  const descriptorsQuery = useQuery({
+    queryKey: ['firmware-descriptors', slavePosition],
+    queryFn: () => api.getDeviceFirmwareDescriptors(slavePosition).then(r => r.data),
+    retry: false,
+  })
   // Only an Integro carries a .variant, so a 404 is an answer, not a failure.
   const variantQuery = useQuery({
     queryKey: ['integro-variant', slavePosition],
@@ -173,7 +178,13 @@ export default function DeviceFirmwarePage() {
 
   const selectedIndex = selected ? packages.indexOf(selected) : -1
   const selectedVerdict = selectedIndex >= 0 ? verdicts[selectedIndex]?.data : undefined
-  const deviceDescriptors = verdicts.find(v => v.data)?.data?.deviceDescriptors
+  const deviceDescriptors = descriptorsQuery.data
+  const descriptorText = (value: string | undefined) =>
+    descriptorsQuery.isPending
+      ? 'Reading…'
+      : descriptorsQuery.isError
+        ? apiErrorMessage(descriptorsQuery.error)
+        : (value ?? '—')
 
   return (
     <div>
@@ -199,14 +210,12 @@ export default function DeviceFirmwarePage() {
                     : (versionQuery.data ?? '—')
               }
             />
-            <Field
-              label="Device descriptor"
-              value={deviceDescriptors?.device ?? '—'}
-              hint={deviceDescriptors ? undefined : 'shown once a package is checked'}
-            />
+            <Field label="Device descriptor" value={descriptorText(deviceDescriptors?.device)} />
             <Field
               label="Assembly descriptor"
-              value={deviceDescriptors ? (deviceDescriptors.assembly ?? 'no assembly') : '—'}
+              value={descriptorText(
+                deviceDescriptors ? (deviceDescriptors.assembly ?? 'no assembly') : undefined,
+              )}
             />
           </dl>
           <div className="px-5 pb-4 space-y-4">

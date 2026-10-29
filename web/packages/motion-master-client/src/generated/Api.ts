@@ -29,6 +29,7 @@ import {
   FirmwareCompatibility,
   FirmwarePackageName,
   FoeErrorCode,
+  FullFirmwareDescriptors,
   GameLoopHealth,
   HardwareDescription,
   HrdRecording,
@@ -1707,6 +1708,23 @@ export class Api<
   getDevicePlantModel = (slavePosition: number, params: RequestParams = {}) =>
     this.request<IdentifiedPlantModel, void>({
       path: `/api/devices/${slavePosition}/plant-model`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reads the device's `.hardware_description` and `.variant` and assembles the full firmware descriptors it accepts: the device's own, and the assembly's where the hardware description names one. These are the descriptors `firmware-compatibility` compares a package against, without a package to compare.
+   *
+   * @name GetDeviceFirmwareDescriptors
+   * @summary Read the firmware descriptors a device accepts
+   * @request GET:/api/devices/{slavePosition}/firmware-descriptors
+   */
+  getDeviceFirmwareDescriptors = (
+    slavePosition: number,
+    params: RequestParams = {},
+  ) =>
+    this.request<FullFirmwareDescriptors, void>({
+      path: `/api/devices/${slavePosition}/firmware-descriptors`,
       method: "GET",
       format: "json",
       ...params,

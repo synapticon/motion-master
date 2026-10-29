@@ -33,6 +33,7 @@
 #include "node/cia402.h"
 #include "node/device.h"
 #include "node/device_manager.h"
+#include "node/ic_mu_bridge.h"
 #include "node/ic_mu_encoder.h"
 #include "node/procedure.h"
 #include "node/profile_procedures.h"
@@ -3212,6 +3213,7 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
  public:
   std::array<uint8_t, 256> icMu{};
   std::array<uint8_t, 256> icPvl{};
+  std::array<uint8_t, 256> eeprom{};
   // The (address, value) of every register write, in order.
   std::vector<std::pair<uint8_t, uint8_t>> registerWrites;
   // Whether the next OS command 0 write echoes another value than it was given.
@@ -3244,6 +3246,30 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
     icMu[0x11] = 0xA5;
   }
 
+  // I2C_COM: moves the bytes 0x5C-0x5D name between the exchange registers and the device 0x5E
+  // names, from its register 0x5B. An odd device id reads, an even one writes.
+  void runI2cTransfer() {
+    const uint8_t id = icMu[0x5E];
+    std::array<uint8_t, 256>* chip = nullptr;
+    if ((id & 0xFE) == 0xA0) {
+      chip = &eeprom;
+    } else if ((id & 0xFE) == 0xC2) {
+      chip = &icPvl;
+    }
+    if (chip == nullptr) {
+      return;
+    }
+    for (int i = 0; i <= icMu[0x5D] - icMu[0x5C]; ++i) {
+      auto& device = (*chip)[static_cast<uint8_t>(icMu[0x5B] + i)];
+      auto& exchange = icMu[static_cast<uint8_t>(icMu[0x5C] + i)];
+      if ((id & 0x01) != 0) {
+        exchange = device;
+      } else {
+        device = exchange;
+      }
+    }
+  }
+
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slave, uint16_t index,
                                                            uint8_t subindex) override {
     if (index != kOsCommand || subindex != 3 || awaitingCommand || commands.empty() ||
@@ -3256,8 +3282,8 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
     if (command[2] != 0) {
       registerWrites.emplace_back(address, command[4]);
       if (address == 0x75) {
-        if (command[4] == 0x0A && icMu[0x5E] == 0xC3) {
-          icMu[0x60] = icPvl[icMu[0x5B]];
+        if (command[4] == 0x0A) {
+          runI2cTransfer();
         }
         return std::vector<uint8_t>{1, 0, command[4], 0, 0, 0, 0, 0};
       }
@@ -3787,6 +3813,45 @@ TEST(ParseIcMuEncoderConfigurationRequest, WritesTheRestoreFileUnlessTold) {
   EXPECT_FALSE(request->writeRestoreFile);
   EXPECT_FALSE(mm::node::parseIcMuEncoderConfigurationRequest(
       {{"encoderOrdinal", 1}, {"writeRestoreFile", "no"}}));
+}
+
+TEST(IcMuBridge, ReadsAndWritesSeveralBytesInOneTransfer) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  auto drive = mm::node::createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value());
+  for (int i = 0; i < 16; ++i) {
+    driver.eeprom[0x40 + i] = static_cast<uint8_t>(0xB0 + i);
+  }
+
+  auto bytes = mm::node::readIcMuI2c(*drive, somanet::EncoderOrdinal::kEncoder1,
+                                     somanet::IcMuI2cTarget::kEeprom, 0x40, 16, {});
+  ASSERT_TRUE(bytes.has_value()) << bytes.error();
+  ASSERT_EQ(bytes->size(), 16u);
+  EXPECT_EQ(bytes->front(), 0xB0);
+  EXPECT_EQ(bytes->back(), 0xBF);
+  EXPECT_EQ(driver.icMu[0x5E], 0xA1);  // the EEPROM, read
+
+  const std::array<uint8_t, 3> values = {0x11, 0x22, 0x33};
+  auto written = mm::node::writeIcMuI2c(*drive, somanet::EncoderOrdinal::kEncoder1,
+                                        somanet::IcMuI2cTarget::kEeprom, 0x05, values, {});
+  ASSERT_TRUE(written.has_value()) << written.error();
+  EXPECT_EQ(driver.eeprom[0x05], 0x11);
+  EXPECT_EQ(driver.eeprom[0x07], 0x33);
+  EXPECT_EQ(driver.eeprom[0x08], 0x00);
+  EXPECT_EQ(driver.icMu[0x5E], 0xA0);  // the EEPROM, written
+}
+
+TEST(IcMuBridge, FailsATransferTheEncoderReportsAsAnI2cError) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.icMu[0x77] = 0x40;  // EPR_ERR
+  auto drive = mm::node::createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value());
+  auto bytes = mm::node::readIcMuI2c(*drive, somanet::EncoderOrdinal::kEncoder1,
+                                     somanet::IcMuI2cTarget::kIcPvl, 0x00, 1, {});
+  ASSERT_FALSE(bytes.has_value());
+  EXPECT_NE(bytes.error().find("EPR_ERR"), std::string::npos) << bytes.error();
 }
 
 TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnIcMuWithAnotherBankSelected) {

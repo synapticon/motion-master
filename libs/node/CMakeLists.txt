@@ -13,6 +13,7 @@ add_library(
   hardware_description.cc
   integro_variant.cc
   ic_haus_registers.cc
+  ic_mu_bridge.cc
   ic_mu_calibration.cc
   ic_mu_eeprom.cc
   ic_mu_encoder.cc

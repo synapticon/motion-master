@@ -11,8 +11,10 @@ add_executable(
   game_loop_test.cc
   cycle_rate_source_test.cc
   plant_model_fit_test.cc
+  controller_tuning_call_test.cc
   ../monitoring_api.cc
   ../plant_model_fit.cc
+  ../controller_tuning_call.cc
   ../config.cc
   ../cert_info.cc
   ../game_loop.cc

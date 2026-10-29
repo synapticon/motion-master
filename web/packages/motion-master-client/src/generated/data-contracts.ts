@@ -488,7 +488,7 @@ export interface ProgressStep {
   /** @example "succeeded" */
   status: "idle" | "running" | "succeeded" | "failed";
   /**
-   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`. For `ic-mu-key-registers` the `read-key-registers` step holds an array of `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and `entries`, the pairs written, as `IcMuRestoreFile` lists them. For `open-loop-field-control` the `validate` step holds an `OpenLoopFieldPlan`. For `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null with a `reason`.
+   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`. For `ic-mu-key-registers` the `read-key-registers` step holds an array of `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and `entries`, the pairs written, as `IcMuRestoreFile` lists them. For `open-loop-field-control` the `validate` step holds an `OpenLoopFieldPlan`. For `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null with a `reason`. For `controller-auto-tuning` the `drive-configuration` step holds the `DriveConfig` sent to the auto-tuning program, the `noise` step `noiseRpm` and a `warning`, the `compute` step a `ControllerTuningComputed`, and the `write` step a `ControllerTuningWrite`.
    * @example {"status":1,"data":[1,2,3,4,5,6]}
    */
   value?: any;
@@ -1224,6 +1224,52 @@ export interface OpenLoopFieldPlan {
   velocityRpm: number;
 }
 
+/** The `compute` step of `controller-auto-tuning`: what the auto-tuning program tuned for, and the gains it returned in SI units, before the conversion to the drive's units. */
+export interface ControllerTuningComputed {
+  /** @example true */
+  full: boolean;
+  /** Position tuning only. */
+  controllerType?: "PI-P" | "P-PI";
+  /**
+   * The damping ratio the program chose, or the one the request gave.
+   * @example 0.9
+   */
+  dampingRatio: number;
+  /**
+   * Position tuning only. The settling time the program chose, or the one given.
+   * @example 120
+   */
+  settlingTimeMs?: number;
+  /**
+   * Velocity tuning only. The bandwidth the program chose, or the one given.
+   * @example 40.8
+   */
+  bandwidthHz?: number;
+  /**
+   * Kp and Ki of the position loop, in (rad/s)/rad and (rad/s)/(rad·s), and of the velocity loop, in Nm/(rad/s) and Nm/(rad/s·s). A velocity tuning returns zeros for the position loop.
+   * @example {"position":{"kp":30,"ki":4},"velocity":{"kp":0.05,"ki":2.5}}
+   */
+  gains: object;
+  /** The stability margins and other figures a full tuning reports, as the program renders them. Null for a tuning to targets. */
+  state: any | null;
+}
+
+/** The `write` step of `controller-auto-tuning`: each gain object, its value before and after the write, in the drive's units, and the Kd objects the drive does not have. */
+export interface ControllerTuningWrite {
+  gains: {
+    /** @example "0x2011:01" */
+    object: string;
+    /** @example 1.5 */
+    before: number;
+    /** @example 5.24 */
+    after: number;
+  }[];
+  /** @example ["0x2011:03"] */
+  skipped: string[];
+  /** Set when a full tuning computed the gains with a noise of 0, because the motor moved or the noise recording failed. */
+  warning: string | null;
+}
+
 /** One key register of an iC-MU, read from its RAM: the step value of `ic-mu-key-registers` is a list of 33 of them, in the order of the restore file. */
 export interface IcMuKeyRegister {
   /** @example 82 */
@@ -1650,6 +1696,47 @@ export interface ProcedureRequest {
    * @example 10000
    */
   fieldLengthRate?: number;
+  /**
+   * `controller-auto-tuning` only, and required for it: the controller to tune.
+   * @example "position"
+   */
+  controller?: "position" | "velocity";
+  /**
+   * `controller-auto-tuning` only, position tuning only: the structure of the cascaded position controller the gains are computed for. PI-P puts the integral action in the position loop, P-PI in the velocity loop.
+   * @default "PI-P"
+   * @example "PI-P"
+   */
+  controllerType?: "PI-P" | "P-PI";
+  /**
+   * `controller-auto-tuning` only: true lets the auto-tuning program choose the damping ratio and the settling time or the bandwidth, from the drive configuration and the velocity noise. False computes the gains for `dampingRatioPermil` and `settlingTimeMs` or `bandwidthMilliHz`.
+   * @default true
+   * @example true
+   */
+  full?: boolean;
+  /**
+   * `controller-auto-tuning` only, when `full` is false: the damping ratio of the closed loop, in per mille.
+   * @min 400
+   * @max 2000
+   * @default 1000
+   * @example 1000
+   */
+  dampingRatioPermil?: number;
+  /**
+   * `controller-auto-tuning` only, position tuning only, when `full` is false: the time the step response takes to stay within 5 % of the target.
+   * @min 20
+   * @max 1000
+   * @default 200
+   * @example 200
+   */
+  settlingTimeMs?: number;
+  /**
+   * `controller-auto-tuning` only, velocity tuning only, when `full` is false: the bandwidth of the closed velocity loop, in mHz.
+   * @min 200
+   * @max 100000
+   * @default 5000
+   * @example 5000
+   */
+  bandwidthMilliHz?: number;
   [key: string]: any;
 }
 

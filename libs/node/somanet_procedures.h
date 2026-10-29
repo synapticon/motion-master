@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/controller_tuning.h"
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/firmware_package.h"
@@ -1681,5 +1682,75 @@ std::vector<ProgressStep> openLoopFieldControlSteps();
 std::expected<void, std::string> runOpenLoopFieldControlProcedure(
     Device& device, ProgressReporter& reporter, const std::stop_token& stop,
     const OpenLoopFieldControlRequest& request);
+
+// --- Controller auto-tuning ----------------------------------------------------------------------
+
+/// @brief Procedure name for controller auto-tuning, as it appears in its URL and its snapshot key.
+inline constexpr std::string_view kControllerTuningProcedure = "controller-auto-tuning";
+
+/// @brief The step that checks the firmware and the controller, and reads the plant model.
+inline constexpr std::string_view kControllerTuningValidateStep = "validate";
+
+/// @brief The step that reads the drive configuration a full tuning sends to the program.
+inline constexpr std::string_view kControllerTuningDriveConfigurationStep = "drive-configuration";
+
+/// @brief The step that measures the velocity noise for a full tuning.
+inline constexpr std::string_view kControllerTuningNoiseStep = "noise";
+
+/// @brief The step that calls the auto-tuning program.
+inline constexpr std::string_view kControllerTuningComputeStep = "compute";
+
+/// @brief The step that writes the gains.
+inline constexpr std::string_view kControllerTuningWriteStep = "write";
+
+/// @brief How long the noise recording runs.
+inline constexpr std::chrono::milliseconds kControllerTuningNoiseDuration{500};
+
+/// @brief One controller auto-tuning run, as a client describes it.
+struct ControllerTuningRequest {
+  TunedController controller = TunedController::kPosition;
+  CascadedControllerType controllerType = CascadedControllerType::kPiP;  ///< Position only.
+  /// The program chooses the targets: the damping ratio and the settling time or the bandwidth.
+  /// When false, @c targets are used.
+  bool full = true;
+  ControllerTuningTargets targets;
+};
+
+/// @brief Parses `{"controller": "position", "controllerType": "PI-P", "full": false,
+///        "dampingRatioPermil": 1000, "settlingTimeMs": 200, "bandwidthMilliHz": 5000}`.
+///
+/// @c controller is required. The rest default as @c ControllerTuningRequest declares. The targets
+/// are checked against the ranges the program clips to, so that the value a client sends is the
+/// value the program uses.
+std::expected<ControllerTuningRequest, std::string> parseControllerTuningRequest(
+    const nlohmann::json& body);
+
+/// @brief What controller auto-tuning accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> controllerTuningParameters();
+
+/// @brief The controller auto-tuning step template, idle.
+std::vector<ProgressStep> controllerTuningSteps();
+
+/// @brief Computes the gains of the position or the velocity controller and writes them.
+///
+/// 1. **validate** — refuses firmware older than 5.1.0, and for a position tuning the simple PID
+///    controller (0x2002 = 1), whose gains are in other units. Reads @c kPlantModelFile, and
+///    refuses a drive without it. Reads the resolution of the position encoder for a position
+///    tuning, and checks that the dictionary has the Kp and Ki objects to write.
+/// 2. **drive-configuration** — for a full tuning, reads the objects of
+///    @c TuningDriveConfiguration.
+/// 3. **noise** — for a full tuning, records the velocity for @c kControllerTuningNoiseDuration
+///    with an HRD stream of system identification data, with the chirp disarmed first, and
+///    computes @c velocityNoise. A recording that fails gives a noise of 0 and a warning, and the
+///    run goes on.
+/// 4. **compute** — calls @p tune.
+/// 5. **write** — writes the gains of @c controllerGainPlan, and reports each object's value
+///    before and after. A Kd object the dictionary lacks is skipped and named.
+///
+/// Runs in any CiA402 state and changes none. Nothing moves the motor, and nothing is stored to
+/// flash. The drive reads the new gains on its next control cycle.
+std::expected<void, std::string> runControllerTuningProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const ControllerTuningRequest& request, const ControllerTuningFn& tune);
 
 }  // namespace mm::node

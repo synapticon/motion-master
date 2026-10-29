@@ -36,6 +36,7 @@ import StorageUserCachePage from './pages/StorageUserCachePage'
 import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage'
 import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
 import DeviceSiiPage from './pages/DeviceSiiPage'
+import DeviceTuningPage from './pages/DeviceTuningPage'
 import DeviceRegistersPage from './pages/DeviceRegistersPage'
 import DeviceFoePage from './pages/DeviceFoePage'
 import DeviceHrdPage from './pages/DeviceHrdPage'
@@ -117,6 +118,7 @@ export default function App() {
           <Route path="parameters" element={<DeviceParametersPage />} />
           <Route path="pdo-mapping" element={<DevicePdoMappingPage />} />
           <Route path="motion" element={<DeviceMotionPage />} />
+          <Route path="tuning" element={<DeviceTuningPage />} />
           {/* The selected procedure lives in the URL, so one page serves both paths: no selection
               (the list plus a prompt) and a named procedure (the list plus its detail). */}
           <Route path="procedures" element={<DeviceProceduresPage />} />

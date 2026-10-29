@@ -88,7 +88,9 @@ std::optional<uint8_t> icMuEepromAddress(uint8_t ramAddress) {
 void to_json(nlohmann::json& j, const IcMuKeyRegister& entry) {
   j = nlohmann::json{{"ramAddress", entry.ramAddress},
                      {"eepromAddress", entry.eepromAddress},
-                     {"value", entry.value}};
+                     {"value", entry.value},
+                     {"register", entry.icMuRegister ? nlohmann::json(*entry.icMuRegister)
+                                                     : nlohmann::json(nullptr)}};
 }
 
 void to_json(nlohmann::json& j, const IcMuEepromByte& entry) {

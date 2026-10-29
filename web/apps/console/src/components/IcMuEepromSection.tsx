@@ -331,17 +331,29 @@ export default function IcMuEepromSection({
 
       {registers && (
         <div>
-          <span className={labelCls}>Key registers (RAM → EEPROM)</span>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-1 font-mono text-xs">
-            {registers.map(r => (
-              <span key={r.ramAddress} className="whitespace-nowrap">
-                <span className="text-grey-500">
-                  {hex(r.ramAddress)}→{hex(r.eepromAddress)}
-                </span>{' '}
-                {hex(r.value)}
-              </span>
-            ))}
-          </div>
+          <span className={labelCls}>Key registers</span>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-grey-500 border-b border-grey-200">
+                <th className="py-1.5 pr-3 font-normal">RAM</th>
+                <th className="py-1.5 pr-3 font-normal">EEPROM</th>
+                <th className="py-1.5 pr-3 font-normal">Register</th>
+                <th className="py-1.5 pr-3 font-normal">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {registers.map(r => (
+                <tr key={r.ramAddress} className="border-b border-grey-100 last:border-0">
+                  <td className="py-1.5 pr-3 font-mono">{hex(r.ramAddress)}</td>
+                  <td className="py-1.5 pr-3 font-mono">{hex(r.eepromAddress)}</td>
+                  <td className="py-1.5 pr-3 font-mono">{r.register?.layout ?? 'not in the map'}</td>
+                  <td className="py-1.5 pr-3 font-mono">
+                    {hex(r.value)} ({r.value})
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

@@ -397,6 +397,10 @@ std::string icMuRestoreFileName(uint8_t sensorPort);
 ///        @c icMuRestoreRegisters. @p values holds the value of each register in that order.
 std::vector<uint8_t> icMuRestoreFile(std::span<const uint8_t> values);
 
+/// @brief The iC-MU register at RAM @p address, as @c icHausRegisterSpaces lists it, or nothing for
+///        an address the register map does not list.
+const IcHausRegister* icMuRamRegister(uint8_t address);
+
 /// @brief One @c [address, value] pair of a restore file, with the iC-MU register at that address.
 struct IcMuRestoreEntry {
   uint8_t address = 0;

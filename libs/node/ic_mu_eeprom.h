@@ -72,6 +72,8 @@ struct IcMuKeyRegister {
   uint8_t ramAddress = 0;
   uint8_t eepromAddress = 0;  ///< Where the EEPROM keeps it, from @c icMuEepromAddress.
   uint8_t value = 0;
+  /// The register at @c ramAddress, from @c icMuRamRegister. Nothing where the map lists none.
+  const IcHausRegister* icMuRegister = nullptr;
 };
 void to_json(nlohmann::json& j, const IcMuKeyRegister& entry);
 

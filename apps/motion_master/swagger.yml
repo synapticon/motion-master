@@ -6542,7 +6542,7 @@ components:
       description: >
         One key register of an iC-MU, read from its RAM: the step value of
         `ic-mu-key-registers` is a list of 33 of them, in the order of the restore file.
-      required: [ramAddress, eepromAddress, value]
+      required: [ramAddress, eepromAddress, value, register]
       properties:
         ramAddress: { type: integer, example: 82 }
         eepromAddress:
@@ -6552,6 +6552,13 @@ components:
             0x52-0x59 is EEPROM 0x19-0x20.
           example: 25
         value: { type: integer, example: 47 }
+        register:
+          description: >-
+            The iC-MU register at `ramAddress`, as `/api/meta/ic-haus-registers` lists it, or null
+            for an address the register map does not list.
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/IcHausRegister"
     IcMuEepromByte:
       type: object
       description: >

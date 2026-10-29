@@ -583,6 +583,21 @@ void to_json(nlohmann::json& j, const IcMuRestoreEntry& entry) {
                                                      : nlohmann::json(nullptr)}};
 }
 
+const IcHausRegister* icMuRamRegister(uint8_t address) {
+  for (const auto& space : icHausRegisterSpaces()) {
+    if (space.chip != IcHausChip::kIcMu) {
+      continue;
+    }
+    const auto r = std::ranges::find_if(space.registers, [address](const IcHausRegister& row) {
+      return address >= row.address && address <= row.lastAddress;
+    });
+    if (r != space.registers.end()) {
+      return &*r;
+    }
+  }
+  return nullptr;
+}
+
 std::expected<std::vector<IcMuRestoreEntry>, std::string> parseIcMuRestoreFile(
     std::span<const uint8_t> bytes) {
   if (bytes.size() % 2 != 0) {
@@ -594,23 +609,10 @@ std::expected<std::vector<IcMuRestoreEntry>, std::string> parseIcMuRestoreFile(
     return std::unexpected(std::format("a restore file holds at most {} bytes, and this one has {}",
                                        kIcMuRestoreFileMaxBytes, bytes.size()));
   }
-  auto find = [](uint8_t address) -> const IcHausRegister* {
-    for (const auto& space : icHausRegisterSpaces()) {
-      if (space.chip != IcHausChip::kIcMu) {
-        continue;
-      }
-      const auto r = std::ranges::find_if(space.registers, [address](const IcHausRegister& row) {
-        return address >= row.address && address <= row.lastAddress;
-      });
-      if (r != space.registers.end()) {
-        return &*r;
-      }
-    }
-    return nullptr;
-  };
   std::vector<IcMuRestoreEntry> entries;
   for (size_t i = 0; i < bytes.size(); i += 2) {
-    entries.push_back({.address = bytes[i], .value = bytes[i + 1], .icMuRegister = find(bytes[i])});
+    entries.push_back(
+        {.address = bytes[i], .value = bytes[i + 1], .icMuRegister = icMuRamRegister(bytes[i])});
   }
   return entries;
 }

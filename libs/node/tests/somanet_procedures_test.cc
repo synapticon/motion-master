@@ -3902,6 +3902,12 @@ TEST(RunIcMuKeyRegistersProcedure, ReadsTheRestoreRegistersWithTheirEepromAddres
   EXPECT_EQ(registers[25]["ramAddress"], 0x52);
   EXPECT_EQ(registers[25]["eepromAddress"], 0x19);
   EXPECT_EQ(registers[25]["value"], 0x2F);
+  // Each register comes with its row of the iC-MU register map.
+  EXPECT_EQ(registers[25]["register"]["address"], 0x52);
+  EXPECT_FALSE(registers[25]["register"]["layout"].get<std::string>().empty());
+  for (const auto& entry : registers) {
+    EXPECT_FALSE(entry["register"].is_null()) << entry["ramAddress"];
+  }
   // It reads; nothing is written and the status bits are left alone.
   EXPECT_TRUE(onlyRegisterReads(driver));
 }

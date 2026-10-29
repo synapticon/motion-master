@@ -1954,7 +1954,8 @@ std::expected<void, std::string> runIcMuKeyRegistersProcedure(Device& device,
     }
     registers.push_back({.ramAddress = ram,
                          .eepromAddress = somanet::icMuEepromAddress(ram).value_or(0),
-                         .value = *value});
+                         .value = *value,
+                         .icMuRegister = somanet::icMuRamRegister(ram)});
   }
   reporter.succeed(kIcMuKeyRegistersStep, registers);
   return {};

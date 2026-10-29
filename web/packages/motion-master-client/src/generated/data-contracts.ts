@@ -1201,6 +1201,8 @@ export interface IcMuKeyRegister {
   eepromAddress: number;
   /** @example 47 */
   value: number;
+  /** The iC-MU register at `ramAddress`, as `/api/meta/ic-haus-registers` lists it, or null for an address the register map does not list. */
+  register: IcHausRegister | null;
 }
 
 /** One byte of the EEPROM of an iC-MU encoder: the step value of `ic-mu-eeprom-export` is a list of 77 of them, 0x00-0x4C. 0x00-0x3F is the configuration of the iC-MU and 0x40-0x4C that of the iC-PVL. The `read-eeprom` step of `ic-mu-eeprom-erase` holds the same list, read back after the erase. */

@@ -969,6 +969,49 @@ TEST(BrakeState, ReportsTheConfigurationAndDerivedFlags) {
   EXPECT_TRUE(state->releaseMovesShaft());
 }
 
+// A drive without the brake object 0x2004, as one running Jasper firmware: the CiA402 objects only.
+Device makeDeviceWithoutBrake(OsCommandFakeDriver& driver) {
+  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters().has_value());
+  return device;
+}
+
+TEST(BrakeState, ReportsADriveWithoutTheBrakeObjectAsHavingNoBrake) {
+  OsCommandFakeDriver driver;
+  Device device = makeDeviceWithoutBrake(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+  EXPECT_FALSE(drive->hasBrakeObject());
+
+  auto state = drive->brakeState();
+  ASSERT_TRUE(state.has_value()) << state.error();
+  EXPECT_FALSE(state->present);
+  EXPECT_EQ(state->status, somanet::BrakeStatus::kNotConfigured);
+  EXPECT_FALSE(state->softwareControllable());
+  const nlohmann::json j = *state;
+  EXPECT_EQ(j.at("present"), false);
+
+  auto status = drive->brakeStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_EQ(*status, somanet::BrakeStatus::kNotConfigured);
+}
+
+TEST(ReleaseBrake, WritesNothingOnADriveWithoutTheBrakeObject) {
+  OsCommandFakeDriver driver;
+  Device device = makeDeviceWithoutBrake(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  EXPECT_TRUE(drive->releaseBrake(kNoSettle).has_value());
+  EXPECT_TRUE(drive->engageBrake(kNoSettle).has_value());
+  EXPECT_TRUE(drive->setBrakeStatus(somanet::BrakeStatus::kDisengaged).has_value());
+  EXPECT_FALSE(driver.store.contains(
+      OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)));
+}
+
 TEST(ReleaseBrake, DisengagesAClutchBrakeAndReadsItBack) {
   OsCommandFakeDriver driver;
   Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kClutch,

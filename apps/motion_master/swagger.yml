@@ -5851,6 +5851,13 @@ components:
         commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a
         release or engage arrives in the same shape as a plain read.
       properties:
+        present:
+          type: boolean
+          description: >
+            Whether the drive has the brake object 0x2004. A drive with no brake, such as one
+            running Jasper firmware, has none: then `status` is `notConfigured`,
+            `softwareControllable` is false, and release and engage write nothing and succeed.
+          example: true
         status:
           type: string
           enum: [notConfigured, engaged, disengaged]
@@ -5893,8 +5900,8 @@ components:
             raises current progressively to lift the load off the pin.
           example: false
       required:
-        [status, releaseStrategy, pullTimeMs, pullVoltageMv, holdVoltageMv, softwareControllable,
-         releaseMovesShaft]
+        [present, status, releaseStrategy, pullTimeMs, pullVoltageMv, holdVoltageMv,
+         softwareControllable, releaseMovesShaft]
     ProcedureDescriptor:
       type: object
       description: >

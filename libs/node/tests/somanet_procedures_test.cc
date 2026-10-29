@@ -1082,6 +1082,27 @@ TEST(RunPolePairDetectionProcedure, PreparesReleasesDetectsAndRestores) {
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 7);
 }
 
+TEST(RunPolePairDetectionProcedure, RunsOnADriveWithoutTheBrakeObject) {
+  OsCommandFakeDriver driver;
+  driver.programDrive();
+  // A drive with no brake, as one running Jasper firmware, has no 0x2004 at all.
+  std::erase_if(driver.ods, [](const OdEntry& e) { return e.index == somanet::kBrakeOptions; });
+  std::erase_if(driver.store,
+                [](const auto& entry) { return (entry.first >> 8) == somanet::kBrakeOptions; });
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  ProgressReporter reporter(polePairDetectionSteps());
+
+  driver.responses = {{1, 0, 3, 0, 0, 0, 0, 0}};
+  auto result = runPolePairDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  for (const auto& step : reporter.steps()) {
+    EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
+  }
+  EXPECT_EQ(brakeWrites(driver), 0);
+  EXPECT_EQ(stepById(reporter.steps(), "release-brake")->value.at("present"), false);
+}
+
 TEST(RunPolePairDetectionProcedure, RestoresTheBrakeAndModeItFound) {
   OsCommandFakeDriver driver;
   Device device = makeDevice(driver);

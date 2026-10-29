@@ -80,17 +80,91 @@ TEST(TuningDriveConfiguration, LeavesTheNotchDepthToTheProgramWithoutTheObject) 
   EXPECT_FALSE(j.contains("notch_dp"));
 }
 
-TEST(ControllerTuningFirmwareError, AcceptsFirmwareFrom510) {
-  EXPECT_FALSE(controllerTuningFirmwareError("v5.1.0"));
-  EXPECT_FALSE(controllerTuningFirmwareError("5.6.11"));
-  EXPECT_FALSE(controllerTuningFirmwareError("v10.0.4"));
+TEST(ControllerFirmwareError, AcceptsFirmwareFrom510) {
+  EXPECT_FALSE(controllerFirmwareError("v5.1.0", "x"));
+  EXPECT_FALSE(controllerFirmwareError("5.6.11", "x"));
+  EXPECT_FALSE(controllerFirmwareError("v10.0.4", "x"));
 }
 
-TEST(ControllerTuningFirmwareError, RefusesOlderAndUnreadableFirmware) {
-  EXPECT_TRUE(controllerTuningFirmwareError("v5.0.9"));
-  EXPECT_TRUE(controllerTuningFirmwareError("v5.1.0-rc.1"));
-  EXPECT_TRUE(controllerTuningFirmwareError("v4.4.1"));
-  EXPECT_TRUE(controllerTuningFirmwareError("unknown"));
+TEST(ControllerFirmwareError, RefusesOlderAndUnreadableFirmware) {
+  EXPECT_TRUE(controllerFirmwareError("v5.0.9", "x"));
+  EXPECT_TRUE(controllerFirmwareError("v5.1.0-rc.1", "x"));
+  EXPECT_TRUE(controllerFirmwareError("v4.4.1", "x"));
+  EXPECT_TRUE(controllerFirmwareError("unknown", "x"));
+}
+
+IntegralLimitInputs limitInputs() {
+  return {.maxTorquePermil = 3000,
+          .ratedTorqueMilliNm = 400,
+          .maxMotorSpeed = 2000,
+          .feedConstantFeed = 1,
+          .feedConstantShaftRevolutions = 1,
+          .gearMotorRevolutions = 1,
+          .gearShaftRevolutions = 1,
+          .positionControlStrategy = 2};
+}
+
+TEST(IntegralLimits, TheVelocityLoopsStopAtTheMaximumTorque) {
+  const auto limits = integralLimits(limitInputs());
+  ASSERT_TRUE(limits) << limits.error();
+  EXPECT_EQ(limits->velocityController, 1200u);  // 3000 per mille of 400 mNm
+  EXPECT_EQ(limits->positionVelocityLoop, 1200u);
+}
+
+TEST(IntegralLimits, TheCascadedPositionLoopStopsAtTheMaximumSpeedOnTheDrivingShaft) {
+  auto inputs = limitInputs();
+  inputs.gearMotorRevolutions = 50;  // 50 motor turns for 3 turns of the shaft
+  inputs.gearShaftRevolutions = 3;
+  inputs.feedConstantFeed = 360000;  // 360000 units for one shaft turn
+  inputs.feedConstantShaftRevolutions = 1;
+  const auto limits = integralLimits(inputs);
+  ASSERT_TRUE(limits) << limits.error();
+  EXPECT_EQ(limits->positionLoop, 43200000u);  // 2000 × 360000 / (50 / 3)
+}
+
+TEST(IntegralLimits, AFeedOf0xFFFFFFFFTurnsTheFeedConstantOff) {
+  // The bench Circulo: 3750000 mrpm, a 120:1 gear, the feed constant off.
+  auto inputs = limitInputs();
+  inputs.maxMotorSpeed = 3750000;
+  inputs.gearMotorRevolutions = 120;
+  inputs.feedConstantFeed = kFeedConstantOff;
+  inputs.feedConstantShaftRevolutions = 0;  // not read while the feed constant is off
+  const auto limits = integralLimits(inputs);
+  ASSERT_TRUE(limits) << limits.error();
+  EXPECT_EQ(limits->positionLoop, 31250u);
+}
+
+TEST(IntegralLimits, TheSimplePidPositionLoopStopsAtTheMaximumTorque) {
+  auto inputs = limitInputs();
+  inputs.positionControlStrategy = 1;
+  inputs.gearMotorRevolutions = 50;
+  const auto limits = integralLimits(inputs);
+  ASSERT_TRUE(limits) << limits.error();
+  EXPECT_EQ(limits->positionLoop, 1200u);
+}
+
+TEST(IntegralLimits, RoundsToAWholeNumber) {
+  auto inputs = limitInputs();
+  inputs.maxTorquePermil = 1001;    // 400.4 mNm
+  inputs.gearMotorRevolutions = 3;  // 666.67
+  const auto limits = integralLimits(inputs);
+  ASSERT_TRUE(limits) << limits.error();
+  EXPECT_EQ(limits->velocityController, 400u);
+  EXPECT_EQ(limits->positionLoop, 667u);
+}
+
+TEST(IntegralLimits, RefusesAZeroInTheRatiosAndAnUnknownStrategy) {
+  auto inputs = limitInputs();
+  inputs.gearShaftRevolutions = 0;
+  auto limits = integralLimits(inputs);
+  ASSERT_FALSE(limits);
+  EXPECT_NE(limits.error().find("0x6091:02"), std::string::npos) << limits.error();
+  inputs = limitInputs();
+  inputs.positionControlStrategy = 3;
+  EXPECT_FALSE(integralLimits(inputs));
+  inputs = limitInputs();
+  inputs.feedConstantFeed = 1e12;
+  EXPECT_FALSE(integralLimits(inputs));
 }
 
 TEST(VelocityNoise, IsThreeSampleStandardDeviationsOfTheChange) {

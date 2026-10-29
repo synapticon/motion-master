@@ -32,6 +32,7 @@
 #include "core/base64.h"
 #include "core/platform.h"
 #include "core/user_cache.h"
+#include "node/cia402_drive_objects.h"
 #include "node/firmware_version.h"
 #include "node/ic_mu_bridge.h"
 #include "node/ic_mu_encoder.h"
@@ -5824,7 +5825,7 @@ std::expected<void, std::string> runControllerTuningProcedure(
   }
   const auto version = trimFirmwareVersion(
       std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
-  if (auto error = controllerTuningFirmwareError(version)) {
+  if (auto error = controllerFirmwareError(version, "controller auto-tuning")) {
     return fail(kControllerTuningValidateStep, std::move(*error));
   }
   uint32_t resolution = 0;
@@ -5991,6 +5992,99 @@ std::expected<void, std::string> runControllerTuningProcedure(
       nlohmann::json{{"gains", std::move(written)},
                      {"skipped", std::move(skipped)},
                      {"warning", noiseWarning ? nlohmann::json(*noiseWarning) : nlohmann::json()}});
+  return {};
+}
+
+// --- Integral limits -----------------------------------------------------------------------------
+
+std::vector<ProgressStep> integralLimitsSteps() {
+  return stepsFrom({kIntegralLimitsComputeStep, kIntegralLimitsWriteStep});
+}
+
+std::expected<void, std::string> runIntegralLimitsProcedure(Device& device,
+                                                            ProgressReporter& reporter) {
+  namespace cia402Objects = cia402::objects;
+  namespace objects = somanet::objects;
+  const auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+
+  // ── compute ──
+  reporter.start(kIntegralLimitsComputeStep);
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return fail(kIntegralLimitsComputeStep, drive.error());
+  }
+  auto rawVersion = drive->manufacturerSoftwareVersion();
+  if (!rawVersion) {
+    return fail(kIntegralLimitsComputeStep, rawVersion.error());
+  }
+  const auto version = trimFirmwareVersion(
+      std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
+  if (auto error = controllerFirmwareError(version, "setting the integral limits")) {
+    return fail(kIntegralLimitsComputeStep, std::move(*error));
+  }
+  IntegralLimitInputs inputs;
+  NumericReader reader(device);
+  reader.read(cia402Objects::kMaxTorque, inputs.maxTorquePermil);
+  reader.read(cia402Objects::kMotorRatedTorque, inputs.ratedTorqueMilliNm);
+  reader.read(cia402Objects::kMaxMotorSpeed, inputs.maxMotorSpeed);
+  reader.read(cia402Objects::kFeedConstantSubIndex001, inputs.feedConstantFeed);
+  reader.read(cia402Objects::kFeedConstantSubIndex002, inputs.feedConstantShaftRevolutions);
+  reader.read(cia402Objects::kGearRatioSubIndex001, inputs.gearMotorRevolutions);
+  reader.read(cia402Objects::kGearRatioSubIndex002, inputs.gearShaftRevolutions);
+  reader.read(objects::kPositionControlStrategy, inputs.positionControlStrategy);
+  if (reader.failure()) {
+    return fail(kIntegralLimitsComputeStep, *reader.failure());
+  }
+  auto limits = integralLimits(inputs);
+  if (!limits) {
+    return fail(kIntegralLimitsComputeStep, limits.error());
+  }
+  reporter.succeed(
+      kIntegralLimitsComputeStep,
+      nlohmann::json{
+          {"firmwareVersion", version},
+          {"maxTorquePermil", inputs.maxTorquePermil},
+          {"ratedTorqueMilliNm", inputs.ratedTorqueMilliNm},
+          {"maxMotorSpeed", inputs.maxMotorSpeed},
+          {"feedConstant", {inputs.feedConstantFeed, inputs.feedConstantShaftRevolutions}},
+          {"gearRatio", {inputs.gearMotorRevolutions, inputs.gearShaftRevolutions}},
+          {"positionControlStrategy", inputs.positionControlStrategy}});
+
+  // ── write ──
+  reporter.start(kIntegralLimitsWriteStep);
+  const std::array<std::pair<ObjectAddress<uint32_t>, uint32_t>, 3> writes{{
+      {objects::kVelocityControllerControllerIntegralLimit, limits->velocityController},
+      {objects::kPositionControllerPositionLoopIntegralLimit, limits->positionLoop},
+      {objects::kPositionControllerVelocityLoopIntegralLimit, limits->positionVelocityLoop},
+  }};
+  nlohmann::json written = nlohmann::json::array();
+  nlohmann::json skipped = nlohmann::json::array();
+  for (const auto& [address, value] : writes) {
+    const auto name = std::format("0x{:04X}:{:02X}", address.index, address.subindex);
+    if (!device.parameter(address.index, address.subindex)) {
+      skipped.push_back(name);
+      continue;
+    }
+    auto before = readNumeric(device, address);
+    if (!before) {
+      return fail(kIntegralLimitsWriteStep, before.error());
+    }
+    if (auto r = device.writeValue(address, value); !r) {
+      return fail(kIntegralLimitsWriteStep,
+                  std::format("writing {} failed after {} of 3 limits were written: {}", name,
+                              written.size(), r.error()));
+    }
+    auto after = readNumeric(device, address);
+    if (!after) {
+      return fail(kIntegralLimitsWriteStep, after.error());
+    }
+    written.push_back({{"object", name}, {"before", *before}, {"after", *after}});
+  }
+  reporter.succeed(kIntegralLimitsWriteStep,
+                   nlohmann::json{{"limits", std::move(written)}, {"skipped", std::move(skipped)}});
   return {};
 }
 

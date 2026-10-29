@@ -1180,6 +1180,40 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor limitsDescriptor;
+  limitsDescriptor.name = std::string(kIntegralLimitsProcedure);
+  limitsDescriptor.title = "Set integral limits";
+  limitsDescriptor.description =
+      "Sets the integral limits of the controllers from the drive's own maxima, so that an "
+      "integrator cannot wind up past what the drive can deliver. 0x2011:04 and 0x2012:08 get the "
+      "maximum torque in mNm, 0x6072 / 1000 × 0x6076. 0x2012:04 gets the maximum motor speed on "
+      "the driving shaft, 0x6080 × feed constant / gear ratio, with the cascaded position "
+      "controller, where a feed of 0xFFFFFFFF turns the feed constant off, and the maximum torque "
+      "with the simple PID controller. The result gives each "
+      "object's value before and after.";
+  limitsDescriptor.caveats = {
+      "The drive uses the new limits on its next control cycle, in whatever state it is in.",
+      "Needs firmware 5.1.0 or newer. Older firmware reads 0x2012:04 as a velocity with both "
+      "position controllers.",
+      "A limit object the drive does not have is skipped and named in the result.",
+      "A firmware may keep the limits without applying them, and bound each integrator by the "
+      "controller's output instead.",
+      "The limits are not stored to flash. Run store-parameters to keep them after a restart.",
+  };
+  limitsDescriptor.movesMotor = false;
+  limitsDescriptor.requiresEnabled = false;
+  limitsDescriptor.steps = integralLimitsSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(limitsDescriptor),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token) {
+          return runIntegralLimitsProcedure(ctx.device, reporter);
+        };
+      },
+  });
+
   ProcedureDescriptor polePair;
   polePair.name = std::string(kPolePairDetectionProcedure);
   polePair.title = "Pole pair detection";

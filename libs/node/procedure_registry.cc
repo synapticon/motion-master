@@ -1034,6 +1034,52 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor openLoopFieldControl;
+  openLoopFieldControl.name = std::string(kOpenLoopFieldControlProcedure);
+  openLoopFieldControl.title = "Open-loop field control";
+  openLoopFieldControl.description =
+      "Turns the motor shaft by an angle with a rotating current field of a set length, and no "
+      "position feedback. It converts the move to electrical units with the pole pairs of "
+      "0x2003:01, sets mode -3, writes the profile with OS command 2, and then enables the drive, "
+      "which starts the profile. It ends when the drive reports target reached (statusword bit "
+      "10). Runs OS command 2.";
+  openLoopFieldControl.caveats = {
+      "The motor moves. It needs a configured motor, but no encoder and no commutation offset.",
+      "Nothing checks the position during the move, and the software position limits do not stop "
+      "it. Keep the axis free to turn by the angle.",
+      "The drive takes whole electrical rad/s, so a slow move is rounded. The validate step says "
+      "what the drive runs.",
+      "The field drives the given share of the rated current through the motor for the whole "
+      "move. A large field length on a long move heats the motor.",
+      "A drive in Operation Enabled is brought down to Switched On first. At the end the drive is "
+      "in Switched On, in the operation mode it was in before.",
+      "With a manual brake (0x2004:04 = 0) the profile starts when the drive is enabled, and the "
+      "brake is released after that, so the first moment of the move may run against the brake. "
+      "A brake it released is engaged again before the drive leaves Operation Enabled.",
+      "A quick stop or a fault ends the move and the run fails with the state and the error "
+      "report of the drive.",
+      "The drive refuses OS command 2 while a limit switch is active.",
+  };
+  openLoopFieldControl.movesMotor = true;
+  openLoopFieldControl.requiresEnabled = false;
+  openLoopFieldControl.parameters = openLoopFieldControlParameters();
+  openLoopFieldControl.steps = openLoopFieldControlSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(openLoopFieldControl),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseOpenLoopFieldControlRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          return runOpenLoopFieldControlProcedure(ctx.device, reporter, stop, spec);
+        };
+      },
+  });
+
   ProcedureDescriptor plantIdentification;
   plantIdentification.name = std::string(kPlantIdentificationProcedure);
   plantIdentification.title = "Plant identification";

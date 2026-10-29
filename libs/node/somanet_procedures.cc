@@ -5008,6 +5008,52 @@ constexpr std::string_view kPlantIdWhat = "plant identification";
 // SomanetDrive::releaseBrake adds for a brake the firmware controls.
 constexpr auto kBrakeSettle = std::chrono::milliseconds(50);
 
+// Releases a brake the firmware leaves to the master, after the drive is enabled, and arms its
+// restore. Strategy 1 or 2: the drive released it when it enabled, and engages it again when it
+// leaves Operation Enabled, so there is nothing to write and nothing to restore. Strategy 0: the
+// brake is a voltage the firmware does not manage, so the release and the wait for the pull time
+// are both the procedure's.
+//
+// Reports on kReleaseBrakeStep.
+std::expected<void, std::string> releaseBrakeIfManual(SomanetDrive& drive,
+                                                      ProgressReporter& reporter,
+                                                      DriveRestorer& restorer,
+                                                      const std::stop_token& stop) {
+  reporter.start(kReleaseBrakeStep);
+  auto brake = drive.brakeState();
+  if (!brake) {
+    reporter.fail(kReleaseBrakeStep, brake.error());
+    return std::unexpected(brake.error());
+  }
+  if (brake->status == somanet::BrakeStatus::kNotConfigured) {
+    reporter.succeed(kReleaseBrakeStep, nlohmann::json{{"brake", "none"}, {"state", *brake}});
+    return {};
+  }
+  if (brake->softwareControllable()) {
+    reporter.succeed(kReleaseBrakeStep,
+                     nlohmann::json{{"brake", "released by the drive"}, {"state", *brake}});
+    return {};
+  }
+  // Armed before the write, so a write that lands and then fails to read back is still undone.
+  restorer.restoreBrake(brake->status);
+  if (auto r = drive.setBrakeStatus(somanet::BrakeStatus::kDisengaged); !r) {
+    reporter.fail(kReleaseBrakeStep, r.error());
+    return std::unexpected(r.error());
+  }
+  if (!sleepUnlessStopped(brake->pullTime + kBrakeSettle, stop)) {
+    reporter.fail(kReleaseBrakeStep, "cancelled while the brake released");
+    return std::unexpected("cancelled while the brake released");
+  }
+  auto released = drive.brakeState();
+  if (!released) {
+    reporter.fail(kReleaseBrakeStep, released.error());
+    return std::unexpected(released.error());
+  }
+  reporter.succeed(kReleaseBrakeStep,
+                   nlohmann::json{{"brake", "released manually"}, {"state", *released}});
+  return {};
+}
+
 // The excitation and the recording, with the drive restored on the way out. Split from the fit and
 // the store so the restorer's scope ends here: the drive is back in Switched On before the program
 // computes, however long that takes.
@@ -5071,38 +5117,8 @@ excitePlantAndRecord(SomanetDrive& drive, ProgressReporter& reporter, const std:
   }
 
   // ── release-brake ──
-  reporter.start(kReleaseBrakeStep);
-  auto brake = drive.brakeState();
-  if (!brake) {
-    reporter.fail(kReleaseBrakeStep, brake.error());
-    return std::unexpected(brake.error());
-  }
-  if (brake->status == somanet::BrakeStatus::kNotConfigured) {
-    reporter.succeed(kReleaseBrakeStep, nlohmann::json{{"brake", "none"}, {"state", *brake}});
-  } else if (brake->softwareControllable()) {
-    // Strategy 1 or 2: the drive released it when it enabled in CST, and engages it again when it
-    // leaves Operation Enabled. Nothing to write, and nothing to restore.
-    reporter.succeed(kReleaseBrakeStep,
-                     nlohmann::json{{"brake", "released by the drive"}, {"state", *brake}});
-  } else {
-    // Strategy 0: the brake is a voltage the firmware does not manage, so the release and the
-    // wait for the pull time are both this procedure's. Armed before the write, so a write that
-    // lands and then fails to read back is still undone.
-    restorer.restoreBrake(brake->status);
-    if (auto r = drive.setBrakeStatus(somanet::BrakeStatus::kDisengaged); !r) {
-      reporter.fail(kReleaseBrakeStep, r.error());
-      return std::unexpected(r.error());
-    }
-    if (!sleepUnlessStopped(brake->pullTime + kBrakeSettle, stop)) {
-      return cancelled("while the brake released");
-    }
-    auto released = drive.brakeState();
-    if (!released) {
-      reporter.fail(kReleaseBrakeStep, released.error());
-      return std::unexpected(released.error());
-    }
-    reporter.succeed(kReleaseBrakeStep,
-                     nlohmann::json{{"brake", "released manually"}, {"state", *released}});
+  if (auto released = releaseBrakeIfManual(drive, reporter, restorer, stop); !released) {
+    return std::unexpected(released.error());
   }
   if (stop.stop_requested()) {
     return cancelled("before the chirp was configured");
@@ -5248,6 +5264,225 @@ std::expected<void, std::string> runPlantIdentificationProcedure(
   reporter.succeed(
       kPlantIdStoreStep,
       nlohmann::json{{"file", kPlantModelFile}, {"bytes", csv.size()}, {"content", csv}});
+  return {};
+}
+
+// --- Open-loop field control ---------------------------------------------------------------------
+
+namespace {
+
+constexpr auto kOpenLoopFieldMinTimeout = std::chrono::milliseconds(1000);
+constexpr auto kOpenLoopFieldMaxTimeout = std::chrono::milliseconds(600000);
+constexpr auto kOpenLoopFieldPollInterval = std::chrono::milliseconds(20);
+constexpr std::string_view kOpenLoopFieldWhat = "open-loop field control";
+
+// A number field, or @p fallback when it is absent.
+std::expected<double, std::string> readNumber(const nlohmann::json& body, const char* field,
+                                              std::optional<double> fallback) {
+  auto it = body.find(field);
+  if (it == body.end() || it->is_null()) {
+    if (fallback) {
+      return *fallback;
+    }
+    return std::unexpected(std::format("'{}' is required", field));
+  }
+  if (!it->is_number()) {
+    return std::unexpected(std::format("'{}' must be a number", field));
+  }
+  return it->get<double>();
+}
+
+}  // namespace
+
+std::expected<OpenLoopFieldControlRequest, std::string> parseOpenLoopFieldControlRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  OpenLoopFieldControlRequest request;
+  auto& move = request.move;
+  auto angle = readNumber(body, "angle", std::nullopt);
+  if (!angle) {
+    return std::unexpected(angle.error());
+  }
+  move.angleDegrees = *angle;
+  auto velocity = readNumber(body, "velocity", move.velocityRpm);
+  auto acceleration = readNumber(body, "acceleration", move.accelerationRpmPerSecond);
+  auto length = readNumber(body, "fieldLength", move.fieldLengthPerMille);
+  auto rate = readNumber(body, "fieldLengthRate", move.fieldLengthRatePerMillePerSecond);
+  for (const auto* field : {&velocity, &acceleration, &length, &rate}) {
+    if (!*field) {
+      return std::unexpected(field->error());
+    }
+  }
+  move.velocityRpm = *velocity;
+  move.accelerationRpmPerSecond = *acceleration;
+  if (*length != std::floor(*length) || *rate != std::floor(*rate) || *length > 1e9 ||
+      *rate > 1e9) {
+    return std::unexpected("'fieldLength' and 'fieldLengthRate' must be whole numbers");
+  }
+  move.fieldLengthPerMille = static_cast<int32_t>(*length);
+  move.fieldLengthRatePerMillePerSecond = static_cast<int32_t>(*rate);
+  auto timeout = readMillis(body, "timeoutMs", request.timeout, kOpenLoopFieldMinTimeout,
+                            kOpenLoopFieldMaxTimeout);
+  if (!timeout) {
+    return std::unexpected(timeout.error());
+  }
+  request.timeout = *timeout;
+  return request;
+}
+
+std::vector<ProcedureParameter> openLoopFieldControlParameters() {
+  const OpenLoopFieldControlRequest defaults;
+  return {
+      integerParameter("angle", "Angle (°)",
+                       "How far to turn the motor shaft, in mechanical degrees. Negative turns the "
+                       "other way.",
+                       nlohmann::json(nullptr), -1000000, 1000000),
+      integerParameter("velocity", "Velocity (rpm)",
+                       "The highest velocity of the motor shaft. The drive takes whole electrical "
+                       "rad/s, so a slow move is rounded; the validate step says what it runs.",
+                       defaults.move.velocityRpm, 1, 100000),
+      integerParameter("acceleration", "Acceleration (rpm/s)",
+                       "The acceleration and the deceleration of the motor shaft.",
+                       defaults.move.accelerationRpmPerSecond, 1, 1000000),
+      integerParameter("fieldLength", "Field length (‰)",
+                       "The current of the rotating field, in per mille of the rated current.",
+                       defaults.move.fieldLengthPerMille, 1, 1000000),
+      integerParameter("fieldLengthRate", "Field length rate (‰/s)",
+                       "How fast the field length rises from 0, in per mille of the rated current "
+                       "per second.",
+                       defaults.move.fieldLengthRatePerMillePerSecond, 1, 100000000),
+      integerParameter("timeoutMs", "Timeout (ms)",
+                       "How long the move may take after the drive is enabled before the run "
+                       "fails.",
+                       defaults.timeout.count(), kOpenLoopFieldMinTimeout.count(),
+                       kOpenLoopFieldMaxTimeout.count()),
+  };
+}
+
+std::vector<ProgressStep> openLoopFieldControlSteps() {
+  return stepsFrom({kOpenLoopFieldValidateStep, kPrepareStep, kReleaseBrakeStep,
+                    kOpenLoopFieldMoveStep, kRestoreStep});
+}
+
+std::expected<void, std::string> runOpenLoopFieldControlProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const OpenLoopFieldControlRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  const auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+  const auto cancelled = [](std::string_view when) {
+    return std::unexpected(std::format("{} was cancelled {}", kOpenLoopFieldWhat, when));
+  };
+
+  // ── validate ──
+  reporter.start(kOpenLoopFieldValidateStep);
+  auto polePairs = device.readValue(somanet::objects::kMotorSpecificSettingsPolePairs);
+  if (!polePairs) {
+    return fail(kOpenLoopFieldValidateStep,
+                std::format("could not read the pole pairs from 0x2003:01: {}", polePairs.error()));
+  }
+  auto profile = somanet::openLoopFieldProfile(request.move, *polePairs);
+  if (!profile) {
+    return fail(kOpenLoopFieldValidateStep, profile.error());
+  }
+  nlohmann::json plan = *profile;
+  plan["polePairs"] = *polePairs;
+  plan["angleDegrees"] = request.move.angleDegrees;
+  reporter.succeed(kOpenLoopFieldValidateStep, plan);
+
+  // Declared after the validation, so a refused request restores nothing.
+  DriveRestorer restorer(*drive, reporter, kOpenLoopFieldControlProcedure);
+
+  // ── prepare ──
+  reporter.start(kPrepareStep);
+  auto savedMode = drive->operationModeValue();
+  if (!savedMode) {
+    return fail(kPrepareStep, savedMode.error());
+  }
+  auto state = drive->state();
+  if (!state) {
+    return fail(kPrepareStep, state.error());
+  }
+  // Mode -3 starts the profile as soon as the drive is enabled in it, or switched to it while
+  // enabled, so the drive is brought down first and the parameters are written before it goes up.
+  if (*state == cia402::State::kOperationEnabled) {
+    if (auto r = drive->transitionToState(cia402::State::kSwitchedOn); !r) {
+      return fail(
+          kPrepareStep,
+          std::format("the drive did not leave Operation Enabled for Switched On: {}", r.error()));
+    }
+  }
+  if (auto r = drive->setOperationMode(somanet::OperationMode::kOpenLoopField); !r) {
+    return fail(kPrepareStep, r.error());
+  }
+  restorer.restoreMode(*savedMode, cia402::State::kSwitchedOn);
+  const OsCommandConfig osConfig{.timeout = kEncoderRegisterTimeout,
+                                 .pollInterval = kEncoderRegisterPollInterval,
+                                 .stop = stop};
+  const std::array<std::pair<somanet::OpenLoopFieldParameter, int32_t>, 7> parameters = {{
+      {somanet::OpenLoopFieldParameter::kAngleStart, 0},
+      {somanet::OpenLoopFieldParameter::kAngleEnd, profile->angleEndMilliRadian},
+      {somanet::OpenLoopFieldParameter::kMaxSpeed, profile->speedRadPerSecond},
+      {somanet::OpenLoopFieldParameter::kAcceleration, profile->accelerationRadPerSquaredSecond},
+      {somanet::OpenLoopFieldParameter::kLengthStart, 0},
+      {somanet::OpenLoopFieldParameter::kLengthEnd, profile->lengthEndPerMille},
+      {somanet::OpenLoopFieldParameter::kLengthRate, profile->lengthRatePerMillePerSecond},
+  }};
+  for (const auto& [parameter, value] : parameters) {
+    if (auto r = drive->setOpenLoopFieldParameter(parameter, value, osConfig); !r) {
+      return fail(kPrepareStep, r.error());
+    }
+  }
+  if (stop.stop_requested()) {
+    return cancelled("before the drive was enabled");
+  }
+  if (auto r = drive->enable(); !r) {
+    return fail(kPrepareStep,
+                std::format("the drive did not reach Operation Enabled: {}", r.error()));
+  }
+  reporter.succeed(kPrepareStep, nlohmann::json{{"operationModeFound", *savedMode}});
+
+  // ── release-brake ──
+  if (auto released = releaseBrakeIfManual(*drive, reporter, restorer, stop); !released) {
+    return std::unexpected(released.error());
+  }
+
+  // ── move ──
+  reporter.start(kOpenLoopFieldMoveStep);
+  const auto deadline = std::chrono::steady_clock::now() + request.timeout;
+  while (true) {
+    if (stop.stop_requested()) {
+      return cancelled("during the move");
+    }
+    auto statusword = drive->statusword();
+    if (!statusword) {
+      return fail(kOpenLoopFieldMoveStep, statusword.error());
+    }
+    const auto now = cia402::decodeState(*statusword);
+    if (now != cia402::State::kOperationEnabled) {
+      if (auto enabled = confirmStillEnabled(*drive); !enabled) {
+        return fail(kOpenLoopFieldMoveStep,
+                    std::format("the move did not end: {}", enabled.error()));
+      }
+    } else if (cia402::isTargetReached(*statusword)) {
+      break;
+    }
+    if (std::chrono::steady_clock::now() > deadline) {
+      return fail(kOpenLoopFieldMoveStep,
+                  std::format("the drive did not report the end of the move (statusword bit 10) "
+                              "within {} ms",
+                              request.timeout.count()));
+    }
+    std::this_thread::sleep_for(kOpenLoopFieldPollInterval);
+  }
+  reporter.succeed(kOpenLoopFieldMoveStep);
   return {};
 }
 

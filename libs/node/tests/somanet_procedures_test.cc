@@ -141,6 +141,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::vector<std::vector<uint8_t>> commands;
   uint32_t vendorId = kSynapticonVendorId;
   uint16_t statusword = 0x0040;  // SwitchOnDisabled
+  // What the drive reports in Operation Enabled. 0x0427 adds target reached, which ends an
+  // open-loop field profile.
+  uint16_t enabledStatusword = 0x0027;
   std::vector<std::pair<uint16_t, uint8_t>> writeLog;
 
   // Faults the drive once this many commands go out, which models the drive dropping out of
@@ -250,7 +253,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
       } else if (cmd == 0x0007) {
         statusword = 0x0023;  // SwitchedOn
       } else if (cmd == 0x000F) {
-        statusword = 0x0027;  // OperationEnabled
+        statusword = enabledStatusword;  // OperationEnabled
       } else {
         statusword = 0x0040;  // SwitchOnDisabled
       }
@@ -4146,6 +4149,148 @@ TEST(RunIcMuEncoderConfigurationProcedure, FailsWhenWriteAllReportsAnI2cError) {
       ProgressStatus::kFailed);
   // The status bits come back even though the save failed.
   EXPECT_EQ(driver.commandIds.back(), 14);
+}
+
+// --- Open-loop field control ---------------------------------------------------------------------
+
+Device makeOpenLoopDevice(OsCommandFakeDriver& driver, uint8_t polePairs) {
+  driver.programDrive();
+  driver.programObject(0x2003, 0x01, ObjectDataType::UNSIGNED8, {polePairs});  // pole pairs
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters().has_value());
+  return device;
+}
+
+mm::node::OpenLoopFieldControlRequest openLoopRequest(double angle) {
+  auto request =
+      mm::node::parseOpenLoopFieldControlRequest({{"angle", angle}, {"timeoutMs", 1000}});
+  EXPECT_TRUE(request.has_value()) << request.error();
+  return *request;
+}
+
+TEST(RunOpenLoopFieldControlProcedure, WritesTheProfileBeforeTheEnableAndRestores) {
+  OsCommandFakeDriver driver;
+  Device device = makeOpenLoopDevice(driver, 5);
+  driver.enabledStatusword = 0x0427;  // the profile ends at once
+  ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
+
+  auto result = mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},
+                                                           openLoopRequest(-90));
+  ASSERT_TRUE(result.has_value()) << result.error();
+  for (const auto& step : reporter.steps()) {
+    EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
+  }
+
+  // Seven OS command 2 writes, index 0 to 6, with the converted values.
+  ASSERT_EQ(driver.commands.size(), 7u);
+  auto value = [](const std::vector<uint8_t>& c) {
+    return static_cast<int32_t>((static_cast<uint32_t>(c[2]) << 24) |
+                                (static_cast<uint32_t>(c[3]) << 16) |
+                                (static_cast<uint32_t>(c[4]) << 8) | c[5]);
+  };
+  for (size_t i = 0; i < 7; ++i) {
+    EXPECT_EQ(driver.commands[i][0], 2);
+    EXPECT_EQ(driver.commands[i][1], i);
+  }
+  EXPECT_EQ(value(driver.commands[0]), 0);
+  EXPECT_EQ(value(driver.commands[1]), -7850);  // -90° on 5 pole pairs
+  EXPECT_EQ(value(driver.commands[2]), 3);      // 5 rpm
+  EXPECT_EQ(value(driver.commands[3]), 523);    // 1000 rpm/s
+  EXPECT_EQ(value(driver.commands[4]), 0);
+  EXPECT_EQ(value(driver.commands[5]), 1000);
+  EXPECT_EQ(value(driver.commands[6]), 10000);
+
+  // Mode -3 and every parameter before the enable, because the profile starts with it.
+  EXPECT_TRUE(driver.wroteBefore(Object::kModeOfOperation, 0, kOsCommand, 1));
+  // Restored: Switched On, and the mode it found.
+  EXPECT_EQ(driver.statusword, 0x0023);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+            std::vector<uint8_t>{8});
+  EXPECT_EQ(brakeWrites(driver), 0);
+  const auto plan = stepById(reporter.steps(), "validate")->value;
+  EXPECT_EQ(plan.at("polePairs"), 5);
+  EXPECT_NEAR(plan.at("velocityRpm").get<double>(), 5.73, 0.01);
+}
+
+TEST(RunOpenLoopFieldControlProcedure, EnablesOnlyAfterTheLastParameter) {
+  OsCommandFakeDriver driver;
+  Device device = makeOpenLoopDevice(driver, 5);
+  driver.enabledStatusword = 0x0427;
+  ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
+  ASSERT_TRUE(mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},
+                                                         openLoopRequest(360))
+                  .has_value());
+  // The procedure writes no controlword before the profile is complete: the first one, which starts
+  // the enable, comes after the last OS command.
+  int lastCommand = driver.lastWriteIndex(kOsCommand, 1);
+  int firstEnable = -1;
+  for (size_t k = 0; k < driver.writeLog.size(); ++k) {
+    if (driver.writeLog[k] == std::pair<uint16_t, uint8_t>{Object::kControlword, 0}) {
+      firstEnable = static_cast<int>(k);
+      break;
+    }
+  }
+  EXPECT_GT(firstEnable, lastCommand);
+}
+
+TEST(RunOpenLoopFieldControlProcedure, ReleasesAManualBrakeAndEngagesItBeforeTheDisable) {
+  OsCommandFakeDriver driver;
+  Device device = makeOpenLoopDevice(driver, 5);
+  driver.enabledStatusword = 0x0427;
+  driver.store[OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy)] = {
+      static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kManualOutputVoltage)};
+  ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
+
+  ASSERT_TRUE(mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},
+                                                         openLoopRequest(90))
+                  .has_value());
+  EXPECT_EQ(driver.brakeStatusWrites,
+            (std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged),
+                                  static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)}));
+  EXPECT_LT(driver.lastWriteIndex(somanet::kBrakeOptions, somanet::kBrakeStatus),
+            driver.lastWriteIndex(Object::kControlword, 0));
+}
+
+TEST(RunOpenLoopFieldControlProcedure, FailsWhenTheProfileDoesNotEndInTime) {
+  OsCommandFakeDriver driver;
+  Device device = makeOpenLoopDevice(driver, 5);  // bit 10 never comes
+  ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
+
+  auto result = mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},
+                                                           openLoopRequest(90));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("bit 10"), std::string::npos) << result.error();
+  EXPECT_EQ(stepById(reporter.steps(), "move")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepById(reporter.steps(), "restore")->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(driver.statusword, 0x0023);
+}
+
+TEST(RunOpenLoopFieldControlProcedure, RefusesAMotorWithoutPolePairsBeforeAnythingMoves) {
+  OsCommandFakeDriver driver;
+  Device device = makeOpenLoopDevice(driver, 0);
+  ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
+
+  auto result = mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},
+                                                           openLoopRequest(90));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("0 pole pairs"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.commands.empty());
+  EXPECT_EQ(
+      std::ranges::count(driver.writeLog, std::pair<uint16_t, uint8_t>{Object::kControlword, 0}),
+      0);
+}
+
+TEST(ParseOpenLoopFieldControlRequest, NeedsAnAngleAndDefaultsTheRest) {
+  EXPECT_FALSE(mm::node::parseOpenLoopFieldControlRequest(nlohmann::json::object()));
+  auto request = mm::node::parseOpenLoopFieldControlRequest({{"angle", -45.5}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_DOUBLE_EQ(request->move.angleDegrees, -45.5);
+  EXPECT_DOUBLE_EQ(request->move.velocityRpm, 5);
+  EXPECT_EQ(request->move.fieldLengthPerMille, 1000);
+  EXPECT_EQ(request->timeout, std::chrono::milliseconds(60000));
+  EXPECT_FALSE(mm::node::parseOpenLoopFieldControlRequest({{"angle", 90}, {"fieldLength", 1.5}}));
+  EXPECT_FALSE(mm::node::parseOpenLoopFieldControlRequest({{"angle", "90"}}));
+  EXPECT_FALSE(mm::node::parseOpenLoopFieldControlRequest({{"angle", 90}, {"timeoutMs", 10}}));
 }
 
 }  // namespace

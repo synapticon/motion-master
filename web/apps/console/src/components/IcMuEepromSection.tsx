@@ -4,7 +4,7 @@ import {
   apiErrorMessage,
   type EncoderConfiguration,
   type IcMuEepromByte,
-  type IcMuI2cTransfer,
+  type IcMuI2CTransfer,
   type IcMuKeyRegister,
   type ProcedureSnapshot,
 } from '@synapticon/motion-master-client'
@@ -53,7 +53,11 @@ function eepromCsv(bytes: IcMuEepromByte[]): string {
 
 // One procedure of this section: its last snapshot, and a way to start it. A run of another
 // encoder is not this card's, so `mine` says whether the snapshot belongs to it.
-function useEncoderProcedure(slavePosition: number, name: string, encoderOrdinal: number) {
+function useEncoderProcedure(
+  slavePosition: number,
+  name: string,
+  encoderOrdinal: EncoderConfiguration['encoderOrdinal'],
+) {
   const { api } = useConnection()
   const queryClient = useQueryClient()
   const key = ['procedure', slavePosition, name]
@@ -123,7 +127,7 @@ export default function IcMuEepromSection({
   }, [exportRequested, exported.snapshot?.status, exportBytes, ordinal])
 
   const registers = stepValue<IcMuKeyRegister[]>(keyRegisters.snapshot, 'read-key-registers')
-  const transfer = stepValue<IcMuI2cTransfer>(i2c.snapshot, 'i2c-transfer')
+  const transfer = stepValue<IcMuI2CTransfer>(i2c.snapshot, 'i2c-transfer')
   const restoreFileName = stepValue<{ file: string }>(restoreFile.snapshot, 'restore-file')?.file
   const parsedAddress = parseByte(address)
   const parsedValue = parseByte(value)

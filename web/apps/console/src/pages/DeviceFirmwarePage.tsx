@@ -4,6 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import {
   apiErrorMessage,
   type FirmwareCompatibility,
+  type ProcedureRequest,
   type ProcedureSnapshot,
   type ProgressStep,
 } from '@synapticon/motion-master-client'
@@ -155,7 +156,9 @@ export default function DeviceFirmwarePage() {
     mutationFn: (packageFilename: string) =>
       api.startProcedure(slavePosition, PROCEDURE, {
         packageFilename,
-        ...(finalStateValue !== undefined ? { finalState: finalStateValue } : {}),
+        ...(finalStateValue !== undefined
+          ? { finalState: finalStateValue as ProcedureRequest['finalState'] }
+          : {}),
         skipFiles: skipFilesValue
           .split('\n')
           .map(line => line.trim())

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <nlohmann/json.hpp>
 #include <utility>
 #include <vector>
 
@@ -82,6 +83,16 @@ std::optional<uint8_t> icMuEepromAddress(uint8_t ramAddress) {
     return static_cast<uint8_t>(kSpoBaseEeprom + (ramAddress - kSpoBaseRam));
   }
   return std::nullopt;
+}
+
+void to_json(nlohmann::json& j, const IcMuKeyRegister& entry) {
+  j = nlohmann::json{{"ramAddress", entry.ramAddress},
+                     {"eepromAddress", entry.eepromAddress},
+                     {"value", entry.value}};
+}
+
+void to_json(nlohmann::json& j, const IcMuEepromByte& entry) {
+  j = nlohmann::json{{"address", entry.address}, {"value", entry.value}};
 }
 
 std::vector<IcMuI2cChunk> icMuEepromReadChunks(uint8_t first, uint8_t last) {

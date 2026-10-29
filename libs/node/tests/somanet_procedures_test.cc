@@ -3214,6 +3214,9 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
   std::array<uint8_t, 256> icMu{};
   std::array<uint8_t, 256> icPvl{};
   std::array<uint8_t, 256> eeprom{};
+  // Whether an iC-PVL answers on the I²C bus. Without one, a transfer to it sets EPR_ERR in
+  // STATUS1, and only a transfer that succeeds clears it again, as on a drive.
+  bool icPvlFitted = true;
   // The (address, value) of every register write, in order.
   std::vector<std::pair<uint8_t, uint8_t>> registerWrites;
   // Whether the next OS command 0 write echoes another value than it was given.
@@ -3258,6 +3261,13 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
     }
     if (chip == nullptr) {
       return;
+    }
+    if (chip == &icPvl && !icPvlFitted) {
+      icMu[0x77] |= 0x40;
+      return;
+    }
+    if (!icPvlFitted) {
+      icMu[0x77] &= static_cast<uint8_t>(~0x40);
     }
     for (int i = 0; i <= icMu[0x5D] - icMu[0x5C]; ++i) {
       auto& device = (*chip)[static_cast<uint8_t>(icMu[0x5B] + i)];
@@ -3852,6 +3862,170 @@ TEST(IcMuBridge, FailsATransferTheEncoderReportsAsAnI2cError) {
                                      somanet::IcMuI2cTarget::kIcPvl, 0x00, 1, {});
   ASSERT_FALSE(bytes.has_value());
   EXPECT_NE(bytes.error().find("EPR_ERR"), std::string::npos) << bytes.error();
+}
+
+// --- iC-MU EEPROM tools -------------------------------------------------------------------------
+
+// A copy, because reporter.steps() returns its steps by value.
+mm::node::ProgressStep stepOf(const std::vector<mm::node::ProgressStep>& steps,
+                              std::string_view id) {
+  return *std::ranges::find(steps, id, &mm::node::ProgressStep::id);
+}
+
+TEST(RunIcMuKeyRegistersProcedure, ReadsTheRestoreRegistersWithTheirEepromAddresses) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  driver.icMu[0x01] = 0x08;
+  driver.icMu[0x52] = 0x2F;  // SPO_BASE
+  ProgressReporter reporter(mm::node::icMuKeyRegistersSteps());
+
+  auto result = mm::node::runIcMuKeyRegistersProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const auto steps = reporter.steps();
+  const auto registers = stepOf(steps, mm::node::kIcMuKeyRegistersStep).value;
+  ASSERT_EQ(registers.size(), 33u);
+  EXPECT_EQ(registers[1]["ramAddress"], 0x01);
+  EXPECT_EQ(registers[1]["eepromAddress"], 0x01);
+  EXPECT_EQ(registers[1]["value"], 0x08);
+  EXPECT_EQ(registers[25]["ramAddress"], 0x52);
+  EXPECT_EQ(registers[25]["eepromAddress"], 0x19);
+  EXPECT_EQ(registers[25]["value"], 0x2F);
+  // It reads; nothing is written and the status bits are left alone.
+  EXPECT_TRUE(onlyRegisterReads(driver));
+}
+
+TEST(RunIcMuKeyRegistersProcedure, RefusesAnIcMuWithAnotherBankSelected) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  driver.icMu[0x40] = 0x01;
+  ProgressReporter reporter(mm::node::icMuKeyRegistersSteps());
+  auto result = mm::node::runIcMuKeyRegistersProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("BANKSEL"), std::string::npos) << result.error();
+}
+
+TEST(RunIcMuEepromExportProcedure, ReadsTheConfigurationOfBothChipsIn16ByteTransfers) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  for (int address = 0; address <= 0x4C; ++address) {
+    driver.eeprom[address] = static_cast<uint8_t>(address ^ 0x5A);
+  }
+  ProgressReporter reporter(mm::node::icMuEepromExportSteps());
+
+  auto result = mm::node::runIcMuEepromExportProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const auto steps = reporter.steps();
+  const auto bytes = stepOf(steps, mm::node::kIcMuEepromReadStep).value;
+  ASSERT_EQ(bytes.size(), 77u);
+  EXPECT_EQ(bytes[0x4C]["address"], 0x4C);
+  EXPECT_EQ(bytes[0x4C]["value"], 0x4C ^ 0x5A);
+  // Five I2C_COM: 0x00, 0x10, 0x20, 0x30 and 0x40.
+  EXPECT_EQ(std::ranges::count(driver.registerWrites, std::pair<uint8_t, uint8_t>{0x75, 0x0A}), 5);
+  // OS command 14 ignores the status bits first and restores them last.
+  ASSERT_FALSE(afterReads(driver).empty());
+  EXPECT_EQ(afterReads(driver).front()[0], 14);
+  EXPECT_EQ(driver.commandIds.back(), 14);
+  EXPECT_EQ(stepOf(steps, mm::node::kIcMuRestoreStatusBitsStep).status, ProgressStatus::kSucceeded);
+}
+
+TEST(RunIcMuEepromExportProcedure, TurnsTheStatusBitsOnAgainAfterAFailedRead) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.icMu[0x77] = 0x40;  // EPR_ERR
+  ProgressReporter reporter(mm::node::icMuEepromExportSteps());
+
+  auto result = mm::node::runIcMuEepromExportProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_FALSE(result.has_value());
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepOf(steps, mm::node::kIcMuEepromReadStep).status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepOf(steps, mm::node::kIcMuRestoreStatusBitsStep).status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(driver.commandIds.back(), 14);
+  EXPECT_EQ(driver.commands.back()[1], 0x02);  // encoder 1, stop ignoring
+}
+
+TEST(RunIcMuEepromExportProcedure, RefusesADriveInOperationEnabled) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x27, 0x00};
+  ProgressReporter reporter(mm::node::icMuEepromExportSteps());
+  auto result = mm::node::runIcMuEepromExportProcedure(
+      device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("Operation Enabled"), std::string::npos) << result.error();
+  EXPECT_TRUE(onlyRegisterReads(driver));
+}
+
+TEST(RunIcMuI2cRegisterProcedure, ReadsAndWritesOneByteOfTheTarget) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.icPvl[0x10] = 0xF0;
+
+  mm::node::IcMuI2cRegisterRequest read{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1,
+                                        .target = somanet::IcMuI2cTarget::kIcPvl,
+                                        .write = false,
+                                        .address = 0x10,
+                                        .value = 0};
+  ProgressReporter reporter(mm::node::icMuI2cRegisterSteps());
+  auto result = mm::node::runIcMuI2cRegisterProcedure(device, reporter, {}, read);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  auto value = stepOf(reporter.steps(), mm::node::kIcMuI2cTransferStep).value;
+  EXPECT_EQ(value["value"], 0xF0);
+  EXPECT_EQ(value["deviceId"], 0xC3);
+
+  mm::node::IcMuI2cRegisterRequest write{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1,
+                                         .target = somanet::IcMuI2cTarget::kEeprom,
+                                         .write = true,
+                                         .address = 0x47,
+                                         .value = 0x99};
+  ProgressReporter writeReporter(mm::node::icMuI2cRegisterSteps());
+  result = mm::node::runIcMuI2cRegisterProcedure(device, writeReporter, {}, write);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.eeprom[0x47], 0x99);
+  value = stepOf(writeReporter.steps(), mm::node::kIcMuI2cTransferStep).value;
+  EXPECT_EQ(value["value"], 0x99);
+  EXPECT_EQ(value["deviceId"], 0xA0);
+}
+
+TEST(RunIcMuI2cRegisterProcedure, ClearsEprErrBeforeTheStatusBitsAreOnAgain) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  driver.icPvlFitted = false;  // sensor port 2 carries no iC-PVL
+
+  mm::node::IcMuI2cRegisterRequest read{.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1,
+                                        .target = somanet::IcMuI2cTarget::kIcPvl,
+                                        .write = false,
+                                        .address = 0x10,
+                                        .value = 0};
+  ProgressReporter reporter(mm::node::icMuI2cRegisterSteps());
+  auto result = mm::node::runIcMuI2cRegisterProcedure(device, reporter, {}, read);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("EPR_ERR"), std::string::npos) << result.error();
+  // A one-byte EEPROM read cleared EPR_ERR, then OS command 14 turned the status bits on.
+  EXPECT_EQ(driver.icMu[0x77] & 0x40, 0);
+  EXPECT_EQ(driver.icMu[0x5E], 0xA1);
+  EXPECT_EQ(driver.commandIds.back(), 14);
+  EXPECT_EQ(stepOf(reporter.steps(), mm::node::kIcMuRestoreStatusBitsStep).status,
+            ProgressStatus::kSucceeded);
+}
+
+TEST(ParseIcMuI2cRegisterRequest, NeedsATargetAnAddressAndForAWriteAValue) {
+  using mm::node::parseIcMuI2cRegisterRequest;
+  auto request = parseIcMuI2cRegisterRequest(
+      {{"encoderOrdinal", 2}, {"target", "ic-pvl-status"}, {"registerAddress", 1}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->target, somanet::IcMuI2cTarget::kIcPvlStatus);
+  EXPECT_FALSE(request->write);
+  EXPECT_FALSE(parseIcMuI2cRegisterRequest({{"encoderOrdinal", 1}, {"registerAddress", 1}}));
+  EXPECT_FALSE(parseIcMuI2cRegisterRequest(
+      {{"encoderOrdinal", 1}, {"target", "rom"}, {"registerAddress", 1}}));
+  EXPECT_FALSE(parseIcMuI2cRegisterRequest({{"encoderOrdinal", 1}, {"target", "eeprom"}}));
+  EXPECT_FALSE(parseIcMuI2cRegisterRequest(
+      {{"encoderOrdinal", 1}, {"target", "eeprom"}, {"registerAddress", 1}, {"write", true}}));
+  EXPECT_FALSE(parseIcMuI2cRegisterRequest({{"target", "eeprom"}, {"registerAddress", 1}}));
 }
 
 TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnIcMuWithAnotherBankSelected) {

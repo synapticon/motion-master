@@ -358,6 +358,115 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  // The iC-MU EEPROM tools. Each one addresses one encoder, and the firmware gate needs 0x100A,
+  // which is not known at scan time, so it is in the body.
+  ProcedureDescriptor icMuKeyRegisters;
+  icMuKeyRegisters.name = std::string(kIcMuKeyRegistersProcedure);
+  icMuKeyRegisters.title = "iC-MU key registers";
+  icMuKeyRegisters.description =
+      "Reads the 33 key registers of one iC-MU encoder from its RAM: the configuration 0x00-0x18 "
+      "and the nonius table 0x52-0x59. These are the registers of the restore file. Each one comes "
+      "with the EEPROM address that keeps it. Runs OS command 0, and writes nothing.";
+  icMuKeyRegisters.caveats = {
+      "It reads the RAM, which holds what the EEPROM held at start-up plus any write since then.",
+      "An iC-MU whose BANKSEL (0x40) is not 0 is refused, because 0x00-0x18 then reach another "
+      "bank.",
+      "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuKeyRegisters.movesMotor = false;
+  icMuKeyRegisters.requiresEnabled = false;
+  icMuKeyRegisters.parameters = icMuEncoderParameters();
+  icMuKeyRegisters.steps = icMuKeyRegistersSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuKeyRegisters),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuEncoderRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          return runIcMuKeyRegistersProcedure(ctx.device, reporter, stop, spec);
+        };
+      },
+  });
+
+  ProcedureDescriptor icMuEepromExport;
+  icMuEepromExport.name = std::string(kIcMuEepromExportProcedure);
+  icMuEepromExport.title = "iC-MU EEPROM export";
+  icMuEepromExport.description =
+      "Reads EEPROM 0x00-0x4C of one iC-MU encoder through the I²C bridge of the iC-MU: the "
+      "configuration of the iC-MU in 0x00-0x3F and of the iC-PVL in 0x40-0x4C, 77 bytes. Runs OS "
+      "commands 0 and 14, and writes nothing to the EEPROM.";
+  icMuEepromExport.caveats = {
+      "The encoder does not report position while the I²C bridge is in use. A drive in Operation "
+      "Enabled is refused. The BiSS status bits are ignored during the run and turned on again at "
+      "the end, a failed or cancelled run included.",
+      "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuEepromExport.movesMotor = false;
+  icMuEepromExport.requiresEnabled = false;
+  icMuEepromExport.parameters = icMuEncoderParameters();
+  icMuEepromExport.steps = icMuEepromExportSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuEepromExport),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuEncoderRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          return runIcMuEepromExportProcedure(ctx.device, reporter, stop, spec);
+        };
+      },
+  });
+
+  ProcedureDescriptor icMuI2cRegister;
+  icMuI2cRegister.name = std::string(kIcMuI2cRegisterProcedure);
+  icMuI2cRegister.title = "iC-MU I²C register";
+  icMuI2cRegister.description =
+      "Reads or writes one byte of the EEPROM of an iC-MU encoder, of its iC-PVL, or of the "
+      "status and command registers of its iC-PVL, through the I²C bridge of the iC-MU. The "
+      "server picks the I²C device id from the target and the direction. Runs OS commands 0 "
+      "and 14.";
+  icMuI2cRegister.caveats = {
+      "A write to the EEPROM changes nothing in the iC-MU or the iC-PVL until the next soft reset "
+      "or power cycle, when the chips load the EEPROM again.",
+      "A write to the RAM configuration of the iC-PVL sets its CFG_ERR, and an SCLR command to its "
+      "command register clears it.",
+      "The encoder does not report position while the I²C bridge is in use. A drive in Operation "
+      "Enabled is refused. The BiSS status bits are ignored during the run and turned on again at "
+      "the end, a failed or cancelled run included.",
+      "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuI2cRegister.movesMotor = false;
+  icMuI2cRegister.requiresEnabled = false;
+  icMuI2cRegister.parameters = icMuI2cRegisterParameters();
+  icMuI2cRegister.steps = icMuI2cRegisterSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(icMuI2cRegister),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuI2cRegisterRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          return runIcMuI2cRegisterProcedure(ctx.device, reporter, stop, spec);
+        };
+      },
+  });
+
 #ifdef MM_HAVE_MU_3SL
   ProcedureDescriptor icMuCalibration;
   icMuCalibration.name = std::string(kIcMuCalibrationProcedure);

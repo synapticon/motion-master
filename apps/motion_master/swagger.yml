@@ -5659,6 +5659,10 @@ components:
             `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the
             `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an
             `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`.
+            For `ic-mu-key-registers` the `read-key-registers` step holds an array of
+            `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of
+            `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an
+            `IcMuI2cTransfer`.
           example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
         error:
           type: string
@@ -6527,6 +6531,44 @@ components:
           type: array
           description: One entry for each set bit of encoderStatus, lowest bit first.
           items: { $ref: "#/components/schemas/IcMuStatusBit" }
+    IcMuKeyRegister:
+      type: object
+      description: >
+        One key register of an iC-MU, read from its RAM: the step value of
+        `ic-mu-key-registers` is a list of 33 of them, in the order of the restore file.
+      required: [ramAddress, eepromAddress, value]
+      properties:
+        ramAddress: { type: integer, example: 82 }
+        eepromAddress:
+          type: integer
+          description: >
+            Where the EEPROM keeps the register. RAM 0x00-0x18 is EEPROM 0x00-0x18, and RAM
+            0x52-0x59 is EEPROM 0x19-0x20.
+          example: 25
+        value: { type: integer, example: 47 }
+    IcMuEepromByte:
+      type: object
+      description: >
+        One byte of the EEPROM of an iC-MU encoder: the step value of `ic-mu-eeprom-export` is a
+        list of 77 of them, 0x00-0x4C. 0x00-0x3F is the configuration of the iC-MU and 0x40-0x4C
+        that of the iC-PVL.
+      required: [address, value]
+      properties:
+        address: { type: integer, example: 64 }
+        value: { type: integer, example: 40 }
+    IcMuI2cTransfer:
+      type: object
+      description: The step value of `ic-mu-i2c-register`.
+      required: [target, deviceId, write, registerAddress, value]
+      properties:
+        target: { type: string, enum: [eeprom, ic-pvl, ic-pvl-status], example: ic-pvl }
+        deviceId:
+          type: integer
+          description: The I²C device id with the R/W bit, as written to I2C_DEVID (0x5E).
+          example: 195
+        write: { type: boolean, example: false }
+        registerAddress: { type: integer, example: 16 }
+        value: { type: integer, description: The byte read or written., example: 240 }
     IcMuStatusBit:
       type: object
       description: >
@@ -6750,35 +6792,49 @@ components:
           default: 1
           description: >
             `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits`,
-            `ic-mu-encoder-configuration` and `ic-mu-calibration`: the encoder ordinal of the OS
+            `ic-mu-encoder-configuration`, `ic-mu-calibration`, `ic-mu-key-registers`,
+            `ic-mu-eeprom-export` and `ic-mu-i2c-register`: the encoder ordinal of the OS
             commands, which picks the drive's encoder to address. Encoder 1 is the encoder
             configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a
-            configuration object rather than a kind of encoder. Required for
-            `ic-mu-encoder-configuration` and `ic-mu-calibration`, because a default would write the
-            EEPROM of an encoder that nobody named.
+            configuration object rather than a kind of encoder. Required for every `ic-mu-`
+            procedure that takes it, because a default would address an encoder that nobody
+            named.
           example: 1
         write:
           type: boolean
           default: false
           description: >
-            `encoder-register-communication` only: false reads the register, true writes `value`
-            into it. Either way the drive reports what the register holds afterwards.
+            `encoder-register-communication` and `ic-mu-i2c-register`: false reads, true writes
+            `value`. `encoder-register-communication` reports what the register holds afterwards;
+            `ic-mu-i2c-register` reports the byte it wrote.
         registerAddress:
           type: integer
           minimum: 0
           maximum: 255
           description: >
-            `encoder-register-communication` only, and required for it: the register to access. The
-            map belongs to the encoder chip rather than to the drive's firmware.
+            `encoder-register-communication` and `ic-mu-i2c-register`, and required for both: the
+            register to access. For `encoder-register-communication` the map belongs to the encoder
+            chip rather than to the drive's firmware. For `ic-mu-i2c-register` it is an address on
+            `target`: an EEPROM address, or an iC-PVL register.
           example: 117
+        target:
+          type: string
+          enum: [eeprom, ic-pvl, ic-pvl-status]
+          description: >
+            `ic-mu-i2c-register` only, and required for it: what the I²C transfer of the iC-MU
+            addresses. `eeprom` is the EEPROM that holds the configuration of the iC-MU and the
+            iC-PVL, `ic-pvl` every iC-PVL register, and `ic-pvl-status` only the status and command
+            registers of the iC-PVL, where the command register is 0x01. The server picks the I²C
+            device id from `target` and `write`.
+          example: eeprom
         value:
           type: integer
           minimum: 0
           maximum: 255
           default: 0
           description: >
-            `encoder-register-communication` only: the byte to write into the register. Ignored when
-            reading.
+            `encoder-register-communication` and `ic-mu-i2c-register`: the byte to write. Ignored
+            when reading. `ic-mu-i2c-register` requires it for a write.
           example: 7
         data:
           type: string

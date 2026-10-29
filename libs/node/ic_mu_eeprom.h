@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -65,6 +66,21 @@ inline constexpr uint8_t kIcMuEepromWritePage = 8;
 /// RAM 0x00-0x18 is EEPROM 0x00-0x18, and RAM 0x52-0x59, SPO_BASE and SPO_0-14, is EEPROM
 /// 0x19-0x20 (iC-MU datasheet Rev B1, Figure 51).
 std::optional<uint8_t> icMuEepromAddress(uint8_t ramAddress);
+
+/// @brief One key register of an iC-MU: a register of the restore file, read from RAM.
+struct IcMuKeyRegister {
+  uint8_t ramAddress = 0;
+  uint8_t eepromAddress = 0;  ///< Where the EEPROM keeps it, from @c icMuEepromAddress.
+  uint8_t value = 0;
+};
+void to_json(nlohmann::json& j, const IcMuKeyRegister& entry);
+
+/// @brief One byte of the EEPROM.
+struct IcMuEepromByte {
+  uint8_t address = 0;
+  uint8_t value = 0;
+};
+void to_json(nlohmann::json& j, const IcMuEepromByte& entry);
 
 /// @brief One I²C transfer of a range: @p count bytes from @p deviceStart.
 struct IcMuI2cChunk {

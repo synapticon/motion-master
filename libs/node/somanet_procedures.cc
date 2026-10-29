@@ -1703,6 +1703,330 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
   return {};
 }
 
+std::expected<IcMuEncoderRequest, std::string> parseIcMuEncoderRequest(const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  if (auto it = body.find("encoderOrdinal"); it == body.end() || it->is_null()) {
+    return std::unexpected("'encoderOrdinal' is required");
+  }
+  auto encoder = readEncoderOrdinal(body, somanet::EncoderOrdinal::kEncoder1);
+  if (!encoder) {
+    return std::unexpected(encoder.error());
+  }
+  return IcMuEncoderRequest{.encoderOrdinal = *encoder};
+}
+
+std::vector<ProcedureParameter> icMuEncoderParameters() { return {encoderParameter(std::nullopt)}; }
+
+std::vector<ProgressStep> icMuKeyRegistersSteps() {
+  return stepsFrom({kIcMuValidateStep, kIcMuKeyRegistersStep});
+}
+
+std::vector<ProgressStep> icMuEepromExportSteps() {
+  return stepsFrom({kIcMuValidateStep, kIcMuIgnoreStatusBitsStep, kIcMuEepromReadStep,
+                    kIcMuRestoreStatusBitsStep});
+}
+
+std::expected<IcMuI2cRegisterRequest, std::string> parseIcMuI2cRegisterRequest(
+    const nlohmann::json& body) {
+  auto encoder = parseIcMuEncoderRequest(body);
+  if (!encoder) {
+    return std::unexpected(encoder.error());
+  }
+  IcMuI2cRegisterRequest request{.encoderOrdinal = encoder->encoderOrdinal};
+
+  auto target = body.find("target");
+  if (target == body.end() || target->is_null()) {
+    return std::unexpected("'target' is required");
+  }
+  const auto parsed =
+      target->is_string() ? somanet::parseIcMuI2cTarget(target->get<std::string>()) : std::nullopt;
+  if (!parsed) {
+    return std::unexpected("'target' must be one of eeprom, ic-pvl, ic-pvl-status");
+  }
+  request.target = *parsed;
+
+  auto write = readBool(body, "write", request.write);
+  if (!write) {
+    return std::unexpected(write.error());
+  }
+  request.write = *write;
+  auto address = readByte(body, "registerAddress", std::nullopt);
+  if (!address) {
+    return std::unexpected(address.error());
+  }
+  request.address = *address;
+  // A write needs its byte; a read ignores one.
+  auto value = readByte(body, "value", request.write ? std::nullopt : std::optional<uint8_t>(0));
+  if (!value) {
+    return std::unexpected(value.error());
+  }
+  request.value = *value;
+  return request;
+}
+
+std::vector<ProcedureParameter> icMuI2cRegisterParameters() {
+  return {
+      encoderParameter(std::nullopt),
+      enumParameter("target", "Target",
+                    "What the transfer addresses. eeprom is the EEPROM that holds the "
+                    "configuration of the iC-MU and the iC-PVL. ic-pvl is every register of the "
+                    "iC-PVL. ic-pvl-status is only the status and command registers of the "
+                    "iC-PVL, where the command register is 0x01.",
+                    nlohmann::json(nullptr),
+                    {ParameterOption{.value = "eeprom", .title = "EEPROM"},
+                     ParameterOption{.value = "ic-pvl", .title = "iC-PVL"},
+                     ParameterOption{.value = "ic-pvl-status", .title = "iC-PVL status"}}),
+      booleanParameter("write", "Write", "Writes the byte instead of reading it.", false),
+      integerParameter("registerAddress", "Register address",
+                       "The address on the target: an EEPROM address, or an iC-PVL register.",
+                       nlohmann::json(nullptr), 0, 255),
+      integerParameter("value", "Value", "The byte to write. A read ignores it.", 0, 0, 255),
+  };
+}
+
+std::vector<ProgressStep> icMuI2cRegisterSteps() {
+  return stepsFrom({kIcMuValidateStep, kIcMuIgnoreStatusBitsStep, kIcMuI2cTransferStep,
+                    kIcMuRestoreStatusBitsStep});
+}
+
+namespace {
+
+// Checks what every EEPROM tool needs, and returns the configuration of the encoder. The encoder
+// must be one that ic-mu-encoder-status lists, and on an external port its register 0x74 must name
+// an iC-MU part. A tool that uses the I²C bridge also refuses a drive in Operation Enabled,
+// because the encoder reports no position while the status bits are off.
+std::expected<EncoderConfiguration, std::string> planIcMuTool(SomanetDrive& drive,
+                                                              somanet::EncoderOrdinal encoder,
+                                                              bool bridge,
+                                                              const std::stop_token& stop) {
+  auto rawVersion = drive.manufacturerSoftwareVersion();
+  if (!rawVersion) {
+    return std::unexpected(rawVersion.error());
+  }
+  const auto version = trimFirmwareVersion(
+      std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
+  if (auto error = icMuFirmwareError(version)) {
+    return std::unexpected(std::move(*error));
+  }
+  auto configurations = drive.encoders();
+  if (!configurations) {
+    return std::unexpected(configurations.error());
+  }
+  const auto found =
+      std::ranges::find(configurations->encoders, encoder, &EncoderConfiguration::encoderOrdinal);
+  if (found == configurations->encoders.end() || !somanet::isIcMuEncoder(*found)) {
+    return std::unexpected(
+        std::format("{} is not a BiSS or internal encoder with singleturn bits on a sensor port",
+                    somanet::toString(encoder)));
+  }
+  auto hardRev = readIcMuRegister(drive, encoder, somanet::kIcMuHardRevRegister, stop);
+  if (!hardRev) {
+    return std::unexpected(hardRev.error());
+  }
+  if (auto error = somanet::icMuPartError(found->sensorPort, *hardRev)) {
+    return std::unexpected(std::move(*error));
+  }
+  if (bridge) {
+    auto state = drive.state();
+    if (!state) {
+      return std::unexpected(state.error());
+    }
+    if (*state == cia402::State::kOperationEnabled) {
+      return std::unexpected(
+          "the drive is in Operation Enabled; disable it first, because the encoder stops "
+          "reporting position while its I²C bridge is in use");
+    }
+  }
+  return *found;
+}
+
+// Runs @p body with the BiSS status bits of @p encoder off, because the drive refuses the bridge
+// registers 0x5B-0x6F otherwise, and turns them on again on every way out.
+template <typename Body>
+std::expected<void, std::string> withStatusBitsIgnored(SomanetDrive& drive,
+                                                       ProgressReporter& reporter,
+                                                       somanet::EncoderOrdinal encoder,
+                                                       const std::stop_token& stop, Body body) {
+  reporter.start(kIcMuIgnoreStatusBitsStep);
+  if (auto ignored = drive.setIgnoreBissStatusBits(encoder, true,
+                                                   {.timeout = kBissServiceTimeout,
+                                                    .pollInterval = kEncoderRegisterPollInterval,
+                                                    .stop = stop});
+      !ignored) {
+    reporter.fail(kIcMuIgnoreStatusBitsStep, ignored.error());
+    return std::unexpected(ignored.error());
+  }
+  reporter.succeed(kIcMuIgnoreStatusBitsStep);
+
+  std::expected<void, std::string> result = body();
+
+  reporter.start(kIcMuRestoreStatusBitsStep);
+  // A failed I²C transfer leaves EPR_ERR set until a transfer succeeds, and a read of STATUS1 does
+  // not clear it. With the status bits on again, the drive takes it for a BiSS error and faults. A
+  // one-byte read of the EEPROM clears it. These reads take no stop token, like the restore.
+  if (auto status1 = readIcMuRegister(drive, encoder, kIcMuStatus1Register, {});
+      status1 && (*status1 & kIcMuEepromError) != 0) {
+    if (auto cleared = readIcMuI2c(drive, encoder, somanet::IcMuI2cTarget::kEeprom, 0x00, 1, {});
+        !cleared) {
+      const auto warning = std::format(
+          "EPR_ERR could not be cleared, so the drive may fault when the status bits are on again: "
+          "{}",
+          cleared.error());
+      result = result ? std::unexpected(warning)
+                      : std::unexpected(std::format("{}; {}", result.error(), warning));
+    }
+  }
+  // A cancelled run still turns the status bits on, so this command takes no stop token.
+  auto restored = drive.setIgnoreBissStatusBits(
+      encoder, false,
+      {.timeout = kBissServiceTimeout, .pollInterval = kEncoderRegisterPollInterval});
+  if (!restored) {
+    reporter.fail(kIcMuRestoreStatusBitsStep, restored.error());
+  } else {
+    reporter.succeed(kIcMuRestoreStatusBitsStep);
+  }
+  if (!result) {
+    return result;
+  }
+  if (!restored) {
+    return std::unexpected(restored.error());
+  }
+  return {};
+}
+
+nlohmann::json toolPlan(const EncoderConfiguration& encoder) {
+  return nlohmann::json{{"encoderOrdinal", static_cast<int>(encoder.encoderOrdinal)},
+                        {"sensorPort", encoder.sensorPort}};
+}
+
+}  // namespace
+
+std::expected<void, std::string> runIcMuKeyRegistersProcedure(Device& device,
+                                                              ProgressReporter& reporter,
+                                                              const std::stop_token& stop,
+                                                              const IcMuEncoderRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+  const auto encoder = request.encoderOrdinal;
+
+  reporter.start(kIcMuValidateStep);
+  auto plan = planIcMuTool(*drive, encoder, false, stop);
+  if (!plan) {
+    return fail(kIcMuValidateStep, plan.error());
+  }
+  // The key registers 0x00-0x18 are read through the bank BANKSEL selects.
+  if (auto bank = checkIcMuBank(*drive, encoder, stop); !bank) {
+    return fail(kIcMuValidateStep, bank.error());
+  }
+  reporter.succeed(kIcMuValidateStep, toolPlan(*plan));
+
+  reporter.start(kIcMuKeyRegistersStep);
+  std::vector<somanet::IcMuKeyRegister> registers;
+  for (const uint8_t ram : somanet::icMuRestoreRegisters()) {
+    auto value = readIcMuRegister(*drive, encoder, ram, stop);
+    if (!value) {
+      return fail(kIcMuKeyRegistersStep, value.error());
+    }
+    registers.push_back({.ramAddress = ram,
+                         .eepromAddress = somanet::icMuEepromAddress(ram).value_or(0),
+                         .value = *value});
+  }
+  reporter.succeed(kIcMuKeyRegistersStep, registers);
+  return {};
+}
+
+std::expected<void, std::string> runIcMuEepromExportProcedure(Device& device,
+                                                              ProgressReporter& reporter,
+                                                              const std::stop_token& stop,
+                                                              const IcMuEncoderRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  const auto encoder = request.encoderOrdinal;
+
+  reporter.start(kIcMuValidateStep);
+  auto plan = planIcMuTool(*drive, encoder, true, stop);
+  if (!plan) {
+    reporter.fail(kIcMuValidateStep, plan.error());
+    return std::unexpected(plan.error());
+  }
+  reporter.succeed(kIcMuValidateStep, toolPlan(*plan));
+
+  return withStatusBitsIgnored(
+      *drive, reporter, encoder, stop, [&]() -> std::expected<void, std::string> {
+        reporter.start(kIcMuEepromReadStep);
+        std::vector<somanet::IcMuEepromByte> bytes;
+        for (const auto& chunk :
+             somanet::icMuEepromReadChunks(0x00, somanet::kIcMuEepromConfigurationEnd)) {
+          auto read = readIcMuI2c(*drive, encoder, somanet::IcMuI2cTarget::kEeprom,
+                                  chunk.deviceStart, chunk.count, stop);
+          if (!read) {
+            reporter.fail(kIcMuEepromReadStep, read.error());
+            return std::unexpected(read.error());
+          }
+          uint8_t address = chunk.deviceStart;
+          for (const uint8_t value : *read) {
+            bytes.push_back({.address = address++, .value = value});
+          }
+        }
+        reporter.succeed(kIcMuEepromReadStep, bytes);
+        return {};
+      });
+}
+
+std::expected<void, std::string> runIcMuI2cRegisterProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const IcMuI2cRegisterRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  const auto encoder = request.encoderOrdinal;
+
+  reporter.start(kIcMuValidateStep);
+  auto plan = planIcMuTool(*drive, encoder, true, stop);
+  if (!plan) {
+    reporter.fail(kIcMuValidateStep, plan.error());
+    return std::unexpected(plan.error());
+  }
+  reporter.succeed(kIcMuValidateStep, toolPlan(*plan));
+
+  return withStatusBitsIgnored(
+      *drive, reporter, encoder, stop, [&]() -> std::expected<void, std::string> {
+        reporter.start(kIcMuI2cTransferStep);
+        uint8_t value = request.value;
+        std::expected<void, std::string> transfer;
+        if (request.write) {
+          transfer = writeIcMuI2c(*drive, encoder, request.target, request.address,
+                                  std::span(&value, 1), stop);
+        } else {
+          transfer = readIcMuI2c(*drive, encoder, request.target, request.address, 1, stop)
+                         .transform([&](const std::vector<uint8_t>& bytes) { value = bytes[0]; });
+        }
+        if (!transfer) {
+          reporter.fail(kIcMuI2cTransferStep, transfer.error());
+          return transfer;
+        }
+        reporter.succeed(
+            kIcMuI2cTransferStep,
+            nlohmann::json{{"target", std::string(somanet::toString(request.target))},
+                           {"deviceId", somanet::icMuI2cDeviceId(request.target, request.write)},
+                           {"write", request.write},
+                           {"registerAddress", request.address},
+                           {"value", value}});
+        return {};
+      });
+}
+
 std::string icMuIterationStep(int iteration) { return std::format("iteration-{}", iteration); }
 
 std::expected<IcMuCalibrationRequest, std::string> parseIcMuCalibrationRequest(

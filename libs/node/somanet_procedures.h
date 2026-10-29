@@ -17,6 +17,7 @@
 #include "node/device_manager.h"
 #include "node/firmware_package.h"
 #include "node/ic_mu_calibration.h"
+#include "node/ic_mu_eeprom.h"
 #include "node/kuebler_registers.h"
 #include "node/plant_identification.h"
 #include "node/procedure.h"
@@ -341,6 +342,90 @@ std::vector<ProgressStep> icMuEncoderConfigurationSteps();
 std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     Device& device, ProgressReporter& reporter, const std::stop_token& stop,
     const IcMuEncoderConfigurationRequest& request);
+
+// --- iC-MU EEPROM tools ---------------------------------------------------------------------
+
+/// @brief Procedure names of the iC-MU EEPROM tools, as they appear in their URLs and snapshot
+///        keys.
+inline constexpr std::string_view kIcMuKeyRegistersProcedure = "ic-mu-key-registers";
+inline constexpr std::string_view kIcMuEepromExportProcedure = "ic-mu-eeprom-export";
+inline constexpr std::string_view kIcMuI2cRegisterProcedure = "ic-mu-i2c-register";
+
+/// @brief The step that reads the key registers. Its value lists each register with its RAM
+///        address, its EEPROM address and its value.
+inline constexpr std::string_view kIcMuKeyRegistersStep = "read-key-registers";
+
+/// @brief The step that reads EEPROM 0x00-0x4C. Its value lists each byte with its address.
+inline constexpr std::string_view kIcMuEepromReadStep = "read-eeprom";
+
+/// @brief The step that runs one I²C transfer. Its value is the byte read or written.
+inline constexpr std::string_view kIcMuI2cTransferStep = "i2c-transfer";
+
+/// @brief Which encoder an EEPROM tool addresses.
+struct IcMuEncoderRequest {
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};
+};
+
+/// @brief Parses `{"encoderOrdinal": 1}`. The ordinal is required, because a tool addresses one
+///        encoder and a default would pick one that nobody named.
+std::expected<IcMuEncoderRequest, std::string> parseIcMuEncoderRequest(const nlohmann::json& body);
+
+/// @brief The parameters of a tool that takes only the encoder ordinal.
+std::vector<ProcedureParameter> icMuEncoderParameters();
+
+/// @brief The step templates of the key register read and the EEPROM export, idle.
+std::vector<ProgressStep> icMuKeyRegistersSteps();
+std::vector<ProgressStep> icMuEepromExportSteps();
+
+/// @brief Reads the 33 key registers of an iC-MU from its RAM with OS command 0.
+///
+/// These are the registers of the restore file. It refuses an encoder that @c ic-mu-encoder-status
+/// does not list, and an iC-MU whose BANKSEL is not 0. It writes nothing.
+std::expected<void, std::string> runIcMuKeyRegistersProcedure(Device& device,
+                                                              ProgressReporter& reporter,
+                                                              const std::stop_token& stop,
+                                                              const IcMuEncoderRequest& request);
+
+/// @brief Reads EEPROM 0x00-0x4C of an iC-MU encoder, the configuration of the iC-MU and of the
+///        iC-PVL, through the I²C bridge.
+///
+/// It refuses a drive in Operation Enabled, turns the BiSS status bits off with OS command 14, and
+/// turns them on again on every way out. It writes nothing to the EEPROM.
+std::expected<void, std::string> runIcMuEepromExportProcedure(Device& device,
+                                                              ProgressReporter& reporter,
+                                                              const std::stop_token& stop,
+                                                              const IcMuEncoderRequest& request);
+
+/// @brief One byte of the EEPROM, the iC-PVL or the iC-PVL status, read or written through the
+///        I²C bridge.
+struct IcMuI2cRegisterRequest {
+  somanet::EncoderOrdinal encoderOrdinal{somanet::EncoderOrdinal::kEncoder1};
+  somanet::IcMuI2cTarget target{somanet::IcMuI2cTarget::kEeprom};
+  bool write = false;
+  uint8_t address = 0;
+  uint8_t value = 0;  ///< The byte to write; ignored when reading.
+};
+
+/// @brief Parses `{"encoderOrdinal": 1, "target": "eeprom", "write": false, "registerAddress":
+///        64, "value": 0}`. @c encoderOrdinal, @c target and @c registerAddress are required. The
+///        server picks the device id from @c target and @c write, so a client never sends one.
+std::expected<IcMuI2cRegisterRequest, std::string> parseIcMuI2cRegisterRequest(
+    const nlohmann::json& body);
+
+/// @brief What the I²C register tool accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> icMuI2cRegisterParameters();
+
+/// @brief The I²C register tool's step template, idle.
+std::vector<ProgressStep> icMuI2cRegisterSteps();
+
+/// @brief Reads or writes one byte through the I²C bridge of an iC-MU encoder.
+///
+/// It refuses a drive in Operation Enabled, turns the BiSS status bits off with OS command 14, and
+/// turns them on again on every way out.
+std::expected<void, std::string> runIcMuI2cRegisterProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             const std::stop_token& stop,
+                                                             const IcMuI2cRegisterRequest& request);
 
 /// @brief Procedure name for calibrating an iC-MU encoder, as it appears in its URL and its
 ///        snapshot key.

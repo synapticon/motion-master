@@ -1,5 +1,8 @@
 #include <windows.h>
 
+#include <format>
+#include <string>
+
 #include "core/cyclic_timer.h"
 
 namespace mm::core {
@@ -12,10 +15,12 @@ namespace mm::core {
 // (FILETIME) dependency an absolute SetWaitableTimer due time would carry, so a
 // system-clock change can't disturb the cadence.
 //
-// CREATE_WAITABLE_TIMER_HIGH_RESOLUTION gives ~0.5 ms resolution per timer,
-// process-local. The multimedia timer API (timeBeginPeriod) achieves similar
-// resolution but as a system-wide change that affects all processes and
-// increases power consumption — avoid it.
+// CREATE_WAITABLE_TIMER_HIGH_RESOLUTION gives ~0.5 ms resolution per timer and
+// needs no change of the timer resolution. A loop on timeBeginPeriod instead
+// depends on the resolution Windows grants the process, and since Windows 11
+// Windows does not guarantee it to a process that cannot be seen; the loop then
+// falls to the default tick of 15.625 ms. (Since Windows 10 2004
+// timeBeginPeriod no longer changes the global resolution.)
 CyclicTimer::CyclicTimer(std::chrono::microseconds period) {
   handle_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
                                    TIMER_ALL_ACCESS);
@@ -33,7 +38,25 @@ CyclicTimer::CyclicTimer(std::chrono::microseconds period) {
   next_ = now.QuadPart;
 }
 
+bool CyclicTimer::valid() const { return handle_ != nullptr; }
+
+std::expected<void, std::string> checkCyclicTimer() {
+  HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                        TIMER_ALL_ACCESS);
+  if (timer == nullptr) {
+    return std::unexpected(std::format(
+        "the RT loop needs a high-resolution waitable timer, which Windows 10, version 1803 or "
+        "newer provides; CreateWaitableTimerExW failed with error {}",
+        GetLastError()));
+  }
+  CloseHandle(timer);
+  return {};
+}
+
 CyclicTimer::~CyclicTimer() {
+  if (handle_ == nullptr) {
+    return;
+  }
   CancelWaitableTimer(static_cast<HANDLE>(handle_));
   CloseHandle(static_cast<HANDLE>(handle_));
 }

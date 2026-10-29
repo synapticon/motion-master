@@ -81,6 +81,7 @@ syntaxError:*/ic_haus_registers_test.cc
 syntaxError:*/ic_mu_calibration_engine_test.cc
 syntaxError:*/ic_mu_calibration_test.cc
 syntaxError:*/ic_mu_eeprom_test.cc
+syntaxError:*/cycle_rate_source_test.cc
 syntaxError:*/ic_mu_encoder_test.cc
 syntaxError:*/kuebler_registers_test.cc
 syntaxError:*/router_test.cc

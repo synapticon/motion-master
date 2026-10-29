@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <expected>
+#include <string>
 
 namespace mm::core {
 
@@ -77,6 +79,13 @@ class CyclicTimer {
   ///         callers that don't track skips may ignore it.
   uint64_t waitForNextCycle();
 
+  /// @brief Whether the OS timer exists. Always true off Windows.
+  ///
+  /// On Windows the timer is a waitable timer the constructor creates, and the creation can fail.
+  /// Without one, waitForNextCycle() would not wait at all, so a caller checks this before the
+  /// first cycle.
+  bool valid() const;
+
   /// @brief Changes the cycle period and re-anchors the deadline grid to now.
   ///
   /// Recomputes the internal period and resets the deadline baseline to the
@@ -120,5 +129,12 @@ class CyclicTimer {
   int64_t next_nsec_ = 0;
 #endif
 };
+
+/// @brief Whether this host can run a CyclicTimer, or why not.
+///
+/// On Windows it creates and closes one high-resolution waitable timer, which needs Windows 10,
+/// version 1803 or newer. Elsewhere it always succeeds. Call it at startup, so a host that cannot
+/// run the loop is refused before anything else starts.
+std::expected<void, std::string> checkCyclicTimer();
 
 }  // namespace mm::core

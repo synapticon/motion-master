@@ -1,6 +1,8 @@
 #include "core/realtime.h"
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <pthread.h>
 #include <sched.h>
 #endif
@@ -9,6 +11,28 @@
 #endif
 
 namespace mm::core {
+
+#ifdef _WIN32
+namespace {
+
+// Older Windows SDKs lack the flag that Windows 11 added.
+#ifndef PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION
+#define PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION 0x4
+#endif
+
+// Turns one kind of power throttling off for the whole process: the flag in ControlMask and not
+// in StateMask.
+bool turnOffPowerThrottling(ULONG flag) {
+  PROCESS_POWER_THROTTLING_STATE state{};
+  state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+  state.ControlMask = flag;
+  state.StateMask = 0;
+  return SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state,
+                               sizeof(state)) != 0;
+}
+
+}  // namespace
+#endif
 
 RtSetupResult setRealtimePriority(int cpuAffinity) {
   RtSetupResult result;
@@ -46,6 +70,11 @@ RtSetupResult setRealtimePriority(int cpuAffinity) {
   }
 #else
   (void)cpuAffinity;  // no per-thread affinity API on macOS, and no RT path on Windows
+#endif
+#ifdef _WIN32
+  result.highQos = turnOffPowerThrottling(PROCESS_POWER_THROTTLING_EXECUTION_SPEED);
+  result.timerResolutionHonoured =
+      turnOffPowerThrottling(PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION);
 #endif
   return result;
 }

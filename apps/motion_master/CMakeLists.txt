@@ -25,6 +25,7 @@ add_executable(
   cert_info.cc
   cert_updater.cc
   bus_health_source.cc
+  cycle_rate_source.cc
   capture_runner.cc
   object_address_generator.cc
   # swagger_spec.h is not compiled (CMake never compiles headers) — it is listed here only to wire

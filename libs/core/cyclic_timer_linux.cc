@@ -1,5 +1,7 @@
 #include <time.h>
 
+#include <string>
+
 #include "core/cyclic_timer.h"
 
 namespace mm::core {
@@ -46,5 +48,9 @@ uint64_t CyclicTimer::waitForNextCycle() {
   }
   return skipped;
 }
+
+bool CyclicTimer::valid() const { return true; }
+
+std::expected<void, std::string> checkCyclicTimer() { return {}; }
 
 }  // namespace mm::core

@@ -15,6 +15,7 @@ import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline, btnPrimary } from '../utils/styles'
 
 const PROCEDURE = 'controller-auto-tuning'
+const LIMITS_PROCEDURE = 'set-integral-limits'
 
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -49,6 +50,18 @@ const GAINS: Record<Controller, GainObject[]> = {
     { index: 0x2011, subindex: 0x02, label: 'Ki' },
     { index: 0x2011, subindex: 0x03, label: 'Kd' },
   ],
+}
+
+// The limits set-integral-limits writes, in the order it writes them.
+const LIMITS: GainObject[] = [
+  { index: 0x2011, subindex: 0x04, label: 'Velocity controller' },
+  { index: 0x2012, subindex: 0x04, label: 'Position loop' },
+  { index: 0x2012, subindex: 0x08, label: 'Velocity loop of the position controller' },
+]
+
+interface LimitsWrite {
+  limits: { object: string; before: number; after: number }[]
+  skipped: string[]
 }
 
 function objectName(index: number, subindex: number): string {
@@ -94,7 +107,7 @@ export default function DeviceTuningPage() {
   const gainsQuery = useQuery({
     queryKey: ['controller-gains', slavePosition],
     queryFn: async () => {
-      const objects = [...GAINS.position, ...GAINS.velocity]
+      const objects = [...GAINS.position, ...GAINS.velocity, ...LIMITS]
       const results = await Promise.allSettled(
         objects.map(o => api.readParameter(slavePosition, o.index, o.subindex).then(r => r.data)),
       )
@@ -137,15 +150,34 @@ export default function DeviceTuningPage() {
       queryClient.invalidateQueries({ queryKey: ['procedure', slavePosition, PROCEDURE] }),
   })
 
+  const limitsQuery = useQuery({
+    queryKey: ['procedure', slavePosition, LIMITS_PROCEDURE],
+    queryFn: () => api.getProcedure(slavePosition, LIMITS_PROCEDURE).then(r => r.data),
+    refetchInterval: query => (query.state.data?.status === 'running' ? 300 : false),
+    refetchIntervalInBackground: true,
+    retry: false,
+  })
+  const setLimits = useMutation({
+    mutationFn: () => api.startProcedure(slavePosition, LIMITS_PROCEDURE, {}),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ['procedure', slavePosition, LIMITS_PROCEDURE] }),
+  })
+
   const snapshot = snapshotQuery.data
-  const running = snapshot?.status === 'running' || start.isPending
+  const limitsSnapshot = limitsQuery.data
+  const running =
+    snapshot?.status === 'running' ||
+    start.isPending ||
+    limitsSnapshot?.status === 'running' ||
+    setLimits.isPending
   // The gains change at the end of a run, so they are read again once it has finished.
   const finishedAt = snapshot?.finishedAt
+  const limitsFinishedAt = limitsSnapshot?.finishedAt
   useEffect(() => {
-    if (finishedAt) {
+    if (finishedAt || limitsFinishedAt) {
       void queryClient.invalidateQueries({ queryKey: ['controller-gains', slavePosition] })
     }
-  }, [finishedAt, queryClient, slavePosition])
+  }, [finishedAt, limitsFinishedAt, queryClient, slavePosition])
 
   const noPlantModel = isNotFound(plantModelQuery.error)
   const elapsedSeconds =
@@ -158,7 +190,7 @@ export default function DeviceTuningPage() {
       <DevicePageHeader
         slavePosition={slavePosition}
         title="Tuning"
-        description="Computes the gains of the position or the velocity controller from the plant model of the drive, and writes them."
+        description="Computes the gains of the position or the velocity controller from the plant model of the drive, and sets the integral limits of the controllers."
       />
 
       <div className="p-4 sm:px-8 sm:py-7 space-y-6 max-w-5xl">
@@ -326,6 +358,14 @@ export default function DeviceTuningPage() {
         />
 
         {snapshot && snapshot.status !== 'idle' && <TuningRun snapshot={snapshot} />}
+
+        <LimitsCard
+          values={gainsQuery.data}
+          snapshot={limitsSnapshot}
+          busy={running}
+          onSet={() => setLimits.mutate()}
+          error={setLimits.isError ? apiErrorMessage(setLimits.error) : undefined}
+        />
       </div>
     </div>
   )
@@ -430,6 +470,93 @@ function GainsCard({
             </tbody>
           </table>
         ))}
+      </div>
+    </section>
+  )
+}
+
+function LimitsCard({
+  values,
+  snapshot,
+  busy,
+  onSet,
+  error,
+}: {
+  values: Map<string, number | string> | undefined
+  snapshot: ProcedureSnapshot | undefined
+  busy: boolean
+  onSet: () => void
+  error: string | undefined
+}) {
+  const written = stepValue<LimitsWrite>(snapshot, 'write')
+  const before = new Map((written?.limits ?? []).map(limit => [limit.object, limit.before]))
+  const failed = snapshot?.steps.find(step => step.status === 'failed')
+  return (
+    <section className="border border-grey-200 bg-white">
+      <div className="px-5 py-3 border-b border-grey-200">
+        <h3 className="font-display uppercase tracking-wide text-sm">Integral limits</h3>
+      </div>
+      <p className="px-5 pt-4 text-xs text-grey-600">
+        The velocity loops stop their integrator at the maximum torque, 0x6072 / 1000 × 0x6076, in
+        mNm. The position loop of the cascaded controller stops at the maximum motor speed on the
+        driving shaft, 0x6080 × feed constant / gear ratio, and the simple PID position loop at the
+        maximum torque. 2147483647 means the limit is off.
+      </p>
+      <div className="px-5 py-4">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-grey-600">
+              <th className="text-left font-normal py-1">Object</th>
+              <th className="text-left font-normal py-1">Limit</th>
+              <th className="text-right font-normal py-1">Value</th>
+              <th className="text-right font-normal py-1">Before the last run</th>
+            </tr>
+          </thead>
+          <tbody>
+            {LIMITS.map(limit => {
+              const name = objectName(limit.index, limit.subindex)
+              const value = values?.get(name)
+              return (
+                <tr key={name} className="border-t border-grey-100">
+                  <td className="py-1.5 font-mono text-xs">{name}</td>
+                  <td className="py-1.5">{limit.label}</td>
+                  <td className="py-1.5 text-right font-mono">
+                    {value === 'missing' ? (
+                      <span className="text-grey-500">not in the dictionary</span>
+                    ) : typeof value === 'string' ? (
+                      <span className="text-status-bad text-xs">{value}</span>
+                    ) : (
+                      formatNumber(value)
+                    )}
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-grey-600">
+                    {before.has(name) ? formatNumber(before.get(name)) : ''}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {written && written.skipped.length > 0 && (
+          <p className="pt-2 text-xs text-grey-600">
+            Not in the dictionary, so not written: {written.skipped.join(', ')}
+          </p>
+        )}
+      </div>
+      {(error ?? failed?.error) && (
+        <div className="px-5 pb-4">
+          <Callout variant="error">{error ?? failed?.error}</Callout>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-t border-grey-100">
+        <button type="button" className={btnPrimary} disabled={busy} onClick={onSet}>
+          Set integral limits
+        </button>
+        <span className="text-xs text-grey-600">
+          {snapshot?.finishedAt
+            ? `Last set ${new Date(snapshot.finishedAt).toLocaleTimeString()}, ${snapshot.status}`
+            : 'Not set yet. Nothing is stored to flash.'}
+        </span>
       </div>
     </section>
   )

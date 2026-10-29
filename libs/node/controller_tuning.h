@@ -132,10 +132,48 @@ struct ControllerTuningReply {
 using ControllerTuningFn =
     std::function<std::expected<ControllerTuningReply, std::string>(const ControllerTuningCall&)>;
 
-/// @brief Why a drive with firmware @p version cannot be tuned, or nothing when it can.
+/// @brief Why a drive with firmware @p version cannot run @p procedure, or nothing when it can.
 ///
 /// Refuses firmware older than 5.1.0 and a version that does not parse. A leading "v" is allowed.
-std::optional<std::string> controllerTuningFirmwareError(std::string_view version);
+/// Controller auto-tuning and the integral limits share the floor: from 5.1.0 the drive reads
+/// 0x2012:04 in mNm when the simple PID controller is selected, and in a velocity before it.
+std::optional<std::string> controllerFirmwareError(std::string_view version,
+                                                   std::string_view procedure);
+
+/// @brief The feed of 0x6092:01 that turns the feed constant off.
+inline constexpr double kFeedConstantOff = 4294967295.0;
+
+/// @brief The objects the integral limits are computed from, as the drive holds them.
+struct IntegralLimitInputs {
+  double maxTorquePermil = 0.0;               ///< 0x6072, per mille of rated torque.
+  double ratedTorqueMilliNm = 0.0;            ///< 0x6076.
+  double maxMotorSpeed = 0.0;                 ///< 0x6080, in the velocity unit of 0x60A9.
+  double feedConstantFeed = 0.0;              ///< 0x6092:01.
+  double feedConstantShaftRevolutions = 0.0;  ///< 0x6092:02.
+  double gearMotorRevolutions = 0.0;          ///< 0x6091:01.
+  double gearShaftRevolutions = 0.0;          ///< 0x6091:02.
+  double positionControlStrategy = 0.0;       ///< 0x2002. 1 simple PID, 2 cascaded.
+};
+
+/// @brief The three integral limits, in the units the drive reads them in.
+struct IntegralLimits {
+  uint32_t velocityController = 0;    ///< 0x2011:04, mNm.
+  uint32_t positionLoop = 0;          ///< 0x2012:04, mNm or a velocity, by 0x2002.
+  uint32_t positionVelocityLoop = 0;  ///< 0x2012:08, mNm.
+};
+
+/// @brief Computes the integral limits from the drive's own maxima.
+///
+/// A velocity loop limits a torque, so 0x2011:04 and 0x2012:08 are the maximum torque,
+/// |0x6072| / 1000 × 0x6076, in mNm. The position loop of the cascaded controller limits a
+/// velocity: 0x6080 × feed constant / gear ratio, because the drive reads 0x6080 without the feed
+/// constant and 0x2012:04 with it. A feed of @c kFeedConstantOff turns the feed constant off, and
+/// its factor is 1. The simple PID position loop limits a torque, so 0x2012:04 is the maximum
+/// torque. Each limit is rounded to a whole number.
+///
+/// @return The limits, or why there are none: a feed constant or gear ratio with a zero, a
+///         strategy that is neither 1 nor 2, or a limit that does not fit 32 bits.
+std::expected<IntegralLimits, std::string> integralLimits(const IntegralLimitInputs& inputs);
 
 /// @brief Mean absolute velocity, in rpm, above which the noise recording is taken as a moving
 ///        motor.

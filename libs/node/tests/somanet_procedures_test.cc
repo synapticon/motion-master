@@ -4621,4 +4621,90 @@ TEST(ParseControllerTuningRequest, RefusesTargetsOutsideWhatTheProgramUses) {
   EXPECT_DOUBLE_EQ(request->targets.settlingTimeS, 0.05);
 }
 
+// --- Integral limits -----------------------------------------------------------------------------
+
+std::vector<uint8_t> u32(uint32_t value) {
+  return {static_cast<uint8_t>(value), static_cast<uint8_t>(value >> 8),
+          static_cast<uint8_t>(value >> 16), static_cast<uint8_t>(value >> 24)};
+}
+
+uint32_t u32At(const OsCommandFakeDriver& driver, uint16_t index, uint8_t subindex) {
+  const auto& b = driver.store.at(OsCommandFakeDriver::key(index, subindex));
+  return static_cast<uint32_t>(b[0]) | (static_cast<uint32_t>(b[1]) << 8) |
+         (static_cast<uint32_t>(b[2]) << 16) | (static_cast<uint32_t>(b[3]) << 24);
+}
+
+// A drive with every input of the limits, a gear of 50:3 and the limits still deactivated.
+void programLimitInputs(OsCommandFakeDriver& fake, bool withMaxSpeed = true) {
+  fake.programObject(0x6072, 0, ObjectDataType::UNSIGNED16, {0xB8, 0x0B});  // 3000 per mille
+  fake.programObject(0x6076, 0, ObjectDataType::UNSIGNED32, u32(400));
+  if (withMaxSpeed) {
+    fake.programObject(0x6080, 0, ObjectDataType::UNSIGNED32, u32(2000));
+  }
+  fake.programObject(0x6091, 1, ObjectDataType::UNSIGNED32, u32(50));
+  fake.programObject(0x6091, 2, ObjectDataType::UNSIGNED32, u32(3));
+  fake.programObject(0x6092, 1, ObjectDataType::UNSIGNED32, u32(360000));
+  fake.programObject(0x6092, 2, ObjectDataType::UNSIGNED32, u32(1));
+  for (const uint8_t subindex : {uint8_t{4}, uint8_t{8}}) {
+    fake.programObject(0x2012, subindex, ObjectDataType::UNSIGNED32, u32(2147483647));
+  }
+  fake.programObject(0x2011, 4, ObjectDataType::UNSIGNED32, u32(2147483647));
+}
+
+TEST(RunIntegralLimitsProcedure, WritesTheCascadedLimits) {
+  OsCommandFakeDriver driver;
+  Device device =
+      makeTuningDevice(driver, true, [](OsCommandFakeDriver& fake) { programLimitInputs(fake); });
+  ProgressReporter reporter(mm::node::integralLimitsSteps());
+
+  auto result = mm::node::runIntegralLimitsProcedure(device, reporter);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(u32At(driver, 0x2011, 4), 1200u);  // 3000 per mille of 400 mNm
+  EXPECT_EQ(u32At(driver, 0x2012, 8), 1200u);
+  EXPECT_EQ(u32At(driver, 0x2012, 4), 43200000u);  // 2000 × 360000 / (50 / 3)
+  const auto written = stepById(reporter.steps(), "write")->value;
+  ASSERT_EQ(written.at("limits").size(), 3u);
+  EXPECT_EQ(written.at("limits")[0].at("object"), "0x2011:04");
+  EXPECT_DOUBLE_EQ(written.at("limits")[0].at("before").get<double>(), 2147483647.0);
+  EXPECT_TRUE(written.at("skipped").empty());
+}
+
+TEST(RunIntegralLimitsProcedure, TheSimplePidPositionLoopGetsTheTorque) {
+  OsCommandFakeDriver driver;
+  Device device =
+      makeTuningDevice(driver, true, [](OsCommandFakeDriver& fake) { programLimitInputs(fake); });
+  driver.store[OsCommandFakeDriver::key(0x2002, 0)] = {1, 0};
+  ProgressReporter reporter(mm::node::integralLimitsSteps());
+
+  auto result = mm::node::runIntegralLimitsProcedure(device, reporter);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(u32At(driver, 0x2012, 4), 1200u);
+}
+
+TEST(RunIntegralLimitsProcedure, RefusesAMissingInputBeforeAnythingIsWritten) {
+  OsCommandFakeDriver driver;
+  Device device = makeTuningDevice(
+      driver, true, [](OsCommandFakeDriver& fake) { programLimitInputs(fake, false); });
+  ProgressReporter reporter(mm::node::integralLimitsSteps());
+
+  auto result = mm::node::runIntegralLimitsProcedure(device, reporter);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("0x6080"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.writeLog.empty());
+}
+
+TEST(RunIntegralLimitsProcedure, RefusesFirmwareOlderThan510) {
+  OsCommandFakeDriver driver;
+  Device device =
+      makeTuningDevice(driver, true, [](OsCommandFakeDriver& fake) { programLimitInputs(fake); });
+  const std::string old = "v5.0.4 ";
+  driver.store[OsCommandFakeDriver::key(0x100A, 0)] = std::vector<uint8_t>(old.begin(), old.end());
+  ProgressReporter reporter(mm::node::integralLimitsSteps());
+
+  auto result = mm::node::runIntegralLimitsProcedure(device, reporter);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("5.1.0"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.writeLog.empty());
+}
+
 }  // namespace

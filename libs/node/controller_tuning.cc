@@ -2,10 +2,13 @@
 
 #include <cmath>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <semver.hpp>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "node/somanet_drive_objects.h"
@@ -37,7 +40,8 @@ void to_json(nlohmann::json& j, const TuningDriveConfiguration& configuration) {
   }
 }
 
-std::optional<std::string> controllerTuningFirmwareError(std::string_view version) {
+std::optional<std::string> controllerFirmwareError(std::string_view version,
+                                                   std::string_view procedure) {
   std::string_view number = version;
   if (number.starts_with('v')) {
     number.remove_prefix(1);
@@ -49,10 +53,56 @@ std::optional<std::string> controllerTuningFirmwareError(std::string_view versio
   semver::version<> minimum;
   semver::parse("5.1.0", minimum);
   if (parsed < minimum) {
-    return std::format("controller auto-tuning needs firmware 5.1.0 or newer, and the drive has {}",
+    return std::format("{} needs firmware 5.1.0 or newer, and the drive has {}", procedure,
                        version);
   }
   return std::nullopt;
+}
+
+std::expected<IntegralLimits, std::string> integralLimits(const IntegralLimitInputs& inputs) {
+  // The firmware takes a feed of 0xFFFFFFFF as the feed constant turned off, with a factor of 1,
+  // and does not read the shaft revolutions then (si_units_and_scaling.xc).
+  const bool feedOff = inputs.feedConstantFeed == kFeedConstantOff;
+  for (const auto& [value, object] :
+       {std::pair{feedOff ? 1.0 : inputs.feedConstantFeed, "0x6092:01"},
+        std::pair{feedOff ? 1.0 : inputs.feedConstantShaftRevolutions, "0x6092:02"},
+        std::pair{inputs.gearMotorRevolutions, "0x6091:01"},
+        std::pair{inputs.gearShaftRevolutions, "0x6091:02"}}) {
+    if (value == 0.0) {
+      return std::unexpected(
+          std::format("{} is 0, so the integral limits cannot be computed", object));
+    }
+  }
+  const auto whole = [](double value,
+                        std::string_view what) -> std::expected<uint32_t, std::string> {
+    const double rounded = std::round(std::abs(value));
+    if (rounded > static_cast<double>(std::numeric_limits<uint32_t>::max())) {
+      return std::unexpected(std::format("the {} limit {} does not fit 32 bits", what, rounded));
+    }
+    return static_cast<uint32_t>(rounded);
+  };
+  auto torque = whole(inputs.maxTorquePermil / 1000.0 * inputs.ratedTorqueMilliNm, "torque");
+  if (!torque) {
+    return std::unexpected(torque.error());
+  }
+  IntegralLimits limits{
+      .velocityController = *torque, .positionLoop = *torque, .positionVelocityLoop = *torque};
+  if (inputs.positionControlStrategy == 2.0) {
+    const double feed =
+        feedOff ? 1.0 : inputs.feedConstantFeed / inputs.feedConstantShaftRevolutions;
+    const double gear = inputs.gearMotorRevolutions / inputs.gearShaftRevolutions;
+    auto velocity = whole(inputs.maxMotorSpeed * feed / gear, "position loop");
+    if (!velocity) {
+      return std::unexpected(velocity.error());
+    }
+    limits.positionLoop = *velocity;
+  } else if (inputs.positionControlStrategy != 1.0) {
+    return std::unexpected(std::format(
+        "the position control strategy 0x2002 is {}, which is neither 1 (simple PID) nor 2 "
+        "(cascaded)",
+        inputs.positionControlStrategy));
+  }
+  return limits;
 }
 
 VelocityNoise velocityNoise(std::span<const HrdSystemIdentificationSample> samples) {

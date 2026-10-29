@@ -5670,7 +5670,9 @@ components:
             with a `reason`. For `controller-auto-tuning` the `drive-configuration` step holds the
             `DriveConfig` sent to the auto-tuning program, the `noise` step `noiseRpm` and a
             `warning`, the `compute` step a `ControllerTuningComputed`, and the `write` step a
-            `ControllerTuningWrite`.
+            `ControllerTuningWrite`. For `set-integral-limits` the `compute` step holds the inputs
+            it read, and the `write` step `limits`, each with `object`, `before` and `after`, and
+            `skipped`, the limit objects the drive does not have.
           example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
         error:
           type: string

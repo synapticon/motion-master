@@ -1753,4 +1753,32 @@ std::expected<void, std::string> runControllerTuningProcedure(
     Device& device, ProgressReporter& reporter, const std::stop_token& stop,
     const ControllerTuningRequest& request, const ControllerTuningFn& tune);
 
+// --- Integral limits -----------------------------------------------------------------------------
+
+/// @brief Procedure name for setting the integral limits, as it appears in its URL and its snapshot
+///        key.
+inline constexpr std::string_view kIntegralLimitsProcedure = "set-integral-limits";
+
+/// @brief The step that checks the firmware, reads the inputs and computes the limits.
+inline constexpr std::string_view kIntegralLimitsComputeStep = "compute";
+
+/// @brief The step that writes the limits.
+inline constexpr std::string_view kIntegralLimitsWriteStep = "write";
+
+/// @brief The integral limits step template, idle.
+std::vector<ProgressStep> integralLimitsSteps();
+
+/// @brief Sets the three integral limits of the controllers from the drive's own maxima.
+///
+/// 1. **compute** — refuses firmware older than 5.1.0, reads 0x6072, 0x6076, 0x6080, 0x6091,
+///    0x6092 and 0x2002, and computes @c integralLimits. Fails before anything is written when an
+///    input cannot be read or the computation refuses it.
+/// 2. **write** — writes 0x2011:04, 0x2012:04 and 0x2012:08, and reports each object's value
+///    before and after. A limit object the dictionary lacks is skipped and named.
+///
+/// Runs in any CiA402 state and changes none. Nothing moves the motor, and nothing is stored to
+/// flash. The drive reads the limits on its next control cycle.
+std::expected<void, std::string> runIntegralLimitsProcedure(Device& device,
+                                                            ProgressReporter& reporter);
+
 }  // namespace mm::node

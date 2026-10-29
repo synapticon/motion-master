@@ -23,7 +23,7 @@ std::vector<HrdEncoderSample> idealRecording(uint8_t masterPolePairs, double rev
     const double turn = revolutions * static_cast<double>(i) / static_cast<double>(count);
     auto counts = [turn](double periods) {
       const double fraction = (turn * periods) - std::floor(turn * periods);
-      return static_cast<uint16_t>(fraction * 16384.0) & 0x3FFF;
+      return static_cast<uint16_t>(static_cast<unsigned>(fraction * 16384.0) & 0x3FFFU);
     };
     samples[i].masterCount = counts(masterPolePairs);
     samples[i].noniusCount = counts(masterPolePairs - 1.0);

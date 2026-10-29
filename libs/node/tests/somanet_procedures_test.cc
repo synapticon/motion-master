@@ -3719,9 +3719,10 @@ TEST(RunIcMuCalibrationProcedure, RefusesLimitsTooNarrowForAFullTurn) {
   // 30 degrees between the limits: far less than a turn of the ring.
   Device device = makeCalibrationDevice(driver, 1, 19, [](IcMuFakeDriver& d) {
     const auto quarter = static_cast<uint32_t>(524288 / 24);
+    const auto lower = static_cast<uint32_t>(-static_cast<int32_t>(quarter));
     d.store[OsCommandFakeDriver::key(0x607D, 1)] = {
-        static_cast<uint8_t>(-quarter), static_cast<uint8_t>(-quarter >> 8),
-        static_cast<uint8_t>(-quarter >> 16), static_cast<uint8_t>(-quarter >> 24)};
+        static_cast<uint8_t>(lower), static_cast<uint8_t>(lower >> 8),
+        static_cast<uint8_t>(lower >> 16), static_cast<uint8_t>(lower >> 24)};
     d.store[OsCommandFakeDriver::key(0x607D, 2)] = {
         static_cast<uint8_t>(quarter), static_cast<uint8_t>(quarter >> 8),
         static_cast<uint8_t>(quarter >> 16), static_cast<uint8_t>(quarter >> 24)};

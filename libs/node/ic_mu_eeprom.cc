@@ -37,13 +37,13 @@ std::vector<IcMuI2cChunk> chunks(uint8_t first, uint8_t last, uint8_t size, bool
 }  // namespace
 
 std::string_view toString(IcMuI2cTarget target) {
-  const auto* found =
+  const auto found =
       std::ranges::find(kTargetNames, target, &std::pair<IcMuI2cTarget, std::string_view>::first);
   return found != kTargetNames.end() ? found->second : "unknown";
 }
 
 std::optional<IcMuI2cTarget> parseIcMuI2cTarget(std::string_view name) {
-  const auto* found =
+  const auto found =
       std::ranges::find(kTargetNames, name, &std::pair<IcMuI2cTarget, std::string_view>::second);
   if (found == kTargetNames.end()) {
     return std::nullopt;

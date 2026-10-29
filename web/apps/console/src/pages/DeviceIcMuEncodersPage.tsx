@@ -389,8 +389,9 @@ function EncoderStatusBits({
       </div>
       <p className="text-xs text-grey-600 mt-2 mb-2 max-w-3xl">
         What the drive latched at the last BiSS error or at start-up, read with an SDO upload, not a
-        live view of the chips. It is cleared when the encoder is configured again. Type a value to
-        decode one from a log.
+        live view of the chips. It keeps its value until the drive restarts, or until a change of
+        the encoder configuration object restarts the encoder. The iC-MU encoder configuration does
+        not clear it. Type a value to decode one from a log.
       </p>
       {read.isError && <p className="text-xs text-status-bad">{apiErrorMessage(read.error)}</p>}
       {decoded.isError && (

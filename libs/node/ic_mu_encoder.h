@@ -327,7 +327,7 @@ struct IcMuEncoderStatus {
   std::vector<IcPvlBatteryModeChoice> batteryModes;
 
   /// 0x2111:04 or 0x2113:04: what the drive latched at the last BiSS error or at start-up. 0 when
-  /// nothing was latched since the encoder was last configured.
+  /// nothing was latched since the drive started or the encoder service restarted.
   uint32_t encoderStatus = 0;
 };
 void to_json(nlohmann::json& j, const IcMuEncoderStatus& status);
@@ -336,7 +336,9 @@ void to_json(nlohmann::json& j, const IcMuEncoderStatus& status);
 ///
 /// The drive reads the chips after a BiSS error bit, and at start-up, and latches the bits it
 /// masks in: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits 8-15 and iC-MU STATUS0 in
-/// bits 16-23. The word keeps them until the encoder is configured again.
+/// bits 16-23. The drive sets the word to 0 only when a change of the encoder configuration object,
+/// 0x2110 or 0x2112, restarts the encoder service (somanet_software, biss_service.xc,
+/// set_sensor_config), and it starts at 0. The iC-MU encoder configuration does not clear it.
 struct IcMuStatusBit {
   uint8_t bit = 0;                 ///< The bit in the encoder status word.
   std::optional<IcHausChip> chip;  ///< Empty for bits 24-31, which no chip fills.

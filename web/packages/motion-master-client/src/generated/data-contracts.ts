@@ -1181,7 +1181,7 @@ export interface IcMuEncoderStatus {
     maxAccelerationKrpmPerSecond: number;
   }[];
   /**
-   * The encoder status word, 0x2111:04 for encoder 1 and 0x2113:04 for encoder 2, read with an SDO upload. It is a snapshot, not a live view of the chips. The drive writes it after a BiSS error bit and at start-up: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits 8-15 and iC-MU STATUS0 in bits 16-23, each with only the bits the drive watches. 0 means that nothing was latched since the encoder was last configured. The chips themselves are not read, because a read of STATUS1 clears the iC-MU errors.
+   * The encoder status word, 0x2111:04 for encoder 1 and 0x2113:04 for encoder 2, read with an SDO upload. It is a snapshot, not a live view of the chips. The drive writes it after a BiSS error bit and at start-up: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits 8-15 and iC-MU STATUS0 in bits 16-23, each with only the bits the drive watches. 0 means that nothing was latched since the drive started. The drive sets the word to 0 again only when a change of the encoder configuration object, 0x2110 or 0x2112, restarts the encoder; `ic-mu-encoder-configuration` does not clear it. The chips themselves are not read, because a read of STATUS1 clears the iC-MU errors.
    * @format int64
    * @example 4096
    */

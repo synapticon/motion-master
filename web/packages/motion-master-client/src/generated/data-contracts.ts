@@ -488,7 +488,7 @@ export interface ProgressStep {
   /** @example "succeeded" */
   status: "idle" | "running" | "succeeded" | "failed";
   /**
-   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`.
+   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`. For `ic-mu-key-registers` the `read-key-registers` step holds an array of `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and `entries`, the pairs written, as `IcMuRestoreFile` lists them. For `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null with a `reason`.
    * @example {"status":1,"data":[1,2,3,4,5,6]}
    */
   value?: any;
@@ -1181,13 +1181,56 @@ export interface IcMuEncoderStatus {
     maxAccelerationKrpmPerSecond: number;
   }[];
   /**
-   * The encoder status word, 0x2111:04 for encoder 1 and 0x2113:04 for encoder 2, read with an SDO upload. It is a snapshot, not a live view of the chips. The drive writes it after a BiSS error bit and at start-up: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits 8-15 and iC-MU STATUS0 in bits 16-23, each with only the bits the drive watches. 0 means that nothing was latched since the encoder was last configured. The chips themselves are not read, because a read of STATUS1 clears the iC-MU errors.
+   * The encoder status word, 0x2111:04 for encoder 1 and 0x2113:04 for encoder 2, read with an SDO upload. It is a snapshot, not a live view of the chips. The drive writes it after a BiSS error bit and at start-up: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits 8-15 and iC-MU STATUS0 in bits 16-23, each with only the bits the drive watches. 0 means that nothing was latched since the drive started. The drive sets the word to 0 again only when a change of the encoder configuration object, 0x2110 or 0x2112, restarts the encoder; `ic-mu-encoder-configuration` does not clear it. The chips themselves are not read, because a read of STATUS1 clears the iC-MU errors.
    * @format int64
    * @example 4096
    */
   encoderStatus: number;
   /** One entry for each set bit of encoderStatus, lowest bit first. */
   encoderStatusBits: IcMuStatusBit[];
+}
+
+/** One key register of an iC-MU, read from its RAM: the step value of `ic-mu-key-registers` is a list of 33 of them, in the order of the restore file. */
+export interface IcMuKeyRegister {
+  /** @example 82 */
+  ramAddress: number;
+  /**
+   * Where the EEPROM keeps the register. RAM 0x00-0x18 is EEPROM 0x00-0x18, and RAM 0x52-0x59 is EEPROM 0x19-0x20.
+   * @example 25
+   */
+  eepromAddress: number;
+  /** @example 47 */
+  value: number;
+  /** The iC-MU register at `ramAddress`, as `/api/meta/ic-haus-registers` lists it, or null for an address the register map does not list. */
+  register: IcHausRegister | null;
+}
+
+/** One byte of the EEPROM of an iC-MU encoder: the step value of `ic-mu-eeprom-export` is a list of 77 of them, 0x00-0x4C. 0x00-0x3F is the configuration of the iC-MU and 0x40-0x4C that of the iC-PVL. The `read-eeprom` step of `ic-mu-eeprom-erase` holds the same list, read back after the erase. */
+export interface IcMuEepromByte {
+  /** @example 64 */
+  address: number;
+  /** @example 40 */
+  value: number;
+}
+
+/** The step value of `ic-mu-i2c-register`. */
+export interface IcMuI2CTransfer {
+  /** @example "ic-pvl" */
+  target: "eeprom" | "ic-pvl" | "ic-pvl-status";
+  /**
+   * The I²C device id with the R/W bit, as written to I2C_DEVID (0x5E).
+   * @example 195
+   */
+  deviceId: number;
+  /** @example false */
+  write: boolean;
+  /** @example 16 */
+  registerAddress: number;
+  /**
+   * The byte read or written.
+   * @example 240
+   */
+  value: number;
 }
 
 /** One set bit of the encoder status word. A set bit that the drive masks out has no name, title, description or remedy. */
@@ -1401,25 +1444,30 @@ export interface ProcedureRequest {
   /** `os-command` only, and required when `fsBuffer` is `write`: the bytes to send, base64-encoded into this JSON string. Rejected for the other two directions rather than ignored, so a request that names one and forgets the other is told rather than running a command that moves nothing. (Deliberately not `format: byte`, for the reason spelled out on `packageContent`.) */
   fsBufferData?: string;
   /**
-   * `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits`, `ic-mu-encoder-configuration` and `ic-mu-calibration`: the encoder ordinal of the OS commands, which picks the drive's encoder to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder. Required for `ic-mu-encoder-configuration` and `ic-mu-calibration`, because a default would write the EEPROM of an encoder that nobody named.
+   * `encoder-register-communication`, `ic-mu-calibration-mode`, `ignore-biss-status-bits`, `ic-mu-encoder-configuration`, `ic-mu-calibration`, `ic-mu-key-registers`, `ic-mu-eeprom-export`, `ic-mu-i2c-register`, `ic-mu-restore-file` and `ic-mu-eeprom-erase`: the encoder ordinal of the OS commands, which picks the drive's encoder to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder. Required for every `ic-mu-` procedure that takes it, because a default would address an encoder that nobody named.
    * @default 1
    * @example 1
    */
   encoderOrdinal?: 1 | 2;
   /**
-   * `encoder-register-communication` only: false reads the register, true writes `value` into it. Either way the drive reports what the register holds afterwards.
+   * `encoder-register-communication` and `ic-mu-i2c-register`: false reads, true writes `value`. `encoder-register-communication` reports what the register holds afterwards; `ic-mu-i2c-register` reports the byte it wrote.
    * @default false
    */
   write?: boolean;
   /**
-   * `encoder-register-communication` only, and required for it: the register to access. The map belongs to the encoder chip rather than to the drive's firmware.
+   * `encoder-register-communication` and `ic-mu-i2c-register`, and required for both: the register to access. For `encoder-register-communication` the map belongs to the encoder chip rather than to the drive's firmware. For `ic-mu-i2c-register` it is an address on `target`: an EEPROM address, or an iC-PVL register.
    * @min 0
    * @max 255
    * @example 117
    */
   registerAddress?: number;
   /**
-   * `encoder-register-communication` only: the byte to write into the register. Ignored when reading.
+   * `ic-mu-i2c-register` only, and required for it: what the I²C transfer of the iC-MU addresses. `eeprom` is the EEPROM that holds the configuration of the iC-MU and the iC-PVL, `ic-pvl` every iC-PVL register, and `ic-pvl-status` only the status and command registers of the iC-PVL, where the command register is 0x01. The server picks the I²C device id from `target` and `write`.
+   * @example "eeprom"
+   */
+  target?: "eeprom" | "ic-pvl" | "ic-pvl-status";
+  /**
+   * `encoder-register-communication` and `ic-mu-i2c-register`: the byte to write. Ignored when reading. `ic-mu-i2c-register` requires it for a write.
    * @min 0
    * @max 255
    * @default 0
@@ -1455,6 +1503,11 @@ export interface ProcedureRequest {
     | "18-microamperes"
     | "36-microamperes"
     | "72-microamperes";
+  /**
+   * `ic-mu-encoder-configuration` only: writes the configured registers to the restore file of the sensor port, `circulo_integrated_encoder_<sensor port>_config.bin`. The drive writes that file back into the encoder when the iC-MU reports a corrupted EEPROM. False keeps the file there now. The drive keeps a restore file only for sensor ports 1 and 2.
+   * @default true
+   */
+  writeRestoreFile?: boolean;
   /**
    * `ic-mu-calibration` only: where the ring of an external encoder on sensor port 3 to 5 sits. Required there, and refused for port 1, which is always inner, and port 2, which is always outer. The calibration starts from the values measured for that position.
    * @example "inner"

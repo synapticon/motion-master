@@ -9,8 +9,10 @@ import {
   type ProgressStep,
 } from '@synapticon/motion-master-client'
 import Callout from '../components/Callout'
+import Checkbox from '../components/Checkbox'
 import DevicePageHeader from '../components/DevicePageHeader'
 import IcMuCalibrationSection from '../components/IcMuCalibrationSection'
+import IcMuEepromSection from '../components/IcMuEepromSection'
 import { useConnection } from '../contexts/ConnectionContext'
 import { isIcMuEncoder } from '../utils/icMuEncoder'
 import { btnOutline, btnPrimary } from '../utils/styles'
@@ -157,10 +159,14 @@ export default function DeviceIcMuEncodersPage() {
             roles={(['position', 'velocity', 'commutation'] as const).filter(
               role => encodersQuery.data?.[role] === encoder.encoderOrdinal,
             )}
-            onConfigure={batteryMode =>
+            onConfigure={(batteryMode, writeRestoreFile) =>
               start.mutate({
                 name: CONFIGURATION_PROCEDURE,
-                body: { encoderOrdinal: encoder.encoderOrdinal, ...(batteryMode ? { batteryMode } : {}) },
+                body: {
+                  encoderOrdinal: encoder.encoderOrdinal,
+                  writeRestoreFile,
+                  ...(batteryMode ? { batteryMode } : {}),
+                },
               })
             }
           />
@@ -190,10 +196,13 @@ function EncoderCard({
   calibrationAvailable: boolean
   /** The controllers that use this encoder, as GET /encoders names them. */
   roles: readonly ('position' | 'velocity' | 'commutation')[]
-  onConfigure: (batteryMode: string | null) => void
+  onConfigure: (batteryMode: string | null, writeRestoreFile: boolean) => void
 }) {
   const [batteryMode, setBatteryMode] = useState('default')
   const multiturn = status?.path === 'multiturn'
+  // The drive keeps a restore file only for sensor ports 1 and 2.
+  const restoreFilePort = encoder.sensorPort === 1 || encoder.sensorPort === 2
+  const [writeRestoreFile, setWriteRestoreFile] = useState(true)
 
   return (
     <section className="border border-grey-200 bg-white">
@@ -268,23 +277,37 @@ function EncoderCard({
             </select>
           </div>
         )}
+        {restoreFilePort && (
+          <label className="flex items-center gap-2 h-[38px] text-sm">
+            <Checkbox checked={writeRestoreFile} onChange={setWriteRestoreFile} />
+            Write the restore file
+          </label>
+        )}
         <button
           type="button"
           className={`${btnPrimary} h-[38px]`}
           disabled={busy || !status?.expectedOutputRegister}
-          onClick={() => onConfigure(multiturn && batteryMode !== 'default' ? batteryMode : null)}
+          onClick={() =>
+            onConfigure(
+              multiturn && batteryMode !== 'default' ? batteryMode : null,
+              restoreFilePort && writeRestoreFile,
+            )
+          }
         >
           Configure
         </button>
         <p className="text-xs text-grey-600 max-w-xl">
           Writes the EEPROM of the encoder. The calibration registers keep their values. The drive
           must not be in Operation Enabled, and the encoder reports no position while it is
-          configured. Read the status first.
+          configured. Read the status first. The restore file is what the drive writes back into
+          the encoder when the iC-MU reports a corrupted EEPROM. Leave it off to keep the file that
+          is there now.
         </p>
       </div>
       {calibrationAvailable && (
         <IcMuCalibrationSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
       )}
+      <IcMuEepromSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
     </section>
   )
 }
@@ -368,8 +391,9 @@ function EncoderStatusBits({
       </div>
       <p className="text-xs text-grey-600 mt-2 mb-2 max-w-3xl">
         What the drive latched at the last BiSS error or at start-up, read with an SDO upload, not a
-        live view of the chips. It is cleared when the encoder is configured again. Type a value to
-        decode one from a log.
+        live view of the chips. It keeps its value until the drive restarts, or until a change of
+        the encoder configuration object restarts the encoder. The iC-MU encoder configuration does
+        not clear it. Type a value to decode one from a log.
       </p>
       {read.isError && <p className="text-xs text-status-bad">{apiErrorMessage(read.error)}</p>}
       {decoded.isError && (

@@ -233,6 +233,9 @@ class Device {
   /// partially-operational bus route each device correctly.
   bool exchangesProcessData() const;
 
+  /// @brief The AL state of the device, from the driver's cached AL status.
+  mm::comm::EtherCatState alState() const;
+
   /// @brief Reads an object dictionary entry from the device (CoE SDO upload).
   ///
   /// Raw SDO read with no cache or PDO awareness — for the typed, PDO-aware path use

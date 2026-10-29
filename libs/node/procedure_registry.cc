@@ -1045,6 +1045,8 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "10). Runs OS command 2.";
   openLoopFieldControl.caveats = {
       "The motor moves. It needs a configured motor, but no encoder and no commutation offset.",
+      "The device must be in OP: the drive enters Operation Enabled only then, so the run is "
+      "refused in any other state before anything is written.",
       "Nothing checks the position during the move, and the software position limits do not stop "
       "it. Keep the axis free to turn by the angle.",
       "The drive takes whole electrical rad/s, so a slow move is rounded. The validate step says "

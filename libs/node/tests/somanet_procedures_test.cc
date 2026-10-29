@@ -302,7 +302,8 @@ class OsCommandFakeDriver : public FieldbusDriver {
     info.vendorId = vendorId;
     return info;
   }
-  uint16_t slaveState(uint16_t) const override { return kPreOp; }
+  uint16_t slaveState(uint16_t) const override { return alStatus; }
+  uint16_t alStatus = kPreOp;
   uint16_t mailboxProtocols(uint16_t) const override {
     return mm::comm::MailboxConfig::kProtocolCoe;
   }
@@ -4156,6 +4157,7 @@ TEST(RunIcMuEncoderConfigurationProcedure, FailsWhenWriteAllReportsAnI2cError) {
 Device makeOpenLoopDevice(OsCommandFakeDriver& driver, uint8_t polePairs) {
   driver.programDrive();
   driver.programObject(0x2003, 0x01, ObjectDataType::UNSIGNED8, {polePairs});  // pole pairs
+  driver.alStatus = static_cast<uint16_t>(mm::comm::EtherCatState::Op);
   Device device(1, driver);
   EXPECT_TRUE(device.initializeParameters().has_value());
   return device;
@@ -4278,6 +4280,22 @@ TEST(RunOpenLoopFieldControlProcedure, RefusesAMotorWithoutPolePairsBeforeAnythi
   EXPECT_EQ(
       std::ranges::count(driver.writeLog, std::pair<uint16_t, uint8_t>{Object::kControlword, 0}),
       0);
+}
+
+TEST(RunOpenLoopFieldControlProcedure, RefusesADeviceThatIsNotInOp) {
+  OsCommandFakeDriver driver;
+  Device device = makeOpenLoopDevice(driver, 5);
+  driver.alStatus = kPreOp;
+  ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
+
+  auto result = mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},
+                                                           openLoopRequest(90));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("only in OP"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.commands.empty());
+  EXPECT_EQ(std::ranges::count(driver.writeLog,
+                               std::pair<uint16_t, uint8_t>{Object::kModeOfOperation, 0}),
+            0);
 }
 
 TEST(ParseOpenLoopFieldControlRequest, NeedsAnAngleAndDefaultsTheRest) {

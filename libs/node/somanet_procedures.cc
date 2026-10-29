@@ -5383,6 +5383,14 @@ std::expected<void, std::string> runOpenLoopFieldControlProcedure(
 
   // ── validate ──
   reporter.start(kOpenLoopFieldValidateStep);
+  // The drive enters Operation Enabled only while EtherCAT is in OP (somanet_software,
+  // state_machine.xc, transition 4), so the run is refused before anything is written.
+  if (const auto al = device.alState(); al != mm::comm::EtherCatState::Op) {
+    return fail(
+        kOpenLoopFieldValidateStep,
+        std::format("the device is in {}, and the drive enters Operation Enabled only in OP",
+                    mm::comm::toString(al)));
+  }
   auto polePairs = device.readValue(somanet::objects::kMotorSpecificSettingsPolePairs);
   if (!polePairs) {
     return fail(kOpenLoopFieldValidateStep,

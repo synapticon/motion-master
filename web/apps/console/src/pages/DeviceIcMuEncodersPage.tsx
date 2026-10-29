@@ -12,6 +12,7 @@ import Callout from '../components/Callout'
 import Checkbox from '../components/Checkbox'
 import DevicePageHeader from '../components/DevicePageHeader'
 import IcMuCalibrationSection from '../components/IcMuCalibrationSection'
+import IcMuEepromSection from '../components/IcMuEepromSection'
 import { useConnection } from '../contexts/ConnectionContext'
 import { isIcMuEncoder } from '../utils/icMuEncoder'
 import { btnOutline, btnPrimary } from '../utils/styles'
@@ -306,6 +307,7 @@ function EncoderCard({
       {calibrationAvailable && (
         <IcMuCalibrationSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
       )}
+      <IcMuEepromSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
     </section>
   )
 }

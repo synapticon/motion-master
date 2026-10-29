@@ -341,10 +341,10 @@ IcMuEncoderStatus icMuEncoderStatus(const EncoderConfiguration& encoder, uint8_t
   status.multiturnBits = encoder.multiturnBits;
   status.hardRev = hardRev;
   status.outputRegister = outputRegister;
-  if (auto error = icMuPartError(encoder.sensorPort, hardRev)) {
-    status.reason = std::move(*error);
-  } else if (auto error = icMuSingleturnBitsError(encoder.singleturnBits)) {
-    status.reason = std::move(*error);
+  if (auto partError = icMuPartError(encoder.sensorPort, hardRev)) {
+    status.reason = std::move(*partError);
+  } else if (auto bitsError = icMuSingleturnBitsError(encoder.singleturnBits)) {
+    status.reason = std::move(*bitsError);
   } else {
     status.masterPolePairs = icMuMasterPolePairs(encoder.singleturnBits);
     status.expectedOutputRegister = icMuOutMsb(icMuPath(encoder.sensorPort, encoder.multiturnBits),

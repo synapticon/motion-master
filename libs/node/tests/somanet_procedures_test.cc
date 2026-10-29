@@ -3275,10 +3275,7 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
 mm::node::IcMuEncoderConfigurationRequest icMuRequest() {
   return {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1,
           .batteryMode = std::nullopt,
-          .waits = {.writeAll = kNoDelay,
-                    .icPvlEeprom = kNoDelay,
-                    .icPvlReboot = kNoDelay,
-                    .absReset = kNoDelay}};
+          .waits = {.icPvlEeprom = kNoDelay, .icPvlReboot = kNoDelay, .absReset = kNoDelay}};
 }
 
 // Whether every OS command sent so far is an encoder register read: nothing was written and no
@@ -3745,6 +3742,24 @@ TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnIcMuWithAnotherBankSelected)
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("BANKSEL"), std::string::npos) << result.error();
   EXPECT_TRUE(onlyRegisterReads(driver));
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, FailsWhenWriteAllReportsAnI2cError) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);
+  driver.icMu[0x77] = 0x40;  // STATUS1: EPR_ERR, the EEPROM did not answer
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("EPR_ERR"), std::string::npos) << result.error();
+  const auto steps = reporter.steps();
+  EXPECT_EQ(
+      std::ranges::find(steps, mm::node::kIcMuEepromWriteStep, &mm::node::ProgressStep::id)->status,
+      ProgressStatus::kFailed);
+  // The status bits come back even though the save failed.
+  EXPECT_EQ(driver.commandIds.back(), 14);
 }
 
 }  // namespace

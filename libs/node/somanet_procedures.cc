@@ -1401,6 +1401,93 @@ somanet::IcMuRegisterWrite icMuCommand(somanet::IcMuCommand command) {
   return {somanet::kIcMuCommandRegister, static_cast<uint8_t>(command)};
 }
 
+// Bits of iC-MU STATUS1 (register 0x77, iC-MU datasheet Rev B1, Table 97).
+constexpr uint8_t kIcMuStatus1Register = 0x77;
+constexpr uint8_t kIcMuCrcError = 0x80;
+constexpr uint8_t kIcMuEepromError = 0x40;
+constexpr uint8_t kIcMuCommandInProgress = 0x01;
+
+constexpr auto kIcMuCommandTimeout = std::chrono::seconds(5);
+constexpr auto kIcMuCommandPollInterval = std::chrono::milliseconds(20);
+
+// Runs one iC-MU command, waits until it is done, and returns STATUS1. CMD_MU keeps the command
+// code while the command is queued and turns 0 when it starts, and STATUS1 bit 0 is set while it
+// runs (iC-MU datasheet Rev B1, p. 61 and Table 97). So the wait is for both, in that order; bit 0
+// alone reads 0 for a command still queued. STATUS1 is read first, because with the accumulated
+// status configured it keeps a bit until it is read. EPR_ERR fails the command: it reports an I²C
+// transfer that failed, and the datasheet checks an EEPROM write with it.
+std::expected<uint8_t, std::string> runIcMuCommand(SomanetDrive& drive,
+                                                   somanet::EncoderOrdinal encoder,
+                                                   somanet::IcMuCommand command,
+                                                   const std::stop_token& stop) {
+  if (auto before = readIcMuRegister(drive, encoder, kIcMuStatus1Register, stop); !before) {
+    return std::unexpected(before.error());
+  }
+  if (auto r = writeIcMuRegister(drive, encoder, icMuCommand(command), stop); !r) {
+    return std::unexpected(r.error());
+  }
+  const auto code = static_cast<uint8_t>(command);
+  const auto deadline = std::chrono::steady_clock::now() + kIcMuCommandTimeout;
+  bool started = false;
+  uint8_t status1 = kIcMuCommandInProgress;
+  while (!started || (status1 & kIcMuCommandInProgress) != 0) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      return std::unexpected(
+          std::format("{}: the encoder did not finish command 0x{:02X} within 5 s",
+                      somanet::toString(encoder), code));
+    }
+    if (!sleepUnlessStopped(kIcMuCommandPollInterval, stop)) {
+      return std::unexpected("the configuration was cancelled");
+    }
+    if (!started) {
+      auto queued = readIcMuRegister(drive, encoder, somanet::kIcMuCommandRegister, stop);
+      if (!queued) {
+        return std::unexpected(queued.error());
+      }
+      started = *queued == 0;
+    }
+    if (started) {
+      auto value = readIcMuRegister(drive, encoder, kIcMuStatus1Register, stop);
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+      status1 = *value;
+    }
+  }
+  if ((status1 & kIcMuEepromError) != 0) {
+    return std::unexpected(std::format(
+        "{}: the encoder reports an I²C error (EPR_ERR) after command 0x{:02X}: STATUS1 = 0x{:02X}",
+        somanet::toString(encoder), code, status1));
+  }
+  return status1;
+}
+
+// Copies the RAM configuration into the EEPROM. A CRC_ERR after it means the RAM the copy came
+// from does not match its checksum.
+std::expected<uint8_t, std::string> saveIcMuEeprom(SomanetDrive& drive,
+                                                   somanet::EncoderOrdinal encoder,
+                                                   const std::stop_token& stop) {
+  return runIcMuCommand(drive, encoder, somanet::IcMuCommand::kWriteAll, stop)
+      .and_then([&](uint8_t status1) -> std::expected<uint8_t, std::string> {
+        if ((status1 & kIcMuCrcError) != 0) {
+          return std::unexpected(std::format(
+              "{}: the encoder reports a CRC error (CRC_ERR) after WRITE_ALL: STATUS1 = 0x{:02X}",
+              somanet::toString(encoder), status1));
+        }
+        return status1;
+      });
+}
+
+// Runs an I²C transfer: @p writes set it up and end with I2C_COM, which runs it.
+std::expected<void, std::string> runIcMuI2cTransfer(
+    SomanetDrive& drive, somanet::EncoderOrdinal encoder,
+    std::span<const somanet::IcMuRegisterWrite> writes, const std::stop_token& stop) {
+  return writeIcMuRegisters(drive, encoder, writes.first(writes.size() - 1), stop).and_then([&] {
+    return runIcMuCommand(drive, encoder, somanet::IcMuCommand::kI2cCom, stop)
+        .transform([](uint8_t) {});
+  });
+}
+
 // What the validate step decides before anything is written.
 struct IcMuPlan {
   EncoderConfiguration encoder;
@@ -1560,10 +1647,14 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
   auto command = [&](somanet::IcMuCommand c) {
     return writeIcMuRegister(*drive, encoder, icMuCommand(c), stop);
   };
+  auto transfer = [&](std::span<const somanet::IcMuRegisterWrite> writes) {
+    return runIcMuI2cTransfer(*drive, encoder, writes, stop);
+  };
+  auto save = [&]() { return saveIcMuEeprom(*drive, encoder, stop).transform([](uint8_t) {}); };
   auto read = [&](uint8_t address) { return readIcMuRegister(*drive, encoder, address, stop); };
   // SCLR clears the iC-PVL status, and ABS_RESET has the iC-MU read the revolution count again.
   auto clearAndReset = [&]() -> std::expected<void, std::string> {
-    if (auto r = write(somanet::icPvlCommand(somanet::IcPvlCommand::kSclr)); !r) {
+    if (auto r = transfer(somanet::icPvlCommand(somanet::IcPvlCommand::kSclr)); !r) {
       return r;
     }
     return command(somanet::IcMuCommand::kAbsReset);
@@ -1589,10 +1680,10 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     if (!rawPosition) {
       return std::unexpected(rawPosition.error());
     }
-    if (auto r =
-            write(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOn)).and_then([&] {
-              return write(somanet::icPvlRegisterRead(somanet::kIcPvlSyncRegister));
-            });
+    if (auto r = transfer(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOn))
+                     .and_then([&] {
+                       return transfer(somanet::icPvlRegisterRead(somanet::kIcPvlSyncRegister));
+                     });
         !r) {
       return std::unexpected(r.error());
     }
@@ -1602,14 +1693,13 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     }
     const uint8_t spoMt =
         somanet::icMuSpoMtRegister(*rawPosition, configuration.singleturnBits, *sync);
-    if (auto r =
-            write(std::array{somanet::IcMuRegisterWrite{somanet::kIcMuMpcRegister, spoMt}})
-                .and_then([&] {
-                  return write(somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOff));
-                })
-                .and_then([&] { return command(somanet::IcMuCommand::kWriteAll); })
-                .and_then([&] { return waitForEncoder(waits.writeAll, stop); })
-                .and_then(clearAndReset);
+    if (auto r = write(std::array{somanet::IcMuRegisterWrite{somanet::kIcMuMpcRegister, spoMt}})
+                     .and_then([&] {
+                       return transfer(
+                           somanet::icPvlRegisterWrite(0x05, somanet::kIcPvlPositionOutputOff));
+                     })
+                     .and_then(save)
+                     .and_then(clearAndReset);
         !r) {
       return std::unexpected(r.error());
     }
@@ -1617,8 +1707,8 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
         {"rawPosition", *rawPosition}, {"icPvlSync", *sync & 0x07}, {"mpcRegister", spoMt}};
   };
 
-  // Reads back what the EEPROM holds now. A ring the chip does not have shows in MPC, and an output
-  // word the drive does not expect shows in OUT_MSB.
+  // Reads back the RAM, which WRITE_ALL copied into the EEPROM without an error. A ring the chip
+  // does not have shows in MPC, and an output word the drive does not expect shows in OUT_MSB.
   auto verify = [&]() -> std::expected<somanet::IcMuEncoderStatus, std::string> {
     auto mpc = read(somanet::kIcMuMpcRegister);
     if (!mpc) {
@@ -1656,10 +1746,10 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
 
     if (multiturn) {
       reporter.start(kIcPvlRegistersStep);
-      auto pvl = write(somanet::icPvlEepromWrites(configuration))
+      auto pvl = transfer(somanet::icPvlEepromWrites(configuration))
                      .and_then([&] { return waitForEncoder(waits.icPvlEeprom, stop); })
                      .and_then([&] {
-                       return write(somanet::icPvlCommand(somanet::IcPvlCommand::kReboot));
+                       return transfer(somanet::icPvlCommand(somanet::IcPvlCommand::kReboot));
                      })
                      .and_then([&] { return waitForEncoder(waits.icPvlReboot, stop); });
       if (!pvl) {
@@ -1669,12 +1759,9 @@ std::expected<void, std::string> runIcMuEncoderConfigurationProcedure(
     }
 
     reporter.start(kIcMuEepromWriteStep);
-    auto eeprom =
-        command(somanet::IcMuCommand::kWriteAll)
-            .and_then([&] { return waitForEncoder(waits.writeAll, stop); })
-            .and_then([&]() -> std::expected<void, std::string> {
-              return multiturn ? clearAndReset() : command(somanet::IcMuCommand::kAbsReset);
-            });
+    auto eeprom = save().and_then([&]() -> std::expected<void, std::string> {
+      return multiturn ? clearAndReset() : command(somanet::IcMuCommand::kAbsReset);
+    });
     if (!eeprom) {
       return fail(kIcMuEepromWriteStep, eeprom.error());
     }
@@ -1849,12 +1936,6 @@ std::vector<ProgressStep> icMuCalibrationSteps() {
 #ifdef MM_HAVE_MU_3SL
 
 namespace {
-
-// Bits of iC-MU STATUS1 (register 0x77, iC-MU datasheet Rev B1, Table 97).
-constexpr uint8_t kIcMuStatus1Register = 0x77;
-constexpr uint8_t kIcMuCrcError = 0x80;
-constexpr uint8_t kIcMuEepromError = 0x40;
-constexpr uint8_t kIcMuCommandInProgress = 0x01;
 
 // Register 0x10 holds the multiturn interface. An inner encoder with multiturn bits has its cyclic
 // check, CHK_MT in bit 6, turned off during the calibration; the other fields keep their values.
@@ -2758,57 +2839,16 @@ std::expected<void, std::string> runIcMuCalibrationProcedure(
     }
     if (calibrated) {
       reporter.start(kIcMuSaveStep);
-      // With the accumulated status configured, STATUS1 keeps a bit until it is read, so a read
-      // before WRITE_ALL clears what an earlier event left behind.
-      auto stored = read(kIcMuStatus1Register).transform([](uint8_t) {});
-      if (stored && request.activateHealthMonitoring) {
-        stored = writeOne(0x0C, kIcMuHealthMonitoring);
+      std::expected<uint8_t, std::string> stored = 0;
+      if (request.activateHealthMonitoring) {
+        stored = writeOne(0x0C, kIcMuHealthMonitoring).transform([] { return uint8_t{0}; });
       }
-      stored = stored.and_then([&] {
-        return writeIcMuRegister(
-            *drive, encoder,
-            {somanet::kIcMuCommandRegister, static_cast<uint8_t>(somanet::IcMuCommand::kWriteAll)},
-            stop);
-      });
-      // CMD_MU keeps the command code while the command is queued and turns 0 when it starts, and
-      // STATUS1 bit 0 is set while it runs (iC-MU datasheet Rev B1, p. 61 and Table 97). So the
-      // wait is for both, in that order; bit 0 alone reads 0 for a command still queued.
-      uint8_t status1 = kIcMuCommandInProgress;
-      bool started = false;
-      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (stored && (!started || (status1 & kIcMuCommandInProgress) != 0)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (!started) {
-          auto command = read(somanet::kIcMuCommandRegister);
-          if (!command) {
-            stored = std::unexpected(command.error());
-          } else {
-            started = *command == 0;
-          }
-        }
-        if (stored && started) {
-          auto value = read(kIcMuStatus1Register);
-          if (!value) {
-            stored = std::unexpected(value.error());
-          } else {
-            status1 = *value;
-          }
-        }
-        if (stored && std::chrono::steady_clock::now() > deadline) {
-          stored = std::unexpected("the encoder did not finish WRITE_ALL within 5 s");
-        }
-      }
-      if (stored && (status1 & (kIcMuCrcError | kIcMuEepromError)) != 0) {
-        stored = std::unexpected(
-            std::format("the encoder reports an error after WRITE_ALL: STATUS1 = 0x{:02X}{}{}",
-                        status1, (status1 & kIcMuCrcError) != 0 ? ", CRC_ERR" : "",
-                        (status1 & kIcMuEepromError) != 0 ? ", EPR_ERR" : ""));
-      }
+      stored = stored.and_then([&](uint8_t) { return saveIcMuEeprom(*drive, encoder, stop); });
       if (!stored) {
         calibrated = fail(kIcMuSaveStep, stored.error());
       } else {
         saved = true;
-        reporter.succeed(kIcMuSaveStep, nlohmann::json{{"status1", status1}});
+        reporter.succeed(kIcMuSaveStep, nlohmann::json{{"status1", *stored}});
       }
     }
     if (calibrated) {

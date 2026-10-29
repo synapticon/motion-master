@@ -656,9 +656,11 @@ constexpr std::string_view describe(EncoderRegisterFault fault) {
 /// feature this code does not touch: a rolling OD array the drive fills every motion cycle with
 /// position, velocity and phase currents. Same name, different data, different transport.
 enum class HrdData : uint8_t {
-  /// The raw position word an iC-MU encoder reports. **Records zeros unless the encoder was first
-  /// put into raw mode** (@c IcMuCalibrationMode::kRaw, OS command 1) — the firmware streams
-  /// whatever the encoder is currently clocked for.
+  /// The two tracks of an iC-MU encoder: master in bits 0-13, nonius in bits 14-27. The firmware
+  /// builds each sample from the BiSS frames of one millisecond, so it is not a frame as the
+  /// encoder sent it, and it holds no status bits and no CRC. **Records zeros unless the encoder
+  /// was first put into raw mode** (@c IcMuCalibrationMode::kRaw, OS command 1) — the firmware
+  /// streams whatever the encoder is currently clocked for.
   kEncoderRawData = 0,
 
   /// The velocity and torque actual values. **Records the response to a system identification run**

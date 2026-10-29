@@ -19,7 +19,8 @@ constexpr uint8_t kI2cRamStart = 0x5C;
 constexpr uint8_t kI2cRamEnd = 0x5D;
 constexpr uint8_t kI2cDeviceId = 0x5E;
 
-// I²C device ids, the R/W bit included (iC-MU datasheet, Table 103; iC-PVL datasheet, Table 6).
+// I²C device ids, the R/W bit included: the EEPROM from iC-MU datasheet Table 103, the iC-PVL
+// from iC-PVL datasheet Table 6.
 constexpr uint8_t kWriteEeprom = 0xA0;
 constexpr uint8_t kWriteIcPvl = 0xC2;
 constexpr uint8_t kReadIcPvl = 0xC3;
@@ -152,7 +153,8 @@ std::vector<IcMuRegisterWrite> icMuRamWrites(const IcMuConfiguration& configurat
       {0x05, 0x88},
       {0x06, 0x00},
       {0x0B, icMuOutputPorts(configuration.safeMotion)},
-      // Masks the AN_MAX error.
+      // Keeps NON_CTR, the amplitude errors of both tracks, CRC_ERR and CMD_EXE out of the error
+      // bit (iC-MU datasheet Rev B1, Table 100).
       {0x0C, 0x6C},
       {0x0D, 0xC0},
       {0x0E, static_cast<uint8_t>(multiturn ? 0x44 : 0x04)},

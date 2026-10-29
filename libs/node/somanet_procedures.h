@@ -276,10 +276,10 @@ inline constexpr std::string_view kIcMuRestoreStatusBitsStep = "restore-status-b
 
 /// @brief How long the configuration waits for the chips. Not part of a request.
 ///
-/// The values are the ones the configuration is known to work with. The datasheets give no time
-/// for @c WRITE_ALL or for the iC-PVL reboot. A test sets them to zero.
+/// The values are the ones the configuration is known to work with. A command to the iC-MU is not
+/// in this list, because the configuration polls the chip until the command is done. A test sets
+/// them to zero.
 struct IcMuConfigurationWaits {
-  std::chrono::milliseconds writeAll{5000};     ///< After @c WRITE_ALL.
   std::chrono::milliseconds icPvlEeprom{1000};  ///< After the iC-PVL configuration is in EEPROM.
   std::chrono::milliseconds icPvlReboot{5000};  ///< After the iC-PVL reboot.
   std::chrono::milliseconds absReset{80};       ///< After @c ABS_RESET, before the position read.

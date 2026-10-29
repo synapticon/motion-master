@@ -3412,6 +3412,38 @@ paths:
                 $ref: "#/components/schemas/HardwareDescription"
         "400":
           description: The body is not a valid hardware description
+  /api/ic-mu-encoder-status:
+    get:
+      summary: Decode an iC-MU encoder status word
+      operationId: getIcMuEncoderStatus
+      description: >
+        Decodes an encoder status word, the value of 0x2111:04 or 0x2113:04, into the same bits the
+        `ic-mu-encoder-status` procedure reports. Bus-independent: it reads nothing from a drive,
+        so a value from a log can be decoded with no hardware present. A `GET` with a query, like
+        `/api/firmware-package-name`, because the input is one number.
+      parameters:
+        - name: encoderStatus
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The word, in decimal or in hexadecimal with a 0x prefix.
+          example: "0x1000"
+      responses:
+        "200":
+          description: The decoded word
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [encoderStatus, encoderStatusBits]
+                properties:
+                  encoderStatus: { type: integer, format: int64, example: 4096 }
+                  encoderStatusBits:
+                    type: array
+                    items: { $ref: "#/components/schemas/IcMuStatusBit" }
+        "400":
+          description: The query parameter is missing, or is not a number from 0 to 4294967295
   /api/ic-mu-restore-file/parse:
     post:
       summary: Parse an iC-MU restore file
@@ -6430,7 +6462,7 @@ components:
         object asks for.
       required: [encoderOrdinal, sensorPort, singleturnBits, multiturnBits, masterPolePairs, hardRev,
                  part, revision, outputRegister, expectedOutputRegister, state, reason, path,
-                 batteryModes]
+                 batteryModes, encoderStatus, encoderStatusBits]
       properties:
         encoderOrdinal: { type: integer, enum: [1, 2], example: 1 }
         sensorPort: { type: integer, description: "0x21x0:01. 3 to 5 is an external encoder.", example: 1 }
@@ -6480,6 +6512,55 @@ components:
               name: { type: string, example: 18-microamperes }
               maxCurrentMicroamps: { type: integer, example: 18 }
               maxAccelerationKrpmPerSecond: { type: number, example: 56 }
+        encoderStatus:
+          type: integer
+          format: int64
+          description: >
+            The encoder status word, 0x2111:04 for encoder 1 and 0x2113:04 for encoder 2, read with
+            an SDO upload. It is a snapshot, not a live view of the chips. The drive writes it after
+            a BiSS error bit and at start-up: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits
+            8-15 and iC-MU STATUS0 in bits 16-23, each with only the bits the drive watches. 0
+            means that nothing was latched since the encoder was last configured. The chips
+            themselves are not read, because a read of STATUS1 clears the iC-MU errors.
+          example: 4096
+        encoderStatusBits:
+          type: array
+          description: One entry for each set bit of encoderStatus, lowest bit first.
+          items: { $ref: "#/components/schemas/IcMuStatusBit" }
+    IcMuStatusBit:
+      type: object
+      description: >
+        One set bit of the encoder status word. A set bit that the drive masks out has no name,
+        title, description or remedy.
+      required: [bit, chip, register, registerBit, name, title, description, remedy]
+      properties:
+        bit: { type: integer, description: The bit in the encoder status word., example: 12 }
+        chip:
+          type: string
+          nullable: true
+          enum: [iC-MU, iC-PVL, null]
+          description: The chip the bit comes from, null for bits 24-31.
+          example: iC-PVL
+        register:
+          type: string
+          nullable: true
+          enum: [STATUS0, STATUS1, STATUS, null]
+          description: The status register of the chip, null for bits 24-31.
+          example: STATUS
+        registerBit: { type: integer, description: The bit in that register., example: 4 }
+        name: { type: string, nullable: true, description: The datasheet name., example: BAT_ERR }
+        title: { type: string, nullable: true, example: Battery error }
+        description:
+          type: string
+          nullable: true
+          example: >-
+            The battery voltage is too low (iC-PVL datasheet, Elec. Char. No. 404). The position is
+            not valid.
+        remedy:
+          type: string
+          nullable: true
+          description: What to do, null where there is nothing to do.
+          example: Change the battery, then reset the fault of the drive.
     IcMuCalibrationPlan:
       type: object
       description: What an iC-MU calibration decided before the motor moved.

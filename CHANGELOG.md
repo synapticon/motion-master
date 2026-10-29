@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **The errors an iC-MU encoder latched, by name.** `ic-mu-encoder-status` reads the encoder status word of each encoder, 0x2111:04 or 0x2113:04, with an SDO upload, and lists each set bit with its chip, register, datasheet name, a description and what to do. The word is what the drive latched at the last BiSS error or at start-up, and 0 means nothing was latched since the encoder was last configured. The chips are not read, because a read of STATUS1 clears the iC-MU errors. `GET /api/ic-mu-encoder-status?encoderStatus=0x1000` decodes a word with no drive, for example one from a log. The iC-MU Encoders page has an input for the word, a Read button that fills it from the drive, and the decoded bits under it. (#27)
+
 ## [6.0.0-alpha.115] - 2026-10-29
 
 ### Added

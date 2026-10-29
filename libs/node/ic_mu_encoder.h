@@ -325,8 +325,44 @@ struct IcMuEncoderStatus {
   /// The battery modes a configuration request can name besides the default. Empty on the
   /// singleturn path, and on a ring that offers no mode.
   std::vector<IcPvlBatteryModeChoice> batteryModes;
+
+  /// 0x2111:04 or 0x2113:04: what the drive latched at the last BiSS error or at start-up. 0 when
+  /// nothing was latched since the encoder was last configured.
+  uint32_t encoderStatus = 0;
 };
 void to_json(nlohmann::json& j, const IcMuEncoderStatus& status);
+
+/// @brief One bit of the encoder status word, 0x2111:04 or 0x2113:04.
+///
+/// The drive reads the chips after a BiSS error bit, and at start-up, and latches the bits it
+/// masks in: iC-MU STATUS1 in bits 0-7, the iC-PVL status in bits 8-15 and iC-MU STATUS0 in
+/// bits 16-23. The word keeps them until the encoder is configured again.
+struct IcMuStatusBit {
+  uint8_t bit = 0;                 ///< The bit in the encoder status word.
+  std::optional<IcHausChip> chip;  ///< Empty for bits 24-31, which no chip fills.
+  std::string_view registerName;   ///< The chip's status register; empty with no chip.
+  uint8_t registerBit = 0;         ///< The bit in that register.
+
+  /// The datasheet name, or empty for a bit the drive masks out.
+  std::string_view name;
+  std::string_view title;
+  std::string_view description;
+  std::string_view remedy;  ///< What to do, or empty where there is nothing to do.
+};
+void to_json(nlohmann::json& j, const IcMuStatusBit& bit);
+
+/// @brief The bits the drive latches into the encoder status word, with what each means and what
+///        to do.
+std::span<const IcMuStatusBit> icMuStatusBits();
+
+/// @brief One entry for each set bit of @p encoderStatus, lowest bit first.
+///
+/// A set bit that @c icMuStatusBits does not name is reported with no name, because the drive masks
+/// it out and a set one says something is wrong with the word, not with the encoder.
+std::vector<IcMuStatusBit> decodeIcMuEncoderStatus(uint32_t encoderStatus);
+
+/// @brief An encoder status word typed by a person: decimal, or hexadecimal with a @c 0x prefix.
+std::expected<uint32_t, std::string> parseIcMuEncoderStatus(std::string_view text);
 
 /// @brief Why the encoder on @p sensorPort with @p hardRev cannot be configured as an iC-MU, or
 ///        nothing when it can.

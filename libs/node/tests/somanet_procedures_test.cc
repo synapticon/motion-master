@@ -3732,6 +3732,33 @@ TEST(RunIcMuCalibrationProcedure, RefusesLimitsTooNarrowForAFullTurn) {
 
 #endif  // MM_HAVE_MU_3SL
 
+TEST(RunIcMuEncoderStatusProcedure, DecodesWhatTheDriveLatched) {
+  IcMuFakeDriver driver;
+  driver.programIcMuDrive("v5.6.11", 1, 20, 18);
+  driver.programObject(0x2111, 4, ObjectDataType::UNSIGNED32, {0x00, 0x10, 0x00, 0x00});  // BAT_ERR
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  ProgressReporter reporter(mm::node::icMuEncoderStatusSteps());
+
+  auto result = mm::node::runIcMuEncoderStatusProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  const auto& statuses = std::ranges::find(steps, mm::node::kIcMuEncoderStatusRegistersStep,
+                                           &mm::node::ProgressStep::id)
+                             ->value;
+  ASSERT_EQ(statuses.size(), 1u);
+  EXPECT_EQ(statuses[0]["encoderStatus"], 0x1000);
+  ASSERT_EQ(statuses[0]["encoderStatusBits"].size(), 1u);
+  EXPECT_EQ(statuses[0]["encoderStatusBits"][0]["name"], "BAT_ERR");
+  EXPECT_EQ(statuses[0]["encoderStatusBits"][0]["chip"], "iC-PVL");
+  // The status word is an SDO read: the chips are asked only for 0x74 and 0x11, never for STATUS1.
+  EXPECT_TRUE(onlyRegisterReads(driver));
+  for (const auto& command : driver.commands) {
+    EXPECT_NE(command[3], 0x77);
+  }
+}
+
 TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnIcMuWithAnotherBankSelected) {
   IcMuFakeDriver driver;
   Device device = makeIcMuDevice(driver, "v5.6.11", 2, 19, 0);

@@ -90,6 +90,7 @@ export default function DeviceIcMuEncodersPage() {
   const statuses = (stepValue(statusQuery.data, 'read-registers') ?? []) as IcMuEncoderStatus[]
   const encoders = (encodersQuery.data?.encoders ?? []).filter(isIcMuEncoder)
   const configured = stepValue(configurationQuery.data, 'verify') as IcMuEncoderStatus | undefined
+  const twoColumns = encoders.length > 1
 
   return (
     <div>
@@ -99,7 +100,10 @@ export default function DeviceIcMuEncodersPage() {
         description="Whether each iC-MU encoder of this drive holds the configuration its encoder object asks for, and a way to configure it."
       />
 
-      <div className="p-4 sm:px-8 sm:py-7 space-y-6 max-w-5xl">
+      {/* Two encoders sit side by side on a wide screen, so they can be compared. */}
+      <div
+        className={`p-4 sm:px-8 sm:py-7 space-y-6 max-w-5xl ${twoColumns ? '2xl:max-w-[1760px]' : ''}`}
+      >
         <Callout variant="info">
           The drive does not configure its iC-MU encoders. The configuration writes the registers of
           the encoder with OS command 0 and copies them into the EEPROM of the encoder. The values
@@ -143,6 +147,7 @@ export default function DeviceIcMuEncodersPage() {
           </Callout>
         )}
 
+        <div className={`grid gap-6 items-start ${twoColumns ? '2xl:grid-cols-2' : ''}`}>
         {encoders.map(encoder => (
           <EncoderCard
             key={encoder.encoderOrdinal}
@@ -171,6 +176,7 @@ export default function DeviceIcMuEncodersPage() {
             }
           />
         ))}
+        </div>
 
         {configurationQuery.data && configurationQuery.data.status !== 'idle' && (
           <ConfigurationRun snapshot={configurationQuery.data} />

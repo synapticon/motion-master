@@ -26,6 +26,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- **The iC-MU Encoders page shows two encoders side by side** on a window 1536 px wide or more, so they can be compared. A drive with one iC-MU encoder, and a narrower window, keep one column.
 - **The iC-MU encoder configuration can keep the restore file.** `ic-mu-encoder-configuration` takes `writeRestoreFile`, true by default. With false, the configuration leaves `circulo_integrated_encoder_<sensor port>_config.bin` as it is. The iC-MU Encoders page has a "Write the restore file" checkbox beside Configure for sensor ports 1 and 2.
 
 ## [6.0.0-alpha.115] - 2026-10-29

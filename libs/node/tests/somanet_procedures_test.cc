@@ -3425,23 +3425,51 @@ TEST(RunIcMuEncoderConfigurationProcedure, WritesTheMultiturnSequenceOfACirculo9
                   {0x5D, 0x60}, {0x60, value}, {0x75, 0x0A}};
   };
   Writes expected = {
-      {0x00, 0x00}, {0x05, 0x88},
-      {0x06, 0x00}, {0x0B, 0x02},
-      {0x0C, 0x6C}, {0x0D, 0xC0},
-      {0x0E, 0x44}, {0x0F, 0x06},
-      {0x10, 0x6F}, {0x11, 0x18},
-      {0x12, 0x00}, {0x13, 0xFF},
-      {0x14, 0x0F}, {0x15, 0x13},
-      {0x16, 0x10}, {0x17, 0x02},
-      {0x18, 0x00}, {0x5E, 0xA0},
-      {0x5C, 0x60}, {0x5B, 0x40},
-      {0x5D, 0x6C}, {0x60, 0x28},
-      {0x61, 0x09}, {0x62, 0x3F},
-      {0x63, 0x5D}, {0x64, 0x50},
-      {0x65, 0x30}, {0x66, somanet::icPvlCrc8(settings)},
-      {0x67, 0x00}, {0x68, 0x00},
-      {0x69, 0x00}, {0x6A, 0x00},
-      {0x6B, 0x00}, {0x6C, somanet::icPvlCrc8(reserved)},
+      {0x00, 0x00},
+      {0x05, 0x88},
+      {0x06, 0x00},
+      {0x0B, 0x02},
+      {0x0C, 0x6C},
+      {0x0D, 0xC0},
+      {0x0E, 0x44},
+      {0x0F, 0x06},
+      {0x10, 0x6F},
+      {0x11, 0x18},
+      {0x12, 0x00},
+      {0x13, 0xFF},
+      {0x14, 0x0F},
+      {0x15, 0x13},
+      {0x16, 0x10},
+      {0x17, 0x02},
+      {0x18, 0x00},
+      // The iC-PVL configuration in two page writes, 0x40-0x47 and 0x48-0x4C, then read back.
+      {0x5E, 0xA0},
+      {0x5C, 0x60},
+      {0x5B, 0x40},
+      {0x5D, 0x67},
+      {0x60, 0x28},
+      {0x61, 0x09},
+      {0x62, 0x3F},
+      {0x63, 0x5D},
+      {0x64, 0x50},
+      {0x65, 0x30},
+      {0x66, somanet::icPvlCrc8(settings)},
+      {0x67, 0x00},
+      {0x75, 0x0A},
+      {0x5E, 0xA0},
+      {0x5C, 0x60},
+      {0x5B, 0x48},
+      {0x5D, 0x64},
+      {0x60, 0x00},
+      {0x61, 0x00},
+      {0x62, 0x00},
+      {0x63, 0x00},
+      {0x64, somanet::icPvlCrc8(reserved)},
+      {0x75, 0x0A},
+      {0x5E, 0xA1},
+      {0x5C, 0x60},
+      {0x5B, 0x40},
+      {0x5D, 0x6C},
       {0x75, 0x0A},
   };
   auto append = [&expected](const Writes& more) {
@@ -4124,6 +4152,35 @@ TEST(ParseIcMuI2cRegisterRequest, NeedsATargetAnAddressAndForAWriteAValue) {
   EXPECT_FALSE(parseIcMuI2cRegisterRequest(
       {{"encoderOrdinal", 1}, {"target", "eeprom"}, {"registerAddress", 1}, {"write", true}}));
   EXPECT_FALSE(parseIcMuI2cRegisterRequest({{"target", "eeprom"}, {"registerAddress", 1}}));
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, FailsWhenTheIcPvlEepromDoesNotReadBack) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.stuckEepromAddress = 0x45;  // the iC-PVL register 0x05, which should hold 0x30
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("EEPROM 0x45 reads 0x00"), std::string::npos) << result.error();
+  EXPECT_EQ(stepOf(reporter.steps(), mm::node::kIcPvlRegistersStep).status,
+            ProgressStatus::kFailed);
+  EXPECT_EQ(driver.commandIds.back(), 14);
+}
+
+TEST(RunIcMuEncoderConfigurationProcedure, ClearsEprErrBeforeTheStatusBitsAreOnAgain) {
+  IcMuFakeDriver driver;
+  Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
+  driver.icPvlFitted = false;  // the multiturn path finds no iC-PVL
+  ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
+
+  auto result = mm::node::runIcMuEncoderConfigurationProcedure(device, reporter, std::stop_token{},
+                                                               icMuRequest());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("EPR_ERR"), std::string::npos) << result.error();
+  EXPECT_EQ(driver.icMu[0x77] & 0x40, 0);
+  EXPECT_EQ(driver.commandIds.back(), 14);
 }
 
 TEST(RunIcMuEncoderConfigurationProcedure, RefusesAnIcMuWithAnotherBankSelected) {

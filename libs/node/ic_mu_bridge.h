@@ -99,4 +99,15 @@ std::expected<void, std::string> writeIcMuI2c(SomanetDrive& drive, somanet::Enco
                                               std::span<const uint8_t> bytes,
                                               const std::stop_token& stop);
 
+/// @brief Clears EPR_ERR when a failed I²C transfer left it set.
+///
+/// EPR_ERR stays set until a transfer succeeds, and a read of STATUS1 does not clear it. With the
+/// BiSS status bits on again, the drive takes it for a BiSS error and faults. A one-byte read of
+/// the EEPROM clears it. Call it before the status bits go back on. It takes no stop token, because
+/// a cancelled run is one that needs it.
+///
+/// @return Void when EPR_ERR is clear or was cleared, otherwise why it was not.
+std::expected<void, std::string> clearIcMuI2cError(SomanetDrive& drive,
+                                                   somanet::EncoderOrdinal encoder);
+
 }  // namespace mm::node

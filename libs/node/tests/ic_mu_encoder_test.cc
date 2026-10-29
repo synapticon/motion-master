@@ -165,13 +165,11 @@ TEST(IcMuEncoderTest, MultiturnRamWritesOfASafeMotionCirculo9) {
   EXPECT_EQ(somanet::icMuRamWrites(configuration), expectedRamWrites(0x52, 0x44, 0x06, 0x6F, 0x18));
 }
 
-std::vector<IcMuRegisterWrite> expectedEepromWrites(uint8_t pcr, uint8_t battery, uint8_t crc) {
-  return {{0x5E, 0xA0}, {0x5C, 0x60},    {0x5B, 0x40}, {0x5D, 0x6C}, {0x60, 0x28}, {0x61, 0x09},
-          {0x62, pcr},  {0x63, battery}, {0x64, 0x50}, {0x65, 0x30}, {0x66, crc},  {0x67, 0x00},
-          {0x68, 0x00}, {0x69, 0x00},    {0x6A, 0x00}, {0x6B, 0x00}, {0x6C, 0xFF}, {0x75, 0x0A}};
+std::array<uint8_t, 13> expectedEepromBytes(uint8_t pcr, uint8_t battery, uint8_t crc) {
+  return {0x28, 0x09, pcr, battery, 0x50, 0x30, crc, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF};
 }
 
-TEST(IcMuEncoderTest, IcPvlEepromWritesCarryTheCrcOfEachRingAndShaft) {
+TEST(IcMuEncoderTest, IcPvlEepromBytesCarryTheCrcOfEachRingAndShaft) {
   struct Case {
     uint8_t singleturnBits;
     uint8_t pcr;
@@ -193,8 +191,8 @@ TEST(IcMuEncoderTest, IcPvlEepromWritesCarryTheCrcOfEachRingAndShaft) {
                                           .singleturnBits = c.singleturnBits,
                                           .multiturnBits = 18,
                                           .batteryMode = c.battery};
-    EXPECT_EQ(somanet::icPvlEepromWrites(configuration),
-              expectedEepromWrites(c.pcr, c.battery, c.crc));
+    EXPECT_EQ(somanet::icPvlEepromBytes(configuration),
+              expectedEepromBytes(c.pcr, c.battery, c.crc));
   }
 }
 

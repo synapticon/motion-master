@@ -203,4 +203,23 @@ std::expected<void, std::string> writeIcMuI2c(SomanetDrive& drive, somanet::Enco
   return runIcMuI2cTransfer(drive, encoder, writes, stop);
 }
 
+std::expected<void, std::string> clearIcMuI2cError(SomanetDrive& drive,
+                                                   somanet::EncoderOrdinal encoder) {
+  auto status1 = readIcMuRegister(drive, encoder, kIcMuStatus1Register, {});
+  if (!status1) {
+    return std::unexpected(status1.error());
+  }
+  if ((*status1 & kIcMuEepromError) == 0) {
+    return {};
+  }
+  return readIcMuI2c(drive, encoder, somanet::IcMuI2cTarget::kEeprom, 0x00, 1, {})
+      .transform([](const std::vector<uint8_t>&) {})
+      .transform_error([](const std::string& error) {
+        return std::format(
+            "EPR_ERR could not be cleared, so the drive may fault when the status bits are on "
+            "again: {}",
+            error);
+      });
+}
+
 }  // namespace mm::node

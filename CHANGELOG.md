@@ -31,6 +31,11 @@ the HTTP/WebSocket API may break between any two alphas.
 - **The iC-MU Encoders page shows two encoders side by side** on a window 1536 px wide or more, so they can be compared. A drive with one iC-MU encoder, and a narrower window, keep one column.
 - **The iC-MU encoder configuration can keep the restore file.** `ic-mu-encoder-configuration` takes `writeRestoreFile`, true by default. With false, the configuration leaves `circulo_integrated_encoder_<sensor port>_config.bin` as it is. The iC-MU Encoders page has a "Write the restore file" checkbox beside Configure for sensor ports 1 and 2.
 
+### Fixed
+
+- **The iC-MU encoder configuration writes the iC-PVL configuration in pages, and checks it.** The 13 bytes at EEPROM 0x40-0x4C went in one transfer, which crosses the 8-byte write page at 0x48 and would wrap on a 24C01 or 24C02 EEPROM. They now go in two page-aligned writes and are read back, and the configuration fails on a byte that differs. A failed iC-PVL transfer no longer leaves EPR_ERR set, which faulted the drive once the BiSS status bits were on again. (#157)
+- **The iC-MU calibration checks what it gets.** Each iteration reports the master periods MU_3SL calculated and the fewest samples it saw in one master period. A nonius table value above 15 is refused instead of cut. The calibration keeps at most one sample per millisecond of its recording, and refuses firmware v5.4.0-rc.2 and v5.4.0-rc.3, which record at another rate. (#157)
+
 ## [6.0.0-alpha.115] - 2026-10-29
 
 ### Added

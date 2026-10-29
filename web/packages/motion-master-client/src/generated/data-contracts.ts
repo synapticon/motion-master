@@ -1367,6 +1367,16 @@ export interface IcMuCalibrationIteration {
    * @example 8.9
    */
   recordedRevolutions: number;
+  /**
+   * The master periods MU_3SL calculated from the recording. Reported as the library gives it; nothing judges it.
+   * @example 32
+   */
+  calculatedMasterPeriods?: number;
+  /**
+   * The fewest samples MU_3SL saw in one master period of the recording. Reported as the library gives it; nothing judges it.
+   * @example 12.5
+   */
+  minimalSamplesPerMasterPeriod?: number;
   /** Present when the recording covered less than one turn of the ring. */
   warning?: string;
   /** The permissible nonius phase error. */
@@ -1392,6 +1402,16 @@ export interface IcMuCalibrationValidation {
   samples: number;
   /** @example 8.9 */
   recordedRevolutions: number;
+  /**
+   * As in IcMuCalibrationIteration.
+   * @example 32
+   */
+  calculatedMasterPeriods?: number;
+  /**
+   * As in IcMuCalibrationIteration.
+   * @example 12.5
+   */
+  minimalSamplesPerMasterPeriod?: number;
   warning?: string;
   phaseRangeLimit: number;
   /** A curve over the ring: at most 720 points of [ring angle in degrees, value]. The value is in the unit of phaseRangeLimit. */

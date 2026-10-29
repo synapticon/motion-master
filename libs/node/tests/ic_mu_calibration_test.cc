@@ -310,13 +310,21 @@ TEST(IcMuCalibrationTest, CoverageWarningNamesTheMissedAngle) {
   EXPECT_NE(warning->find("other 18 degrees"), std::string::npos) << *warning;
 }
 
-TEST(IcMuCalibrationTest, CalibrationSamplesCutThePaddingOfAOneKilohertzRecording) {
-  const std::vector<HrdEncoderSample> padded(8032);
-  EXPECT_EQ(somanet::icMuCalibrationSamples(padded, milliseconds(6000)).size(), 6000u);
-  const std::vector<HrdEncoderSample> fast(96000);
-  EXPECT_EQ(somanet::icMuCalibrationSamples(fast, milliseconds(6000)).size(), 96000u);
+TEST(IcMuCalibrationTest, CalibrationSamplesKeepAtMostOnePerMillisecond) {
+  const std::vector<HrdEncoderSample> exact(6000);
+  EXPECT_EQ(somanet::icMuCalibrationSamples(exact, milliseconds(6000)).size(), 6000u);
+  const std::vector<HrdEncoderSample> longer(10040);
+  EXPECT_EQ(somanet::icMuCalibrationSamples(longer, milliseconds(6000)).size(), 6000u);
   const std::vector<HrdEncoderSample> short_(5000);
   EXPECT_EQ(somanet::icMuCalibrationSamples(short_, milliseconds(6000)).size(), 5000u);
+}
+
+TEST(IcMuCalibrationTest, RefusesTheTwoPreReleasesThatRecordAtAnotherRate) {
+  EXPECT_TRUE(somanet::icMuRecordingFirmwareError("v5.4.0-rc.2"));
+  EXPECT_TRUE(somanet::icMuRecordingFirmwareError("5.4.0-rc.3+build.7"));
+  EXPECT_FALSE(somanet::icMuRecordingFirmwareError("v5.4.0-rc.1"));
+  EXPECT_FALSE(somanet::icMuRecordingFirmwareError("v5.4.0-rc.4"));
+  EXPECT_FALSE(somanet::icMuRecordingFirmwareError("v5.6.11"));
 }
 
 TEST(IcMuCalibrationTest, AnalogRegistersOfBothTracks) {

@@ -421,10 +421,22 @@ std::optional<std::string> icMuCoverageWarning(double recordedRevolutions) {
 std::span<const HrdEncoderSample> icMuCalibrationSamples(std::span<const HrdEncoderSample> samples,
                                                          std::chrono::milliseconds recording) {
   const auto expected = static_cast<size_t>(recording.count());
-  if (samples.size() > expected && samples.size() < 2 * expected) {
-    return samples.first(expected);
+  return samples.size() > expected ? samples.first(expected) : samples;
+}
+
+std::optional<std::string> icMuRecordingFirmwareError(std::string_view version) {
+  std::string_view bare = version;
+  if (bare.starts_with('v')) {
+    bare.remove_prefix(1);
   }
-  return samples;
+  bare = bare.substr(0, bare.find('+'));
+  if (bare != "5.4.0-rc.2" && bare != "5.4.0-rc.3") {
+    return std::nullopt;
+  }
+  return std::format(
+      "firmware {} records a number of samples per millisecond that depends on the control loop "
+      "period, so the calibration cannot read its recording; install another firmware",
+      version);
 }
 
 }  // namespace mm::node::somanet

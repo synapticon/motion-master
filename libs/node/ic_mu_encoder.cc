@@ -17,8 +17,6 @@ namespace mm::node::somanet {
 
 namespace {
 
-// The iC-PVL configuration lives at EEPROM 0x40-0x4C, after the iC-MU's own bank at 0x00-0x3F.
-constexpr uint8_t kIcPvlEepromStart = 0x40;
 constexpr uint8_t kIcPvlCommandRegister = 0x11;
 
 constexpr uint8_t kMotorShaftBatteryMode = 0x5D;
@@ -166,7 +164,7 @@ std::vector<IcMuRegisterWrite> icMuRamWrites(const IcMuConfiguration& configurat
   };
 }
 
-std::vector<IcMuRegisterWrite> icPvlEepromWrites(const IcMuConfiguration& configuration) {
+std::array<uint8_t, 13> icPvlEepromBytes(const IcMuConfiguration& configuration) {
   const std::array<uint8_t, 6> settings = {
       0x28,
       0x09,
@@ -178,19 +176,12 @@ std::vector<IcMuRegisterWrite> icPvlEepromWrites(const IcMuConfiguration& config
   const std::array<uint8_t, 5> reserved{};
 
   // iC-PVL registers 0x00-0x0C, in the order they land in the EEPROM.
-  std::vector<uint8_t> eeprom(settings.begin(), settings.end());
-  eeprom.push_back(icPvlCrc8(settings));
-  eeprom.insert(eeprom.end(), reserved.begin(), reserved.end());
-  eeprom.push_back(icPvlCrc8(reserved));
-
-  auto writes = icMuI2cTransferSetup(icMuI2cDeviceId(IcMuI2cTarget::kEeprom, true),
-                                     kIcPvlEepromStart, static_cast<uint8_t>(eeprom.size()));
-  std::ranges::transform(eeprom, std::back_inserter(writes),
-                         [address = kIcMuExchangeRegister](uint8_t value) mutable {
-                           return IcMuRegisterWrite{address++, value};
-                         });
-  writes.push_back(command(IcMuCommand::kI2cCom));
-  return writes;
+  std::array<uint8_t, 13> eeprom{};
+  std::ranges::copy(settings, eeprom.begin());
+  eeprom[6] = icPvlCrc8(settings);
+  std::ranges::copy(reserved, eeprom.begin() + 7);
+  eeprom[12] = icPvlCrc8(reserved);
+  return eeprom;
 }
 
 std::vector<IcMuRegisterWrite> icPvlRegisterWrite(uint8_t icPvlRegister, uint8_t value) {

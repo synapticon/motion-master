@@ -11,21 +11,11 @@
 #include <utility>
 #include <vector>
 
+#include "node/ic_mu_eeprom.h"
+
 namespace mm::node::somanet {
 
 namespace {
-
-// The exchange registers 0x60-0x6F hold one transfer; 0x5B-0x5E say where it goes.
-constexpr uint8_t kI2cDeviceStart = 0x5B;
-constexpr uint8_t kI2cRamStart = 0x5C;
-constexpr uint8_t kI2cRamEnd = 0x5D;
-constexpr uint8_t kI2cDeviceId = 0x5E;
-
-// I²C device ids, the R/W bit included: the EEPROM from iC-MU datasheet Table 103, the iC-PVL
-// from iC-PVL datasheet Table 6.
-constexpr uint8_t kWriteEeprom = 0xA0;
-constexpr uint8_t kWriteIcPvl = 0xC2;
-constexpr uint8_t kReadIcPvl = 0xC3;
 
 // The iC-PVL configuration lives at EEPROM 0x40-0x4C, after the iC-MU's own bank at 0x00-0x3F.
 constexpr uint8_t kIcPvlEepromStart = 0x40;
@@ -56,14 +46,6 @@ constexpr IcPvlBatteryMode kBatteryModes[] = {
      .maxCurrentMicroamps = 72,
      .maxAccelerationKrpmPerSecond = {895, 447}},
 };
-
-// The I²C transfer of one byte between the exchange register and @p deviceRegister of @p deviceId.
-std::vector<IcMuRegisterWrite> oneByteTransfer(uint8_t deviceId, uint8_t deviceRegister) {
-  return {{kI2cDeviceId, deviceId},
-          {kI2cRamStart, kIcMuExchangeRegister},
-          {kI2cDeviceStart, deviceRegister},
-          {kI2cRamEnd, kIcMuExchangeRegister}};
-}
 
 constexpr IcMuRegisterWrite command(IcMuCommand c) {
   return {kIcMuCommandRegister, static_cast<uint8_t>(c)};
@@ -201,11 +183,8 @@ std::vector<IcMuRegisterWrite> icPvlEepromWrites(const IcMuConfiguration& config
   eeprom.insert(eeprom.end(), reserved.begin(), reserved.end());
   eeprom.push_back(icPvlCrc8(reserved));
 
-  const auto lastExchangeRegister = static_cast<uint8_t>(kIcMuExchangeRegister + eeprom.size() - 1);
-  std::vector<IcMuRegisterWrite> writes = {{kI2cDeviceId, kWriteEeprom},
-                                           {kI2cRamStart, kIcMuExchangeRegister},
-                                           {kI2cDeviceStart, kIcPvlEepromStart},
-                                           {kI2cRamEnd, lastExchangeRegister}};
+  auto writes = icMuI2cTransferSetup(icMuI2cDeviceId(IcMuI2cTarget::kEeprom, true),
+                                     kIcPvlEepromStart, static_cast<uint8_t>(eeprom.size()));
   std::ranges::transform(eeprom, std::back_inserter(writes),
                          [address = kIcMuExchangeRegister](uint8_t value) mutable {
                            return IcMuRegisterWrite{address++, value};
@@ -215,7 +194,8 @@ std::vector<IcMuRegisterWrite> icPvlEepromWrites(const IcMuConfiguration& config
 }
 
 std::vector<IcMuRegisterWrite> icPvlRegisterWrite(uint8_t icPvlRegister, uint8_t value) {
-  auto writes = oneByteTransfer(kWriteIcPvl, icPvlRegister);
+  auto writes =
+      icMuI2cTransferSetup(icMuI2cDeviceId(IcMuI2cTarget::kIcPvl, true), icPvlRegister, 1);
   writes.push_back({kIcMuExchangeRegister, value});
   writes.push_back(command(IcMuCommand::kI2cCom));
   return writes;
@@ -226,7 +206,8 @@ std::vector<IcMuRegisterWrite> icPvlCommand(IcPvlCommand c) {
 }
 
 std::vector<IcMuRegisterWrite> icPvlRegisterRead(uint8_t icPvlRegister) {
-  auto writes = oneByteTransfer(kReadIcPvl, icPvlRegister);
+  auto writes =
+      icMuI2cTransferSetup(icMuI2cDeviceId(IcMuI2cTarget::kIcPvl, false), icPvlRegister, 1);
   writes.push_back(command(IcMuCommand::kI2cCom));
   return writes;
 }

@@ -16,6 +16,7 @@ add_executable(
   integro_variant_test.cc
   ic_haus_registers_test.cc
   ic_mu_calibration_test.cc
+  ic_mu_eeprom_test.cc
   ic_mu_encoder_test.cc
   kuebler_registers_test.cc
   monitoring_test.cc

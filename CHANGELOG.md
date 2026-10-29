@@ -19,6 +19,19 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.115] - 2026-10-29
+
+### Added
+
+- **Read and configure the iC-MU encoder of a Circulo.** `ic-mu-encoder-status` reads each iC-MU encoder: the part, the ring, the path (singleturn, or multiturn through an iC-PVL), whether the encoder holds the configuration the drive expects, and the battery modes of the multiturn path. `ic-mu-encoder-configuration` writes the iC-MU, and the iC-PVL on the multiturn path, from the singleturn and multiturn bits of the drive, never from the product. It stores the EEPROM, synchronises the multiturn, and writes the restore file the drive uses when the encoder reports a corrupted EEPROM. An encoder on sensor port 3, 4 or 5 is accepted when its register 0x74 names an iC-MU part. (#23)
+- **`POST /api/ic-mu-restore-file/parse`** decodes a `circulo_integrated_encoder_<sensor port>_config.bin`, and the Console's FoE page shows such a file decoded. (#23)
+- **Calibrate an iC-MU encoder.** `ic-mu-calibration` calibrates the master and nonius tracks and the nonius table of one iC-MU encoder with the iC-Haus MU_3SL library, on Linux x86_64 and Windows x64 only. Before the motor moves, it checks the drive and plans the motion: a recording at constant velocity of 6 s, or 10 s for a slow ring, and a full ring turn from the lower limit when the position limits are narrow. When nothing fits, it refuses and says by how many degrees to widen the limits. Each iteration reports the residuals of both tracks and the phase error curve. The validation reports both nonius phase margins with a band. A full run stores the EEPROM, warns on a position jump after `ABS_RESET`, and writes the restore file. On every way out, a failure and a cancel included, it puts the encoder and the drive back. The request takes `encoderOrdinal` and the optional `ringPosition`, `measurementOnly`, `activateHealthMonitoring` and `ringVelocity`. (#25)
+- **The Console has an iC-MU Encoders page.** It shows the status of each iC-MU encoder and the controllers that use it, runs the configuration, and has a Calibrate section with a plot of the nonius phase error against the permissible error. (#23, #25)
+
+### Changed
+
+- **An encoder is named by `encoderOrdinal` everywhere.** `GET /api/devices/{slavePosition}/encoders` and the requests of `encoder-register-communication`, `ic-mu-calibration-mode` and `ignore-biss-status-bits` take `encoderOrdinal` in place of `encoder`. (#23)
+
 ## [6.0.0-alpha.114] - 2026-10-26
 
 ### Added
@@ -977,7 +990,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.114...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.115...HEAD
+[6.0.0-alpha.115]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.114...v6.0.0-alpha.115
 [6.0.0-alpha.114]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.113...v6.0.0-alpha.114
 [6.0.0-alpha.113]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.112...v6.0.0-alpha.113
 [6.0.0-alpha.112]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.111...v6.0.0-alpha.112

@@ -34,6 +34,7 @@ add_library(
   process_data_ring.cc
   process_image.cc
   somanet_control.cc
+  controller_tuning.cc
   plant_identification.cc
   somanet_drive.cc
   somanet_procedures.cc)

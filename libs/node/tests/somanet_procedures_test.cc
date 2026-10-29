@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -15,12 +16,14 @@
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <numbers>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -4411,6 +4414,211 @@ TEST(ParseOpenLoopFieldControlRequest, NeedsAnAngleAndDefaultsTheRest) {
   EXPECT_FALSE(mm::node::parseOpenLoopFieldControlRequest({{"angle", 90}, {"fieldLength", 1.5}}));
   EXPECT_FALSE(mm::node::parseOpenLoopFieldControlRequest({{"angle", "90"}}));
   EXPECT_FALSE(mm::node::parseOpenLoopFieldControlRequest({{"angle", 90}, {"timeoutMs", 10}}));
+}
+
+// --- Controller auto-tuning ----------------------------------------------------------------------
+
+std::vector<uint8_t> littleEndian(float value) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof bits);
+  return {static_cast<uint8_t>(bits), static_cast<uint8_t>(bits >> 8),
+          static_cast<uint8_t>(bits >> 16), static_cast<uint8_t>(bits >> 24)};
+}
+
+float floatAt(const OsCommandFakeDriver& driver, uint16_t index, uint8_t subindex) {
+  const auto& bytes = driver.store.at(OsCommandFakeDriver::key(index, subindex));
+  uint32_t bits = static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8) |
+                  (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
+  float value = 0.0F;
+  std::memcpy(&value, &bits, sizeof value);
+  return value;
+}
+
+// A drive with the velocity controller's Kp and Ki and no Kd, as Jasper firmware has it, and a
+// plant model on it.
+Device makeTuningDevice(OsCommandFakeDriver& driver, bool withPlantModel = true,
+                        const std::function<void(OsCommandFakeDriver&)>& program = {}) {
+  driver.programDrive();
+  const std::string version = "v10.0.4";
+  driver.programObject(0x100A, 0, ObjectDataType::VISIBLE_STRING,
+                       std::vector<uint8_t>(version.begin(), version.end()));
+  driver.programObject(0x2011, 0x01, ObjectDataType::REAL32, littleEndian(1.0F));
+  driver.programObject(0x2011, 0x02, ObjectDataType::REAL32, littleEndian(2.0F));
+  driver.programObject(0x2002, 0x00, ObjectDataType::UNSIGNED16, {2, 0});
+  if (withPlantModel) {
+    mm::node::PlantModel model;
+    model.numerator = {1.0};
+    model.denominator = {0.001, 0.01};
+    const auto csv = mm::node::plantModelCsv(model);
+    driver.files[std::string(mm::node::kPlantModelFile)] =
+        std::vector<uint8_t>(csv.begin(), csv.end());
+  }
+  if (program) {
+    program(driver);
+  }
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters().has_value());
+  return device;
+}
+
+mm::node::ControllerTuningRequest tuningRequest(const nlohmann::json& body) {
+  auto request = mm::node::parseControllerTuningRequest(body);
+  EXPECT_TRUE(request.has_value()) << request.error();
+  return *request;
+}
+
+TEST(RunControllerTuningProcedure, WritesTheVelocityGainsAndSkipsAMissingKd) {
+  OsCommandFakeDriver driver;
+  Device device = makeTuningDevice(driver);
+  ProgressReporter reporter(mm::node::controllerTuningSteps());
+  std::optional<mm::node::ControllerTuningCall> received;
+  const mm::node::ControllerTuningFn tune = [&](const mm::node::ControllerTuningCall& call) {
+    received = call;
+    return std::expected<mm::node::ControllerTuningReply, std::string>(
+        mm::node::ControllerTuningReply{
+            .gains = {.position = {}, .velocity = {.kp = 0.06, .ki = 3.0, .kd = 0.0}},
+            .used = call.targets,
+            .state = nlohmann::json()});
+  };
+
+  auto result = mm::node::runControllerTuningProcedure(
+      device, reporter, std::stop_token{},
+      tuningRequest({{"controller", "velocity"}, {"full", false}, {"bandwidthMilliHz", 12000}}),
+      tune);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  for (const auto& step : reporter.steps()) {
+    EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
+  }
+  ASSERT_TRUE(received);
+  EXPECT_FALSE(received->driveConfiguration);  // a tuning to targets reads no configuration
+  EXPECT_DOUBLE_EQ(received->targets.bandwidthHz, 12.0);
+  EXPECT_EQ(received->denominator, (std::vector<double>{0.001, 0.01}));
+
+  const double scale = 2000.0 * std::numbers::pi / 60.0;
+  EXPECT_FLOAT_EQ(floatAt(driver, 0x2011, 0x01), static_cast<float>(0.06 * scale));
+  EXPECT_FLOAT_EQ(floatAt(driver, 0x2011, 0x02), static_cast<float>(3.0 * scale));
+  EXPECT_FALSE(driver.store.contains(OsCommandFakeDriver::key(0x2011, 0x03)));
+  // Nothing but the two gains is written: no state change, no store.
+  EXPECT_EQ(driver.writeLog,
+            (std::vector<std::pair<uint16_t, uint8_t>>{{0x2011, 0x01}, {0x2011, 0x02}}));
+
+  const auto written = stepById(reporter.steps(), "write")->value;
+  ASSERT_EQ(written.at("gains").size(), 2u);
+  EXPECT_EQ(written.at("gains")[0].at("object"), "0x2011:01");
+  EXPECT_DOUBLE_EQ(written.at("gains")[0].at("before").get<double>(), 1.0);
+  EXPECT_EQ(written.at("skipped"), nlohmann::json::array({"0x2011:03"}));
+}
+
+TEST(RunControllerTuningProcedure, RefusesADriveWithoutAPlantModel) {
+  OsCommandFakeDriver driver;
+  Device device = makeTuningDevice(driver, false);
+  ProgressReporter reporter(mm::node::controllerTuningSteps());
+  bool called = false;
+  const mm::node::ControllerTuningFn tune = [&](const mm::node::ControllerTuningCall&) {
+    called = true;
+    return std::expected<mm::node::ControllerTuningReply, std::string>(std::unexpected("unused"));
+  };
+
+  auto result = mm::node::runControllerTuningProcedure(
+      device, reporter, std::stop_token{}, tuningRequest({{"controller", "velocity"}}), tune);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("plant identification"), std::string::npos) << result.error();
+  EXPECT_FALSE(called);
+  EXPECT_TRUE(driver.writeLog.empty());
+}
+
+TEST(RunControllerTuningProcedure, RefusesAPositionTuningOfTheSimplePidController) {
+  OsCommandFakeDriver driver;
+  Device device = makeTuningDevice(driver);
+  driver.store[OsCommandFakeDriver::key(0x2002, 0)] = {1, 0};
+  ProgressReporter reporter(mm::node::controllerTuningSteps());
+
+  auto result = mm::node::runControllerTuningProcedure(
+      device, reporter, std::stop_token{}, tuningRequest({{"controller", "position"}}), {});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("0x2002 = 1"), std::string::npos) << result.error();
+  EXPECT_TRUE(driver.writeLog.empty());
+}
+
+TEST(RunControllerTuningProcedure, AFullTuningGoesOnWithANoiseOf0WhenTheRecordingFails) {
+  OsCommandFakeDriver driver;
+  Device device = makeTuningDevice(driver, true, [](OsCommandFakeDriver& fake) {
+    for (const auto& [index, subindex, type, bytes] :
+         std::vector<std::tuple<uint16_t, uint8_t, ObjectDataType, std::vector<uint8_t>>>{
+             {0x6076, 0, ObjectDataType::UNSIGNED32, {0xD0, 0x07, 0, 0}},  // 2000 mNm
+             {0x2021, 1, ObjectDataType::UNSIGNED8, {1}},
+             {0x2021, 2, ObjectDataType::UNSIGNED32, {0x2C, 0x01, 0, 0}},
+             {0x2022, 1, ObjectDataType::UNSIGNED8, {1}},
+             {0x2022, 2, ObjectDataType::UNSIGNED32, {0x2C, 0x01, 0, 0}},
+             {0x2023, 1, ObjectDataType::UNSIGNED8, {0}},
+             {0x2023, 2, ObjectDataType::UNSIGNED16, {0xE8, 0x03}},
+             {0x2023, 3, ObjectDataType::UNSIGNED16, {0x0A, 0x00}},
+             {0x2015, 1, ObjectDataType::INTEGER16, {0, 0}},
+             {0x2015, 2, ObjectDataType::UNSIGNED16, {0xE8, 0x03}},
+             {0x2010, 0x0A, ObjectDataType::UNSIGNED16, {0xE8, 0x03}},
+             {0x2010, 0x0B, ObjectDataType::UNSIGNED16, {0xD0, 0x07}},
+         }) {
+      fake.programObject(index, subindex, type, bytes);
+    }
+  });
+  ProgressReporter reporter(mm::node::controllerTuningSteps());
+  std::optional<mm::node::ControllerTuningCall> received;
+  const mm::node::ControllerTuningFn tune = [&](const mm::node::ControllerTuningCall& call) {
+    received = call;
+    return std::expected<mm::node::ControllerTuningReply, std::string>(
+        mm::node::ControllerTuningReply{.gains = {}, .used = {}, .state = nlohmann::json()});
+  };
+
+  auto result = mm::node::runControllerTuningProcedure(
+      device, reporter, std::stop_token{}, tuningRequest({{"controller", "velocity"}}), tune);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  ASSERT_TRUE(received && received->driveConfiguration);
+  const auto& configuration = *received->driveConfiguration;
+  EXPECT_EQ(configuration.ratedTorqueMilliNm, 2000u);
+  EXPECT_EQ(configuration.velocityFilterCutoffHz, 300u);
+  EXPECT_EQ(configuration.torqueDampingRatioPermil, 2000);
+  EXPECT_EQ(configuration.firmwareVersion, "v10.0.4");
+  EXPECT_FALSE(configuration.notchDepthDb);  // the dictionary has no 0x2023:04
+  EXPECT_DOUBLE_EQ(configuration.velocityNoiseRpm, 0.0);
+  const auto noise = stepById(reporter.steps(), "noise")->value;
+  EXPECT_TRUE(noise.at("warning").is_string()) << noise.dump();
+  EXPECT_TRUE(stepById(reporter.steps(), "write")->value.at("warning").is_string());
+}
+
+TEST(ParseControllerTuningRequest, NeedsAControllerAndDefaultsTheRest) {
+  EXPECT_FALSE(mm::node::parseControllerTuningRequest(nlohmann::json::object()));
+  EXPECT_FALSE(mm::node::parseControllerTuningRequest({{"controller", "torque"}}));
+  auto request = mm::node::parseControllerTuningRequest({{"controller", "position"}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->controller, mm::node::TunedController::kPosition);
+  EXPECT_EQ(request->controllerType, mm::node::CascadedControllerType::kPiP);
+  EXPECT_TRUE(request->full);
+  EXPECT_DOUBLE_EQ(request->targets.dampingRatio, 1.0);
+  EXPECT_DOUBLE_EQ(request->targets.settlingTimeS, 0.2);
+  EXPECT_DOUBLE_EQ(request->targets.bandwidthHz, 5.0);
+}
+
+TEST(ParseControllerTuningRequest, RefusesTargetsOutsideWhatTheProgramUses) {
+  using mm::node::parseControllerTuningRequest;
+  EXPECT_FALSE(
+      parseControllerTuningRequest({{"controller", "position"}, {"dampingRatioPermil", 399}}));
+  EXPECT_FALSE(
+      parseControllerTuningRequest({{"controller", "position"}, {"settlingTimeMs", 1001}}));
+  EXPECT_FALSE(
+      parseControllerTuningRequest({{"controller", "velocity"}, {"bandwidthMilliHz", 100}}));
+  EXPECT_FALSE(
+      parseControllerTuningRequest({{"controller", "position"}, {"controllerType", "PID"}}));
+  EXPECT_FALSE(parseControllerTuningRequest({{"controller", "position"}, {"full", "no"}}));
+  auto request = parseControllerTuningRequest({{"controller", "position"},
+                                               {"controllerType", "P-PI"},
+                                               {"full", false},
+                                               {"dampingRatioPermil", 700},
+                                               {"settlingTimeMs", 50}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->controllerType, mm::node::CascadedControllerType::kPPi);
+  EXPECT_FALSE(request->full);
+  EXPECT_DOUBLE_EQ(request->targets.dampingRatio, 0.7);
+  EXPECT_DOUBLE_EQ(request->targets.settlingTimeS, 0.05);
 }
 
 }  // namespace

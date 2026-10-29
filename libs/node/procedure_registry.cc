@@ -1135,6 +1135,51 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor controllerTuning;
+  controllerTuning.name = std::string(kControllerTuningProcedure);
+  controllerTuning.title = "Controller auto-tuning";
+  controllerTuning.description =
+      "Computes the gains of the position or the velocity controller from the plant model in "
+      "plant_model.csv, and writes them to the drive. A full tuning reads the drive "
+      "configuration, measures the velocity noise of the motor at rest for 500 ms, and lets the "
+      "auto-tuning program choose the damping ratio and the settling time or the bandwidth. "
+      "Otherwise the gains are computed for the damping ratio and the settling time or the "
+      "bandwidth given. A position tuning writes 0x2012:01 to :03 and 0x2012:05 to :07, a "
+      "velocity tuning 0x2011:01 to :03, with Kd 0. The result gives each gain object's value "
+      "before and after, and the damping ratio and the settling time or the bandwidth used.";
+  controllerTuning.caveats = {
+      "Needs a plant model. Run plant identification first.",
+      "The drive uses the new gains on its next control cycle, in whatever state it is in. A "
+      "controller that is running when the gains change can respond with a jump.",
+      "A full tuning measures the noise with the motor at rest. If the motor moves, or the "
+      "recording fails, the gains are computed with a noise of 0 and the result says so.",
+      "A Kd object the drive does not have is skipped and named in the result.",
+      "The gains are not stored to flash. Run store-parameters to keep them after a restart. The "
+      "integral limits do not change.",
+      "Needs the auto-tuning program. Without it the run fails at the compute step, and GET "
+      "/api/auto-tuning says why.",
+  };
+  controllerTuning.parameters = controllerTuningParameters();
+  controllerTuning.movesMotor = false;
+  controllerTuning.requiresEnabled = false;
+  controllerTuning.steps = controllerTuningSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(controllerTuning),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [tune = config.tuneController](
+                      const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseControllerTuningRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return [request = *request, tune](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                          std::stop_token stop) {
+          return runControllerTuningProcedure(ctx.device, reporter, stop, request, tune);
+        };
+      },
+  });
+
   ProcedureDescriptor polePair;
   polePair.name = std::string(kPolePairDetectionProcedure);
   polePair.title = "Pole pair detection";

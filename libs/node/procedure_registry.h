@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include "node/controller_tuning.h"
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/plant_identification.h"
@@ -74,6 +75,9 @@ struct ProcedureRegistryConfig {
   /// Fits a plant model to a chirp measurement. Plant identification calls it. When no auto-tuning
   /// program runs, the composition root installs a function that says so.
   PlantModelFitFn fitPlantModel;
+  /// Computes controller gains from a plant model. Controller auto-tuning calls it. When no
+  /// auto-tuning program runs, the composition root installs a function that says so.
+  ControllerTuningFn tuneController;
 };
 
 /// @brief Every procedure the server knows, and the four operations a client performs against it.

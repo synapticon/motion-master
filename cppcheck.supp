@@ -44,6 +44,8 @@ syntaxError:*/procedure_manager_test.cc
 syntaxError:*/procedure_registry_test.cc
 syntaxError:*/plant_model_fit_test.cc
 syntaxError:*/plant_identification_test.cc
+syntaxError:*/controller_tuning_test.cc
+syntaxError:*/controller_tuning_call_test.cc
 syntaxError:*/ring_log_sink_test.cc
 syntaxError:*/monitoring_api_test.cc
 syntaxError:*/process_image_test.cc

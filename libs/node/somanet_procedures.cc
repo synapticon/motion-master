@@ -5546,4 +5546,452 @@ std::expected<void, std::string> runOpenLoopFieldControlProcedure(
   return {};
 }
 
+// --- Controller auto-tuning ----------------------------------------------------------------------
+
+namespace {
+
+constexpr int64_t kMinDampingRatioPermil = 400;
+constexpr int64_t kMaxDampingRatioPermil = 2000;
+constexpr int64_t kMinSettlingTimeMs = 20;
+constexpr int64_t kMaxSettlingTimeMs = 1000;
+constexpr int64_t kMinBandwidthMilliHz = 200;
+constexpr int64_t kMaxBandwidthMilliHz = 100000;
+constexpr int64_t kDefaultDampingRatioPermil = 1000;
+constexpr int64_t kDefaultSettlingTimeMs = 200;
+constexpr int64_t kDefaultBandwidthMilliHz = 5000;
+
+// A whole-number field between @p min and @p max, or @p fallback when it is absent.
+std::expected<int64_t, std::string> readBoundedInteger(const nlohmann::json& body,
+                                                       const char* field, int64_t fallback,
+                                                       int64_t min, int64_t max) {
+  auto it = body.find(field);
+  if (it == body.end() || it->is_null()) {
+    return fallback;
+  }
+  if (!it->is_number_integer()) {
+    return std::unexpected(std::format("'{}' must be a whole number", field));
+  }
+  const auto value = it->get<int64_t>();
+  if (value < min || value > max) {
+    return std::unexpected(std::format("'{}' must be between {} and {}", field, min, max));
+  }
+  return value;
+}
+
+nlohmann::json addressJson(ObjectAddress<float> address) {
+  return std::format("0x{:04X}:{:02X}", address.index, address.subindex);
+}
+
+// Reads a numeric object whatever type the drive declares it with.
+template <typename T>
+std::expected<double, std::string> readNumeric(Device& device, ObjectAddress<T> address) {
+  auto value = device.readParameter(address.index, address.subindex);
+  if (!value) {
+    return std::unexpected(value.error());
+  }
+  auto number = numericValue(*value);
+  if (!number) {
+    return std::unexpected(
+        std::format("0x{:04X}:{:02X} is not a number", address.index, address.subindex));
+  }
+  return *number;
+}
+
+// Reads numeric objects into fields, and keeps the first failure, so a list of reads needs one
+// check at its end.
+class NumericReader {
+ public:
+  explicit NumericReader(Device& device) : device_(device) {}
+
+  template <typename T, typename F>
+  void read(ObjectAddress<T> address, F& field) {
+    if (failure_) {
+      return;
+    }
+    auto value = readNumeric(device_, address);
+    if (!value) {
+      failure_ = value.error();
+      return;
+    }
+    field = static_cast<F>(*value);
+  }
+
+  const std::optional<std::string>& failure() const { return failure_; }
+
+ private:
+  Device& device_;
+  std::optional<std::string> failure_;
+};
+
+// The drive configuration of a full tuning, without the noise.
+std::expected<TuningDriveConfiguration, std::string> readTuningDriveConfiguration(
+    Device& device, std::string firmwareVersion, uint32_t ratedTorqueMilliNm) {
+  namespace objects = somanet::objects;
+  TuningDriveConfiguration configuration;
+  configuration.firmwareVersion = std::move(firmwareVersion);
+  configuration.ratedTorqueMilliNm = ratedTorqueMilliNm;
+  NumericReader reader(device);
+  reader.read(objects::kVelocityFeedbackFilterType, configuration.velocityFilterType);
+  reader.read(objects::kVelocityFeedbackFilterCutoffFrequency,
+              configuration.velocityFilterCutoffHz);
+  reader.read(objects::kPositionFeedbackFilterType, configuration.positionFilterType);
+  reader.read(objects::kPositionFeedbackFilterCutoffFrequency,
+              configuration.positionFilterCutoffHz);
+  reader.read(objects::kNotchFilterEnabled, configuration.notchEnabled);
+  reader.read(objects::kNotchFilterCenterFrequency, configuration.notchCenterHz);
+  reader.read(objects::kNotchFilterRejectionBand, configuration.notchWidthHz);
+  reader.read(objects::kVelocityFeedForwardGain, configuration.velocityFeedForwardPermil);
+  reader.read(objects::kVelocityFeedForwardCutoffFrequency,
+              configuration.velocityFeedForwardCutoffHz);
+  reader.read(objects::kTorqueControllerSettlingTime, configuration.torqueSettlingTimeUs);
+  reader.read(objects::kTorqueControllerDampingRatio, configuration.torqueDampingRatioPermil);
+  if (device.parameter(objects::kNotchFilterDepth.index, objects::kNotchFilterDepth.subindex)) {
+    uint16_t depth = 0;
+    reader.read(objects::kNotchFilterDepth, depth);
+    configuration.notchDepthDb = depth;
+  }
+  if (reader.failure()) {
+    return std::unexpected(*reader.failure());
+  }
+  return configuration;
+}
+
+// The noise of a full tuning. Never fails: a recording that does not complete gives a noise of 0
+// and a warning, because the program can still tune without it.
+VelocityNoise measureVelocityNoise(SomanetDrive& drive, const std::stop_token& stop) {
+  const auto skipped = [](std::string_view why) {
+    return VelocityNoise{
+        .noiseRpm = 0.0,
+        .warning = std::format("the noise was not measured, so the gains are computed with a "
+                               "noise of 0: {}",
+                               why)};
+  };
+  // A chirp still armed to start with the recording would excite the motor during it.
+  if (auto r = drive.setSystemIdentificationParameter(
+          somanet::SystemIdentificationParameter::kStartProcedure,
+          static_cast<uint32_t>(somanet::SystemIdentificationStart::kNone),
+          {.timeout = kEncoderRegisterTimeout,
+           .pollInterval = kEncoderRegisterPollInterval,
+           .stop = stop});
+      !r) {
+    return skipped(std::format("could not disarm the chirp: {}", r.error()));
+  }
+  if (auto r = drive.configureHrdStream(
+          somanet::HrdData::kSystemIdentificationData, kControllerTuningNoiseDuration,
+          {.timeout = kHrdConfigureTimeout, .pollInterval = kHrdPollInterval, .stop = stop});
+      !r) {
+    return skipped(std::format("could not configure the recording: {}", r.error()));
+  }
+  if (auto r = drive.startHrdStream({.timeout = kControllerTuningNoiseDuration + kHrdRecordMargin,
+                                     .pollInterval = kHrdPollInterval,
+                                     .stop = stop});
+      !r) {
+    return skipped(std::format("the recording did not complete: {}", r.error()));
+  }
+  auto recording = drive.readHrdRecording(somanet::HrdData::kSystemIdentificationData);
+  if (!recording) {
+    return skipped(std::format("could not read the recording back: {}", recording.error()));
+  }
+  return velocityNoise(std::get<std::vector<HrdSystemIdentificationSample>>(recording->samples));
+}
+
+nlohmann::json targetsJson(TunedController controller, const ControllerTuningTargets& targets) {
+  nlohmann::json j{{"dampingRatio", targets.dampingRatio}};
+  if (controller == TunedController::kPosition) {
+    j["settlingTimeMs"] = targets.settlingTimeS * 1000.0;
+  } else {
+    j["bandwidthHz"] = targets.bandwidthHz;
+  }
+  return j;
+}
+
+}  // namespace
+
+std::expected<ControllerTuningRequest, std::string> parseControllerTuningRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  ControllerTuningRequest request;
+  const auto controller = body.find("controller");
+  if (controller == body.end() || !controller->is_string()) {
+    return std::unexpected("'controller' is required: \"position\" or \"velocity\"");
+  }
+  if (*controller == "position") {
+    request.controller = TunedController::kPosition;
+  } else if (*controller == "velocity") {
+    request.controller = TunedController::kVelocity;
+  } else {
+    return std::unexpected("'controller' must be \"position\" or \"velocity\"");
+  }
+  if (const auto type = body.find("controllerType"); type != body.end() && !type->is_null()) {
+    if (*type == "PI-P") {
+      request.controllerType = CascadedControllerType::kPiP;
+    } else if (*type == "P-PI") {
+      request.controllerType = CascadedControllerType::kPPi;
+    } else {
+      return std::unexpected("'controllerType' must be \"PI-P\" or \"P-PI\"");
+    }
+  }
+  if (const auto full = body.find("full"); full != body.end() && !full->is_null()) {
+    if (!full->is_boolean()) {
+      return std::unexpected("'full' must be true or false");
+    }
+    request.full = full->get<bool>();
+  }
+  auto damping = readBoundedInteger(body, "dampingRatioPermil", kDefaultDampingRatioPermil,
+                                    kMinDampingRatioPermil, kMaxDampingRatioPermil);
+  auto settling = readBoundedInteger(body, "settlingTimeMs", kDefaultSettlingTimeMs,
+                                     kMinSettlingTimeMs, kMaxSettlingTimeMs);
+  auto bandwidth = readBoundedInteger(body, "bandwidthMilliHz", kDefaultBandwidthMilliHz,
+                                      kMinBandwidthMilliHz, kMaxBandwidthMilliHz);
+  for (const auto* field : {&damping, &settling, &bandwidth}) {
+    if (!*field) {
+      return std::unexpected(field->error());
+    }
+  }
+  request.targets = {.dampingRatio = static_cast<double>(*damping) / 1000.0,
+                     .settlingTimeS = static_cast<double>(*settling) / 1000.0,
+                     .bandwidthHz = static_cast<double>(*bandwidth) / 1000.0};
+  return request;
+}
+
+std::vector<ProcedureParameter> controllerTuningParameters() {
+  return {
+      enumParameter("controller", "Controller", "The controller to tune.", nlohmann::json(nullptr),
+                    {ParameterOption{.value = "position", .title = "Position"},
+                     ParameterOption{.value = "velocity", .title = "Velocity"}}),
+      enumParameter(
+          "controllerType", "Cascaded controller type",
+          "Position only. PI-P puts the integral action in the position loop: a faster response "
+          "with overshoot, and no steady-state error for a ramp. P-PI puts it in the velocity "
+          "loop: a damped response, and a steady-state error for a ramp.",
+          "PI-P",
+          {ParameterOption{.value = "PI-P", .title = "PI-P"},
+           ParameterOption{.value = "P-PI", .title = "P-PI"}}),
+      booleanParameter(
+          "full", "Full auto-tuning",
+          "On: the program analyses the control loop, with the drive configuration and the "
+          "velocity noise, and chooses the damping ratio and the settling time or the bandwidth. "
+          "Off: the gains are computed for the three values below.",
+          true),
+      integerParameter(
+          "dampingRatioPermil", "Damping ratio (‰)",
+          "Only when full auto-tuning is off. Above 1000 removes overshoot and settles "
+          "more slowly; below 1000 responds faster with overshoot.",
+          kDefaultDampingRatioPermil, kMinDampingRatioPermil, kMaxDampingRatioPermil),
+      integerParameter("settlingTimeMs", "Settling time (ms)",
+                       "Position only, and only when full auto-tuning is off. The time the step "
+                       "response takes to stay within 5 % of the target.",
+                       kDefaultSettlingTimeMs, kMinSettlingTimeMs, kMaxSettlingTimeMs),
+      integerParameter("bandwidthMilliHz", "Bandwidth (mHz)",
+                       "Velocity only, and only when full auto-tuning is off. The bandwidth of the "
+                       "closed velocity loop.",
+                       kDefaultBandwidthMilliHz, kMinBandwidthMilliHz, kMaxBandwidthMilliHz),
+  };
+}
+
+std::vector<ProgressStep> controllerTuningSteps() {
+  return stepsFrom({kControllerTuningValidateStep, kControllerTuningDriveConfigurationStep,
+                    kControllerTuningNoiseStep, kControllerTuningComputeStep,
+                    kControllerTuningWriteStep});
+}
+
+std::expected<void, std::string> runControllerTuningProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const ControllerTuningRequest& request, const ControllerTuningFn& tune) {
+  namespace objects = somanet::objects;
+  const auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+  const auto cancelled = [](std::string_view when) {
+    return std::unexpected(std::format("controller auto-tuning was cancelled {}", when));
+  };
+  const auto hasObject = [&device](ObjectAddress<float> address) {
+    return device.parameter(address.index, address.subindex).has_value();
+  };
+
+  // ── validate ──
+  reporter.start(kControllerTuningValidateStep);
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return fail(kControllerTuningValidateStep, drive.error());
+  }
+  auto rawVersion = drive->manufacturerSoftwareVersion();
+  if (!rawVersion) {
+    return fail(kControllerTuningValidateStep, rawVersion.error());
+  }
+  const auto version = trimFirmwareVersion(
+      std::span(reinterpret_cast<const uint8_t*>(rawVersion->data()), rawVersion->size()));
+  if (auto error = controllerTuningFirmwareError(version)) {
+    return fail(kControllerTuningValidateStep, std::move(*error));
+  }
+  uint32_t resolution = 0;
+  if (request.controller == TunedController::kPosition) {
+    auto strategy = readNumeric(device, objects::kPositionControlStrategy);
+    if (!strategy) {
+      return fail(kControllerTuningValidateStep, strategy.error());
+    }
+    if (*strategy == 1) {
+      return fail(kControllerTuningValidateStep,
+                  "the position controller is the simple PID controller (0x2002 = 1), whose "
+                  "gains auto-tuning does not compute; select the cascaded controller first");
+    }
+    auto configured = drive->encoders();
+    if (!configured) {
+      return fail(kControllerTuningValidateStep, configured.error());
+    }
+    const auto found = std::ranges::find_if(configured->encoders, [&](const auto& encoder) {
+      return configured->position && encoder.encoderOrdinal == *configured->position;
+    });
+    if (found == configured->encoders.end()) {
+      return fail(kControllerTuningValidateStep,
+                  "the position controller has no encoder (0x2012:09), so its gains cannot be "
+                  "converted");
+    }
+    resolution = found->resolution;
+  }
+  // The objects and the resolution are checked before the program runs, so a drive that cannot
+  // take the gains is refused before anything is recorded.
+  if (auto check = controllerGainPlan(request.controller, TunedGains{}, resolution, hasObject);
+      !check) {
+    return fail(kControllerTuningValidateStep, check.error());
+  }
+  auto model = drive->readPlantModel();
+  if (!model) {
+    return fail(kControllerTuningValidateStep, model.error());
+  }
+  if (!*model) {
+    return fail(
+        kControllerTuningValidateStep,
+        std::format("the drive has no {}; run plant identification first", kPlantModelFile));
+  }
+  nlohmann::json validated{{"firmwareVersion", version}, {"plantModel", **model}};
+  if (request.controller == TunedController::kPosition) {
+    validated["positionEncoderResolution"] = resolution;
+  }
+  reporter.succeed(kControllerTuningValidateStep, std::move(validated));
+  if (stop.stop_requested()) {
+    return cancelled("before the drive configuration");
+  }
+
+  ControllerTuningCall call{.controller = request.controller,
+                            .controllerType = request.controllerType,
+                            .numerator = (*model)->numerator,
+                            .denominator = (*model)->denominator,
+                            .driveConfiguration = std::nullopt,
+                            .targets = request.targets};
+
+  // ── drive-configuration ──
+  reporter.start(kControllerTuningDriveConfigurationStep);
+  if (!request.full) {
+    reporter.succeed(
+        kControllerTuningDriveConfigurationStep,
+        nlohmann::json{{"read", false}, {"reason", "a tuning to targets does not use it"}});
+  } else {
+    auto ratedTorque = drive->motorRatedTorque();
+    if (!ratedTorque) {
+      return fail(kControllerTuningDriveConfigurationStep, ratedTorque.error());
+    }
+    if (*ratedTorque == 0) {
+      return fail(kControllerTuningDriveConfigurationStep,
+                  "the motor rated torque (0x6076) is 0; configure the motor first");
+    }
+    auto configuration = readTuningDriveConfiguration(device, version, *ratedTorque);
+    if (!configuration) {
+      return fail(kControllerTuningDriveConfigurationStep, configuration.error());
+    }
+    call.driveConfiguration = std::move(*configuration);
+    reporter.succeed(kControllerTuningDriveConfigurationStep, *call.driveConfiguration);
+  }
+  if (stop.stop_requested()) {
+    return cancelled("before the noise recording");
+  }
+
+  // ── noise ──
+  reporter.start(kControllerTuningNoiseStep);
+  std::optional<std::string> noiseWarning;
+  if (!request.full) {
+    reporter.succeed(
+        kControllerTuningNoiseStep,
+        nlohmann::json{{"measured", false}, {"reason", "a tuning to targets does not use it"}});
+  } else {
+    auto noise = measureVelocityNoise(*drive, stop);
+    if (stop.stop_requested()) {
+      return cancelled("during the noise recording");
+    }
+    call.driveConfiguration->velocityNoiseRpm = noise.noiseRpm;
+    noiseWarning = noise.warning;
+    if (noise.warning) {
+      spdlog::warn("Device {}: {}", device.slavePosition(), *noise.warning);
+    }
+    reporter.succeed(kControllerTuningNoiseStep,
+                     nlohmann::json{{"measured", true},
+                                    {"noiseRpm", noise.noiseRpm},
+                                    {"warning", noise.warning ? nlohmann::json(*noise.warning)
+                                                              : nlohmann::json()}});
+  }
+
+  // ── compute ──
+  reporter.start(kControllerTuningComputeStep);
+  if (!tune) {
+    return fail(kControllerTuningComputeStep,
+                "controller auto-tuning is not configured on this server");
+  }
+  auto reply = tune(call);
+  if (!reply) {
+    return fail(kControllerTuningComputeStep, reply.error());
+  }
+  nlohmann::json computed = targetsJson(request.controller, reply->used);
+  computed["full"] = request.full;
+  if (request.controller == TunedController::kPosition) {
+    computed["controllerType"] = toString(request.controllerType);
+  }
+  computed["gains"] = {
+      {"position", {{"kp", reply->gains.position.kp}, {"ki", reply->gains.position.ki}}},
+      {"velocity", {{"kp", reply->gains.velocity.kp}, {"ki", reply->gains.velocity.ki}}}};
+  computed["state"] = reply->state;
+  reporter.succeed(kControllerTuningComputeStep, std::move(computed));
+  if (stop.stop_requested()) {
+    return cancelled("before the gains were written");
+  }
+
+  // ── write ──
+  reporter.start(kControllerTuningWriteStep);
+  auto plan = controllerGainPlan(request.controller, reply->gains, resolution, hasObject);
+  if (!plan) {
+    return fail(kControllerTuningWriteStep, plan.error());
+  }
+  nlohmann::json written = nlohmann::json::array();
+  for (const auto& write : plan->writes) {
+    auto before = readNumeric(device, write.address);
+    if (!before) {
+      return fail(kControllerTuningWriteStep, before.error());
+    }
+    if (auto r = device.writeValue(write.address, write.value); !r) {
+      return fail(kControllerTuningWriteStep,
+                  std::format("writing {} failed after {} of {} gains were written: {}",
+                              addressJson(write.address).get<std::string>(), written.size(),
+                              plan->writes.size(), r.error()));
+    }
+    auto after = readNumeric(device, write.address);
+    if (!after) {
+      return fail(kControllerTuningWriteStep, after.error());
+    }
+    written.push_back(
+        {{"object", addressJson(write.address)}, {"before", *before}, {"after", *after}});
+  }
+  nlohmann::json skipped = nlohmann::json::array();
+  for (const auto& address : plan->skipped) {
+    skipped.push_back(addressJson(address));
+  }
+  reporter.succeed(
+      kControllerTuningWriteStep,
+      nlohmann::json{{"gains", std::move(written)},
+                     {"skipped", std::move(skipped)},
+                     {"warning", noiseWarning ? nlohmann::json(*noiseWarning) : nlohmann::json()}});
+  return {};
+}
+
 }  // namespace mm::node

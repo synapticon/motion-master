@@ -25,6 +25,7 @@
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "comm/spoe_fieldbus_driver.h"
+#include "controller_tuning_call.h"
 #include "core/cyclic_timer.h"
 #include "core/platform.h"
 #include "core/user_cache.h"
@@ -293,7 +294,9 @@ int main(int argc, char** argv) {
   // refusal that names the missing program when none runs.
   mm::node::ProcedureRegistry procedureRegistry{
       deviceManager, procedureManager,
-      mm::node::ProcedureRegistryConfig{.fitPlantModel = mm::makePlantModelFit(autoTuningClient)}};
+      mm::node::ProcedureRegistryConfig{
+          .fitPlantModel = mm::makePlantModelFit(autoTuningClient),
+          .tuneController = mm::makeControllerTuning(autoTuningClient)}};
 
   // The user-writable file store behind /api/user-cache, rooted at the shared cache directory
   // resolved above. Like the parameter cache, its location is a process-level setting fixed at

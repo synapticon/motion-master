@@ -5667,7 +5667,10 @@ components:
             `open-loop-field-control` the `validate` step holds an `OpenLoopFieldPlan`. For
             `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as
             `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null
-            with a `reason`.
+            with a `reason`. For `controller-auto-tuning` the `drive-configuration` step holds the
+            `DriveConfig` sent to the auto-tuning program, the `noise` step `noiseRpm` and a
+            `warning`, the `compute` step a `ControllerTuningComputed`, and the `write` step a
+            `ControllerTuningWrite`.
           example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
         error:
           type: string
@@ -6570,6 +6573,68 @@ components:
           type: number
           description: The velocity of the motor shaft the rounded speed gives.
           example: 5.73
+    ControllerTuningComputed:
+      type: object
+      description: >
+        The `compute` step of `controller-auto-tuning`: what the auto-tuning program tuned for, and
+        the gains it returned in SI units, before the conversion to the drive's units.
+      required: [full, dampingRatio, gains, state]
+      properties:
+        full: { type: boolean, example: true }
+        controllerType:
+          type: string
+          enum: [PI-P, P-PI]
+          description: Position tuning only.
+        dampingRatio:
+          type: number
+          description: The damping ratio the program chose, or the one the request gave.
+          example: 0.9
+        settlingTimeMs:
+          type: number
+          description: Position tuning only. The settling time the program chose, or the one given.
+          example: 120
+        bandwidthHz:
+          type: number
+          description: Velocity tuning only. The bandwidth the program chose, or the one given.
+          example: 40.8
+        gains:
+          type: object
+          description: >
+            Kp and Ki of the position loop, in (rad/s)/rad and (rad/s)/(rad·s), and of the
+            velocity loop, in Nm/(rad/s) and Nm/(rad/s·s). A velocity tuning returns zeros for the
+            position loop.
+          example: { position: { kp: 30.0, ki: 4.0 }, velocity: { kp: 0.05, ki: 2.5 } }
+        state:
+          description: >
+            The stability margins and other figures a full tuning reports, as the program renders
+            them. Null for a tuning to targets.
+          nullable: true
+    ControllerTuningWrite:
+      type: object
+      description: >
+        The `write` step of `controller-auto-tuning`: each gain object, its value before and after
+        the write, in the drive's units, and the Kd objects the drive does not have.
+      required: [gains, skipped, warning]
+      properties:
+        gains:
+          type: array
+          items:
+            type: object
+            required: [object, before, after]
+            properties:
+              object: { type: string, example: "0x2011:01" }
+              before: { type: number, example: 1.5 }
+              after: { type: number, example: 5.24 }
+        skipped:
+          type: array
+          items: { type: string }
+          example: ["0x2011:03"]
+        warning:
+          type: string
+          nullable: true
+          description: >
+            Set when a full tuning computed the gains with a noise of 0, because the motor moved or
+            the noise recording failed.
     IcMuKeyRegister:
       type: object
       description: >
@@ -7089,6 +7154,57 @@ components:
             `open-loop-field-control` only: how fast the field length rises from 0, in per mille of
             the rated current per second.
           example: 10000
+        controller:
+          type: string
+          enum: [position, velocity]
+          description: >
+            `controller-auto-tuning` only, and required for it: the controller to tune.
+          example: position
+        controllerType:
+          type: string
+          enum: [PI-P, P-PI]
+          default: PI-P
+          description: >
+            `controller-auto-tuning` only, position tuning only: the structure of the cascaded
+            position controller the gains are computed for. PI-P puts the integral action in the
+            position loop, P-PI in the velocity loop.
+          example: PI-P
+        full:
+          type: boolean
+          default: true
+          description: >
+            `controller-auto-tuning` only: true lets the auto-tuning program choose the damping
+            ratio and the settling time or the bandwidth, from the drive configuration and the
+            velocity noise. False computes the gains for `dampingRatioPermil` and `settlingTimeMs`
+            or `bandwidthMilliHz`.
+          example: true
+        dampingRatioPermil:
+          type: integer
+          minimum: 400
+          maximum: 2000
+          default: 1000
+          description: >
+            `controller-auto-tuning` only, when `full` is false: the damping ratio of the closed
+            loop, in per mille.
+          example: 1000
+        settlingTimeMs:
+          type: integer
+          minimum: 20
+          maximum: 1000
+          default: 200
+          description: >
+            `controller-auto-tuning` only, position tuning only, when `full` is false: the time
+            the step response takes to stay within 5 % of the target.
+          example: 200
+        bandwidthMilliHz:
+          type: integer
+          minimum: 200
+          maximum: 100000
+          default: 5000
+          description: >
+            `controller-auto-tuning` only, velocity tuning only, when `full` is false: the
+            bandwidth of the closed velocity loop, in mHz.
+          example: 5000
     OutputStageResult:
       type: object
       required: [slavePosition, index, subindex, staged, error]

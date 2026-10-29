@@ -38,6 +38,7 @@ import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
 import DeviceSiiPage from './pages/DeviceSiiPage'
 import DeviceTuningPage from './pages/DeviceTuningPage'
 import DeviceRegistersPage from './pages/DeviceRegistersPage'
+import DeviceFirmwarePage from './pages/DeviceFirmwarePage'
 import DeviceFoePage from './pages/DeviceFoePage'
 import DeviceHrdPage from './pages/DeviceHrdPage'
 import DeviceIcMuEncodersPage from './pages/DeviceIcMuEncodersPage'
@@ -112,6 +113,7 @@ export default function App() {
           <Route path="object-dictionary" element={<DeviceObjectDictionaryPage />} />
           <Route path="sii" element={<DeviceSiiPage />} />
           <Route path="registers" element={<DeviceRegistersPage />} />
+          <Route path="firmware" element={<DeviceFirmwarePage />} />
           <Route path="foe" element={<DeviceFoePage />} />
           <Route path="hrd" element={<DeviceHrdPage />} />
           <Route path="ic-mu-encoders" element={<DeviceIcMuEncodersPage />} />

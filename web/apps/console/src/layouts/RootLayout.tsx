@@ -333,6 +333,7 @@ function DeviceSection({
     ...(isCia402 && isOp ? [{ to: 'motion', label: 'Motion' }] : []),
     ...(hasIcMuEncoder ? [{ to: 'ic-mu-encoders', label: 'iC-MU Encoders' }] : []),
     ...(isSomanet && isCia402 ? [{ to: 'tuning', label: 'Tuning' }] : []),
+    ...(isSomanet ? [{ to: 'firmware', label: 'Firmware' }] : []),
     ...deviceLinks,
   ].sort((a, b) => a.label.localeCompare(b.label))
 

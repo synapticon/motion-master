@@ -7269,8 +7269,12 @@ components:
             after erasing one or between two installs, since a PRE-OP transition then has nothing to
             hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8`
             climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other
-            device. The state the device was in beforehand is not restored. Over SPoE the drive
-            restarts into the new firmware and comes up in PRE-OP, so `3` cannot keep it in BOOT.
+            device. When the package writes a com binary, the step to INIT can restart the netX of
+            an Integro about 0.7 s after the drive reports INIT. The install then waits until the
+            drive answers again and gives it its station address back, so `1` leaves the drive
+            answering in INIT. The state the device was in beforehand is not restored. Over SPoE
+            the drive restarts into the new firmware and comes up in PRE-OP, so `3` cannot keep it
+            in BOOT.
           example: 2
         angle:
           type: number

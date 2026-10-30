@@ -23,6 +23,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - **A write of a string longer than its object logs a warning.** A parameter write and a `config-file-load` row both send the value to the drive as it is, because a test of a drive needs that. Before, `config-file-load` refused such a row. The warning names the object, the length of the value and what the object holds, so a support log shows why a drive keeps a cut value. (#180)
 
+### Fixed
+
+- **A firmware installation on a Jasper-based drive ends in its final state.** The Jasper bootloader restarts the drive on the step from BOOT to INIT, and the restart clears the drive's station address. The drive answers again in INIT, and a broadcast read, which needs no address, counted INIT as reached. The read-back at the address then found nothing, so `firmware-installation` failed with "could not reach INIT: the device reported UNKNOWN rather than INIT". With `finalState` BOOT, a later request for INIT left the drive without its address, and the step to PRE-OP programmed its mailbox from an empty read and took 2 s longer. A drive that can restart on its way out of BOOT now counts as being in a state only when it answers at its station address, and it gets the address back as soon as it is found without it. (#189)
+
 ## [6.0.0-alpha.120] - 2026-10-30
 
 ### Added

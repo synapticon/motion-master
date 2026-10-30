@@ -1925,6 +1925,22 @@ AddressState restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
   return reachable ? AddressState::Reassigned : AddressState::Unreachable;
 }
 
+// Reads the AL status and AL status code of one slave at its configured address into the
+// slavelist. ecx_readstate takes every state from one broadcast read when all slaves report the
+// same state, and a slave without its station address answers a broadcast too. So a slave that
+// restarted and came back in the target state reads as there, while every request addressed to it
+// goes nowhere. A read that gets no answer leaves the slavelist as it was and returns false.
+bool readStateAtAddress(ecx_contextt* ctx, uint16_t slave) {
+  ec_alstatust status{};
+  if (ecx_FPRD(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_ALSTAT, sizeof(status), &status,
+               kLateFrameTimeoutUs) <= 0) {
+    return false;
+  }
+  ctx->slavelist[slave].state = etohs(status.alstatus);
+  ctx->slavelist[slave].ALstatuscode = etohs(status.alstatuscode);
+  return true;
+}
+
 // SOMANET firmware ignores a mailbox request whose counter equals the counter of the previous
 // request. Firmware before v5.6.0 keeps that counter across INIT. ecx_config_init zeroes the
 // slavelist, and a new process starts with a zeroed context, so in both cases the first request
@@ -2003,12 +2019,15 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
                                            std::function<bool()> shouldAbort) {
   // A slave that lost its station address cannot receive the request, so commanding it only waits
   // out the timeout. The exception is a slave this driver sent to BOOT and now asks to leave it,
-  // because either step out of BOOT can restart the device, and the resend loop below gives it its
-  // address back. The step to PRE-OP makes the bootloader hand over to the application by a
-  // restart. The step to INIT restarts the netX of an Integro that got a new com binary: its boot
-  // code asks the netX for a reset 500 ms away and only then reports INIT, so the device can be
-  // gone before the master reads INIT (somanet_software, AppECS_Functions_Boot.c,
-  // Boot_Handle_ESM_AL_Control_Changed_Ind).
+  // because either step out of BOOT can restart the device. Such a slave gets its address back
+  // before the first request, on each resend, and before it counts as having reached the target.
+  // The step to PRE-OP makes a SOMANET bootloader hand over to the application by a restart. The
+  // step to INIT restarts the netX of an Integro that got a new com binary: its boot code asks the
+  // netX for a reset 500 ms away and only then reports INIT, so the device can be gone before the
+  // master reads INIT (somanet_software, AppECS_Functions_Boot.c,
+  // Boot_Handle_ESM_AL_Control_Changed_Ind). The step to INIT also restarts a Jasper-based drive
+  // that committed an app or com binary in BOOT. It answers again in INIT about 1.9 s after the
+  // request, without its station address.
   const bool leavesBoot = targetState == EtherCatState::Init || targetState == EtherCatState::PreOp;
   const auto mayRestart = [this, leavesBoot](uint16_t pos) {
     return leavesBoot && bootMailboxSlaves_.contains(pos);
@@ -2022,8 +2041,14 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
     }
     for (const uint16_t pos : requested) {
       const Reachability reachability = probeReachability(ctx_.get(), pos);
-      if (reachability == Reachability::Answering ||
-          (reachability == Reachability::AddressLost && mayRestart(pos))) {
+      if (reachability == Reachability::Answering) {
+        positions.push_back(pos);
+      } else if (reachability == Reachability::AddressLost && mayRestart(pos)) {
+        // Given back now, because the INIT+ACK, the first request and the sync manager writes
+        // below all go to the station address. updateMailboxSyncManagers also reads the mailbox
+        // settings from the SII there, and without the address every SII read returns 0. A slave
+        // that stays unreachable is still commanded, and each resend tries again.
+        restoreStationAddress(ctx_.get(), pos);
         positions.push_back(pos);
       } else {
         logUnreachable(ctx_.get(), pos, reachability);
@@ -2151,6 +2176,20 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
 
     for (auto it = pending.begin(); it != pending.end();) {
       uint16_t pos = *it;
+      // A slave that can restart counts as there only when it answers at its station address. One
+      // that answers at its wire position only gets the address back at once rather than at the
+      // next resend. On the step to PRE-OP it also needs its sync managers again. When the read at
+      // the address gets no answer, the state reads as 0, and the slave stays pending.
+      if (ctx_->slavelist[pos].state == targetRaw && mayRestart(pos)) {
+        if (restoreStationAddress(ctx_.get(), pos) == AddressState::Reassigned &&
+            targetState == EtherCatState::PreOp) {
+          spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
+          updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+        }
+        if (!readStateAtAddress(ctx_.get(), pos)) {
+          ctx_->slavelist[pos].state = 0;
+        }
+      }
       uint16_t state = ctx_->slavelist[pos].state;
       uint16_t alStatusCode = ctx_->slavelist[pos].ALstatuscode;
       // First time we see the error bit for this slave, report the AL status + code immediately

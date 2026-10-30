@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A frame capture works on an rpm or tarball install.** The rpm and the tarball's `setup.sh` gave `cap_net_raw` to `motion-master` only. The server starts `motion-master-capture` as a child process, and a child gets no capability from its parent, so `POST /api/captures` failed with "cannot open a raw socket" unless the server ran as root. Both now give the capture program `cap_net_raw`, as the deb did. On a tarball, run `./setup.sh` again.
+
 ## [6.0.0-alpha.118] - 2026-10-30
 
 ### Fixed

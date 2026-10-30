@@ -16,4 +16,8 @@ dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$(uname -s)" = Linux ]; then
   sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip "$dir/motion-master"
   echo "Capabilities set on $dir/motion-master"
+  # The server starts the capture program as a child, and a child gets no capability from its
+  # parent. The program opens a raw socket on the bus adapter and needs nothing else.
+  sudo setcap cap_net_raw=eip "$dir/motion-master-capture"
+  echo "Capabilities set on $dir/motion-master-capture"
 fi

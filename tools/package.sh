@@ -129,6 +129,8 @@ ln -sf /opt/motion-master/motion-master %{buildroot}/usr/local/bin/motion-master
 
 %post
 setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip /opt/motion-master/motion-master
+# The capture program opens a raw socket on the bus adapter and needs nothing else.
+setcap cap_net_raw=eip /opt/motion-master/motion-master-capture
 # The twin of packaging/postinst; keep the two in step.
 /opt/motion-master/install-auto-tuning.sh /opt/motion-master
 

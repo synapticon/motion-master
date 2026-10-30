@@ -12,7 +12,7 @@ The script does two things.
 
 **It downloads the auto-tuning executable.** The file is about 65 MB, and Motion Master starts it as a child process. It installs as `auto-tuning`, next to the server binary. The file is downloaded once, instead of a copy in every release. If the download fails, the script prints a message and continues. Motion Master then runs without auto-tuning, and only the auto-tuning endpoints are missing. To add the file later, run `./install-auto-tuning.sh`.
 
-**It grants the capabilities.** The script runs `setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the `motion-master` binary.
+**It grants the capabilities.** The script runs `setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the `motion-master` binary. It also runs `setcap cap_net_raw=eip` on `motion-master-capture`, the program that records the EtherCAT frames for `POST /api/captures`. The server starts that program as a child process, and a child gets no capability from the server.
 
 **Why the capabilities are needed:**
 

@@ -51,6 +51,8 @@ using mm::comm::OdEntry;
 using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::commutationOffsetMeasurementSteps;
+using mm::node::configFileLoadSteps;
+using mm::node::ConfigFileLoadStrategy;
 using mm::node::Device;
 using mm::node::encoderRegisterParameters;
 using mm::node::EncoderRegisterRequest;
@@ -80,6 +82,7 @@ using mm::node::offsetDetectionSteps;
 using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
+using mm::node::parseConfigFileLoadRequest;
 using mm::node::parseEncoderRegisterRequest;
 using mm::node::parseFirmwareLatencyAction;
 using mm::node::parseFirmwareLatencyRequest;
@@ -389,6 +392,44 @@ OsCommandRequest makeRequest() {
 // arrives unsigned off the wire, and an initialiser list makes it signed, which the byte check
 // rejects for reasons that have nothing to do with what is under test.
 nlohmann::json osCommandBody(std::string_view json) { return nlohmann::json::parse(json); }
+
+TEST(ParseConfigFileLoadRequest, DecodesTheFileAndDefaultsToReplacingEveryRow) {
+  // "MHgyMDAxLCAwLCAx" is "0x2001, 0, 1".
+  auto request = parseConfigFileLoadRequest(nlohmann::json{{"file", "MHgyMDAxLCAwLCAx"}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->file, "0x2001, 0, 1");
+  EXPECT_EQ(request->strategy, ConfigFileLoadStrategy::kReplace);
+  EXPECT_TRUE(request->rows.empty());
+}
+
+TEST(ParseConfigFileLoadRequest, ReadsTheStrategyAndTheRows) {
+  auto request = parseConfigFileLoadRequest(nlohmann::json{
+      {"file", "MHgyMDAxLCAwLCAx"}, {"strategy", "merge"}, {"rows", {"0x2001:00", "0x2012:0A"}}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->strategy, ConfigFileLoadStrategy::kMerge);
+  const std::vector<std::pair<uint16_t, uint8_t>> rows{{0x2001, 0x00}, {0x2012, 0x0A}};
+  EXPECT_EQ(request->rows, rows);
+}
+
+TEST(ParseConfigFileLoadRequest, RefusesAMissingFileABadStrategyAndABadAddress) {
+  EXPECT_FALSE(parseConfigFileLoadRequest(nlohmann::json::object()));
+  EXPECT_FALSE(parseConfigFileLoadRequest(nlohmann::json{{"file", "not base64!"}}));
+  EXPECT_FALSE(parseConfigFileLoadRequest(
+      nlohmann::json{{"file", "MHgyMDAxLCAwLCAx"}, {"strategy", "append"}}));
+  EXPECT_FALSE(parseConfigFileLoadRequest(
+      nlohmann::json{{"file", "MHgyMDAxLCAwLCAx"}, {"rows", {"2001:00"}}}));
+  EXPECT_FALSE(parseConfigFileLoadRequest(
+      nlohmann::json{{"file", "MHgyMDAxLCAwLCAx"}, {"rows", {"0x2001:100"}}}));
+}
+
+TEST(ConfigFileLoadSteps, RunInTheOrderOfTheLoad) {
+  std::vector<std::string> ids;
+  for (const auto& step : configFileLoadSteps()) {
+    ids.push_back(step.id);
+  }
+  EXPECT_EQ(ids, (std::vector<std::string>{"validate", "read-config-file", "write-config-file",
+                                           "load", "outputs", "verify"}));
+}
 
 TEST(ParseOsCommandRequest, DefaultsToMovingNoBulkData) {
   auto request = parseOsCommandRequest(osCommandBody(R"({"command": [8, 0, 0, 0, 0, 0, 0, 0]})"));

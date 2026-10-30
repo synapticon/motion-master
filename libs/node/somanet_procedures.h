@@ -10,6 +10,7 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
@@ -1780,5 +1781,77 @@ std::vector<ProgressStep> integralLimitsSteps();
 /// flash. The drive reads the limits on its next control cycle.
 std::expected<void, std::string> runIntegralLimitsProcedure(Device& device,
                                                             ProgressReporter& reporter);
+
+// --- Configuration file load ---------------------------------------------------------------------
+
+/// @brief Procedure name for loading a configuration file, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kConfigFileLoadProcedure = "config-file-load";
+
+/// @brief The step that parses the file and checks the drive and every row before anything is
+///        written.
+inline constexpr std::string_view kConfigFileLoadValidateStep = "validate";
+
+/// @brief The step that reads the drive's @c config.csv, for a merge.
+inline constexpr std::string_view kConfigFileLoadReadStep = "read-config-file";
+
+/// @brief The step that writes the new @c config.csv.
+inline constexpr std::string_view kConfigFileLoadWriteStep = "write-config-file";
+
+/// @brief The step that makes the drive load the file, through 0x1011:01.
+inline constexpr std::string_view kConfigFileLoadLoadStep = "load";
+
+/// @brief The step that puts each loaded value of an output-mapped object into its cell.
+inline constexpr std::string_view kConfigFileLoadOutputsStep = "outputs";
+
+/// @brief The step that reads every loaded object back and compares it with the file.
+inline constexpr std::string_view kConfigFileLoadVerifyStep = "verify";
+
+/// @brief How a file's rows meet the drive's own @c config.csv.
+enum class ConfigFileLoadStrategy {
+  kReplace,  ///< The selected rows are the new file.
+  kMerge,    ///< The selected rows replace the same addresses in the drive's file.
+};
+
+/// @brief One configuration file load, as a client describes it.
+struct ConfigFileLoadRequest {
+  std::string file;  ///< The file's text.
+  ConfigFileLoadStrategy strategy = ConfigFileLoadStrategy::kReplace;
+  /// The rows to load, by address. Empty loads every row.
+  std::vector<std::pair<uint16_t, uint8_t>> rows;
+};
+
+/// @brief Parses `{"file": "<base64>", "strategy": "replace", "rows": ["0x2001:00"]}`.
+///
+/// @c file is required. @c strategy defaults to @c replace, and @c rows to every row of the file.
+std::expected<ConfigFileLoadRequest, std::string> parseConfigFileLoadRequest(
+    const nlohmann::json& body);
+
+/// @brief What the configuration file load accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> configFileLoadParameters();
+
+/// @brief The configuration file load step template, idle.
+std::vector<ProgressStep> configFileLoadSteps();
+
+/// @brief Loads a configuration file into a SOMANET drive.
+///
+/// 1. **validate** — parses the file and refuses one with a problem, a line the drive would ignore
+///    or read differently. Refuses a drive that is not in Switch On Disabled or Fault, because the
+///    drive accepts 0x1011:01 in no other CiA 402 state. Refuses a row in a safety area on a drive
+///    with 0xF050, which keeps its safety configuration on a safety module. Gives each row its
+///    outcome, and refuses a loadable row whose value does not fit its object.
+/// 2. **read-config-file** — for a merge, reads the drive's @c config.csv and merges the rows in.
+/// 3. **write-config-file** — writes the new @c config.csv.
+/// 4. **load** — sets 0x1011:01 and waits for the drive to confirm, as
+///    @c restore-default-parameters does.
+/// 5. **outputs** — writes the file's value of each loadable row whose object is output-mapped
+///    into its cell. While the drive exchanges process data, the RT loop sends that cell every
+///    cycle, and without this write it sends the old value and overwrites the load.
+/// 6. **verify** — reads every loadable row back and reports each value that differs from the
+///    file. A difference does not fail the run: the drive applies @c .assembly_config after the
+///    file, so an assembly value wins.
+std::expected<void, std::string> runConfigFileLoadProcedure(
+    Device& device, ProgressReporter& reporter, const std::stop_token& stop,
+    const ConfigFileLoadRequest& request, RestoreDefaultParametersConfig config = {});
 
 }  // namespace mm::node

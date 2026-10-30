@@ -1214,6 +1214,52 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor configLoad;
+  configLoad.name = std::string(kConfigFileLoadProcedure);
+  configLoad.title = "Load configuration file";
+  configLoad.description =
+      "Writes a configuration file as the drive's config.csv and makes the drive load it through "
+      "0x1011:01, in one action. Before it writes anything, it checks every row against the "
+      "drive's object dictionary, and gives each one an outcome: loads, unknown-object or "
+      "not-loadable. Afterwards it reads every loaded object back and lists each value that "
+      "differs from the file.";
+  configLoad.caveats = {
+      "It replaces the drive's live values with those of the file, at once.",
+      "The drive must be in Switch On Disabled or Fault. In any other CiA 402 state the drive "
+      "refuses the load, so the run refuses it first.",
+      "The drive loads .factory_config, then config.csv, then .assembly_config, so an assembly "
+      "value wins over the file.",
+      "The drive skips a row with no error when the object does not exist, when the object cannot "
+      "be loaded from a file, or when its data type is not one the drive reads. Those rows are "
+      "listed in the result.",
+      "While the drive exchanges process data, each loaded object that is mapped into the outputs "
+      "is written into its output too, so that the next cycle sends the new value.",
+      "A drive with a safety module refuses a file with safety objects. Load those through the "
+      "safety module.",
+      "The values are not stored to flash, but config.csv is the file the drive loads at its next "
+      "start.",
+  };
+  configLoad.movesMotor = false;
+  configLoad.requiresEnabled = false;
+  configLoad.parameters = configFileLoadParameters();
+  configLoad.steps = configFileLoadSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(configLoad),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseConfigFileLoadRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = std::move(*request)](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                            const std::stop_token& stop) {
+              return runConfigFileLoadProcedure(ctx.device, reporter, stop, request);
+            };
+      },
+  });
+
   ProcedureDescriptor polePair;
   polePair.name = std::string(kPolePairDetectionProcedure);
   polePair.title = "Pole pair detection";

@@ -233,6 +233,12 @@ class Device {
   /// partially-operational bus route each device correctly.
   bool exchangesProcessData() const;
 
+  /// @brief Whether the device exchanges process data and the object is in its outputs.
+  ///
+  /// Then the RT loop sends the object's cell every cycle, so a value that reaches the device by
+  /// another path is overwritten on the next cycle unless the cell holds it too.
+  bool isOutputMapped(uint16_t index, uint8_t subindex) const;
+
   /// @brief The AL state of the device, from the driver's cached AL status.
   mm::comm::EtherCatState alState() const;
 

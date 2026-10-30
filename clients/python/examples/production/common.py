@@ -690,3 +690,32 @@ def identify_plant(s, chirp):
     for line in lines:
         say(line, style="ok" if line.startswith(("inertia", "friction")) else None)
     s.add("plant model", lines)
+
+
+def tune_controller(s, controller, settings):
+    """Tune the velocity or the position controller with the controller-auto-tuning procedure.
+
+    `controller` is "velocity" or "position". `settings` holds the other parameters of the
+    procedure, such as full and controllerType. The procedure needs the plant model of the plant
+    model step, computes the gains with the auto-tuning program of the server, and writes them.
+    It turns no motor: a full tuning records the velocity noise with the motor at rest. The step
+    shows each gain before and after, and stores the parameters to flash.
+    """
+    s.heading(f"{controller} controller tuning")
+    params = {"controller": controller, **settings}
+    for key, value in params.items():
+        say("%s: %s", key, value)
+    snapshot = run_procedure(s, "controller-auto-tuning", params)
+    write = step_value(snapshot, "write") or {}
+    lines = [f"{key}: {value}" for key, value in params.items()]
+    for gain in write.get("gains", []):
+        lines.append(f"{gain['object']}: {gain['before']} -> {gain['after']}")
+    for skipped in write.get("skipped", []):
+        lines.append(f"skipped, the drive has no {skipped}")
+    for line in lines[len(params) :]:
+        say(line, style="ok")
+    if write.get("warning"):
+        say("%s", write["warning"], style="warning")
+        lines.append(f"warning: {write['warning']}")
+    lines.append(store_parameters(s))
+    s.add(f"{controller} controller tuning", lines)

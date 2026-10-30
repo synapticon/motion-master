@@ -95,6 +95,8 @@ the drive loads it from there.
 | AL state OP | Yes |
 | Commutation offset | Yes |
 | Plant model | Yes |
+| Velocity controller tuning | Yes |
+| Position controller tuning | Yes |
 
 The other steps follow one at a time.
 
@@ -222,3 +224,18 @@ nothing. On the console, a step value with a long list of numbers, such as the B
 fit, shows how many numbers it has. The log file keeps them all.
 
 The Integro script uses a logarithmic chirp from 2.3 Hz to 31 Hz, at 460 per mille, for 3000 ms.
+
+### Velocity and position controller tuning
+
+The script tunes the velocity controller first, then the position controller, each with the
+`controller-auto-tuning` procedure and the settings its drive script names. The procedure needs
+the plant model of the step before. It computes the gains with the auto-tuning program of the
+server, and writes them. It does not turn the motor: a full tuning records the velocity noise with
+the motor at rest.
+
+The script shows each gain before and after, and a warning when the noise was not measured. Then
+it stores the parameters to flash. The record gets the settings and every gain before and after.
+
+The Integro script uses full tuning for both controllers, which lets the auto-tuning program choose
+the targets, and the controller type PI-P for the position controller. The drive uses the new gains
+on its next control cycle.

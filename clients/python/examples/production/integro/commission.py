@@ -21,6 +21,7 @@ from common import (  # noqa: E402
     load_configuration,
     read_hardware_description,
     set_assigned_name,
+    tune_controller,
     transition_to_state,
     identify_plant,
 )
@@ -37,6 +38,11 @@ PLANT_IDENTIFICATION_CHIRP = {
     "transitionTimeMs": 3000,
     "signalType": "logarithmic",
 }
+
+# Full tuning lets the auto-tuning program choose the targets. PI-P puts the integral action in
+# the position loop.
+VELOCITY_TUNING = {"full": True}
+POSITION_TUNING = {"full": True, "controllerType": "PI-P"}
 
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
 CONFIG_FILE = Path(__file__).resolve().parent / "config.csv"
@@ -57,6 +63,8 @@ def main():
         transition_to_state(s, OP)
         detect_offset(s, OFFSET_DETECTION_METHOD)
         identify_plant(s, PLANT_IDENTIFICATION_CHIRP)
+        tune_controller(s, "velocity", VELOCITY_TUNING)
+        tune_controller(s, "position", POSITION_TUNING)
 
 
 if __name__ == "__main__":

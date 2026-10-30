@@ -21,7 +21,7 @@ from common import (  # noqa: E402
     read_hardware_description,
     set_assigned_name,
 )
-from motion_master_client import run  # noqa: E402
+from motion_master_client import PRE_OP, run  # noqa: E402
 
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
 CONFIG_FILE = Path(__file__).resolve().parent / "config.csv"
@@ -33,7 +33,7 @@ def main():
     args = ap.parse_args()
 
     with Session(args.slave, LOGS_DIR) as s:
-        connect(s)
+        connect(s, PRE_OP)
         read_hardware_description(s)
         install_firmware(s)
         load_configuration(s, CONFIG_FILE)

@@ -2,7 +2,7 @@
 the steps that every script runs.
 
 A production script runs its steps in order on one drive. Every question, every answer and every
-result goes to a log file. The record is a plain text file for the drive, written at the end, and
+result goes to a log file. The record is a Markdown file for the drive, written at the end, and
 also when a step fails, with what the script has so far. Both go to the logs/ directory beside
 the script, which git ignores, and both have the same name: the build descriptor and the serial
 number of the drive, and the start time.
@@ -87,6 +87,16 @@ HARDWARE_DESCRIPTION_WAIT_S = 10
 # Firmware packages for every production script. The compatibility check of the server tells
 # which of them fit a drive.
 PACKAGES_DIR = Path(__file__).resolve().parent / "packages"
+
+
+def _list_item(line):
+    # A record line as a Markdown list item. Two leading spaces nest it one level, and a leading
+    # "- " of the line is the item's own marker.
+    text = line.lstrip(" ")
+    depth = (len(line) - len(text)) // 2
+    if text.startswith("- "):
+        text = text[2:]
+    return f"{'  ' * depth}- {text}"
 
 
 class Exit(Exception):
@@ -253,19 +263,32 @@ class Session:
         self.appendices.append((title, list(lines)))
 
     def write_record(self, outcome):
-        """Write the record of the drive, with the name of the log file and the suffix .txt."""
-        path = self._path(".txt")
+        """Write the record of the drive as Markdown, with the name of the log file and the suffix
+        .md: a title, a table of the drive and the run, a section for each step with its lines as
+        a list, and each appendix, such as the configuration file, as a code block."""
+        path = self._path(".md")
+        header = [
+            ("Build descriptor and serial number", self.drive_id),
+            ("Assigned name", self.assigned_name),
+            ("Firmware version", self.firmware_version),
+            ("Started", self.started.isoformat(timespec="seconds")),
+            ("Outcome", outcome),
+        ]
         with open(path, "w", encoding="utf-8") as f:
-            f.write(f"drive: {self.drive_name or 'unknown'}\n")
-            f.write(f"build descriptor and serial number: {self.drive_id or 'unknown'}\n")
-            f.write(f"assigned name: {self.assigned_name or 'unknown'}\n")
-            f.write(f"firmware version: {self.firmware_version or 'unknown'}\n")
-            f.write(f"started: {self.started.isoformat(timespec='seconds')}\n")
-            f.write(f"outcome: {outcome}\n")
-            for title, lines in self.sections + self.appendices:
-                f.write(f"\n[{title}]\n")
+            f.write(f"# {self.drive_name or f'Device {self.slave}'}\n\n")
+            f.write("| | |\n| --- | --- |\n")
+            for name, value in header:
+                cell = str(value or "unknown").replace("|", "\\|")
+                f.write(f"| {name} | {cell} |\n")
+            for title, lines in self.sections:
+                f.write(f"\n## {title[0].upper()}{title[1:]}\n\n")
+                for line in lines:
+                    f.write(f"{_list_item(line)}\n")
+            for title, lines in self.appendices:
+                f.write(f"\n## {title[0].upper()}{title[1:]}\n\n```text\n")
                 for line in lines:
                     f.write(f"{line}\n")
+                f.write("```\n")
         say("record written to %s", path, style="ok")
         return path
 

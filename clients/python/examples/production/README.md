@@ -70,7 +70,7 @@ The files go to `logs/` beside the script, for example
 | File | Content |
 | --- | --- |
 | `<build descriptor>_<serial number>-<time>.log` | The log. Every message of the script with its time: each question, each answer and each result. |
-| `<build descriptor>_<serial number>-<time>.txt` | The record of the drive. |
+| `<build descriptor>_<serial number>-<time>.md` | The record of the drive, in Markdown, so that it reads as a page in a Markdown viewer and as text anywhere else. |
 
 The two files of one run have the same name, so they sort together. `<time>` is the start time
 of the script, as `YYYYMMDD-HHMMSS`. The build descriptor and the serial number come from the
@@ -78,10 +78,11 @@ hardware description of the drive. Until the script reads them, the log is named
 `device-<slave>-<time>.log`. The script renames it as soon as the hardware description step
 reads them. When the script stops before that, both files keep the name `device-<slave>-<time>`.
 
-The script writes the record also when a step fails, with the results it has so far. The first
-lines of the record give the drive name, the build descriptor and the serial number, the
-assigned name and the firmware version the drive ends with, the start time and the outcome. A
-section for each step follows, and the whole configuration file comes last.
+The script writes the record also when a step fails, with the results it has so far. The record
+starts with the drive name as its title, and a table of the build descriptor and the serial
+number, the assigned name and the firmware version the drive ends with, the start time and the
+outcome. A section for each step follows, with its results as a list, and the whole
+configuration file comes last, as a code block.
 
 ## Steps
 

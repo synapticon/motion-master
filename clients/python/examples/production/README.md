@@ -87,23 +87,27 @@ the drive loads it from there.
 | Step | Integro |
 | --- | --- |
 | Connect | Yes |
+| AL state PRE-OP | Yes |
 | Hardware description | Yes |
 | Firmware | Yes |
 | Configuration | Yes |
 | Assigned name | Yes |
-| Connect in OP | Yes |
+| AL state OP | Yes |
 | Commutation offset | Yes |
 
 The other steps follow one at a time.
 
 ### Connect
 
-Before the first step, the script opens the fieldbus driver when no driver is open. It scans
-when the last scan is missing or wrong. It moves the drive to PRE-OP. A drive in SAFE-OP or OP
-stays there.
+The script opens the fieldbus driver when no driver is open, and scans when the last scan is
+missing or wrong. It moves no drive.
 
-A step that needs another AL state, such as OP for a step that turns the motor, connects again
-with that state. A drive that reaches PRE-OP but not that state stops the script.
+### AL state
+
+The script moves the drive to the AL state that the next steps need: PRE-OP before the first
+step, and OP before the first step that turns the motor, because the drive turns the motor only
+while it exchanges process data. A drive above that state stays there. A drive that reaches PRE-OP
+but not the state asked for stops the script.
 
 A drive with no running firmware does not reach PRE-OP. The script logs why, and moves the drive
 to BOOT instead. In BOOT, the bootloader of the drive serves the files that the hardware
@@ -171,12 +175,6 @@ name before and after.
 
 The configuration step sets the assigned name too, when `config.csv` has a row for 0x20F2. The
 assigned name step comes after it, so the name the user types wins.
-
-### Connect in OP
-
-The steps from the commutation offset on turn the motor, and the drive turns it only while it
-exchanges process data. So the script connects again, now in OP, before the first of them. A drive
-that does not reach OP stops the script.
 
 ### Commutation offset
 

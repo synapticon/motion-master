@@ -265,28 +265,35 @@ class Session:
         return path
 
 
-def connect(s, state=PRE_OP):
-    """Open the fieldbus driver, scan, and move the drive to the AL state `state`.
+def connect(s):
+    """Open the fieldbus driver when none is open, and scan when the last scan is missing or
+    wrong. Moves no drive."""
+    heading("Connect")
+    s.client.init()
+    s.client.ensure_scanned()
+    say("the drive is in %s", STATE_NAMES[s.al_state()])
 
-    The driver is opened when none is open, and the bus is scanned when the last scan is missing
-    or wrong. A drive above `state` stays where it is.
+
+def ensure_state(s, state):
+    """Make sure the drive is at least in the AL state `state`, as the client's ensure_state does.
+    A drive above `state` stays where it is.
 
     A drive with no running firmware does not reach PRE-OP. It goes to BOOT instead, where its
-    bootloader serves the files that step 1 reads and the firmware installation writes, and stays
-    there whatever `state` is. A drive that reaches PRE-OP but not `state` fails the call.
+    bootloader serves the files that the hardware description step reads and the firmware
+    installation writes, and stays there whatever `state` is. A drive that reaches PRE-OP but not
+    `state` fails the call.
     """
-    heading(f"Connect · {STATE_NAMES[state]}")
-    s.client.init()
+    heading(f"AL state · {STATE_NAMES[state]}")
     try:
         s.client.ensure_state(PRE_OP, positions=[s.slave])
     except StateError as e:
         say("the drive did not reach PRE-OP: %s", e, style="warning")
         say("moving the drive to BOOT", style="warning")
         s.client.ensure_state(BOOT, positions=[s.slave])
-        s.add("connect", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
+        s.add("AL state", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
     else:
         s.client.ensure_state(state, positions=[s.slave])
-    log.info("the drive is in %s", STATE_NAMES[s.al_state()])
+    say("the drive is in %s", STATE_NAMES[s.al_state()])
 
 
 def heading(label):
@@ -591,10 +598,10 @@ def write_object(s, index, subindex, value):
 def detect_offset(s, method):
     """Detect the commutation offset with the offset-detection procedure.
 
-    The procedure turns the rotor and releases the brake. It needs the drive in OP, so connect to
-    OP before this step. The drive takes the method from 0x2009:03, which this step sets first.
-    Each measurement shows as a step of the procedure. The offset is read back from 0x2001 and the
-    phase order from 0x2003:05.
+    The procedure turns the rotor and releases the brake. It needs the drive in OP, so move the
+    drive to OP before this step. The drive takes the method from 0x2009:03, which this step sets
+    first. Each measurement shows as a step of the procedure. The offset is read back from 0x2001
+    and the phase order from 0x2003:05.
     """
     number = s.heading("commutation offset")
     before = read_object(s, 0x2009, 3)

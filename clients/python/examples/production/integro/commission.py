@@ -21,6 +21,7 @@ from common import (  # noqa: E402
     load_configuration,
     read_hardware_description,
     set_assigned_name,
+    ensure_state,
 )
 from motion_master_client import OP, PRE_OP, run  # noqa: E402
 
@@ -37,12 +38,13 @@ def main():
     args = ap.parse_args()
 
     with Session(args.slave, LOGS_DIR) as s:
-        connect(s, PRE_OP)
+        connect(s)
+        ensure_state(s, PRE_OP)
         read_hardware_description(s)
         install_firmware(s)
         load_configuration(s, CONFIG_FILE)
         set_assigned_name(s)
-        connect(s, OP)
+        ensure_state(s, OP)
         detect_offset(s, OFFSET_DETECTION_METHOD)
 
 

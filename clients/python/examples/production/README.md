@@ -71,11 +71,14 @@ lines of the record give the drive name, the start time and the outcome.
 
 Each step is described once. The table shows which script runs it.
 
-**After each step that changes the object dictionary of the drive, the script stores the
-parameters to flash** with the `store-parameters` procedure. A later step that fails then leaves
-the drive with what the steps before it did, also after a power cycle. The drive writes every
-value it holds into its `config.csv`, so the stored file is what the drive runs. Its comments
-carry the firmware version of the drive.
+**After each step that changes values in the object dictionary of the drive, the script stores
+the parameters to flash** with the `store-parameters` procedure. A later step that fails then
+leaves the drive with what the steps before it did, also after a power cycle. The drive writes
+every value it holds into its `config.csv`, so the stored file is what the drive runs. Its
+comments carry the firmware version of the drive.
+
+Step 3 stores nothing, because it writes `config.csv` to the flash itself, and the drive loads it
+from there.
 
 | Step | Integro |
 | --- | --- |
@@ -145,10 +148,10 @@ that the next cycle does not send the old value, and reads every loaded object b
 The drive must be in Switch On Disabled or Fault, the two CiA 402 states in which the drive
 accepts a load. In any other state the server refuses the load, and the step fails.
 
-Then the script stores the parameters to flash. The record gets the file name, the number of
-rows loaded, the rows the drive skipped, and each object whose value read back differs from the
-file. The drive loads `.assembly_config` after `config.csv`, so a value of the assembly can win
-over the file. The whole file goes to the end of the record.
+The record gets the file name, the number of rows loaded, the rows the drive skipped, and each
+object whose value read back differs from the file. The drive loads `.assembly_config` after
+`config.csv`, so a value of the assembly can win over the file. The whole file goes to the end
+of the record.
 
 ### 4. Assigned name
 

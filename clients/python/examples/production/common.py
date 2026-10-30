@@ -453,7 +453,6 @@ def load_configuration(s, path):
         lines.append("read back: every loaded value matches the file")
     for line in lines:
         log.info(line)
-    lines.append(store_parameters(s))
     s.add("configuration", lines)
     s.append(f"configuration file {path.name}", text.splitlines())
 

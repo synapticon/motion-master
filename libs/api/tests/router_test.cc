@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -231,6 +232,22 @@ TEST(TimedTest, ReportsFailureWithTheGivenStatusAndTiming) {
   EXPECT_EQ(response.status, "404 Not Found");
   EXPECT_EQ(response.body, R"({"error":"no such device"})");
   EXPECT_EQ(response.headers.size(), 2u) << "a failure carries the timing header too";
+}
+
+TEST(InvokeHandler, TurnsAnExceptionIntoA500) {
+  const Request request("/api/test", {}, "", {}, "");
+  const Handler throwing = [](const Request&) -> Response {
+    throw std::runtime_error("a path that is gone");
+  };
+  const Response response = invokeHandler(throwing, request);
+  EXPECT_EQ(response.status, "500 Internal Server Error");
+  EXPECT_NE(response.body.find("a path that is gone"), std::string::npos);
+
+  const Handler throwingAnInt = [](const Request&) -> Response { throw 7; };
+  EXPECT_EQ(invokeHandler(throwingAnInt, request).status, "500 Internal Server Error");
+
+  const Handler fine = [](const Request&) { return notFound("nothing here"); };
+  EXPECT_EQ(invokeHandler(fine, request).status, "404 Not Found");
 }
 
 }  // namespace

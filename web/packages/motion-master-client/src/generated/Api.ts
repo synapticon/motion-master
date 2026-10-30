@@ -934,7 +934,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reads one parameter of the device at `slavePosition` and returns the full `DeviceParameter` (value plus metadata: data type, access, sync state). Unlike the raw `GET …/sdo/{index}/{subindex}` endpoint, this is PDO-aware. With `source=auto` (the default) the value is taken from the live process image when the device is exchanging and the object is PDO-mapped, otherwise via an SDO upload, otherwise from the cache. With `source=cache` the cached value is served with no bus access at all. Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
+   * @description Reads one parameter of the device at `slavePosition` and returns the full `DeviceParameter` (value plus metadata: data type, access, sync state). Unlike the raw `GET …/sdo/{index}/{subindex}` endpoint, this is PDO-aware. With `source=auto` (the default) the value is taken from the live process image when the device is exchanging and the object is PDO-mapped, otherwise via an SDO upload. A device with no mailbox, in INIT or BOOT, answers no read, so `auto` answers 409 there rather than a cached value that looks live. With `source=cache` the cached value is served with no bus access at all. Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
    *
    * @name ReadParameter
    * @summary Read a single parameter value (PDO-aware, with optional cache-only mode)
@@ -946,7 +946,7 @@ export class Api<
     subindex: number,
     query?: {
       /**
-       * `auto` (default) reads PDO-when-exchanging else SDO else cache; `cache` returns the cached value with no bus access.
+       * `auto` (default) reads PDO-when-exchanging else SDO, and answers 409 for a device with no mailbox; `cache` returns the cached value with no bus access.
        * @default "auto"
        */
       source?: "auto" | "cache";

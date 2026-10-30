@@ -16,7 +16,15 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient  # noqa: E402
+from motion_master_client import (  # noqa: E402
+    BOOT,
+    OP,
+    PRE_OP,
+    SAFE_OP,
+    STATE_NAMES,
+    MotionMasterClient,
+    StateError,
+)
 
 log = logging.getLogger("production")
 
@@ -88,11 +96,30 @@ class Session:
 
         The driver is opened when none is open, and the bus is scanned when the last scan is
         missing or wrong. A drive in SAFE-OP or OP stays there.
+
+        A drive with no running firmware does not reach PRE-OP. It goes to BOOT instead, where its
+        bootloader serves the files that step 1 reads and the firmware installation writes.
         """
         log.info("")
         log.info("== connect ==")
         self.client.init()
-        self.client.ensure_state(PRE_OP, positions=[self.slave])
+        try:
+            self.client.ensure_state(PRE_OP, positions=[self.slave])
+        except StateError as e:
+            log.info("the drive did not reach PRE-OP: %s", e)
+            log.info("moving the drive to BOOT")
+            self.client.ensure_state(BOOT, positions=[self.slave])
+            self.add("connect", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
+        log.info("the drive is in %s", STATE_NAMES[self.al_state()])
+
+    def al_state(self):
+        """Return the AL state of the drive, as the server reads it now."""
+        query = {"positions": str(self.slave)}
+        return self.client.call("getDeviceStates", query=query).json()[0]["alState"]
+
+    def firmware_running(self):
+        """Return whether the drive runs its firmware, which is so in PRE-OP, SAFE-OP and OP."""
+        return self.al_state() in (PRE_OP, SAFE_OP, OP)
 
     def heading(self, number, title):
         """Show and log the start of a step."""
@@ -174,9 +201,14 @@ def read_hardware_description(s):
     lines = product_lines("device", hd["device"])
     if hd.get("assembly"):
         lines += product_lines("assembly", hd["assembly"])
-    firmware = s.client.call(
-        "readParameter", path={"slavePosition": s.slave, "index": 0x100A, "subindex": 0}
-    ).json()["value"]
+    # Outside PRE-OP, SAFE-OP and OP the server answers 0x100A from its cache, and the answer does
+    # not say so (#177). The version of a firmware that does not run is not recorded.
+    if s.firmware_running():
+        firmware = s.client.call(
+            "readParameter", path={"slavePosition": s.slave, "index": 0x100A, "subindex": 0}
+        ).json()["value"]
+    else:
+        firmware = f"not running (drive in {STATE_NAMES[s.al_state()]})"
     lines.append(f"firmware version: {firmware}")
 
     for line in lines:

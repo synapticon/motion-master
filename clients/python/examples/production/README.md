@@ -78,11 +78,18 @@ Before the first step, the script opens the fieldbus driver when no driver is op
 when the last scan is missing or wrong. It moves the drive to PRE-OP. A drive in SAFE-OP or OP
 stays there.
 
+A drive with no running firmware does not reach PRE-OP. The script logs why, and moves the drive
+to BOOT instead. In BOOT, the bootloader of the drive serves the files that step 1 reads, and
+the firmware installation writes the firmware there.
+
 ### 1. Hardware description
 
 The script reads the `.hardware_description` file of the drive over FoE (File access over
 EtherCAT), and the firmware version from object 0x100A. It shows the device and the assembly,
 each with its name, build descriptor, serial number and components.
+
+The script reads 0x100A only when the drive is in PRE-OP, SAFE-OP or OP, because only then does
+the firmware run. In BOOT, the record says that no firmware runs.
 
 After a power cycle, an Integro refuses FoE reads for about 2.5 s after it reaches PRE-OP
 ([#175](https://github.com/synapticon/motion-master/issues/175)). The script asks again every

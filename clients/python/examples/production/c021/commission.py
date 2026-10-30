@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Commission a C021 drive, step by step, and keep a record of what was done.
 
-The C021 is a Circulo NG board that runs the Jasper firmware. The script runs the steps up to the
+The C021 is a board that runs the Jasper firmware. The script runs the steps up to the
 assigned name. The encoder, motion and tuning steps follow when a C021 is at hand to test them.
 
 Firmware packages come from production/packages/. The configuration comes from config.csv beside

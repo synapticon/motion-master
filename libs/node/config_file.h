@@ -209,6 +209,8 @@ ConfigFileView describeConfigFile(
 /// @brief Serialises a view: each row with `line`, `index`, `subindex`, `name`, `value`,
 ///        `outcome`, `live` and `differs`, and the problems with `line` and `message`.
 void to_json(nlohmann::json& j, const ConfigFileView& view);
+void to_json(nlohmann::json& j, const ConfigFileViewRow& row);
+void to_json(nlohmann::json& j, const ConfigFileProblem& problem);
 
 /// @brief Whether @p index is in a safety area, 0x2600-0x26FF or 0x6600-0x67EF.
 ///

@@ -595,33 +595,32 @@ ConfigFileView describeConfigFile(
   return view;
 }
 
+void to_json(nlohmann::json& j, const ConfigFileProblem& problem) {
+  j = nlohmann::json{{"line", problem.line}, {"message", problem.message}};
+}
+
+void to_json(nlohmann::json& j, const ConfigFileViewRow& row) {
+  j = nlohmann::json{
+      {"line", row.line},
+      {"index", row.index},
+      {"subindex", row.subindex},
+      {"name", row.name},
+      {"value", row.value},
+      {"outcome", toString(row.outcome)},
+      {"live", row.live ? std::visit([](const auto& v) -> nlohmann::json { return v; }, *row.live)
+                        : nlohmann::json()},
+      {"differs", row.differs}};
+}
+
 void to_json(nlohmann::json& j, const ConfigFileView& view) {
-  auto rows = nlohmann::json::array();
-  for (const auto& row : view.rows) {
-    rows.push_back(
-        {{"line", row.line},
-         {"index", row.index},
-         {"subindex", row.subindex},
-         {"name", row.name},
-         {"value", row.value},
-         {"outcome", toString(row.outcome)},
-         {"live", row.live
-                      ? std::visit([](const auto& v) -> nlohmann::json { return v; }, *row.live)
-                      : nlohmann::json()},
-         {"differs", row.differs}});
-  }
-  auto problems = nlohmann::json::array();
-  for (const auto& problem : view.problems) {
-    problems.push_back({{"line", problem.line}, {"message", problem.message}});
-  }
   const auto optional = [](const std::optional<std::string>& text) {
     return text ? nlohmann::json(*text) : nlohmann::json();
   };
   j = nlohmann::json{{"format", view.format},
                      {"deviceName", optional(view.deviceName)},
                      {"firmwareVersion", optional(view.firmwareVersion)},
-                     {"rows", rows},
-                     {"problems", problems}};
+                     {"rows", view.rows},
+                     {"problems", view.problems}};
 }
 
 bool isSafetyConfigIndex(uint16_t index) {

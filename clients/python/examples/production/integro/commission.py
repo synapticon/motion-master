@@ -66,8 +66,8 @@ def read_hardware_description(s):
 
     for line in lines:
         log.info(line)
-    s.drive_name = hd["device"]["name"]
-    s.drive_id = f"{hd['device']['buildDescriptor']}_{hd['device']['serialNumber']}"
+    device = hd["device"]
+    s.identify(device["name"], f"{device['buildDescriptor']}_{device['serialNumber']}")
     s.add("hardware description", lines)
 
 

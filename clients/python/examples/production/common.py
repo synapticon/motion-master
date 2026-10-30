@@ -3,7 +3,8 @@
 A production script runs its steps in order on one drive. Every question, every answer and every
 result goes to a log file. The record is a plain text file for the drive, written at the end, and
 also when a step fails, with what the script has so far. Both go to the logs/ directory beside
-the script, which git ignores.
+the script, which git ignores, and both have the same name: the build descriptor and the serial
+number of the drive, and the start time.
 """
 
 import logging
@@ -31,13 +32,20 @@ class Session:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.started = datetime.now()
         self.stamp = self.started.strftime("%Y%m%d-%H%M%S")
-        self.log_path = self.directory / f"production-{self.stamp}.log"
         self.drive_name = None
         self.drive_id = None
         self.sections = []
+        self.log_path = self._path(".log")
         self._setup_logging()
         self.client = MotionMasterClient.from_config()
         log.info("log file %s", self.log_path)
+
+    def _path(self, suffix):
+        # Before the hardware description is read, the position on the bus stands in for the
+        # build descriptor and the serial number.
+        drive_id = self.drive_id or f"device-{self.slave}"
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", drive_id)
+        return self.directory / f"{safe}-{self.stamp}{suffix}"
 
     def _setup_logging(self):
         # The console gets the message only. The file gets the time too, so that a support log
@@ -46,10 +54,30 @@ class Session:
         root.setLevel(logging.INFO)
         console = logging.StreamHandler()
         console.setFormatter(logging.Formatter("%(message)s"))
-        file = logging.FileHandler(self.log_path, encoding="utf-8")
-        file.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
         root.addHandler(console)
-        root.addHandler(file)
+        self._open_log_file()
+
+    def _open_log_file(self):
+        self._log_file = logging.FileHandler(self.log_path, encoding="utf-8")
+        self._log_file.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+        logging.getLogger().addHandler(self._log_file)
+
+    def identify(self, name, drive_id):
+        """Name the drive, and rename the log file to match the record.
+
+        `drive_id` is the build descriptor and the serial number. The full name is too long for a
+        file name, so it goes into the record only.
+        """
+        self.drive_name = name
+        self.drive_id = drive_id
+        path = self._path(".log")
+        if path == self.log_path:
+            return
+        logging.getLogger().removeHandler(self._log_file)
+        self._log_file.close()
+        self.log_path = self.log_path.rename(path)
+        self._open_log_file()
+        log.info("log file renamed to %s", self.log_path)
 
     def connect(self):
         """Open the fieldbus driver, scan, and move the drive to PRE-OP, before the first step.
@@ -91,18 +119,11 @@ class Session:
         self.sections.append((title, list(lines)))
 
     def write_record(self, outcome):
-        """Write the record of the drive, named after the drive and the start time.
-
-        The file name is the build descriptor and the serial number of the drive, because its full
-        name is too long for a file name. Before the hardware description is read, the position
-        on the bus stands in for them.
-        """
-        drive_id = self.drive_id or f"device-{self.slave}"
-        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", drive_id)
-        path = self.directory / f"{safe}-{self.stamp}.txt"
+        """Write the record of the drive, with the name of the log file and the suffix .txt."""
+        path = self._path(".txt")
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"drive: {self.drive_name or 'unknown'}\n")
-            f.write(f"build descriptor and serial number: {drive_id}\n")
+            f.write(f"build descriptor and serial number: {self.drive_id or 'unknown'}\n")
             f.write(f"started: {self.started.isoformat(timespec='seconds')}\n")
             f.write(f"outcome: {outcome}\n")
             for title, lines in self.sections:

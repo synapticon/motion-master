@@ -49,12 +49,14 @@ The files go to `logs/` beside the script, for example
 
 | File | Content |
 | --- | --- |
-| `production-<time>.log` | Every message of the script with its time: each question, each answer and each result. |
+| `<build descriptor>_<serial number>-<time>.log` | The log. Every message of the script with its time: each question, each answer and each result. |
 | `<build descriptor>_<serial number>-<time>.txt` | The record of the drive. |
 
-`<time>` is the start time of the script, as `YYYYMMDD-HHMMSS`. The build descriptor and the
-serial number come from the hardware description of the drive. When the script stops before it
-reads them, the record is named `device-<slave>-<time>.txt`.
+The two files of one run have the same name, so they sort together. `<time>` is the start time of
+the script, as `YYYYMMDD-HHMMSS`. The build descriptor and the serial number come from the
+hardware description of the drive. Until the script reads them, the log is named
+`device-<slave>-<time>.log`. The script renames it as soon as step 1 reads them. When the
+script stops before that, both files keep the name `device-<slave>-<time>`.
 
 The script writes the record also when a step fails, with the results it has so far. The first
 lines of the record give the drive name, the start time and the outcome.

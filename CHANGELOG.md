@@ -28,7 +28,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+<<<<<<< HEAD
 - **A capture works after the server binary is replaced, and a request that fails inside the server gets an answer.** The capture route found the capture program through the server's own binary on each request, which fails once a rebuild or an upgrade replaces the binary under a running server. The path is now found at startup. That failure also left every later capture refused as running until a restart; the flag is now cleared on every way out. And an exception inside any route went unanswered and unlogged, so the client waited for a timeout; it is now a 500 with the message and an error line in the log. (#176)
+=======
+- **A route that takes a list of devices answers 404 for an unknown position.** `GET` and `POST /api/devices/state`, `GET /api/devices/diagnostics`, `GET /api/dc-sync` and `POST /api/devices/restart` answered 500, which a client takes for a failure of the bus. They now answer 404 with the position, as the routes for one device do. (#178)
+>>>>>>> origin/main
 - **A VISIBLE_STRING value ends at its first NUL.** A SOMANET drive writes a shorter string and its NUL over a longer one and keeps the old bytes after the NUL, so `0x2E00:06` read back as `0` followed by the rest of an old text. A read now returns `0`.
 
 ## [6.0.0-alpha.119] - 2026-10-30

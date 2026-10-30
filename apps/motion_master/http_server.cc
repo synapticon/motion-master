@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <ctime>
 #include <expected>
+#include <format>
 #include <iterator>
 #include <map>
 #include <nlohmann/json.hpp>
@@ -153,6 +154,19 @@ std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::
     positions.push_back(position);
   }
   return positions;
+}
+
+// A 404 for the first listed position that names no device, as the routes for one device answer.
+// No position means every device, so there is nothing to check.
+std::optional<mm::api::Response> unknownPosition(mm::node::DeviceManager& deviceManager,
+                                                 const std::vector<uint16_t>& positions) {
+  const auto unknown = std::ranges::find_if(positions, [&deviceManager](uint16_t position) {
+    return !deviceManager.hasDevice(position);
+  });
+  if (unknown == positions.end()) {
+    return std::nullopt;
+  }
+  return mm::api::notFound(std::format("no device at bus position {}", *unknown));
 }
 
 // setCorsOrigin remains for the two framework-level responses that are not Router routes: the
@@ -518,6 +532,9 @@ void HttpServer::run() {
     if (!positions) {
       return mm::api::badRequest(positions.error());
     }
+    if (auto unknown = unknownPosition(deviceManager_, *positions); unknown) {
+      return *unknown;
+    }
     return mm::api::timed([this, &positions] { return deviceManager_.deviceStates(*positions); });
   });
 
@@ -694,6 +711,9 @@ void HttpServer::run() {
     if (!positions) {
       return mm::api::badRequest(positions.error());
     }
+    if (auto unknown = unknownPosition(deviceManager_, *positions); unknown) {
+      return *unknown;
+    }
     return mm::api::timed(
         [this, &positions] { return deviceManager_.deviceDiagnostics(*positions); });
   });
@@ -705,6 +725,9 @@ void HttpServer::run() {
     auto positions = parsePositions(req);
     if (!positions) {
       return mm::api::badRequest(positions.error());
+    }
+    if (auto unknown = unknownPosition(deviceManager_, *positions); unknown) {
+      return *unknown;
     }
     return mm::api::timed([this, &positions] { return deviceManager_.dcSync(*positions); });
   });
@@ -2099,6 +2122,9 @@ void HttpServer::run() {
       }
       positions = body["positions"].get<std::vector<uint16_t>>();
     }
+    if (auto unknown = unknownPosition(deviceManager_, positions); unknown) {
+      return *unknown;
+    }
     int timeoutMs = 5000;
     if (body.contains("timeout")) {
       if (!body["timeout"].is_number_integer()) {
@@ -2160,6 +2186,9 @@ void HttpServer::run() {
         return mm::api::badRequest("'positions' must be an array of bus positions");
       }
       positions = body["positions"].get<std::vector<uint16_t>>();
+    }
+    if (auto unknown = unknownPosition(deviceManager_, positions); unknown) {
+      return *unknown;
     }
     int timeoutMs = 5000;
     if (body.contains("timeout")) {

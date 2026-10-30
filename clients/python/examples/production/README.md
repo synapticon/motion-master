@@ -9,7 +9,7 @@ Each kind of drive has its own script:
 | Script | Drive |
 | --- | --- |
 | `integro/commission.py` | Integro |
-| `c021/commission.py` | C021, a board that runs the Jasper firmware |
+| `c021/commission.py` | C021, a Jasper-based board |
 
 A script belongs to a board, not to a firmware, because one firmware runs on several boards. The
 C021 script runs the steps up to the assigned name. Its other steps follow when a C021 is at hand

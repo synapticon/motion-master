@@ -1411,8 +1411,9 @@ paths:
         Unlike the raw `GET …/sdo/{index}/{subindex}` endpoint, this is PDO-aware.
         With `source=auto` (the default) the value is taken from the live process
         image when the device is exchanging and the object is PDO-mapped, otherwise
-        via an SDO upload, otherwise from the cache. With `source=cache` the cached
-        value is served with no bus access at all.
+        via an SDO upload. A device with no mailbox, in INIT or BOOT, answers no read, so
+        `auto` answers 409 there rather than a cached value that looks live. With
+        `source=cache` the cached value is served with no bus access at all.
 
         Both `index` and `subindex` accept decimal or hexadecimal notation; prefix
         with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
@@ -1451,8 +1452,8 @@ paths:
             enum: [auto, cache]
             default: auto
           description: >-
-            `auto` (default) reads PDO-when-exchanging else SDO else cache;
-            `cache` returns the cached value with no bus access.
+            `auto` (default) reads PDO-when-exchanging else SDO, and answers 409 for a
+            device with no mailbox; `cache` returns the cached value with no bus access.
       responses:
         "200":
           description: The parameter (value plus metadata)
@@ -1469,6 +1470,10 @@ paths:
           description: >-
             No device at the given bus position, or the device has no parameter at that
             index and subindex
+        "409":
+          description: >-
+            `source=auto` for a device with no mailbox, in INIT or BOOT. The message names
+            the state; `source=cache` serves the last value read.
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
     put:

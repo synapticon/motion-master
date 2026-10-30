@@ -293,6 +293,7 @@ struct ParameterError {
     kUnknownParameter,  ///< The device has no parameter at that index and subindex. → 404
     kInvalidValue,      ///< The value cannot be encoded in the parameter's data type. → 400
     kTransferFailed,    ///< The read or the write over the bus failed. → 500
+    kNoMailbox,         ///< A fresh read of a device with no mailbox, in INIT or BOOT. → 409
   };
 
   Kind kind = Kind::kTransferFailed;

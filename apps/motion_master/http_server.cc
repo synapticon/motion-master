@@ -187,6 +187,8 @@ constexpr std::string_view parameterErrorStatus(const mm::node::ParameterError& 
       return "400 Bad Request";
     case mm::node::ParameterError::Kind::kTransferFailed:
       return "500 Internal Server Error";
+    case mm::node::ParameterError::Kind::kNoMailbox:
+      return "409 Conflict";
   }
   return "500 Internal Server Error";
 }

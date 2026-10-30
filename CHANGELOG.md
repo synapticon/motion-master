@@ -28,6 +28,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+- **A parameter read of a device with no mailbox answers 409, not a cached value that looks live.** `GET /api/devices/{slavePosition}/parameters/{index}/{subindex}` in INIT or BOOT served the last value read with 200 and `syncState: synced`, so a client could not tell it from a live read; in BOOT that can be the version of a firmware that no longer runs. It now answers 409 and names the state. `source=cache` still serves the cached value. (#177)
 - **A VISIBLE_STRING value ends at its first NUL.** A SOMANET drive writes a shorter string and its NUL over a longer one and keeps the old bytes after the NUL, so `0x2E00:06` read back as `0` followed by the rest of an old text. A read now returns `0`.
 
 ## [6.0.0-alpha.119] - 2026-10-30

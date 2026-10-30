@@ -16,12 +16,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from common import (  # noqa: E402
     Session,
     connect,
+    detect_offset,
     install_firmware,
     load_configuration,
     read_hardware_description,
     set_assigned_name,
 )
-from motion_master_client import PRE_OP, run  # noqa: E402
+from motion_master_client import OP, PRE_OP, run  # noqa: E402
+
+# The rotating method, which needs no tuning and holds the load.
+OFFSET_DETECTION_METHOD = 0
 
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
 CONFIG_FILE = Path(__file__).resolve().parent / "config.csv"
@@ -38,6 +42,8 @@ def main():
         install_firmware(s)
         load_configuration(s, CONFIG_FILE)
         set_assigned_name(s)
+        connect(s, OP)
+        detect_offset(s, OFFSET_DETECTION_METHOD)
 
 
 if __name__ == "__main__":

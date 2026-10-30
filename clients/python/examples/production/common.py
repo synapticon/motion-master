@@ -105,6 +105,7 @@ class Session:
         self.drive_id = None
         self.sections = []
         self.appendices = []
+        self._steps = 0
         self.log_path = self._path(".log")
         self._setup_logging()
         self.client = MotionMasterClient.from_config()
@@ -187,9 +188,12 @@ class Session:
         """Return whether the drive runs its firmware, which is so in PRE-OP, SAFE-OP and OP."""
         return self.al_state() in (PRE_OP, SAFE_OP, OP)
 
-    def heading(self, number, title):
-        """Show and log the start of a step."""
-        heading(f"{number} · {title[0].upper()}{title[1:]}")
+    def heading(self, title):
+        """Show and log the start of a step, numbered in the order the steps run. Returns the
+        number."""
+        self._steps += 1
+        heading(f"{self._steps} · {title[0].upper()}{title[1:]}")
+        return self._steps
 
     def _file_only(self, message):
         # A question and its answer are on the console already, as the prompt and what was typed.
@@ -369,7 +373,7 @@ def read_hardware_description_file(s):
 
 def read_hardware_description(s):
     """Step 1: read the hardware description and the firmware version."""
-    s.heading(1, "hardware description")
+    s.heading("hardware description")
     hd = read_hardware_description_file(s)
     lines = product_lines("device", hd["device"])
     if hd.get("assembly"):
@@ -390,7 +394,7 @@ def install_firmware(s):
     after a second confirmation, because the installation writes whatever it gets. A drive with no
     running firmware cannot skip the step, because every later step needs the firmware.
     """
-    s.heading(2, "firmware")
+    s.heading("firmware")
     descriptors = s.client.call(
         "getDeviceFirmwareDescriptors", path={"slavePosition": s.slave}
     ).json()
@@ -489,7 +493,7 @@ def load_configuration(s, path):
     drive load it, puts each loaded output value into the process image, and reads every loaded
     object back. The drive must be in Switch On Disabled or Fault, or the server refuses the load.
     """
-    s.heading(3, "configuration")
+    s.heading("configuration")
     if not path.exists():
         say("no configuration file at %s", path, style="warning")
         answer = s.ask("skip the step or exit?", {"s": "skip the step", "x": "exit"})
@@ -548,7 +552,7 @@ def set_assigned_name(s):
     An empty answer keeps the current name and skips the step. The server refuses a name longer
     than the object holds.
     """
-    s.heading(4, "assigned name")
+    s.heading("assigned name")
     path = {"slavePosition": s.slave, "index": 0x20F2, "subindex": 0}
     before = s.client.call("readParameter", path=path).json()["value"]
     log.info("assigned name now: %r", before)
@@ -566,3 +570,51 @@ def set_assigned_name(s):
     if after != name:
         raise ProcedureError(f"the drive holds {after!r} after the write of {name!r}")
     s.add("assigned name", [f"before: {before}", f"after: {after}", store_parameters(s)])
+
+
+def read_object(s, index, subindex):
+    """Return the value of one object of the drive."""
+    path = {"slavePosition": s.slave, "index": index, "subindex": subindex}
+    return s.client.call("readParameter", path=path).json()["value"]
+
+
+def write_object(s, index, subindex, value):
+    """Write one object of the drive, and raise ProcedureError with the server's reason on a
+    refusal."""
+    path = {"slavePosition": s.slave, "index": index, "subindex": subindex}
+    r = s.client.call("writeParameter", path=path, body={"value": value}, check=False)
+    if not r.ok:
+        reason = r.json().get("error", r.text) if r.content else r.reason
+        raise ProcedureError(f"writing 0x{index:04X}:{subindex:02X} failed: {reason}")
+
+
+def detect_offset(s, method):
+    """Detect the commutation offset with the offset-detection procedure.
+
+    The procedure turns the rotor and releases the brake. It needs the drive in OP, so connect to
+    OP before this step. The drive takes the method from 0x2009:03, which this step sets first.
+    Each measurement shows as a step of the procedure. The offset is read back from 0x2001 and the
+    phase order from 0x2003:05.
+    """
+    number = s.heading("commutation offset")
+    before = read_object(s, 0x2009, 3)
+    if before != method:
+        write_object(s, 0x2009, 3, method)
+    say("offset detection method, 0x2009:03: %s (was %s)", method, before)
+
+    snapshot = run_procedure(s, "offset-detection")
+    offset = read_object(s, 0x2001, 0)
+    inverted = read_object(s, 0x2003, 5)
+    say("commutation offset, 0x2001: %s", offset, style="ok")
+    say("motor phases inverted, 0x2003:05: %s", inverted)
+
+    lines = [f"method, 0x2009:03: {method} (was {before})"]
+    for step in snapshot["steps"]:
+        if "value" in step and step["value"] is not None:
+            lines.append(f"{step['id']}: {json.dumps(step['value'], ensure_ascii=False)}")
+    lines += [
+        f"commutation offset, 0x2001: {offset}",
+        f"motor phases inverted, 0x2003:05: {inverted}",
+        store_parameters(s),
+    ]
+    s.add(f"commutation offset, step {number}", lines)

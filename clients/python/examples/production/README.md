@@ -26,8 +26,8 @@ results. It decides nothing that the server decides. Each step is also available
 
 | File | Content |
 | --- | --- |
-| `packages/*.zip` | Firmware packages, for every kind of drive. Step 2 lists them. |
-| `<drive>/config.csv` | The configuration of one kind of drive, for example `integro/config.csv`. Step 3 loads it. |
+| `packages/*.zip` | Firmware packages, for every kind of drive. The firmware step lists them. |
+| `<drive>/config.csv` | The configuration of one kind of drive, for example `integro/config.csv`. The configuration step loads it. |
 
 Git ignores both, so each production line puts its own files there. The script reads nothing
 from the directory it runs in.
@@ -61,18 +61,19 @@ The files go to `logs/` beside the script, for example
 | `<build descriptor>_<serial number>-<time>.log` | The log. Every message of the script with its time: each question, each answer and each result. |
 | `<build descriptor>_<serial number>-<time>.txt` | The record of the drive. |
 
-The two files of one run have the same name, so they sort together. `<time>` is the start time of
-the script, as `YYYYMMDD-HHMMSS`. The build descriptor and the serial number come from the
+The two files of one run have the same name, so they sort together. `<time>` is the start time
+of the script, as `YYYYMMDD-HHMMSS`. The build descriptor and the serial number come from the
 hardware description of the drive. Until the script reads them, the log is named
-`device-<slave>-<time>.log`. The script renames it as soon as step 1 reads them. When the
-script stops before that, both files keep the name `device-<slave>-<time>`.
+`device-<slave>-<time>.log`. The script renames it as soon as the hardware description step
+reads them. When the script stops before that, both files keep the name `device-<slave>-<time>`.
 
 The script writes the record also when a step fails, with the results it has so far. The first
 lines of the record give the drive name, the start time and the outcome.
 
 ## Steps
 
-Each step is described once. The table shows which script runs it.
+Each step is described once. The table shows which script runs it, in the order it runs them. The
+console numbers the steps in the order they run, so the numbers of two scripts can differ.
 
 **After each step that changes values in the object dictionary of the drive, the script stores
 the parameters to flash** with the `store-parameters` procedure. A later step that fails then
@@ -80,16 +81,18 @@ leaves the drive with what the steps before it did, also after a power cycle. Th
 every value it holds into its `config.csv`, so the stored file is what the drive runs. Its
 comments carry the firmware version of the drive.
 
-Step 3 stores nothing, because it writes `config.csv` to the flash itself, and the drive loads it
-from there.
+The configuration step stores nothing, because it writes `config.csv` to the flash itself, and
+the drive loads it from there.
 
 | Step | Integro |
 | --- | --- |
 | Connect | Yes |
-| 1. Hardware description | Yes |
-| 2. Firmware | Yes |
-| 3. Configuration | Yes |
-| 4. Assigned name | Yes |
+| Hardware description | Yes |
+| Firmware | Yes |
+| Configuration | Yes |
+| Assigned name | Yes |
+| Connect in OP | Yes |
+| Commutation offset | Yes |
 
 The other steps follow one at a time.
 
@@ -103,10 +106,10 @@ A step that needs another AL state, such as OP for a step that turns the motor, 
 with that state. A drive that reaches PRE-OP but not that state stops the script.
 
 A drive with no running firmware does not reach PRE-OP. The script logs why, and moves the drive
-to BOOT instead. In BOOT, the bootloader of the drive serves the files that step 1 reads, and
-the firmware installation writes the firmware there.
+to BOOT instead. In BOOT, the bootloader of the drive serves the files that the hardware
+description step reads, and the firmware installation writes the firmware there.
 
-### 1. Hardware description
+### Hardware description
 
 The script reads the `.hardware_description` file of the drive over FoE (File access over
 EtherCAT), and the firmware version from object 0x100A. It shows the device and the assembly,
@@ -120,7 +123,7 @@ After a power cycle, an Integro refuses FoE reads for about 2.5 s after it reach
 0.5 s for up to 10 s, and logs each refusal. After 10 s, the step fails with the message of the
 server.
 
-### 2. Firmware
+### Firmware
 
 The script shows the descriptors that the drive accepts, for example `9010-05-2423-1`. A package
 fits the drive when its file name carries one of them. Then the script lists the packages in
@@ -138,7 +141,7 @@ no process data during the installation. The script shows each step of the proce
 the firmware version again. The record gets the version before, the package, the verdict of the
 server and the version after.
 
-### 3. Configuration
+### Configuration
 
 The script shows the `config.csv` beside it: its size, its number of rows and its comments. The
 drive writes its name and its firmware version into those comments when it saves the file. The
@@ -159,12 +162,36 @@ object whose value read back differs from the file. The drive loads `.assembly_c
 `config.csv`, so a value of the assembly can win over the file. The whole file goes to the end
 of the record.
 
-### 4. Assigned name
+### Assigned name
 
 The script shows the assigned name of the drive, object 0x20F2, and asks for a new one. An empty
 answer keeps the name and skips the step. The script writes the name, reads it back, and stops
 when the drive holds something else. Then it stores the parameters to flash. The record gets the
 name before and after.
 
-Step 3 sets the assigned name too, when `config.csv` has a row for 0x20F2. Step 4 comes after it,
-so the name the user types wins.
+The configuration step sets the assigned name too, when `config.csv` has a row for 0x20F2. The
+assigned name step comes after it, so the name the user types wins.
+
+### Connect in OP
+
+The steps from the commutation offset on turn the motor, and the drive turns it only while it
+exchanges process data. So the script connects again, now in OP, before the first of them. A drive
+that does not reach OP stops the script.
+
+### Commutation offset
+
+**This step turns the motor.** The shaft must be free, and whatever it drives must be safe to
+move.
+
+The script sets the method of the offset detection, object 0x2009:03, to the method its drive
+script names, and runs the `offset-detection` procedure. The procedure detects an open phase,
+measures the phase resistance and the phase inductance, counts the pole pairs, detects the phase
+order of the motor, and measures the commutation offset. The script shows each of these as it
+ends.
+
+Then the script reads the commutation offset from 0x2001 and the phase order from 0x2003:05, and
+stores the parameters to flash. The record gets the method, every measurement, the offset and the
+phase order.
+
+The Integro script uses method 0, which turns the rotor by up to one pole pair, needs no tuning,
+and holds the load.

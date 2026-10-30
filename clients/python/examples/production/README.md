@@ -97,6 +97,7 @@ the drive loads it from there.
 | Plant model | Yes |
 | Velocity controller tuning | Yes |
 | Position controller tuning | Yes |
+| Integral limits | Yes |
 
 The other steps follow one at a time.
 
@@ -239,3 +240,13 @@ it stores the parameters to flash. The record gets the settings and every gain b
 The Integro script uses full tuning for both controllers, which lets the auto-tuning program choose
 the targets, and the controller type PI-P for the position controller. The drive uses the new gains
 on its next control cycle.
+
+### Integral limits
+
+The script runs the `set-integral-limits` procedure. The server computes the three integral limits
+of the controllers from the maxima of the drive: the maximum torque, the rated torque, the maximum
+motor speed, the feed constant, the gear ratio and the controller type. It writes them to 0x2011:04,
+0x2012:04 and 0x2012:08. The step does not turn the motor.
+
+The script shows each limit before and after, and names a limit object the drive does not have.
+Then it stores the parameters to flash. The record gets every limit before and after.

@@ -21,6 +21,7 @@ from common import (  # noqa: E402
     load_configuration,
     read_hardware_description,
     set_assigned_name,
+    set_integral_limits,
     tune_controller,
     transition_to_state,
     identify_plant,
@@ -65,6 +66,7 @@ def main():
         identify_plant(s, PLANT_IDENTIFICATION_CHIRP)
         tune_controller(s, "velocity", VELOCITY_TUNING)
         tune_controller(s, "position", POSITION_TUNING)
+        set_integral_limits(s)
 
 
 if __name__ == "__main__":

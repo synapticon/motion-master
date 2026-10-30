@@ -719,3 +719,22 @@ def tune_controller(s, controller, settings):
         lines.append(f"warning: {write['warning']}")
     lines.append(store_parameters(s))
     s.add(f"{controller} controller tuning", lines)
+
+
+def set_integral_limits(s):
+    """Set the integral limits of the controllers with the set-integral-limits procedure.
+
+    The server computes the three limits from the maxima of the drive, writes 0x2011:04,
+    0x2012:04 and 0x2012:08, and reports each value before and after. The step shows them, names
+    a limit object the drive does not have, and stores the parameters to flash.
+    """
+    s.heading("integral limits")
+    snapshot = run_procedure(s, "set-integral-limits")
+    write = step_value(snapshot, "write") or {}
+    limits = write.get("limits", [])
+    lines = [f"{limit['object']}: {limit['before']} -> {limit['after']}" for limit in limits]
+    lines += [f"skipped, the drive has no {name}" for name in write.get("skipped", [])]
+    for line in lines:
+        say(line, style="ok")
+    lines.append(store_parameters(s))
+    s.add("integral limits", lines)

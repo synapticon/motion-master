@@ -22,20 +22,25 @@ results. It decides nothing that the server decides. Each step is also available
 2. Start the Motion Master server.
 3. Connect the drive to the bus adapter that `config.toml` names.
 
+## Files the script reads
+
+| File | Content |
+| --- | --- |
+| `packages/*.zip` | Firmware packages, for every kind of drive. Step 2 lists them. |
+
+Git ignores `packages/`, so each production line puts its own packages there. The script reads
+nothing from the directory it runs in.
+
 ## Run
 
-Run the script in the directory that holds the files for the drive. The script writes its log
-and its record into `logs/` beside the script, whatever directory it runs in.
-
 ```bash
-cd <directory for the drive>
-python <path to motion-master>/clients/python/examples/production/integro/commission.py
+python clients/python/examples/production/integro/commission.py
 ```
 
 `--slave` gives the position of the drive on the bus. The default is 1.
 
 ```bash
-python commission.py --slave 2
+python clients/python/examples/production/integro/commission.py --slave 2
 ```
 
 **The running server is shared.** The script opens the fieldbus driver, scans, and moves the
@@ -69,6 +74,7 @@ Each step is described once. The table shows which script runs it.
 | --- | --- |
 | Connect | Yes |
 | 1. Hardware description | Yes |
+| 2. Firmware | Yes |
 
 The other steps follow one at a time.
 
@@ -95,3 +101,21 @@ After a power cycle, an Integro refuses FoE reads for about 2.5 s after it reach
 ([#175](https://github.com/synapticon/motion-master/issues/175)). The script asks again every
 0.5 s for up to 10 s, and logs each refusal. After 10 s, the step fails with the message of the
 server.
+
+### 2. Firmware
+
+The script shows the descriptors that the drive accepts, for example `9010-05-2423-1`. A package
+fits the drive when its file name carries one of them. Then the script lists the packages in
+`packages/`, and the server says for each one whether it fits the drive.
+
+The user types the number of a package, `s` to skip the step, or `x` to exit. A drive with no
+running firmware cannot skip the step, because every later step needs the firmware. A package
+that does not fit is installed only after a second confirmation, because the installation writes
+whatever it gets.
+
+The script uploads the package to the user cache of the server, and runs the
+`firmware-installation` procedure with the final state PRE-OP. The procedure moves the drive to
+BOOT, writes the firmware files over FoE, and moves the drive back to PRE-OP. The drive exchanges
+no process data during the installation. The script shows each step of the procedure, then reads
+the firmware version again. The record gets the version before, the package, the verdict of the
+server and the version after.

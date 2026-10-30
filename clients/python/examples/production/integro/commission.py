@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Commission an Integro drive, step by step, and keep a record of what was done.
 
-Run it in the directory that holds the firmware package and the configuration file. The log and
-the record go to logs/ beside this script.
+Firmware packages come from production/packages/. The log and the record go to logs/ beside
+this script. See production/README.md for the steps.
 
     python commission.py
     python commission.py --slave 2
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common import Session, connect, read_hardware_description  # noqa: E402
+from common import Session, connect, install_firmware, read_hardware_description  # noqa: E402
 from motion_master_client import run  # noqa: E402
 
 
@@ -25,6 +25,7 @@ def main():
     with Session(args.slave, Path(__file__).resolve().parent / "logs") as s:
         connect(s)
         read_hardware_description(s)
+        install_firmware(s)
 
 
 if __name__ == "__main__":

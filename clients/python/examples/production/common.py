@@ -23,13 +23,20 @@ from motion_master_client import (  # noqa: E402
     SAFE_OP,
     STATE_NAMES,
     MotionMasterClient,
+    ProcedureError,
     StateError,
     error_line,
+    format_step,
+    step_changes,
 )
 
 log = logging.getLogger("production")
 
 HARDWARE_DESCRIPTION_WAIT_S = 10
+
+# Firmware packages for every production script. The compatibility check of the server tells
+# which of them fit a drive.
+PACKAGES = Path(__file__).resolve().parent / "packages"
 
 
 class Exit(Exception):
@@ -135,13 +142,14 @@ class Session:
         log.info("")
         log.info("== step %d: %s ==", number, title)
 
-    def ask(self, question, choices):
+    def ask(self, question, choices, listed=None):
         """Ask until the answer is one of `choices`, and log the question and the answer.
 
         `choices` maps each answer the user types to what it means, and the prompt lists them.
-        End of input counts as an exit.
+        `listed` replaces that list in the prompt, for choices already shown above it. End of
+        input counts as an exit.
         """
-        listed = ", ".join(f"{key} = {meaning}" for key, meaning in choices.items())
+        listed = listed or ", ".join(f"{key} = {meaning}" for key, meaning in choices.items())
         log.info("question: %s (%s)", question, listed)
         while True:
             try:
@@ -196,6 +204,36 @@ def connect(s):
     log.info("the drive is in %s", STATE_NAMES[s.al_state()])
 
 
+def run_procedure(s, name, params=None):
+    """Run a procedure to its end, show and log each step, and return the last snapshot.
+
+    Raises ProcedureError when the server refuses the start, or when the run does not succeed.
+    """
+    snapshot = None
+    changes = step_changes(s.client.run_procedure(s.slave, name, params))
+    try:
+        for snapshot, changed in changes:
+            for step in changed:
+                log.info(format_step(step))
+    finally:
+        # Closing the generator cancels a run that is still in progress, for example on Ctrl-C.
+        changes.close()
+    if snapshot["status"] != "succeeded":
+        reason = f": {snapshot['error']}" if snapshot.get("error") else ""
+        raise ProcedureError(f"{name} {snapshot['status']}{reason}")
+    return snapshot
+
+
+def firmware_version(s):
+    """Return the firmware version from 0x100A, or say that no firmware runs."""
+    # Outside PRE-OP, SAFE-OP and OP the server answers 0x100A from its cache, and the answer does
+    # not say so (#177). The version of a firmware that does not run is not recorded.
+    if not s.firmware_running():
+        return f"not running (drive in {STATE_NAMES[s.al_state()]})"
+    path = {"slavePosition": s.slave, "index": 0x100A, "subindex": 0}
+    return s.client.call("readParameter", path=path).json()["value"]
+
+
 def product_lines(title, part):
     """Return the lines that describe one part of a hardware description."""
     lines = [
@@ -232,18 +270,88 @@ def read_hardware_description(s):
     lines = product_lines("device", hd["device"])
     if hd.get("assembly"):
         lines += product_lines("assembly", hd["assembly"])
-    # Outside PRE-OP, SAFE-OP and OP the server answers 0x100A from its cache, and the answer does
-    # not say so (#177). The version of a firmware that does not run is not recorded.
-    if s.firmware_running():
-        firmware = s.client.call(
-            "readParameter", path={"slavePosition": s.slave, "index": 0x100A, "subindex": 0}
-        ).json()["value"]
-    else:
-        firmware = f"not running (drive in {STATE_NAMES[s.al_state()]})"
-    lines.append(f"firmware version: {firmware}")
+    lines.append(f"firmware version: {firmware_version(s)}")
 
     for line in lines:
         log.info(line)
     device = hd["device"]
     s.identify(device["name"], f"{device['buildDescriptor']}_{device['serialNumber']}")
     s.add("hardware description", lines)
+
+
+def install_firmware(s):
+    """Step 2: install a firmware package from the packages directory, or skip the step.
+
+    The server says which package fits the drive. A package that does not fit is installed only
+    after a second confirmation, because the installation writes whatever it gets. A drive with no
+    running firmware cannot skip the step, because every later step needs the firmware.
+    """
+    s.heading(2, "firmware")
+    descriptors = s.client.call(
+        "getDeviceFirmwareDescriptors", path={"slavePosition": s.slave}
+    ).json()
+    accepted = " or ".join(filter(None, [descriptors["device"], descriptors.get("assembly")]))
+    log.info("the drive accepts packages built for %s", accepted)
+    before = firmware_version(s)
+    log.info("firmware version now: %s", before)
+
+    packages = sorted(PACKAGES.glob("*.zip"))
+    verdicts = []
+    for i, package in enumerate(packages, start=1):
+        r = s.client.call(
+            "checkDeviceFirmwareCompatibility",
+            path={"slavePosition": s.slave},
+            query={"filename": package.name},
+            check=False,
+        )
+        verdict = r.json() if r.ok else {"compatible": False, "explanation": r.json().get("error")}
+        verdicts.append(verdict)
+        mark = "fits" if verdict["compatible"] else "DOES NOT FIT"
+        log.info("  %d. %s: %s", i, package.name, mark)
+    if not packages:
+        log.info("no firmware package in %s", PACKAGES)
+
+    choices = {str(i): package.name for i, package in enumerate(packages, start=1)}
+    if s.firmware_running():
+        choices["s"] = "skip the step"
+    choices["x"] = "exit"
+    numbers = f"1-{len(packages)} = package, " if packages else ""
+    others = ", ".join(f"{key} = {meaning}" for key, meaning in choices.items() if key in "sx")
+    answer = s.ask("install which package?", choices, listed=numbers + others)
+    if answer == "x":
+        raise Exit("the user chose to exit at the firmware step")
+    if answer == "s":
+        s.add("firmware", [f"version: {before}", "installation: skipped by the user"])
+        return
+
+    package = packages[int(answer) - 1]
+    verdict = verdicts[int(answer) - 1]
+    if not verdict["compatible"]:
+        log.info("%s", verdict["explanation"])
+        confirm = s.ask(
+            "the package does not fit the drive. install it all the same?",
+            {"y": "install", "n": "exit"},
+        )
+        if confirm == "n":
+            raise Exit("the user chose not to install a package that does not fit")
+
+    s.client.call(
+        "putUserCacheFile",
+        path={"path": f"firmwares/{package.name}"},
+        data=package.read_bytes(),
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    log.info("uploaded %s", package.name)
+    params = {"packageFilename": package.name, "finalState": PRE_OP}
+    run_procedure(s, "firmware-installation", params)
+    after = firmware_version(s)
+    log.info("firmware version after the installation: %s", after)
+    s.add(
+        "firmware",
+        [
+            f"version before: {before}",
+            f"package: {package.name}",
+            f"verdict: {verdict['explanation']}",
+            f"version after: {after}",
+        ],
+    )

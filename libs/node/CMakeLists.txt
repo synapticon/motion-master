@@ -2,6 +2,7 @@ add_library(
   node STATIC
   cia402_control.cc
   cia402_drive.cc
+  config_file.cc
   device.cc
   device_manager.cc
   device_parameter.cc

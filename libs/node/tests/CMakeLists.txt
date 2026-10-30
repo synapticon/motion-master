@@ -4,6 +4,7 @@ add_executable(
   mm_node_tests
   cia402_drive_test.cc
   cia402_test.cc
+  config_file_test.cc
   device_parameter_test.cc
   object_addresses_test.cc
   device_test.cc

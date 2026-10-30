@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **A configuration file loads into a SOMANET drive in one action.** The `config-file-load` procedure writes the file as the drive's `config.csv` and makes the drive load it through 0x1011:01. It checks every row against the object dictionary first, and lists the rows the drive will skip. It works while the drive exchanges process data, because it also puts each loaded value of an output-mapped object into the process image, so that the next cycle does not send the old value. Afterwards it reads every loaded object back and lists each value that differs from the file. The drive must be in Switch On Disabled or Fault.
+
 ## [6.0.0-alpha.119] - 2026-10-30
 
 ### Changed

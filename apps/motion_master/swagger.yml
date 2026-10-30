@@ -5705,7 +5705,12 @@ components:
             `warning`, the `compute` step a `ControllerTuningComputed`, and the `write` step a
             `ControllerTuningWrite`. For `set-integral-limits` the `compute` step holds the inputs
             it read, and the `write` step `limits`, each with `object`, `before` and `after`, and
-            `skipped`, the limit objects the drive does not have.
+            `skipped`, the limit objects the drive does not have. For `config-file-load` the
+            `validate` step holds `rows`, `loads`, `unknownObject` and `notLoadable`, each an
+            array of addresses such as `0x2001:00`, `fileFirmwareVersion` and `cia402State`; the
+            `outputs` step `written`, the addresses whose output now holds the loaded value; and
+            the `verify` step `checked`, `differing`, each with `address`, `file` and `live` or
+            `error`, and the two arrays of `validate` again.
           example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
         error:
           type: string

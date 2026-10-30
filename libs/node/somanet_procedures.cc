@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -15,6 +16,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
@@ -33,6 +35,7 @@
 #include "core/platform.h"
 #include "core/user_cache.h"
 #include "node/cia402_drive_objects.h"
+#include "node/config_file.h"
 #include "node/firmware_version.h"
 #include "node/ic_mu_bridge.h"
 #include "node/ic_mu_encoder.h"
@@ -6085,6 +6088,299 @@ std::expected<void, std::string> runIntegralLimitsProcedure(Device& device,
   }
   reporter.succeed(kIntegralLimitsWriteStep,
                    nlohmann::json{{"limits", std::move(written)}, {"skipped", std::move(skipped)}});
+  return {};
+}
+
+// --- Configuration file load ---------------------------------------------------------------------
+
+namespace {
+
+std::string configAddress(uint16_t index, uint8_t subindex) {
+  return std::format("0x{:04X}:{:02X}", index, subindex);
+}
+
+// "0x2001:00" — the index and the subindex in hexadecimal, as the step values write them.
+std::optional<std::pair<uint16_t, uint8_t>> parseConfigAddress(std::string_view text) {
+  const auto colon = text.find(':');
+  if (!text.starts_with("0x") || colon == std::string_view::npos) {
+    return std::nullopt;
+  }
+  uint16_t index = 0;
+  uint8_t subindex = 0;
+  const auto indexText = text.substr(2, colon - 2);
+  const auto subindexText = text.substr(colon + 1);
+  const auto* indexEnd = std::to_address(indexText.end());
+  const auto* subindexEnd = std::to_address(subindexText.end());
+  const auto parsedIndex = std::from_chars(std::to_address(indexText.begin()), indexEnd, index, 16);
+  const auto parsedSubindex =
+      std::from_chars(std::to_address(subindexText.begin()), subindexEnd, subindex, 16);
+  if (indexText.empty() || subindexText.empty() || parsedIndex.ec != std::errc() ||
+      parsedIndex.ptr != indexEnd || parsedSubindex.ec != std::errc() ||
+      parsedSubindex.ptr != subindexEnd) {
+    return std::nullopt;
+  }
+  return std::pair{index, subindex};
+}
+
+nlohmann::json configValueToJson(const DeviceParameterValue& value) {
+  return std::visit([](const auto& v) -> nlohmann::json { return v; }, value);
+}
+
+}  // namespace
+
+std::expected<ConfigFileLoadRequest, std::string> parseConfigFileLoadRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  ConfigFileLoadRequest request;
+  const auto file = body.find("file");
+  if (file == body.end() || !file->is_string()) {
+    return std::unexpected("'file' is required: the configuration file, base64-encoded");
+  }
+  auto bytes = mm::core::base64Decode(file->get<std::string>());
+  if (!bytes) {
+    return std::unexpected("'file' is not base64: " + bytes.error());
+  }
+  request.file.assign(bytes->begin(), bytes->end());
+
+  if (const auto strategy = body.find("strategy"); strategy != body.end() && !strategy->is_null()) {
+    if (*strategy == "replace") {
+      request.strategy = ConfigFileLoadStrategy::kReplace;
+    } else if (*strategy == "merge") {
+      request.strategy = ConfigFileLoadStrategy::kMerge;
+    } else {
+      return std::unexpected("'strategy' must be replace or merge");
+    }
+  }
+
+  if (const auto rows = body.find("rows"); rows != body.end() && !rows->is_null()) {
+    if (!rows->is_array()) {
+      return std::unexpected("'rows' must be an array of addresses such as \"0x2001:00\"");
+    }
+    for (const auto& row : *rows) {
+      const auto address =
+          row.is_string() ? parseConfigAddress(row.get<std::string>()) : std::nullopt;
+      if (!address) {
+        return std::unexpected(std::format(
+            "'rows' holds {}, which is not an address such as \"0x2001:00\"", row.dump()));
+      }
+      request.rows.push_back(*address);
+    }
+  }
+  return request;
+}
+
+std::vector<ProcedureParameter> configFileLoadParameters() {
+  return {
+      fileParameter("file", "Configuration file",
+                    "A config.csv as a drive saves it. The drive loads .factory_config, then this "
+                    "file, then .assembly_config, so an assembly value wins over the file.",
+                    nullptr),
+      enumParameter("strategy", "Strategy",
+                    "Replace makes the selected rows the drive's new config.csv. Merge keeps the "
+                    "drive's config.csv and replaces only the rows at the same addresses.",
+                    "replace",
+                    {
+                        ParameterOption{.value = "replace", .title = "Replace"},
+                        ParameterOption{.value = "merge", .title = "Merge"},
+                    }),
+      stringArrayParameter("rows", "Rows",
+                           "The rows to load, as addresses such as 0x2001:00. Empty loads every "
+                           "row of the file.",
+                           nlohmann::json::array()),
+  };
+}
+
+std::vector<ProgressStep> configFileLoadSteps() {
+  return stepsFrom({kConfigFileLoadValidateStep, kConfigFileLoadReadStep, kConfigFileLoadWriteStep,
+                    kConfigFileLoadLoadStep, kConfigFileLoadOutputsStep,
+                    kConfigFileLoadVerifyStep});
+}
+
+std::expected<void, std::string> runConfigFileLoadProcedure(Device& device,
+                                                            ProgressReporter& reporter,
+                                                            const std::stop_token& stop,
+                                                            const ConfigFileLoadRequest& request,
+                                                            RestoreDefaultParametersConfig config) {
+  const auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+
+  // ── validate ──
+  reporter.start(kConfigFileLoadValidateStep);
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return fail(kConfigFileLoadValidateStep, drive.error());
+  }
+  auto file = parseConfigFile(request.file);
+  if (!file.problems.empty()) {
+    std::string message = "the file has lines the drive would ignore or read differently:";
+    for (const auto& problem : file.problems) {
+      message += std::format(" line {}: {};", problem.line, problem.message);
+    }
+    message.pop_back();
+    return fail(kConfigFileLoadValidateStep, std::move(message));
+  }
+  if (!request.rows.empty()) {
+    for (const auto& [index, subindex] : request.rows) {
+      const bool inFile = std::ranges::any_of(file.rows, [&](const ConfigFileRow& row) {
+        return row.index == index && row.subindex == subindex;
+      });
+      if (!inFile) {
+        return fail(kConfigFileLoadValidateStep,
+                    std::format("{} is not a row of the file", configAddress(index, subindex)));
+      }
+    }
+    file = selectConfigFileRows(file, request.rows);
+  }
+  if (file.rows.empty()) {
+    return fail(kConfigFileLoadValidateStep, "the file has no row to load");
+  }
+
+  auto statusword = device.readValue(cia402::objects::kStatusword);
+  if (!statusword) {
+    return fail(kConfigFileLoadValidateStep,
+                "reading the statusword failed: " + statusword.error());
+  }
+  const auto state = cia402::decodeState(*statusword);
+  if (state != cia402::State::kSwitchOnDisabled && state != cia402::State::kFault) {
+    return fail(kConfigFileLoadValidateStep,
+                std::format("the drive is in {}; it loads a configuration only in Switch On "
+                            "Disabled or Fault, so disable it first",
+                            cia402::toString(state)));
+  }
+
+  if (device.parameter(0xF050, 0)) {
+    for (const auto& row : file.rows) {
+      if (isSafetyConfigIndex(row.index)) {
+        return fail(kConfigFileLoadValidateStep,
+                    std::format("{} is a safety object, and this drive keeps its safety "
+                                "configuration on a safety module, which has its own load path",
+                                configAddress(row.index, row.subindex)));
+      }
+    }
+  }
+
+  struct Load {
+    uint16_t index;
+    uint8_t subindex;
+    DeviceParameterValue value;
+  };
+  std::vector<Load> loads;
+  nlohmann::json unknownObjects = nlohmann::json::array();
+  nlohmann::json notLoadable = nlohmann::json::array();
+  std::string valueErrors;
+  for (const auto& row : file.rows) {
+    const auto object = device.parameter(row.index, row.subindex);
+    const auto address = configAddress(row.index, row.subindex);
+    switch (configRowOutcome(row.index, object ? &*object : nullptr)) {
+      case ConfigRowOutcome::kUnknownObject:
+        unknownObjects.push_back(address);
+        break;
+      case ConfigRowOutcome::kNotLoadable:
+        notLoadable.push_back(address);
+        break;
+      case ConfigRowOutcome::kLoads:
+        if (auto value = parseConfigFileValue(*object, row.value, file.format); value) {
+          loads.push_back({row.index, row.subindex, std::move(*value)});
+        } else {
+          valueErrors += std::format(" line {}, {}: {};", row.line, address, value.error());
+        }
+        break;
+    }
+  }
+  if (!valueErrors.empty()) {
+    valueErrors.pop_back();
+    return fail(kConfigFileLoadValidateStep,
+                "the file has values that do not fit their objects:" + valueErrors);
+  }
+  reporter.succeed(kConfigFileLoadValidateStep,
+                   nlohmann::json{{"rows", file.rows.size()},
+                                  {"loads", loads.size()},
+                                  {"unknownObject", unknownObjects},
+                                  {"notLoadable", notLoadable},
+                                  {"fileFirmwareVersion", file.firmwareVersion().value_or("")},
+                                  {"cia402State", cia402::toString(state)}});
+
+  // ── read-config-file ──
+  reporter.start(kConfigFileLoadReadStep);
+  ConfigFile toWrite = file;
+  if (request.strategy == ConfigFileLoadStrategy::kMerge) {
+    auto bytes = device.readFile(std::string(kConfigFileName));
+    if (!bytes) {
+      return fail(kConfigFileLoadReadStep,
+                  "reading the drive's config.csv failed: " + bytes.error().message);
+    }
+    const auto driveFile = parseConfigFile(std::string(bytes->begin(), bytes->end()));
+    toWrite = mergeConfigFiles(driveFile, file);
+    reporter.succeed(kConfigFileLoadReadStep, nlohmann::json{{"rows", driveFile.rows.size()}});
+  } else {
+    reporter.succeed(
+        kConfigFileLoadReadStep,
+        nlohmann::json{{"reason", "the strategy is replace, so the file is not read"}});
+  }
+
+  if (stop.stop_requested()) {
+    return fail(kConfigFileLoadWriteStep, "cancelled before the file was written");
+  }
+
+  // ── write-config-file ──
+  reporter.start(kConfigFileLoadWriteStep);
+  const auto text = writeConfigFile(toWrite);
+  const std::span bytes(reinterpret_cast<const uint8_t*>(text.data()), text.size());
+  if (auto written = device.writeFile(std::string(kConfigFileName), bytes); !written) {
+    return fail(kConfigFileLoadWriteStep, "writing config.csv failed: " + written.error().message);
+  }
+  reporter.succeed(kConfigFileLoadWriteStep,
+                   nlohmann::json{{"byteCount", text.size()}, {"rows", toWrite.rows.size()}});
+
+  // ── load ──
+  reporter.start(kConfigFileLoadLoadStep);
+  config.stop = stop;
+  if (auto loaded = drive->runRestoreDefaultParameters(RestoreGroup::kAll, config); !loaded) {
+    return fail(kConfigFileLoadLoadStep, loaded.error());
+  }
+  reporter.succeed(kConfigFileLoadLoadStep);
+
+  // ── outputs ──
+  reporter.start(kConfigFileLoadOutputsStep);
+  nlohmann::json outputs = nlohmann::json::array();
+  for (const auto& load : loads) {
+    if (!device.isOutputMapped(load.index, load.subindex)) {
+      continue;
+    }
+    const auto address = configAddress(load.index, load.subindex);
+    if (auto r = device.writeParameter(load.index, load.subindex, load.value); !r) {
+      return fail(kConfigFileLoadOutputsStep,
+                  std::format("writing the loaded value of {} into its output failed after {} "
+                              "outputs: {}",
+                              address, outputs.size(), r.error()));
+    }
+    outputs.push_back(address);
+  }
+  reporter.succeed(kConfigFileLoadOutputsStep, nlohmann::json{{"written", outputs}});
+
+  // ── verify ──
+  reporter.start(kConfigFileLoadVerifyStep);
+  nlohmann::json differing = nlohmann::json::array();
+  for (const auto& load : loads) {
+    const auto address = configAddress(load.index, load.subindex);
+    auto live = device.readParameter(load.index, load.subindex);
+    if (!live) {
+      differing.push_back(
+          {{"address", address}, {"file", configValueToJson(load.value)}, {"error", live.error()}});
+    } else if (*live != load.value) {
+      differing.push_back({{"address", address},
+                           {"file", configValueToJson(load.value)},
+                           {"live", configValueToJson(*live)}});
+    }
+  }
+  reporter.succeed(kConfigFileLoadVerifyStep, nlohmann::json{{"checked", loads.size()},
+                                                             {"differing", differing},
+                                                             {"unknownObject", unknownObjects},
+                                                             {"notLoadable", notLoadable}});
   return {};
 }
 

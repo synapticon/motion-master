@@ -16,6 +16,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -6381,6 +6382,193 @@ std::expected<void, std::string> runConfigFileLoadProcedure(Device& device,
                                                              {"differing", differing},
                                                              {"unknownObject", unknownObjects},
                                                              {"notLoadable", notLoadable}});
+  return {};
+}
+
+std::expected<ConfigFileCompareRequest, std::string> parseConfigFileCompareRequest(
+    const nlohmann::json& body) {
+  ConfigFileCompareRequest request;
+  if (body.is_null()) {
+    return request;
+  }
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  const auto read =
+      [&body](std::string_view key) -> std::expected<std::optional<std::string>, std::string> {
+    const auto it = body.find(key);
+    if (it == body.end() || it->is_null()) {
+      return std::nullopt;
+    }
+    if (!it->is_string()) {
+      return std::unexpected(std::format("'{}' must be a configuration file, base64-encoded", key));
+    }
+    auto bytes = mm::core::base64Decode(it->get<std::string>());
+    if (!bytes) {
+      return std::unexpected(std::format("'{}' is not base64: {}", key, bytes.error()));
+    }
+    return std::string(bytes->begin(), bytes->end());
+  };
+  auto file = read("file");
+  if (!file) {
+    return std::unexpected(file.error());
+  }
+  auto other = read("other");
+  if (!other) {
+    return std::unexpected(other.error());
+  }
+  if (*other && !*file) {
+    return std::unexpected("'other' needs 'file': it is the second configuration of a compare");
+  }
+  request.file = std::move(*file);
+  request.other = std::move(*other);
+  return request;
+}
+
+std::vector<ProcedureParameter> configFileCompareParameters() {
+  return {
+      fileParameter("file", "Configuration file",
+                    "The first configuration. Without one, the drive's own config.csv is compared "
+                    "with the values the drive runs.",
+                    nullptr),
+      fileParameter("other", "Second configuration file",
+                    "The second configuration. Without one, the drive's own config.csv is the "
+                    "second. Needs a first file.",
+                    nullptr),
+  };
+}
+
+std::vector<ProgressStep> configFileCompareSteps() {
+  return stepsFrom(
+      {kConfigFileCompareReadStep, kConfigFileCompareValuesStep, kConfigFileCompareStep});
+}
+
+std::expected<void, std::string> runConfigFileCompareProcedure(
+    Device& device, ProgressReporter& reporter, const ConfigFileCompareRequest& request) {
+  const auto fail = [&reporter](std::string_view step, std::string error) {
+    reporter.fail(step, error);
+    return std::unexpected(std::move(error));
+  };
+
+  // ── read-config-file ──
+  reporter.start(kConfigFileCompareReadStep);
+  std::optional<ConfigFile> driveFile;
+  if (!request.other) {
+    auto bytes = device.readFile(std::string(kConfigFileName));
+    if (!bytes) {
+      return fail(kConfigFileCompareReadStep,
+                  "reading the drive's config.csv failed: " + bytes.error().message);
+    }
+    driveFile = parseConfigFile(std::string(bytes->begin(), bytes->end()));
+    reporter.succeed(kConfigFileCompareReadStep, nlohmann::json{{"rows", driveFile->rows.size()}});
+  } else {
+    reporter.succeed(kConfigFileCompareReadStep,
+                     nlohmann::json{{"reason", "two files are compared, so it is not read"}});
+  }
+  // The first configuration, and the second, which is the drive's config.csv unless a second file
+  // is given, and nothing when the drive's config.csv is the first.
+  const ConfigFile first = request.file ? parseConfigFile(*request.file) : *driveFile;
+  std::optional<ConfigFile> second;
+  if (request.other) {
+    second = parseConfigFile(*request.other);
+  } else if (request.file) {
+    second = driveFile;
+  }
+
+  // ── read-values ──
+  reporter.start(kConfigFileCompareValuesStep);
+  std::map<std::pair<uint16_t, uint8_t>, ConfigLiveObject> objects;
+  nlohmann::json failed = nlohmann::json::array();
+  const auto readRows = [&](const ConfigFile& config) {
+    for (const auto& row : config.rows) {
+      const std::pair address{row.index, row.subindex};
+      if (objects.contains(address)) {
+        continue;
+      }
+      auto definition = device.parameter(row.index, row.subindex);
+      if (!definition) {
+        continue;
+      }
+      ConfigLiveObject object{.definition = std::move(*definition), .live = std::nullopt};
+      if (auto live = device.readParameter(row.index, row.subindex); live) {
+        object.live = std::move(*live);
+      } else {
+        failed.push_back(configAddress(row.index, row.subindex));
+      }
+      objects.emplace(address, std::move(object));
+    }
+  };
+  readRows(first);
+  if (second) {
+    readRows(*second);
+  }
+  reporter.succeed(kConfigFileCompareValuesStep,
+                   nlohmann::json{{"read", objects.size() - failed.size()}, {"failed", failed}});
+
+  // ── compare ──
+  reporter.start(kConfigFileCompareStep);
+  const auto rows = compareConfiguration(first, second ? &*second : nullptr, objects);
+  nlohmann::json out = nlohmann::json::array();
+  std::size_t loads = 0;
+  std::size_t unknown = 0;
+  std::size_t notLoadable = 0;
+  std::size_t differsBetween = 0;
+  std::size_t differsFromLive = 0;
+  std::size_t onlyInFirst = 0;
+  std::size_t onlyInSecond = 0;
+  const auto optional = [](const std::optional<std::string>& text) {
+    return text ? nlohmann::json(*text) : nlohmann::json();
+  };
+  for (const auto& row : rows) {
+    loads += row.outcome == ConfigRowOutcome::kLoads ? 1 : 0;
+    unknown += row.outcome == ConfigRowOutcome::kUnknownObject ? 1 : 0;
+    notLoadable += row.outcome == ConfigRowOutcome::kNotLoadable ? 1 : 0;
+    differsBetween += row.differsBetween ? 1 : 0;
+    differsFromLive += row.differsFromLive ? 1 : 0;
+    onlyInFirst += second && row.first && !row.second ? 1 : 0;
+    onlyInSecond += row.second && !row.first ? 1 : 0;
+    out.push_back({{"address", configAddress(row.index, row.subindex)},
+                   {"index", row.index},
+                   {"subindex", row.subindex},
+                   {"name", row.name},
+                   {"first", optional(row.first)},
+                   {"second", optional(row.second)},
+                   {"live", row.live ? configValueToJson(*row.live) : nlohmann::json()},
+                   {"outcome", toString(row.outcome)},
+                   {"differsBetween", row.differsBetween},
+                   {"differsFromLive", row.differsFromLive}});
+  }
+  auto version = device.readParameter(0x100A, 0);
+  const auto* driveVersion = version ? std::get_if<std::string>(&*version) : nullptr;
+  const auto describe = [](const ConfigFile& config, std::string_view source) {
+    nlohmann::json problems = nlohmann::json::array();
+    for (const auto& problem : config.problems) {
+      problems.push_back({{"line", problem.line}, {"message", problem.message}});
+    }
+    const auto firmware = config.firmwareVersion();
+    return nlohmann::json{
+        {"source", source},
+        {"rows", config.rows.size()},
+        {"firmwareVersion", firmware ? nlohmann::json(*firmware) : nlohmann::json()},
+        {"problems", problems}};
+  };
+  reporter.succeed(
+      kConfigFileCompareStep,
+      nlohmann::json{{"first", describe(first, request.file ? "file" : "drive")},
+                     {"second", second ? describe(*second, request.other ? "file" : "drive")
+                                       : nlohmann::json()},
+                     {"driveFirmwareVersion",
+                      driveVersion != nullptr ? nlohmann::json(*driveVersion) : nlohmann::json()},
+                     {"rows", out},
+                     {"counts",
+                      {{"rows", rows.size()},
+                       {"loads", loads},
+                       {"unknownObject", unknown},
+                       {"notLoadable", notLoadable},
+                       {"differsBetween", differsBetween},
+                       {"differsFromLive", differsFromLive},
+                       {"onlyInFirst", onlyInFirst},
+                       {"onlyInSecond", onlyInSecond}}}});
   return {};
 }
 

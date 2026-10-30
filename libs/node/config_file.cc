@@ -2,13 +2,20 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <format>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <nlohmann/json.hpp>
+#include <ranges>
+#include <set>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "comm/object_data_types.h"
@@ -454,6 +461,167 @@ ConfigFileComparison compareConfigFileRows(const std::vector<ConfigFileRow>& fir
     }
   }
   return result;
+}
+
+namespace {
+
+std::string liveText(const DeviceParameterValue& live) {
+  return std::visit(
+      [](const auto& v) -> std::string {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, std::string>) {
+          return v;
+        } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+          return {};
+        } else if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>) {
+          return std::to_string(static_cast<int>(v));
+        } else {
+          return std::format("{}", v);
+        }
+      },
+      live);
+}
+
+}  // namespace
+
+bool sameConfigValue(const DeviceParameter& object, std::string_view value, int format,
+                     const DeviceParameterValue& live) {
+  const auto parsed = parseConfigFileValue(object, value, format);
+  if (!parsed) {
+    return sameValue(trim(value), liveText(live));
+  }
+  if (const auto* a = std::get_if<float>(&*parsed); a != nullptr) {
+    if (const auto* b = std::get_if<float>(&live); b != nullptr) {
+      const double scale = std::max({1.0, std::fabs(double{*a}), std::fabs(double{*b})});
+      return std::fabs(double{*a} - double{*b}) <= 1e-6 * scale;
+    }
+  }
+  return *parsed == live;
+}
+
+namespace {
+
+// Two values of files are the same when the drive reads them as the same value. A value the drive
+// cannot read is compared as a number or as text.
+bool sameFileValues(const DeviceParameter* object, std::string_view a, int formatA,
+                    std::string_view b, int formatB) {
+  if (object != nullptr) {
+    const auto parsedB = parseConfigFileValue(*object, b, formatB);
+    if (parsedB) {
+      return sameConfigValue(*object, a, formatA, *parsedB);
+    }
+  }
+  return sameValue(trim(a), trim(b));
+}
+
+}  // namespace
+
+std::vector<ConfigCompareRow> compareConfiguration(
+    const ConfigFile& first, const ConfigFile* second,
+    const std::map<std::pair<uint16_t, uint8_t>, ConfigLiveObject>& objects) {
+  const auto a = byAddress(first.rows);
+  const auto b = second != nullptr ? byAddress(second->rows)
+                                   : std::map<std::pair<uint16_t, uint8_t>, const ConfigFileRow*>{};
+  const int secondFormat = second != nullptr ? second->format : first.format;
+  std::set<std::pair<uint16_t, uint8_t>> addresses;
+  std::ranges::copy(a | std::views::keys, std::inserter(addresses, addresses.end()));
+  std::ranges::copy(b | std::views::keys, std::inserter(addresses, addresses.end()));
+  std::vector<ConfigCompareRow> rows;
+  rows.reserve(addresses.size());
+  for (const auto& address : addresses) {
+    const auto inA = a.find(address);
+    const auto inB = b.find(address);
+    const ConfigFileRow* rowA = inA != a.end() ? inA->second : nullptr;
+    const ConfigFileRow* rowB = inB != b.end() ? inB->second : nullptr;
+    ConfigCompareRow out;
+    out.index = address.first;
+    out.subindex = address.second;
+    if (rowA != nullptr) {
+      out.first = std::string(rowA->trimmedValue());
+    }
+    if (rowB != nullptr) {
+      out.second = std::string(rowB->trimmedValue());
+    }
+    const auto object = objects.find(address);
+    const DeviceParameter* definition =
+        object != objects.end() ? &object->second.definition : nullptr;
+    out.outcome = configRowOutcome(address.first, definition);
+    if (rowA != nullptr && rowB != nullptr) {
+      out.differsBetween =
+          !sameFileValues(definition, rowA->value, first.format, rowB->value, secondFormat);
+    }
+    if (definition != nullptr) {
+      out.name = definition->name;
+      out.live = object->second.live;
+      if (out.live) {
+        const auto* row = rowA != nullptr ? rowA : rowB;
+        const int format = rowA != nullptr ? first.format : secondFormat;
+        out.differsFromLive = !sameConfigValue(*definition, row->value, format, *out.live);
+      }
+    }
+    rows.push_back(std::move(out));
+  }
+  return rows;
+}
+
+ConfigFileView describeConfigFile(
+    const ConfigFile& file,
+    const std::function<std::optional<DeviceParameter>(uint16_t, uint8_t)>& lookup,
+    const std::function<std::optional<DeviceParameterValue>(uint16_t, uint8_t)>& read) {
+  ConfigFileView view{.format = file.format,
+                      .deviceName = file.deviceName(),
+                      .firmwareVersion = file.firmwareVersion(),
+                      .rows = {},
+                      .problems = file.problems};
+  view.rows.reserve(file.rows.size());
+  for (const auto& row : file.rows) {
+    const auto object = lookup(row.index, row.subindex);
+    ConfigFileViewRow out{.line = row.line,
+                          .index = row.index,
+                          .subindex = row.subindex,
+                          .name = object ? object->name : std::string(),
+                          .value = std::string(row.trimmedValue()),
+                          .outcome = configRowOutcome(row.index, object ? &*object : nullptr),
+                          .live = std::nullopt,
+                          .differs = false};
+    if (object && read) {
+      out.live = read(row.index, row.subindex);
+      if (out.live) {
+        out.differs = !sameConfigValue(*object, row.value, file.format, *out.live);
+      }
+    }
+    view.rows.push_back(std::move(out));
+  }
+  return view;
+}
+
+void to_json(nlohmann::json& j, const ConfigFileView& view) {
+  auto rows = nlohmann::json::array();
+  for (const auto& row : view.rows) {
+    rows.push_back(
+        {{"line", row.line},
+         {"index", row.index},
+         {"subindex", row.subindex},
+         {"name", row.name},
+         {"value", row.value},
+         {"outcome", toString(row.outcome)},
+         {"live", row.live
+                      ? std::visit([](const auto& v) -> nlohmann::json { return v; }, *row.live)
+                      : nlohmann::json()},
+         {"differs", row.differs}});
+  }
+  auto problems = nlohmann::json::array();
+  for (const auto& problem : view.problems) {
+    problems.push_back({{"line", problem.line}, {"message", problem.message}});
+  }
+  const auto optional = [](const std::optional<std::string>& text) {
+    return text ? nlohmann::json(*text) : nlohmann::json();
+  };
+  j = nlohmann::json{{"format", view.format},
+                     {"deviceName", optional(view.deviceName)},
+                     {"firmwareVersion", optional(view.firmwareVersion)},
+                     {"rows", rows},
+                     {"problems", problems}};
 }
 
 bool isSafetyConfigIndex(uint16_t index) {

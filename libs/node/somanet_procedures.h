@@ -1854,4 +1854,52 @@ std::expected<void, std::string> runConfigFileLoadProcedure(
     Device& device, ProgressReporter& reporter, const std::stop_token& stop,
     const ConfigFileLoadRequest& request, RestoreDefaultParametersConfig config = {});
 
+/// @brief Procedure name for comparing a configuration file with the drive, as it appears in its
+///        URL and its snapshot key.
+inline constexpr std::string_view kConfigFileCompareProcedure = "config-file-compare";
+
+/// @brief The step that reads the drive's @c config.csv.
+inline constexpr std::string_view kConfigFileCompareReadStep = "read-config-file";
+
+/// @brief The step that reads the live value of each object the compare holds.
+inline constexpr std::string_view kConfigFileCompareValuesStep = "read-values";
+
+/// @brief The step that compares, and holds the result.
+inline constexpr std::string_view kConfigFileCompareStep = "compare";
+
+/// @brief What a configuration file compare compares.
+struct ConfigFileCompareRequest {
+  std::optional<std::string> file;   ///< The first configuration; the drive's config.csv without.
+  std::optional<std::string> other;  ///< The second; the drive's config.csv without. Needs @c file.
+};
+
+/// @brief Parses `{"file": "<base64>", "other": "<base64>"}`. Both are optional, and @c other needs
+///        @c file.
+std::expected<ConfigFileCompareRequest, std::string> parseConfigFileCompareRequest(
+    const nlohmann::json& body);
+
+/// @brief What the configuration file compare accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> configFileCompareParameters();
+
+/// @brief The configuration file compare step template, idle.
+std::vector<ProgressStep> configFileCompareSteps();
+
+/// @brief Compares two configurations with each other and with the drive.
+///
+/// Without a file, the drive's own @c config.csv is the only configuration, compared with the live
+/// values. With @c file, the file is the first and the drive's @c config.csv the second. With
+/// @c other too, the two files are compared.
+///
+/// 1. **read-config-file** — reads the drive's @c config.csv, unless both files are given.
+/// 2. **read-values** — reads the live value of the object of each row. A value that does not read
+///    leaves the row without one and is named in the step's value.
+/// 3. **compare** — gives each row the value of each configuration and of the drive, its outcome,
+///    and whether it differs between the two and from the drive, with @c compareConfiguration.
+///    Holds the counts, the firmware version in each configuration beside the drive's 0x100A, and
+///    the lines of each file the drive would ignore or read differently.
+///
+/// Writes nothing, in any CiA 402 state.
+std::expected<void, std::string> runConfigFileCompareProcedure(
+    Device& device, ProgressReporter& reporter, const ConfigFileCompareRequest& request);
+
 }  // namespace mm::node

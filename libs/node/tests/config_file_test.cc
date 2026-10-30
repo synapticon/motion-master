@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -173,6 +176,98 @@ TEST(ConfigFileTest, ReadsAStringThatFitsTheObject) {
   const auto text = definition(ObjectDataType::VISIBLE_STRING, 0x0100, 8 * 8);
   EXPECT_EQ(std::get<std::string>(*parseConfigFileValue(text, "  axis 1", 2)), "axis 1");
   EXPECT_FALSE(parseConfigFileValue(text, "much too long", 2));
+}
+
+TEST(ConfigFileTest, ComparesTwoConfigurationsWithEachOtherAndWithTheDrive) {
+  const auto first = parseConfigFile(
+      "META,FORMAT,2\n0x2001, 0, 5\n0x2002, 0, 7\n0x2003, 0, 1\n"
+      "0x2004, 0, 2\n0x2012, 1, 0.0247177552\n");
+  const auto second =
+      parseConfigFile("META,FORMAT,2\n0x2001, 0, 4\n0x2012, 1, 0.024717755\n0x2005, 0, 3\n");
+  std::map<std::pair<uint16_t, uint8_t>, ConfigLiveObject> objects;
+  objects[{0x2001, 0}] = {definition(ObjectDataType::UNSIGNED32), uint32_t{4}};
+  objects[{0x2002, 0}] = {definition(ObjectDataType::UNSIGNED32), uint32_t{7}};
+  objects[{0x2004, 0}] = {definition(ObjectDataType::UNSIGNED32, 0x0007), uint32_t{9}};
+  objects[{0x2005, 0}] = {definition(ObjectDataType::UNSIGNED32), uint32_t{1}};
+  objects[{0x2012, 1}] = {definition(ObjectDataType::REAL32), 0.024717755F};
+
+  const auto rows = compareConfiguration(first, &second, objects);
+  ASSERT_EQ(rows.size(), 6U);
+  // 0x2001: in both, different, and the first is not what the drive runs.
+  EXPECT_EQ(rows[0].first, "5");
+  EXPECT_EQ(rows[0].second, "4");
+  EXPECT_TRUE(rows[0].differsBetween);
+  EXPECT_TRUE(rows[0].differsFromLive);
+  // 0x2002: only in the first, and the drive runs it.
+  EXPECT_FALSE(rows[1].second.has_value());
+  EXPECT_FALSE(rows[1].differsBetween);
+  EXPECT_FALSE(rows[1].differsFromLive);
+  // 0x2003: no such object.
+  EXPECT_EQ(rows[2].outcome, ConfigRowOutcome::kUnknownObject);
+  EXPECT_FALSE(rows[2].live.has_value());
+  // 0x2004: not loadable, and not what the drive runs.
+  EXPECT_EQ(rows[3].outcome, ConfigRowOutcome::kNotLoadable);
+  EXPECT_TRUE(rows[3].differsFromLive);
+  // 0x2005: only in the second, compared with the drive from the second.
+  EXPECT_FALSE(rows[4].first.has_value());
+  EXPECT_EQ(rows[4].second, "3");
+  EXPECT_TRUE(rows[4].differsFromLive);
+  // 0x2012: the same float written with other digits, as the drive reads both.
+  EXPECT_FALSE(rows[5].differsBetween);
+  EXPECT_FALSE(rows[5].differsFromLive);
+}
+
+TEST(ConfigFileTest, ComparesOneConfigurationWithTheDrive) {
+  const auto drive = parseConfigFile("0x2001, 0, 4\n0x2001, 0, 6\n");
+  std::map<std::pair<uint16_t, uint8_t>, ConfigLiveObject> objects;
+  objects[{0x2001, 0}] = {definition(ObjectDataType::UNSIGNED32), uint32_t{6}};
+  const auto rows = compareConfiguration(drive, nullptr, objects);
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_FALSE(rows[0].second.has_value());
+  // A later row at one address wins, as it does on the drive.
+  EXPECT_EQ(rows[0].first, "6");
+  EXPECT_FALSE(rows[0].differsFromLive);
+}
+
+TEST(ConfigFileTest, ComparesAValueTheDriveCannotReadAsText) {
+  const auto sixtyFourBit = definition(ObjectDataType::UNSIGNED64);
+  EXPECT_TRUE(sameConfigValue(sixtyFourBit, " 12 ", 2, uint64_t{12}));
+  EXPECT_FALSE(sameConfigValue(sixtyFourBit, "13", 2, uint64_t{12}));
+}
+
+TEST(ConfigFileTest, NamesEachRowForAReader) {
+  const auto file =
+      parseConfigFile("META,FORMAT,2\n# v5.6.11\n0x2001, 0, 5\n0x2003, 0, 1\n0x2001, 0\n");
+  const auto view =
+      describeConfigFile(file, [](uint16_t index, uint8_t) -> std::optional<DeviceParameter> {
+        if (index != 0x2001) {
+          return std::nullopt;
+        }
+        auto object = definition(ObjectDataType::UNSIGNED32);
+        object.name = "Commutation angle offset";
+        return object;
+      });
+  EXPECT_EQ(view.firmwareVersion, "v5.6.11");
+  ASSERT_EQ(view.rows.size(), 2U);
+  EXPECT_EQ(view.rows[0].name, "Commutation angle offset");
+  EXPECT_EQ(view.rows[0].value, "5");
+  EXPECT_EQ(view.rows[0].line, 3U);
+  EXPECT_EQ(view.rows[1].outcome, ConfigRowOutcome::kUnknownObject);
+  ASSERT_EQ(view.problems.size(), 1U);
+  const nlohmann::json json = view;
+  EXPECT_EQ(json["rows"][0]["outcome"], "loads");
+  EXPECT_EQ(json["rows"][1]["name"], "");
+  EXPECT_EQ(json["problems"][0]["line"], 5);
+  EXPECT_TRUE(json["rows"][0]["live"].is_null());
+
+  const auto withValues = describeConfigFile(
+      file,
+      [](uint16_t, uint8_t) -> std::optional<DeviceParameter> {
+        return definition(ObjectDataType::UNSIGNED32);
+      },
+      [](uint16_t, uint8_t) -> std::optional<DeviceParameterValue> { return uint32_t{6}; });
+  EXPECT_TRUE(withValues.rows[0].differs);
+  EXPECT_EQ(std::get<uint32_t>(*withValues.rows[0].live), 6U);
 }
 
 TEST(ConfigFileTest, KnowsTheSafetyAreas) {

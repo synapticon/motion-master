@@ -19,6 +19,7 @@ import {
   BrakeState,
   CaptureSummary,
   Cia402Status,
+  ConfigFileView,
   DcSyncStatus,
   DeviceDiagnostics,
   DeviceFile,
@@ -1709,6 +1710,31 @@ export class Api<
     this.request<IdentifiedPlantModel, void>({
       path: `/api/devices/${slavePosition}/plant-model`,
       method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reads `config.csv` from a SOMANET drive over FoE, parses it as the drive's own parser does, and gives each row the name of its object from the object dictionary and its outcome on a load: `loads`, `unknown-object` or `not-loadable`. The rows keep the order of the file. A line the drive would ignore or read differently is in `problems`. With `live=true`, each row of an object the drive has also gets the value in memory, read over SDO, and whether the value in the file differs from it.
+   *
+   * @name GetDeviceConfigFile
+   * @summary Read the drive's config.csv as rows with names
+   * @request GET:/api/devices/{slavePosition}/config-file
+   */
+  getDeviceConfigFile = (
+    slavePosition: number,
+    query?: {
+      /**
+       * Read the value in memory of each row's object too, one SDO read each.
+       * @default false
+       */
+      live?: boolean;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<ConfigFileView, void>({
+      path: `/api/devices/${slavePosition}/config-file`,
+      method: "GET",
+      query: query,
       format: "json",
       ...params,
     });

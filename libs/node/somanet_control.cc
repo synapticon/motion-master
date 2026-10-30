@@ -94,6 +94,13 @@ std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant(
                           [](SomanetDrive& drive) { return drive.readIntegroVariant(); });
 }
 
+std::expected<ConfigFileView, std::string> readConfigFile(DeviceManager& deviceManager,
+                                                          uint16_t slavePosition, bool withValues) {
+  return withSomanetDrive(deviceManager, slavePosition, [withValues](SomanetDrive& drive) {
+    return drive.readConfigFile(withValues);
+  });
+}
+
 std::expected<FullFirmwareDescriptors, std::string> readFirmwareDescriptors(
     DeviceManager& deviceManager, uint16_t slavePosition) {
   return withSomanetDrive(deviceManager, slavePosition,

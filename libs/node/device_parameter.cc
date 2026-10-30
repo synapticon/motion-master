@@ -178,10 +178,12 @@ std::expected<DeviceParameterValue, std::string> decodeSdoBytes(uint16_t dataTyp
       return decodeScalar<uint64_t>(dataType, bytes);
     case ObjectDataType::VISIBLE_STRING: {
       // ETG.1000.6: VISIBLE_STRING is a fixed-width field padded with trailing
-      // spaces (and may carry a terminating NUL). Devices return the full padded
-      // field on upload — neither is significant, so strip them for display.
-      size_t len = bytes.size();
-      while (len > 0 && (bytes[len - 1] == 0x00 || bytes[len - 1] == 0x20)) {
+      // spaces, and may carry a terminating NUL. The text ends at the first NUL: a
+      // SOMANET drive writes a shorter string and its NUL over a longer one and keeps
+      // the old bytes after the NUL, which are not part of the value.
+      const auto nul = std::ranges::find(bytes, uint8_t{0x00});
+      size_t len = static_cast<size_t>(nul - bytes.begin());
+      while (len > 0 && bytes[len - 1] == 0x20) {
         --len;
       }
       return DeviceParameterValue{std::string(reinterpret_cast<const char*>(bytes.data()), len)};

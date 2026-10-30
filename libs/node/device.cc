@@ -119,6 +119,11 @@ bool Device::exchangesProcessData() const {
   return mm::comm::exchangesProcessData(driver_.slaveState(slavePosition_));
 }
 
+bool Device::isOutputMapped(uint16_t index, uint8_t subindex) const {
+  return processData_ && exchangesProcessData() &&
+         processData_->isOutputMapped(slavePosition_, index, subindex);
+}
+
 mm::comm::EtherCatState Device::alState() const {
   return mm::comm::alState(driver_.slaveState(slavePosition_));
 }

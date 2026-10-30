@@ -51,6 +51,7 @@ The **ESC** is the EtherCAT Slave Controller, the chip in each device that talks
 
 ## Device services
 
+- **The drive's configuration file as rows** — `GET /api/devices/{slavePosition}/config-file` reads `config.csv` from a SOMANET drive and gives each row the name of its object and what the drive does with it on a load. With `live=true` it also reads the value in memory of each row's object and marks the rows that differ, which are the changes not stored yet.
 - **File transfer** — read, write and delete a file on a device over FoE, which is how firmware and configuration files move (`GET`/`PUT`/`DELETE /api/devices/{slavePosition}/files/{filename}`). List what a SOMANET drive holds, with the size of each file (`GET /api/devices/{slavePosition}/files`). EtherCAT has no directory service, so that listing is the vendor's own `fs-getlist` pseudo-file, which the server reads and parses so each client does not have to.
 - **High resolution data** — read back what the *HRD streaming* procedure recorded and turn it into samples (`GET /api/devices/{slavePosition}/hrd?data=…`). The server concatenates the drive's files in order and decodes them as one of two things: the encoder's raw position word, split into its master and nonius tracks, or velocity in RPM converted out of the drive's Q15 fixed point, paired with torque in per mille of rated torque. It answers JSON or CSV, whichever the `Accept` header asks for.
 - **ESC register access** — read and write the raw bytes of an ESC register (`GET`/`POST /api/devices/{slavePosition}/registers/{address}`).
@@ -86,6 +87,7 @@ A procedure is an operation that takes longer than a request should. It runs on 
 - **Device locate** — blinks the LEDs of a device for a while, so someone at the machine can find it. Only SPoE offers it.
 - **SOMANET procedures**, each of which is one row in a registry table:
   - **Firmware installation** — takes the device to BOOT, writes the package's binaries over FoE and its SII image, and returns the device to the state you choose, PRE-OP by default. Reaching PRE-OP confirms that the new firmware booted.
+  - **Configuration file load and compare** — `config-file-load` writes a configuration file as the drive's `config.csv` and makes the drive load it, in one action. It checks every row against the object dictionary first, puts each loaded value of an output-mapped object into its output so the next cycle keeps it, and reads every loaded object back. `config-file-compare` compares two configurations, a file with the drive's `config.csv` or two files, with each other and with the values in memory: the values that differ, the rows only in one, and what the drive does with each row on a load.
   - **OS command** — the raw operating-system command interface (`0x1023` and `0x1024`), with the request bytes passed through as given.
   - **Read object dictionary** — reads every value of the dictionary in one transfer with OS command 21. It is a test of the bulk transfer, and a cross-check of the values read over SDO.
   - **Encoder register communication** — read or write one BiSS encoder register. **Kübler register communication** does the same for the internal encoder of an Integro.
@@ -139,10 +141,12 @@ A React Progressive Web App at `https://motion-master.synapticon.com` provides a
 - **Connection** — driver initialisation, adapter selection, and the TLS certificate's status.
 - **Fieldbus** — an overview, EtherCAT state control with a Restart button, bus configuration, the process image, bus diagnostics with a frame capture, and DC sync.
 - **Per device** — EtherCAT State, Parameters, Object Dictionary, PDO Mapping, Registers, SII, FoE and Procedures, plus pages that do more than show one endpoint:
+  - **The device bar** on every device page carries Store parameters, because a value changes from many places, and the store writes them all to flash.
   - **Motion** drives the CiA402 state machine, the operation mode and cyclic setpoints, showing target against actual live. It appears only for a CiA402 device in OP, because both are needed to command motion.
   - **HRD** reads a high resolution recording back and plots it, or downloads it as CSV.
   - **iC-MU Encoders** shows the status of each iC-MU encoder and the controllers that use it, configures and calibrates it, and holds its EEPROM tools. It appears only for a drive with an iC-MU encoder.
   - **Tuning** shows the plant model, the controller gains and the integral limits, and runs the tuning. It appears for a SOMANET CiA402 drive.
+  - **Configuration** shows the drive's `config.csv` as a table, beside the values in memory, compares a configuration file with `config.csv` or with a second file, and loads the rows you select. It appears for a SOMANET device.
   - **Firmware** shows the firmware the device runs and the descriptors it accepts. It lists the packages in `firmwares/` of the user cache, each with the server's verdict for this device, and installs one. It appears for a SOMANET device.
 - **Data** — a live process-data view, the recorder, and Monitorings, which configures and plots live telemetry.
 - **Game Loop** — the health of the real-time loop, and control of its cycle period while it runs.

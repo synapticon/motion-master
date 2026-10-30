@@ -1746,6 +1746,27 @@ void HttpServer::run() {
              });
 
   // The descriptors a package must carry to fit this device, without a package to compare.
+  router.get("/api/devices/:slavePosition/config-file",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed(
+                   [&]() -> std::expected<nlohmann::json, std::string> {
+                     const bool live = req.query("live") == "true";
+                     auto view = mm::node::readConfigFile(deviceManager_, *position, live);
+                     if (!view) {
+                       return std::unexpected(view.error());
+                     }
+                     return nlohmann::json(*view);
+                   },
+                   "409 Conflict");
+             });
+
   router.get("/api/devices/:slavePosition/firmware-descriptors",
              [this](const mm::api::Request& req) -> mm::api::Response {
                auto position = req.parameterAs<uint16_t>("slavePosition");

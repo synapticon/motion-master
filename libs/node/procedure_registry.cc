@@ -1260,6 +1260,42 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       },
   });
 
+  ProcedureDescriptor configCompare;
+  configCompare.name = std::string(kConfigFileCompareProcedure);
+  configCompare.title = "Compare configuration file";
+  configCompare.description =
+      "Compares two configurations with each other and with the drive, row by row: the value in "
+      "each, the value the drive runs, and what the drive does with the row on a load: loads, "
+      "unknown-object or not-loadable. A file is compared with the drive's config.csv, or with "
+      "a second file. Without a file, the drive's config.csv is compared with the values the "
+      "drive runs, which shows what a store would change.";
+  configCompare.caveats = {
+      "It writes nothing.",
+      "It reads the live value of every object of the file, which takes about a second for a "
+      "whole configuration.",
+      "It reports the firmware version in the file's comment beside the drive's, and does not "
+      "refuse a file of another version.",
+  };
+  configCompare.movesMotor = false;
+  configCompare.requiresEnabled = false;
+  configCompare.parameters = configFileCompareParameters();
+  configCompare.steps = configFileCompareSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(configCompare),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseConfigFileCompareRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return [request = std::move(*request)](const ProcedureContext& ctx,
+                                               ProgressReporter& reporter, const std::stop_token&) {
+          return runConfigFileCompareProcedure(ctx.device, reporter, request);
+        };
+      },
+  });
+
   ProcedureDescriptor polePair;
   polePair.name = std::string(kPolePairDetectionProcedure);
   polePair.title = "Pole pair detection";

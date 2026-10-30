@@ -51,6 +51,7 @@ using mm::comm::OdEntry;
 using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::commutationOffsetMeasurementSteps;
+using mm::node::configFileCompareSteps;
 using mm::node::configFileLoadSteps;
 using mm::node::ConfigFileLoadStrategy;
 using mm::node::Device;
@@ -82,6 +83,7 @@ using mm::node::offsetDetectionSteps;
 using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
+using mm::node::parseConfigFileCompareRequest;
 using mm::node::parseConfigFileLoadRequest;
 using mm::node::parseEncoderRegisterRequest;
 using mm::node::parseFirmwareLatencyAction;
@@ -429,6 +431,30 @@ TEST(ConfigFileLoadSteps, RunInTheOrderOfTheLoad) {
   }
   EXPECT_EQ(ids, (std::vector<std::string>{"validate", "read-config-file", "write-config-file",
                                            "load", "outputs", "verify"}));
+}
+
+TEST(ParseConfigFileCompareRequest, TakesUpToTwoFiles) {
+  auto none = parseConfigFileCompareRequest(nlohmann::json::object());
+  ASSERT_TRUE(none.has_value()) << none.error();
+  EXPECT_FALSE(none->file.has_value());
+  EXPECT_FALSE(none->other.has_value());
+  auto both = parseConfigFileCompareRequest(
+      nlohmann::json{{"file", "MHgyMDAxLCAwLCAx"}, {"other", "MHgyMDAxLCAwLCAx"}});
+  ASSERT_TRUE(both.has_value()) << both.error();
+  EXPECT_EQ(both->file, "0x2001, 0, 1");
+  EXPECT_EQ(both->other, "0x2001, 0, 1");
+  EXPECT_FALSE(parseConfigFileCompareRequest(nlohmann::json{{"file", "not base64!"}}));
+  EXPECT_FALSE(parseConfigFileCompareRequest(nlohmann::json{{"file", 3}}));
+  // A second configuration needs a first.
+  EXPECT_FALSE(parseConfigFileCompareRequest(nlohmann::json{{"other", "MHgyMDAxLCAwLCAx"}}));
+}
+
+TEST(ConfigFileCompareSteps, ReadThenCompare) {
+  std::vector<std::string> ids;
+  for (const auto& step : configFileCompareSteps()) {
+    ids.push_back(step.id);
+  }
+  EXPECT_EQ(ids, (std::vector<std::string>{"read-config-file", "read-values", "compare"}));
 }
 
 TEST(ParseOsCommandRequest, DefaultsToMovingNoBulkData) {

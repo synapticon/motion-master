@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
+#include <map>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -131,6 +134,83 @@ ConfigRowOutcome configRowOutcome(uint16_t index, const DeviceParameter* object)
 std::expected<DeviceParameterValue, std::string> parseConfigFileValue(const DeviceParameter& object,
                                                                       std::string_view value,
                                                                       int format);
+
+/// @brief An object of the drive as a compare sees it: its definition and its live value.
+struct ConfigLiveObject {
+  DeviceParameter definition;
+  std::optional<DeviceParameterValue> live;  ///< Empty when the read failed.
+};
+
+/// @brief One row of a compare of two configurations with each other and with the drive.
+struct ConfigCompareRow {
+  uint16_t index{};
+  uint8_t subindex{};
+  std::string name;                   ///< From the object dictionary; empty when unknown.
+  std::optional<std::string> first;   ///< The value in the first configuration, when it has one.
+  std::optional<std::string> second;  ///< The value in the second configuration, when it has one.
+  std::optional<DeviceParameterValue> live;
+  ConfigRowOutcome outcome{ConfigRowOutcome::kUnknownObject};
+  /// Whether both configurations hold the row with values that are not the same.
+  bool differsBetween = false;
+  /// Whether the value of the first configuration, or of the second when the first has no row,
+  /// is not the live value. False when there is no live value.
+  bool differsFromLive = false;
+};
+
+/// @brief Compares two configurations with each other and with the drive, row by row, in the
+///        order of the addresses.
+///
+/// The rows are every address of @p first and of @p second. @p second may be null, and then the
+/// rows are those of @p first. A later row at one address wins, as it does on the drive. Two values
+/// are the same when the drive reads them as the same value of their object, and, for an object
+/// the dictionary does not have, when they are the same number or the same text. @p objects holds
+/// each address the object dictionary has, with its live value.
+std::vector<ConfigCompareRow> compareConfiguration(
+    const ConfigFile& first, const ConfigFile* second,
+    const std::map<std::pair<uint16_t, uint8_t>, ConfigLiveObject>& objects);
+
+/// @brief Whether a value of a file, read as the drive reads it, is the live value.
+///
+/// A REAL32 value matches within a relative 1e-6, because the drive writes 10 fractional digits of
+/// a float, which reads back a step off. A value the drive cannot read is compared as text.
+bool sameConfigValue(const DeviceParameter& object, std::string_view value, int format,
+                     const DeviceParameterValue& live);
+
+/// @brief One row of a configuration file as a reader sees it: where it is, what it names, and what
+///        the drive does with it.
+struct ConfigFileViewRow {
+  std::size_t line = 0;  ///< 1-based line number in the file.
+  uint16_t index{};
+  uint8_t subindex{};
+  std::string name;  ///< From the object dictionary; empty for an object the drive does not have.
+  std::string value;
+  ConfigRowOutcome outcome{ConfigRowOutcome::kUnknownObject};
+  std::optional<DeviceParameterValue> live;  ///< The value in memory, when it was read.
+  bool differs = false;  ///< Whether @c value is not the value in memory. False without one.
+};
+
+/// @brief A configuration file as a reader sees it, row by row, in the order of the file.
+struct ConfigFileView {
+  int format = 0;
+  std::optional<std::string> deviceName;
+  std::optional<std::string> firmwareVersion;
+  std::vector<ConfigFileViewRow> rows;
+  std::vector<ConfigFileProblem> problems;
+};
+
+/// @brief Names each row of @p file, and gives it its outcome, with @p lookup, which returns the
+///        definition of an object of the drive or nothing. With @p read, each row of an object the
+///        drive has also gets the value in memory that @p read returns, and whether it differs.
+ConfigFileView describeConfigFile(
+    const ConfigFile& file,
+    const std::function<std::optional<DeviceParameter>(uint16_t, uint8_t)>& lookup,
+    const std::function<std::optional<DeviceParameterValue>(uint16_t, uint8_t)>& read = nullptr);
+
+/// @brief Serialises a view: each row with `line`, `index`, `subindex`, `name`, `value`,
+///        `outcome`, `live` and `differs`, and the problems with `line` and `message`.
+void to_json(nlohmann::json& j, const ConfigFileView& view);
+void to_json(nlohmann::json& j, const ConfigFileViewRow& row);
+void to_json(nlohmann::json& j, const ConfigFileProblem& problem);
 
 /// @brief Whether @p index is in a safety area, 0x2600-0x26FF or 0x6600-0x67EF.
 ///

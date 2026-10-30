@@ -488,7 +488,7 @@ export interface ProgressStep {
   /** @example "succeeded" */
   status: "idle" | "running" | "succeeded" | "failed";
   /**
-   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`. For `ic-mu-key-registers` the `read-key-registers` step holds an array of `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and `entries`, the pairs written, as `IcMuRestoreFile` lists them. For `open-loop-field-control` the `validate` step holds an `OpenLoopFieldPlan`. For `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null with a `reason`. For `controller-auto-tuning` the `drive-configuration` step holds the `DriveConfig` sent to the auto-tuning program, the `noise` step `noiseRpm` and a `warning`, the `compute` step a `ControllerTuningComputed`, and the `write` step a `ControllerTuningWrite`. For `set-integral-limits` the `compute` step holds the inputs it read, and the `write` step `limits`, each with `object`, `before` and `after`, and `skipped`, the limit objects the drive does not have. For `config-file-load` the `validate` step holds `rows`, `loads`, `unknownObject` and `notLoadable`, each an array of addresses such as `0x2001:00`, `fileFirmwareVersion` and `cia402State`; the `outputs` step `written`, the addresses whose output now holds the loaded value; and the `verify` step `checked`, `differing`, each with `address`, `file` and `live` or `error`, and the two arrays of `validate` again.
+   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`. For `ic-mu-encoder-status` the `read-registers` step holds an array of `IcMuEncoderStatus`, and for `ic-mu-encoder-configuration` the `verify` step holds one. For `ic-mu-calibration` the `validate` step holds an `IcMuCalibrationPlan`, each `iteration-<n>` step an `IcMuCalibrationIteration`, and the `validation` step an `IcMuCalibrationValidation`. For `ic-mu-key-registers` the `read-key-registers` step holds an array of `IcMuKeyRegister`, for `ic-mu-eeprom-export` the `read-eeprom` step an array of `IcMuEepromByte`, and for `ic-mu-i2c-register` the `i2c-transfer` step an `IcMuI2cTransfer`. For `ic-mu-restore-file` the `restore-file` step holds `file` and `entries`, the pairs written, as `IcMuRestoreFile` lists them. For `open-loop-field-control` the `validate` step holds an `OpenLoopFieldPlan`. For `ic-mu-eeprom-erase` the `read-eeprom` step holds the 77 erased bytes as `IcMuEepromByte`, and the `delete-restore-file` step the `file` it deleted, or null with a `reason`. For `controller-auto-tuning` the `drive-configuration` step holds the `DriveConfig` sent to the auto-tuning program, the `noise` step `noiseRpm` and a `warning`, the `compute` step a `ControllerTuningComputed`, and the `write` step a `ControllerTuningWrite`. For `set-integral-limits` the `compute` step holds the inputs it read, and the `write` step `limits`, each with `object`, `before` and `after`, and `skipped`, the limit objects the drive does not have. For `config-file-load` the `validate` step holds `rows`, `loads`, `unknownObject` and `notLoadable`, each an array of addresses such as `0x2001:00`, `fileFirmwareVersion` and `cia402State`; the `outputs` step `written`, the addresses whose output now holds the loaded value; and the `verify` step `checked`, `differing`, each with `address`, `file` and `live` or `error`, and the two arrays of `validate` again. For `config-file-compare` the `read-values` step holds `read` and `failed`, the addresses whose value did not read, and the `compare` step `first` and `second`, each with `source` (`file` or `drive`, the drive's config.csv), `rows`, `firmwareVersion` and `problems`, each with `line` and `message`, or null for a missing second; `driveFirmwareVersion`; `rows`, each with `address`, `index`, `subindex`, `name`, `first`, `second`, `live`, `outcome`, `differsBetween` and `differsFromLive`; and `counts` with `rows`, `loads`, `unknownObject`, `notLoadable`, `differsBetween`, `differsFromLive`, `onlyInFirst` and `onlyInSecond`. A value that is not there is null.
    * @example {"status":1,"data":[1,2,3,4,5,6]}
    */
   value?: any;
@@ -896,6 +896,33 @@ export interface HardwareProduct {
    * @example "9501-01"
    */
   buildDescriptor: string;
+}
+
+/** A drive's config.csv as rows with names, in the order of the file. */
+export interface ConfigFileView {
+  /** The value of `META,FORMAT`; 0 when the file has none. */
+  format: number;
+  /** The device name the drive wrote in the first comment, from 0x1008. */
+  deviceName: string | null;
+  /** The firmware version the drive wrote in a comment, such as v5.6.11. */
+  firmwareVersion: string | null;
+  rows: {
+    line: number;
+    index: number;
+    subindex: number;
+    /** Empty for an object the drive does not have. */
+    name: string;
+    value: string;
+    outcome: "loads" | "unknown-object" | "not-loadable";
+    /** The value in memory, with `live=true`; null without it, for an object the drive does not have, and when the read failed. */
+    live: any | null;
+    /** Whether the value in the file differs from the value in memory. */
+    differs: boolean;
+  }[];
+  problems: {
+    line: number;
+    message: string;
+  }[];
 }
 
 /**

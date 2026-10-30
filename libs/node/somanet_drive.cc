@@ -1333,6 +1333,27 @@ std::expected<void, std::string> removeDeviceFile(Device& device, const std::str
                                      device.slavePosition(), removed.error().message));
 }
 
+std::expected<ConfigFileView, std::string> SomanetDrive::readConfigFile(bool withValues) {
+  auto content = device().readFile(std::string(kConfigFileName));
+  if (!content) {
+    return std::unexpected(
+        std::format("reading '{}' failed: {}", kConfigFileName, content.error().message));
+  }
+  const auto file = parseConfigFile(std::string(content->begin(), content->end()));
+  const auto lookup = [this](uint16_t index, uint8_t subindex) {
+    return device().parameter(index, subindex);
+  };
+  if (!withValues) {
+    return describeConfigFile(file, lookup);
+  }
+  return describeConfigFile(
+      file, lookup,
+      [this](uint16_t index, uint8_t subindex) -> std::optional<DeviceParameterValue> {
+        auto value = device().readParameter(index, subindex);
+        return value ? std::optional(std::move(*value)) : std::nullopt;
+      });
+}
+
 std::expected<HardwareDescription, std::string> SomanetDrive::readHardwareDescription() const {
   auto content = device().readFile(std::string(kHardwareDescriptionName));
   if (!content) {

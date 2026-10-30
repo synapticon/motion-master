@@ -128,6 +128,15 @@ std::expected<std::optional<PlantModel>, std::string> readPlantModel(DeviceManag
 std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant(
     DeviceManager& deviceManager, uint16_t slavePosition);
 
+/// @brief Reads the drive's config.csv and names each row; see @c SomanetDrive::readConfigFile.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @return The rows with their names and outcomes, or why the file could not be read.
+std::expected<ConfigFileView, std::string> readConfigFile(DeviceManager& deviceManager,
+                                                          uint16_t slavePosition,
+                                                          bool withValues = false);
+
 /// @brief Reads the full firmware descriptors a device accepts firmware under.
 ///
 /// Thin forward to @c SomanetDrive::readFullFirmwareDescriptors. Two FoE reads, the hardware

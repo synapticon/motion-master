@@ -2968,6 +2968,41 @@ paths:
           description: >
             The device is not a SOMANET drive, the file could not be read, or its content is not a
             plant model
+  /api/devices/{slavePosition}/config-file:
+    get:
+      summary: Read the drive's config.csv as rows with names
+      operationId: getDeviceConfigFile
+      description: >
+        Reads `config.csv` from a SOMANET drive over FoE, parses it as the drive's own parser does,
+        and gives each row the name of its object from the object dictionary and its outcome on a
+        load: `loads`, `unknown-object` or `not-loadable`. The rows keep the order of the file. A
+        line the drive would ignore or read differently is in `problems`. With `live=true`, each
+        row of an object the drive has also gets the value in memory, read over SDO, and whether
+        the value in the file differs from it.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+        - name: live
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: Read the value in memory of each row's object too, one SDO read each.
+      responses:
+        "200":
+          description: The file, row by row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigFileView"
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a SOMANET drive, or config.csv could not be read
   /api/devices/{slavePosition}/firmware-descriptors:
     get:
       summary: Read the firmware descriptors a device accepts
@@ -5710,7 +5745,15 @@ components:
             array of addresses such as `0x2001:00`, `fileFirmwareVersion` and `cia402State`; the
             `outputs` step `written`, the addresses whose output now holds the loaded value; and
             the `verify` step `checked`, `differing`, each with `address`, `file` and `live` or
-            `error`, and the two arrays of `validate` again.
+            `error`, and the two arrays of `validate` again. For `config-file-compare` the
+            `read-values` step holds `read` and `failed`, the addresses whose value did not read,
+            and the `compare` step `first` and `second`, each with `source` (`file` or `drive`,
+            the drive's config.csv), `rows`, `firmwareVersion` and `problems`, each with `line`
+            and `message`, or null for a missing second; `driveFirmwareVersion`; `rows`, each
+            with `address`, `index`, `subindex`, `name`, `first`, `second`, `live`, `outcome`,
+            `differsBetween` and `differsFromLive`; and `counts` with `rows`, `loads`,
+            `unknownObject`, `notLoadable`, `differsBetween`, `differsFromLive`, `onlyInFirst`
+            and `onlyInSecond`. A value that is not there is null.
           example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
         error:
           type: string
@@ -6197,6 +6240,54 @@ components:
           type: string
           description: "`id` and `version` joined by a dash."
           example: 9501-01
+    ConfigFileView:
+      type: object
+      description: A drive's config.csv as rows with names, in the order of the file.
+      required: [format, deviceName, firmwareVersion, rows, problems]
+      properties:
+        format:
+          type: integer
+          description: The value of `META,FORMAT`; 0 when the file has none.
+        deviceName:
+          type: string
+          nullable: true
+          description: The device name the drive wrote in the first comment, from 0x1008.
+        firmwareVersion:
+          type: string
+          nullable: true
+          description: The firmware version the drive wrote in a comment, such as v5.6.11.
+        rows:
+          type: array
+          items:
+            type: object
+            required: [line, index, subindex, name, value, outcome, live, differs]
+            properties:
+              line: { type: integer }
+              index: { type: integer }
+              subindex: { type: integer }
+              name:
+                type: string
+                description: Empty for an object the drive does not have.
+              value: { type: string }
+              outcome:
+                type: string
+                enum: [loads, unknown-object, not-loadable]
+              live:
+                nullable: true
+                description: >
+                  The value in memory, with `live=true`; null without it, for an object the drive
+                  does not have, and when the read failed.
+              differs:
+                type: boolean
+                description: Whether the value in the file differs from the value in memory.
+        problems:
+          type: array
+          items:
+            type: object
+            required: [line, message]
+            properties:
+              line: { type: integer }
+              message: { type: string }
     HardwareDescription:
       type: object
       description: >

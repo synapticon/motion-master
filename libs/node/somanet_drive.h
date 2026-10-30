@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "node/cia402_drive.h"
+#include "node/config_file.h"
 #include "node/firmware_package.h"
 
 namespace mm::node {
@@ -2091,6 +2092,11 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// @return The parsed description, or why it could not be read or made sense of.
   std::expected<HardwareDescription, std::string> readHardwareDescription() const;
+
+  /// @brief Reads the drive's config.csv over FoE, and names each row from the object dictionary.
+  ///        With @p withValues, also reads the value in memory of each row's object, one SDO read
+  ///        each, and marks the rows whose value differs.
+  std::expected<ConfigFileView, std::string> readConfigFile(bool withValues = false);
 
   /// @brief Reads and parses the drive's @c .variant file (FoE).
   ///

@@ -76,6 +76,8 @@ classDiagram
         +runAutoTuning «fn»
         +autoTuningStatus «fn»
         +autoTuningSpec «fn»
+        +eniOptions «fn»
+        +runCapture «fn»
     }
     class NotificationBus {
         <<mm::node — thread 6>>
@@ -183,6 +185,7 @@ classDiagram
         -atomic~uint64~ processImageGeneration_
         -unique_ptr~ProcessData~ pd_
         -ParameterCache parameterCache_
+        -EsiCache esiCache_
         -DeviceManagerConfig config_
         -mutex busOperationMutex_
         -mutex currentSetMutex_
@@ -221,6 +224,7 @@ classDiagram
         -vector~unordered_map~ retiredMaps_
         -FlatPdoMapping flatPdoMapping_
         -const ParameterCache* parameterCache_
+        -const EsiCache* esiCache_
         -unique_ptr~mutex~ parametersMutex_
     }
     class ParameterCache {
@@ -228,6 +232,12 @@ classDiagram
         +list() / readRaw() / remove()
         +enabledForVendor()
         -ParameterCacheConfig config_
+    }
+    class EsiCache {
+        +find() / store() «control-plane, thread-safe»
+        +enabled()
+        -EsiCacheConfig config_
+        -mutex mutex_
     }
     class FieldbusDriver {
         <<interface>>
@@ -342,6 +352,7 @@ classDiagram
     DeviceSet *-- "0..*" Device : owns
     DeviceManager *-- "1" ProcessData : owns (pd_)
     DeviceManager *-- "1" ParameterCache : owns
+    DeviceManager *-- "1" EsiCache : owns
     ProcessData *-- "1" ProcessDataRing : owns (recorder)
     ProcessData o-- "0..*" ProcessImage : generations
     ProcessImage *-- "0..*" ProcessImageEntry
@@ -349,6 +360,7 @@ classDiagram
     Device ..> FieldbusDriver : ref (shared)
     Device ..> ProcessData : ref (live IO image)
     Device ..> ParameterCache : ref (OD-definition cache)
+    Device ..> EsiCache : ref (ESI metadata)
     Device *-- "0..*" DeviceParameter
     Device *-- FlatPdoMapping
     Device ..> ObjectAddress~T~ : addressed by
@@ -390,6 +402,7 @@ classDiagram
 | `DeviceSet` | `devices` | `vector<Device>` | **Yes** — a published set owns its devices. `DeviceManager` reaches them through the set | `libs/node/device_manager.h` |
 | `DeviceManager` | `pd_` | `unique_ptr<ProcessData>` | **Yes** | `libs/node/device_manager.h` |
 | `DeviceManager` | `parameterCache_` | `ParameterCache` | **Yes** | `libs/node/device_manager.h` |
+| `DeviceManager` | `esiCache_` | `EsiCache` | **Yes** | `libs/node/device_manager.h` |
 | `ProcessData` | `ring` | `ProcessDataRing` | **Yes** | `libs/node/process_data.h` |
 | `ProcessData` | `outScratch`, `inScratch` | `ProcessBuffer` | **Yes** — RT-thread-only scratch | `libs/node/process_data.h` |
 | `ProcessData` | `generations` | `vector<shared_ptr<const ProcessImage>>` | **Yes (retained)** | `libs/node/process_data.h` |
@@ -401,6 +414,7 @@ classDiagram
 | `Device` | `retiredMaps_` | `vector<unordered_map<uint32_t, DeviceParameter*>>` | **Yes** — but only for a map replaced while the real-time cycle refused to drain. A cyclic task may still walk such a map, so freeing it then is a use-after-free. Each entry is logged as an emergency | `libs/node/device.h` |
 | `Device` | `flatPdoMapping_` | `FlatPdoMapping` | **Yes** | `libs/node/device.h` |
 | `Device` | `parameterCache_` | `const ParameterCache*` | No — points at `DeviceManager::parameterCache_` | `libs/node/device.h` |
+| `Device` | `esiCache_` | `const EsiCache*` | No — points at `DeviceManager::esiCache_` | `libs/node/device.h` |
 | `Device` | `parametersMutex_` | `unique_ptr<std::mutex>` | **Yes** — indirect only so `Device` stays movable for `vector<Device>` | `libs/node/device.h` |
 
 ## Inheritance

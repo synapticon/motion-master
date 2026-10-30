@@ -44,7 +44,7 @@ Use the release preset for anything timing-sensitive — a debug build is unopti
 
 For the inner development loop, `./tools/build-dev.sh` builds and stamps capabilities as it goes (`--no-setcap` skips the `sudo`), and `./tools/run-dev.sh` starts the result with CORS opened to the Vite dev server and debug-level logging — see [Running locally](#running-locally). Run `./tools/test.sh` separately when you want the test suite.
 
-On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. This is the same set the release packages apply, and it has to be re-run after every relink because the capabilities are attached to the file; see [Linux capabilities](INSTALLATION.md#linux-capabilities) for what each one grants.
+On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. This is the same set the release packages apply, and it has to be re-run after every relink because the capabilities are attached to the file; see [Linux capabilities](INSTALLATION.md#linux-capabilities) for what each one grants. It also gives `motion-master-capture`, the frame capture program built beside the server, `cap_net_raw`.
 
 ### Windows
 
@@ -237,6 +237,8 @@ Managed via [vcpkg](https://vcpkg.io). No manual installation needed — vcpkg d
 | GTest | Unit testing |
 
 On Windows, SOEM's NIC driver additionally builds against the [Npcap SDK](https://npcap.com/#sdk), vendored in-repo under `extern/` so it survives vcpkg binary-cache restores. The Npcap *driver* is a runtime dependency — see [Prerequisites](../README.md#prerequisites).
+
+The iC-Haus MU_3SL library, which the iC-MU calibration uses, is vendored under `extern/MU_3SL-3.4.2` as headers and prebuilt binaries. iC-Haus builds it for Linux x86-64 and Windows x64 only. On every other platform the build leaves it out, and no device offers the `ic-mu-calibration` procedure. The build copies the library next to each executable, so a build directory runs as it is.
 
 ## Real-Time Linux
 

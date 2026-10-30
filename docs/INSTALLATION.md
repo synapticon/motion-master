@@ -17,6 +17,13 @@ Release packages are available on the [Releases](https://github.com/synapticon/m
 
 The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/local/bin/motion-master` symlink.
 
+Every artefact carries two programs:
+
+- `motion-master` is the server.
+- `motion-master-capture` records the EtherCAT frames on a network adapter to a pcap file, and prints how late each frame came back. The server runs it for `POST /api/captures`, and you can run it on its own: `motion-master-capture --ifname <adapter> --seconds 30 --out frames.pcap`.
+
+The Linux x86-64 and Windows artefacts also carry the iC-Haus MU_3SL library, which the iC-MU calibration needs. iC-Haus builds that library for Linux x86-64 and Windows x64 only. So the aarch64 and macOS artefacts have no iC-MU calibration.
+
 > **aarch64 note:** the arm64 artefacts are built on **Debian 13 (trixie)** and need glibc 2.38 or newer, so they run on Debian 13 and Raspberry Pi OS trixie. Debian 12 (bookworm, glibc 2.36) is too old — [build from source](DEVELOPMENT.md#building-from-source) there.
 
 [Download statistics](https://github.com/synapticon/motion-master/releases/tag/stats) shows how many times each file in each release has been downloaded. A workflow regenerates it once a day. The same text is also an asset on that release, at [`STATS.md`](https://github.com/synapticon/motion-master/releases/download/stats/STATS.md), for a script that wants to read it.
@@ -54,7 +61,7 @@ sudo apt remove motion-master                         # remove (leaves cert.pem 
 sudo apt purge motion-master                          # full removal including certs
 ```
 
-The `postinst` script automatically sets the four required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`, `cap_ipc_lock`) on the binary — see [Linux capabilities](#linux-capabilities) for what each one does. On upgrade the capabilities are re-applied to the new binary automatically. The script also downloads [auto-tuning](#auto-tuning), when the machine does not have that file yet. This is why the package depends on `curl`. `apt purge` deletes the file again.
+The `postinst` script automatically sets the four required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`, `cap_ipc_lock`) on the binary — see [Linux capabilities](#linux-capabilities) for what each one does. It gives `motion-master-capture` the one capability it needs, `cap_net_raw`. On upgrade the capabilities are re-applied to the new binary automatically. The script also downloads [auto-tuning](#auto-tuning), when the machine does not have that file yet. This is why the package depends on `curl`. `apt purge` deletes the file again.
 
 > **Note:** `apt remove` leaves `cert.pem` and `key.pem` behind as conffiles. Use `apt purge` for a complete uninstall.
 
@@ -83,7 +90,7 @@ cd motion-master-<version>-linux-x64
 
 Run `setup.sh` as yourself. Do not use `sudo`. The script calls `sudo` itself for the capability step, so the file it downloads belongs to you.
 
-Alongside the binary the tarball carries `setup.sh` and `install-auto-tuning.sh`, a `SETUP.md` with the same first-run notes, the bundled `cert.pem`/`key.pem`, and the annotated `motion-master.example.jsonc`.
+Alongside the binary the tarball carries `motion-master-capture`, `setup.sh` and `install-auto-tuning.sh`, a `SETUP.md` with the same first-run notes, the bundled `cert.pem`/`key.pem`, and the annotated `motion-master.example.jsonc`.
 
 ## Linux capabilities
 
@@ -107,13 +114,19 @@ The `=eip` suffix puts each capability in the file's **e**ffective, **i**nherita
 - Capabilities live in an extended attribute on the *file*, so they are lost whenever the file is replaced — a rebuild, a `cp`, or a manual binary swap. Re-run `setup.sh` (or `./tools/build.sh --setcap`) afterwards. Package upgrades handle this themselves.
 - They require a filesystem with extended-attribute support, mounted without `nosuid`. On a `nosuid` mount, or over NFS without xattrs, `setcap` succeeds but the kernel ignores the capabilities at exec time — run the binary from local storage instead.
 
+The capture program opens a raw socket on the adapter and needs nothing else. The server starts it as a child process, and a child gets no capability from the server, so the program needs its own. All three Linux install paths also run:
+
+```bash
+setcap cap_net_raw=eip <install-dir>/motion-master-capture
+```
+
 Inside a container file capabilities are ignored entirely; see [Docker → Capabilities](#capabilities) for the `--cap-add` equivalents.
 
 ## Windows
 
-Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.exe`, the bundled `cert.pem`/`key.pem`, an auto-loaded `motion-master.jsonc` (preset to a 4 ms real-time cycle, robust on stock Windows timers), the annotated `motion-master.example.jsonc`, and the required vcpkg runtime DLLs. The zip also contains `setup.ps1`, which downloads [auto-tuning](#auto-tuning). Windows has no capability step, so the script does nothing else. Install the two runtime dependencies listed under [Usage → Prerequisites](../README.md#prerequisites) (Visual C++ Redistributable and Npcap), then run `motion-master.exe` from the extracted directory — it picks up the neighbouring `motion-master.jsonc` automatically (edit it to change the cycle period or any other setting).
+Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.exe`, `motion-master-capture.exe`, `MU_3SL_interface_64.dll`, the bundled `cert.pem`/`key.pem`, an auto-loaded `motion-master.jsonc` (preset to a 4 ms real-time cycle, robust on stock Windows timers), the annotated `motion-master.example.jsonc`, and the required vcpkg runtime DLLs. The zip also contains `setup.ps1`, which downloads [auto-tuning](#auto-tuning). Windows has no capability step, so the script does nothing else. Install the two runtime dependencies listed under [Usage → Prerequisites](../README.md#prerequisites) (Visual C++ Redistributable and Npcap), then run `motion-master.exe` from the extracted directory — it picks up the neighbouring `motion-master.jsonc` automatically (edit it to change the cycle period or any other setting).
 
-`motion-master.exe` is **Authenticode code-signed** (with an RFC 3161 timestamp), so Windows shows Synapticon as the verified publisher instead of an "unknown publisher" SmartScreen block. Signing happens on a self-hosted runner holding the certificate token, as a final step of the release workflow — it replaces the zip asset in place, so the published archive is always the signed one.
+`motion-master.exe` and `motion-master-capture.exe` are **Authenticode code-signed** (with an RFC 3161 timestamp), so Windows shows Synapticon as the verified publisher instead of an "unknown publisher" SmartScreen block. Signing happens on a self-hosted runner holding the certificate token, as a final step of the release workflow — it replaces the zip asset in place, so the published archive is always the signed one.
 
 ## macOS (Apple Silicon)
 

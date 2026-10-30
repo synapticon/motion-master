@@ -149,7 +149,9 @@ Every setting lives in a JSONC config file — comments are allowed, all keys ar
 | `recorder` | `capacity` of the lossless process-data ring in cycles (default 300000 ≈ 5 min at 1 ms for one drive, ≈ 38 MB) and `dumpDir` for `.mmpd` dumps |
 | `parameterCache` | On-disk cache of CoE object-dictionary *definitions* (never values) keyed by vendor/product/firmware version (0x100A) — `enabled`, `cacheAllVendors`, `directory` |
 | `esiCache` | ESI files that add units, ranges, defaults, descriptions and options to live parameters, found by vendor and firmware version (0x100A) as `esi-<vendor>-<version>.xml` — `enabled`, `directory` (default: the `esis` subdirectory of the user cache) |
+| `userCache` | `directory` of the per-user file store served at `/api/user-cache` (default: the standard per-user cache directory, under `motion-master`). Everything in it is readable, writable and deletable through the API, so point it at a directory that holds nothing else |
 | `parameters` | `readObjectDictionaryOnPreop` (enumerate on the first PRE-OP) and `useCompleteAccess` (one CoE Complete Access upload per ARRAY/RECORD instead of per-subindex reads) |
+| `autoTuning` | `enabled`, `binaryPath` (default: `auto-tuning` next to the binary) and the loopback `port` (63528) of the auto-tuning child process |
 | `tls` | `certPath`, `keyPath` (empty = auto-discover), and `autoUpdate` — set `false` for air-gapped installs |
 
 If a raised `skippedCycles` count shows up right after start (visible on the console's Game Loop page), the configured `gameLoop.periodUs` is too aggressive for that machine's timer resolution — raise it. A 1 ms cycle is realistic on a `PREEMPT_RT` Linux host; stock Windows often cannot sustain better than ~1.5 ms, which is why the Windows release defaults to 4 ms.

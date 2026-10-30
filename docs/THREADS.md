@@ -34,6 +34,16 @@ threading model:
 - **The route handler that calls it blocks on an HTTP request.** That call runs on an HTTP worker
   thread, and it holds no lock, so it stalls neither the real-time loop nor another request.
 
+A second child process runs only for the length of one capture. `POST /api/captures` starts
+`motion-master-capture` (`apps/motion_master/capture_runner.cc`) with `mm::core::spawnChild` and
+waits for it to exit with `mm::core::waitChild`. Three facts about it matter:
+
+- **An HTTP worker thread starts it.** That thread is not real-time, so the child does not
+  inherit `SCHED_FIFO`.
+- **The worker blocks for the whole capture**, up to 120 s, and holds no lock while it waits.
+- **One capture runs at a time.** The atomic flag `captureRunning_` refuses a second request with
+  409 while one runs.
+
 A C++ route plug-in (`mm::api`, see [CLASS_DIAGRAM.md](CLASS_DIAGRAM.md)) is ordinary code that
 holds a `DeviceManager&`. It may start its own off-real-time `std::jthread` for long work, exactly
 as `MonitoringManager` does. Such a thread obeys the same two rules as every non-real-time thread.
@@ -98,6 +108,7 @@ flowchart TB
     BH -->|processImageInfo,<br/>processDataMutex_ shared| WKC
     FS -->|re-map or tear down,<br/>busOperationMutex_| SM
     HTTP -->|blocking HTTP request<br/>on a worker thread| AT[["auto-tuning child process<br/>(loopback, own program)"]]
+    HTTP -->|spawn and wait<br/>on a worker thread| CAP[["motion-master-capture<br/>(one capture at a time)"]]
 ```
 
 ## The seven threads
@@ -234,6 +245,7 @@ order, the drain protocol, the invariants — is in [LOCKING.md](LOCKING.md). Th
 | SDO, FoE, registers, AL state | 2 and 5 | The driver's control-plane locks, held for a single socket transaction. Over SOEM, work on one drive takes that drive's lock and the bus lock shared, so the mailbox work of different drives runs at the same time. A scan, a re-map and an AL transition take the bus lock exclusive. Never across a sleep, a blocking wait or a user callback |
 | Bus health counts | 1 writes. 2 and 6 read | Relaxed atomics in `ProcessData`. The reader reaches them through `processImageInfo()`, which takes `processDataMutex_` **shared**, because it also walks the retained image generations |
 | Auto-tuning request | an HTTP worker | None in this process. The call is a blocking HTTP request to the child, and it holds no lock while it waits |
+| Frame capture | an HTTP worker | `captureRunning_`, an atomic flag that lets one capture run at a time. The worker waits for the child to exit and holds no lock |
 
 **No long hold, and that is the design.** A procedure that commands and waits for seconds holds a
 `DeviceHandle` for its whole duration, *including the sleeps between polls*. `runStoreParameters`,

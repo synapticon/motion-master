@@ -102,6 +102,8 @@ export default function DeviceConfigurationPage() {
   const [first, setFirst] = useState<PickedFile | null>(null)
   const [second, setSecond] = useState<PickedFile | null>(null)
   const [view, setView] = useState<'differences' | 'all'>('differences')
+  const [onlyChanged, setOnlyChanged] = useState(false)
+  const [outcome, setOutcome] = useState<Outcome | 'all'>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [strategy, setStrategy] = useState('replace')
 
@@ -455,6 +457,28 @@ export default function DeviceConfigurationPage() {
 
           {result && view === 'all' && (
             <div className="pb-4">
+              <div className="flex flex-wrap items-end gap-6 px-5 pb-3 text-xs">
+                <label className="flex items-center gap-2">
+                  <Checkbox checked={onlyChanged} onChange={setOnlyChanged} />
+                  Only rows that differ, between the two or from memory
+                </label>
+                <div>
+                  <label className={labelCls} htmlFor="configuration-outcome">
+                    Outcome
+                  </label>
+                  <select
+                    id="configuration-outcome"
+                    className={inputCls}
+                    value={outcome}
+                    onChange={event => setOutcome(event.target.value as Outcome | 'all')}
+                  >
+                    <option value="all">All</option>
+                    <option value="loads">Loads</option>
+                    <option value="unknown-object">No such object</option>
+                    <option value="not-loadable">Not loadable</option>
+                  </select>
+                </div>
+              </div>
               <Table
                 head={[
                   <Checkbox
@@ -472,7 +496,13 @@ export default function DeviceConfigurationPage() {
                   secondName,
                   'In memory',
                 ]}
-                rows={result.rows.map(row => ({
+                rows={result.rows
+                  .filter(
+                    row =>
+                      (!onlyChanged || row.differsBetween || row.differsFromLive) &&
+                      (outcome === 'all' || row.outcome === outcome),
+                  )
+                  .map(row => ({
                   key: row.address,
                   highlight: row.differsBetween || row.differsFromLive,
                   cells: [

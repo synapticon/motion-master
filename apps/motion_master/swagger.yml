@@ -3777,8 +3777,11 @@ paths:
                 properties:
                   error:
                     type: string
+        "404":
+          description: A listed position names no device
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
+
   /api/dc-sync:
     get:
       summary: Read live distributed-clock synchronisation status for devices
@@ -3830,8 +3833,11 @@ paths:
                 properties:
                   error:
                     type: string
+        "404":
+          description: A listed position names no device
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
+
   /api/captures:
     post:
       summary: Record the EtherCAT frames of the bus adapter for a number of seconds
@@ -4036,8 +4042,11 @@ paths:
                       example: answering
         "400":
           description: A `positions` value is not a valid integer
+        "404":
+          description: A listed position names no device
         "500":
           $ref: "#/components/responses/DriverError"
+
     post:
       summary: Transition devices to an EtherCAT AL state
       operationId: transitionToState
@@ -4171,8 +4180,11 @@ paths:
                   error:
                     type: string
                     description: Why the driver refuses state changes
+        "404":
+          description: A listed position names no device
         "500":
           $ref: "#/components/responses/DriverError"
+
   /api/devices/restart:
     post:
       summary: Restart devices through INIT up to an AL state
@@ -4314,8 +4326,11 @@ paths:
                   error:
                     type: string
                     description: Why the driver refuses state changes
+        "404":
+          description: A listed position names no device
         "500":
           $ref: "#/components/responses/DriverError"
+
   /api/devices:
     get:
       summary: List all fieldbus devices

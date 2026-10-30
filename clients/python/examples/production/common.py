@@ -366,6 +366,18 @@ def install_firmware(s):
     )
 
 
+def store_parameters(s):
+    """Store the drive's parameters to flash, after a step that changed the object dictionary.
+
+    Each such step stores at once, so that a later step that fails leaves the drive with what the
+    steps before it did. The drive writes every value it holds into its config.csv. Returns the
+    line for the step's section of the record.
+    """
+    log.info("storing the parameters to flash")
+    run_procedure(s, "store-parameters")
+    return "parameters stored to flash"
+
+
 def step_value(snapshot, step_id):
     """Return the value of one step of a finished procedure run, or None."""
     for step in snapshot["steps"]:
@@ -430,5 +442,6 @@ def load_configuration(s, path):
         lines.append("read back: every loaded value matches the file")
     for line in lines:
         log.info(line)
+    lines.append(store_parameters(s))
     s.add("configuration", lines)
     s.append(f"configuration file {path.name}", text.splitlines())

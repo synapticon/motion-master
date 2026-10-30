@@ -605,6 +605,14 @@ constexpr auto kStateTimeout = std::chrono::seconds(10);
 /// AppECS_Functions_Boot.c, Boot_Handle_ESM_AL_Control_Changed_Ind).
 constexpr auto kBootExitTimeout = std::chrono::seconds(30);
 
+/// How long after INIT the master watches for the restart of the netX. The boot code asks for the
+/// reset 500 ms after it reports INIT, and an Integro on the bench stopped answering 0.7 s after
+/// the INIT request.
+constexpr auto kComRestartWindow = std::chrono::seconds(2);
+
+/// The pause between two state reads while the master waits for the netX restart.
+constexpr auto kComRestartPoll = std::chrono::milliseconds(100);
+
 /// Ceiling on a firmware activation that restarts the device, as SPoE does: the restart loads the
 /// COM firmware from flash before the drive answers again. A ceiling, not a wait: the activation
 /// returns as soon as the drive answers.
@@ -726,13 +734,61 @@ std::expected<void, std::string> enterBoot(DeviceManager& deviceManager, uint16_
   return {};
 }
 
+/// Reads the reachability of one device, or nothing when the read fails.
+std::optional<mm::comm::Reachability> readReachability(DeviceManager& deviceManager,
+                                                       uint16_t devicePosition) {
+  auto states = deviceManager.deviceStates({devicePosition});
+  if (!states || states->empty()) {
+    return std::nullopt;
+  }
+  return states->front().reachability;
+}
+
+/// Waits for the restart of the netX that follows the step from BOOT to INIT, and gives the device
+/// its station address back.
+///
+/// An Integro that got a com binary reports INIT at its station address, and its boot code resets
+/// the netX 500 ms later. The reset clears the station address, and the netX is off the bus for
+/// several seconds. So INIT counts as reached only after the netX answers again. A device that does
+/// not stop answering within @c kComRestartWindow restarted before it reported INIT, or does not
+/// restart. The INIT request after the restart is what gives the address back, and it reads the
+/// state at the address.
+std::expected<void, std::string> awaitComRestart(DeviceManager& deviceManager,
+                                                 uint16_t devicePosition) {
+  using Clock = std::chrono::steady_clock;
+  using mm::comm::Reachability;
+  const auto windowEnd = Clock::now() + kComRestartWindow;
+  while (readReachability(deviceManager, devicePosition) == Reachability::Answering) {
+    if (Clock::now() >= windowEnd) {
+      return {};
+    }
+    std::this_thread::sleep_for(kComRestartPoll);
+  }
+  spdlog::info("Device {}: the netX restarts after INIT; waiting for it to answer again",
+               devicePosition);
+  const auto deadline = Clock::now() + kBootExitTimeout;
+  for (;;) {
+    const auto reachability = readReachability(deviceManager, devicePosition);
+    if (reachability == Reachability::AddressLost || reachability == Reachability::Answering) {
+      break;
+    }
+    if (Clock::now() >= deadline) {
+      return std::unexpected(std::format(
+          "the device did not answer again within {} s of its restart", kBootExitTimeout.count()));
+    }
+    std::this_thread::sleep_for(kComRestartPoll);
+  }
+  return transitionTo(deviceManager, devicePosition, EtherCatState::Init, kStateTimeout);
+}
+
 /// Leaves BOOT for @p finalState, one legal AL step at a time.
 ///
 /// The state machine only pairs BOOT with INIT and only climbs one step at a time, so the walk is
 /// fixed: INIT, then PRE-OP, then SAFE-OP, then OP, stopping wherever it was asked to. The first
-/// two steps each get the long timeout, because either can restart the device.
+/// two steps each get the long timeout, because either can restart the device. @p comWritten says
+/// that a com binary waits to be applied, so the step to INIT can restart the netX after it.
 std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_t devicePosition,
-                                           EtherCatState finalState) {
+                                           EtherCatState finalState, bool comWritten) {
   if (finalState == EtherCatState::Boot) {
     return {};
   }
@@ -740,6 +796,11 @@ std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_
   if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Init, kBootExitTimeout);
       !r) {
     return std::unexpected(std::format("could not reach INIT: {}", r.error()));
+  }
+  if (comWritten) {
+    if (auto r = awaitComRestart(deviceManager, devicePosition); !r) {
+      return std::unexpected(std::format("could not reach INIT after the restart: {}", r.error()));
+    }
   }
   if (finalState == EtherCatState::Init) {
     return {};
@@ -4874,9 +4935,11 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
   // From here on the device is in BOOT, so every exit runs through this: whatever happened, the
   // device is taken to the requested final state rather than left in the bootloader by accident.
   std::optional<std::string> failure;
+  // Set when a com binary is written, and cleared when the activation already restarted the device.
+  bool comWritten = false;
   auto finish = [&]() -> std::expected<void, std::string> {
     reporter.start(kFinalStateStep);
-    auto left = leaveBoot(deviceManager, devicePosition, request.finalState);
+    auto left = leaveBoot(deviceManager, devicePosition, request.finalState, comWritten);
     if (!left) {
       // Worded so it cannot be mistaken for a write failure: the bytes are already on the drive.
       const std::string reason =
@@ -4980,6 +5043,7 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
                    "the package carries no COM firmware")) {
     return finish();
   }
+  comWritten = package->comBinary.has_value();
 
   // ── activate-firmware ──────────────────────────────────────────────────────────────────────
   // Over EtherCAT, leaving BOOT applies the firmware, and this does nothing. Over SPoE the drive
@@ -5001,6 +5065,9 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
       failure = std::format("activating the firmware failed: {}", activation.error());
       reporter.fail(kActivateFirmwareStep, *failure);
       return finish();
+    }
+    if (*activation == mm::comm::FieldbusDriver::FirmwareActivation::kRestarted) {
+      comWritten = false;
     }
     reporter.succeed(kActivateFirmwareStep,
                      *activation == mm::comm::FieldbusDriver::FirmwareActivation::kRestarted

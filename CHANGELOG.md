@@ -26,6 +26,7 @@ the HTTP/WebSocket API may break between any two alphas.
 ### Fixed
 
 - **A firmware installation on a Jasper-based drive ends in its final state.** The Jasper bootloader restarts the drive on the step from BOOT to INIT, and the restart clears the drive's station address. The drive answers again in INIT, and a broadcast read, which needs no address, counted INIT as reached. The read-back at the address then found nothing, so `firmware-installation` failed with "could not reach INIT: the device reported UNKNOWN rather than INIT". With `finalState` BOOT, a later request for INIT left the drive without its address, and the step to PRE-OP programmed its mailbox from an empty read and took 2 s longer. A drive that can restart on its way out of BOOT now counts as being in a state only when it answers at its station address, and it gets the address back as soon as it is found without it. (#189)
+- **A firmware installation on an Integro with `finalState` INIT leaves the drive answering.** An Integro that got a com binary reports INIT, and 0.7 s later its netX restarts and loses the station address. `firmware-installation` reported success before the restart, and the drive was off the bus for up to 16 s after it. The `final-state` step now waits for that restart and gives the drive its address back. A drive that keeps answering for 2 s after INIT does not restart, and the step goes on. (#189)
 
 ## [6.0.0-alpha.120] - 2026-10-30
 

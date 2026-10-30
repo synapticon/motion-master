@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.118] - 2026-10-30
+
+### Fixed
+
+- **The web apps on motion-master.synapticon.com are current again.** The Console of 6.0.0-alpha.116 and 6.0.0-alpha.117 did not build, so the site kept serving the apps of 6.0.0-alpha.115. The apps of this version include the Tuning page, the Firmware page and the integral limits.
+
 ## [6.0.0-alpha.117] - 2026-10-29
 
 ### Added
@@ -1020,7 +1026,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.117...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.118...HEAD
+[6.0.0-alpha.118]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.117...v6.0.0-alpha.118
 [6.0.0-alpha.117]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.116...v6.0.0-alpha.117
 [6.0.0-alpha.116]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.115...v6.0.0-alpha.116
 [6.0.0-alpha.115]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.114...v6.0.0-alpha.115

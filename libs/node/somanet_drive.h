@@ -1346,9 +1346,10 @@ std::expected<ObjectDictionaryValues, std::string> decodeObjectDictionaryValues(
 /// no-op when the brake is not firmware-controlled, and @c softwareControllable says so without the
 /// caller having to know that strategy 0 means manual.
 struct BrakeState {
-  /// Whether the object dictionary has 0x2004. A drive without a brake, such as one running Jasper
-  /// firmware, has none; every brake operation is then a no-op that succeeds.
-  bool present = true;
+  /// Whether the object dictionary has 0x2004. A drive running Jasper firmware has none, and every
+  /// brake operation is then a no-op that succeeds. It does not say that a brake is fitted: an
+  /// Integro has the object with or without one.
+  bool brakeObject = true;
   somanet::BrakeStatus status{somanet::BrakeStatus::kNotConfigured};  ///< 0x2004:07.
   somanet::BrakeReleaseStrategy releaseStrategy{
       somanet::BrakeReleaseStrategy::kManualOutputVoltage};  ///< 0x2004:04.
@@ -1359,7 +1360,7 @@ struct BrakeState {
   /// @brief Whether the firmware drives the brake, i.e. whether commanding 0x2004:07 does anything.
   ///        False for @c kManualOutputVoltage, where the brake is a raw phase-D voltage instead.
   bool softwareControllable() const {
-    return present && releaseStrategy != somanet::BrakeReleaseStrategy::kManualOutputVoltage;
+    return brakeObject && releaseStrategy != somanet::BrakeReleaseStrategy::kManualOutputVoltage;
   }
 
   /// @brief Whether releasing this brake turns the motor — true only for a pin brake, whose release
@@ -1851,9 +1852,10 @@ class SomanetDrive : public Cia402Drive {
 
   /// @brief Whether the object dictionary has the brake object 0x2004.
   ///
-  /// A drive with no brake, such as one running Jasper firmware, has none. Then @c brakeStatus
-  /// reports @c kNotConfigured, @c setBrakeStatus writes nothing, and @c brakeState reports
-  /// @c BrakeState::present false, so a procedure that handles an unconfigured brake runs as it is.
+  /// A drive running Jasper firmware has none. Then @c brakeStatus reports @c kNotConfigured,
+  /// @c setBrakeStatus writes nothing, and @c brakeState reports @c BrakeState::brakeObject false,
+  /// so a procedure that handles an unconfigured brake runs as it is. The object says nothing about
+  /// a fitted brake: an Integro has it with or without one.
   bool hasBrakeObject() const;
 
   /// @brief Reads the brake state (0x2004:07), or @c kNotConfigured where 0x2004 is missing.

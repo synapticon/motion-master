@@ -5957,12 +5957,13 @@ components:
         commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a
         release or engage arrives in the same shape as a plain read.
       properties:
-        present:
+        brakeObject:
           type: boolean
           description: >
-            Whether the drive has the brake object 0x2004. A drive with no brake, such as one
-            running Jasper firmware, has none: then `status` is `notConfigured`,
-            `softwareControllable` is false, and release and engage write nothing and succeed.
+            Whether the drive has the brake object 0x2004. A drive running Jasper firmware has
+            none: then `status` is `notConfigured`, `softwareControllable` is false, and release
+            and engage write nothing and succeed. It does not say that a brake is fitted: an
+            Integro has the object with or without one.
           example: true
         status:
           type: string
@@ -6006,7 +6007,7 @@ components:
             raises current progressively to lift the load off the pin.
           example: false
       required:
-        [present, status, releaseStrategy, pullTimeMs, pullVoltageMv, holdVoltageMv,
+        [brakeObject, status, releaseStrategy, pullTimeMs, pullVoltageMv, holdVoltageMv,
          softwareControllable, releaseMovesShaft]
     ProcedureDescriptor:
       type: object

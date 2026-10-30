@@ -1170,7 +1170,7 @@ TEST(RunPolePairDetectionProcedure, RunsOnADriveWithoutTheBrakeObject) {
     EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
   }
   EXPECT_EQ(brakeWrites(driver), 0);
-  EXPECT_EQ(stepById(reporter.steps(), "release-brake")->value.at("present"), false);
+  EXPECT_EQ(stepById(reporter.steps(), "release-brake")->value.at("brakeObject"), false);
 }
 
 TEST(RunPolePairDetectionProcedure, RestoresTheBrakeAndModeItFound) {

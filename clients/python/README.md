@@ -167,7 +167,8 @@ Three values in that column are not states:
 ### Production
 
 A production script runs many steps in order on one drive, asks before the steps that need a
-decision, and writes a log and a record of the drive. Each script has a README with its steps.
+decision, and writes a log and a record of the drive. Its steps are in
+[`examples/production/README.md`](examples/production/README.md).
 
 | Script | What it does | AL state |
 | --- | --- | --- |

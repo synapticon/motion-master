@@ -1,15 +1,24 @@
-# Production script for an Integro drive
+# Production scripts
 
-`commission.py` commissions one SOMANET Integro drive in a fixed order of steps. It writes a
-log and a record of what it did. Use it at the production line, so that every drive gets the
-same configuration.
+A production script commissions one SOMANET drive in a fixed order of steps. It writes a log
+and a record of what it did. Use it at the production line, so that every drive gets the same
+configuration.
 
-The script calls the routes and the procedures of the Motion Master server, and shows their
+Each kind of drive has its own script:
+
+| Script | Drive |
+| --- | --- |
+| `integro/commission.py` | Integro |
+
+A script for the Circulo NG, which runs the Jasper firmware, follows in `jasper/`. Code that the
+scripts share is in `common.py`.
+
+A script calls the routes and the procedures of the Motion Master server, and shows their
 results. It decides nothing that the server decides. Each step is also available in the Console.
 
 ## Before you start
 
-1. Set up the Python client as [the client README](../../../README.md#setup) says.
+1. Set up the Python client as [the client README](../../README.md#setup) says.
 2. Start the Motion Master server.
 3. Connect the drive to the bus adapter that `config.toml` names.
 
@@ -35,7 +44,8 @@ Console session that uses the same server sees every change.
 
 ## Files the script writes
 
-The files go to `clients/python/examples/production/integro/logs/`. Git ignores that directory.
+The files go to `logs/` beside the script, for example
+`clients/python/examples/production/integro/logs/`. Git ignores every `logs/` directory here.
 
 | File | Content |
 | --- | --- |
@@ -51,7 +61,14 @@ lines of the record give the drive name, the start time and the outcome.
 
 ## Steps
 
-The script runs step 1 only. The other steps follow one at a time.
+Each step is described once. The table shows which script runs it.
+
+| Step | Integro |
+| --- | --- |
+| Connect | Yes |
+| 1. Hardware description | Yes |
+
+The other steps follow one at a time.
 
 ### Connect
 

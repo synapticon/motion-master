@@ -47,6 +47,9 @@ class FakeDriver : public FieldbusDriver {
   /// AL Status reported by readStates() for every queried slave (bits 3:0 = state).
   uint16_t reportState = 0;
 
+  /// The object dictionary that readObjectDictionary() reports for every slave.
+  std::vector<mm::comm::OdEntry> od;
+
   /// Slaves that readStates() reports as not answering, with the reason. Every other slave answers.
   std::map<uint16_t, mm::comm::Reachability> unreachable;
 
@@ -146,7 +149,9 @@ class FakeDriver : public FieldbusDriver {
     return {};
   }
 
-  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override { return OdRead{}; }
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
+    return OdRead{.entries = od, .missingEntries = 0};
+  }
 
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
       uint16_t, const std::string&, std::chrono::milliseconds) override {
@@ -443,6 +448,40 @@ TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
       dm.writeDeviceParameter(99, 0x6064, 0x00, DeviceParameterValue{uint32_t{1}}).has_value());
   EXPECT_FALSE(dm.deviceParameterView(99, 0x6064, 0x00, /*refreshFromBus=*/true).has_value());
   EXPECT_FALSE(dm.deviceParameterView(99, 0x6064, 0x00, /*refreshFromBus=*/false).has_value());
+}
+
+TEST(DeviceManagerDelegates, AFreshReadWithoutAMailboxIsRefused) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  mm::comm::OdEntry entry;
+  entry.index = 0x2001;
+  entry.objectCode = 7;
+  entry.dataType = 0x0007;
+  entry.bitLength = 32;
+  entry.access = 0x0007;
+  entry.name = "Commutation angle offset";
+  driver->od = {entry};
+  auto* raw = driver.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.deviceStates({}).has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  // In PRE-OP the fresh read goes to the bus. The fake answers an SDO read with no bytes, so it
+  // fails as a transfer, which is not the refusal below.
+  const auto preOp = dm.deviceParameterView(1, 0x2001, 0, /*refreshFromBus=*/true);
+  ASSERT_FALSE(preOp.has_value());
+  EXPECT_EQ(preOp.error().kind, mm::node::ParameterError::Kind::kTransferFailed);
+
+  // The device drops to INIT, where it has no mailbox. The cached value is the last one read, so a
+  // fresh read is refused rather than served as if it were live.
+  raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  ASSERT_TRUE(dm.deviceStates({}).has_value());
+  const auto fresh = dm.deviceParameterView(1, 0x2001, 0, /*refreshFromBus=*/true);
+  ASSERT_FALSE(fresh.has_value());
+  EXPECT_EQ(fresh.error().kind, mm::node::ParameterError::Kind::kNoMailbox);
+  EXPECT_NE(fresh.error().message.find("source=cache"), std::string::npos);
+  EXPECT_TRUE(dm.deviceParameterView(1, 0x2001, 0, /*refreshFromBus=*/false).has_value());
 }
 
 TEST(DeviceManagerStageOutputs, ReportsPerItemWithoutFailingWholeBatch) {

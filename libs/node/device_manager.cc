@@ -1598,6 +1598,16 @@ std::expected<DeviceParameter, ParameterError> DeviceManager::deviceParameterVie
   if (!device->parameter(index, subindex)) {
     return std::unexpected(unknownParameter(slavePosition, index, subindex));
   }
+  // Without a mailbox the device answers no read, and the value the cache holds is the last one
+  // read, perhaps from firmware that no longer runs. Served under a fresh read it looked live, so a
+  // fresh read is refused, and a client that wants the cached value asks for it.
+  if (refreshFromBus && !device->mailboxActive()) {
+    return std::unexpected(ParameterError{
+        ParameterError::Kind::kNoMailbox,
+        std::format("device {} is in {} and has no mailbox, so 0x{:04X}:{:02X} cannot be read; "
+                    "source=cache serves the last value read",
+                    slavePosition, mm::comm::toString(device->alState()), index, subindex)});
+  }
   // refreshFromBus == false is the ?source=cache path: serve the cached struct without any bus I/O.
   // refreshFromBus == true (?source=auto) first syncs the cache via the live PDO image or an SDO
   // upload (routing lives in Device::readParameter), then returns the updated struct.

@@ -3831,7 +3831,7 @@ paths:
                 seconds:
                   type: integer
                   minimum: 1
-                  maximum: 120
+                  maximum: 300
                   default: 30
                   description: How long to record. A capture is a measurement a person starts.
                 adapter:

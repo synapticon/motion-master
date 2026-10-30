@@ -414,7 +414,7 @@ function CaptureSection() {
   })
 
   const n = Number(seconds)
-  const canRun = Number.isFinite(n) && n >= 1 && n <= 120 && !run.isPending && !upload.isPending
+  const canRun = Number.isFinite(n) && n >= 1 && n <= 300 && !run.isPending && !upload.isPending
   const busy = run.isPending || upload.isPending
 
   return (
@@ -447,7 +447,7 @@ function CaptureSection() {
             <input
               type="number"
               min={1}
-              max={120}
+              max={300}
               value={seconds}
               onChange={e => setSeconds(e.target.value)}
               className="ml-2 w-20 h-[38px] border border-grey-300 px-2 font-mono text-sm"

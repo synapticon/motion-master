@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **A frame capture can run for up to 5 minutes.** `POST /api/captures` and the Capture card on the Console's Fieldbus Diagnostics page accept `seconds` up to 300, where the limit was 120. Run `motion-master-capture` by hand for a longer capture, up to an hour.
+
 ### Fixed
 
 - **A frame capture works on an rpm or tarball install.** The rpm and the tarball's `setup.sh` gave `cap_net_raw` to `motion-master` only. The server starts `motion-master-capture` as a child process, and a child gets no capability from its parent, so `POST /api/captures` failed with "cannot open a raw socket" unless the server ran as root. Both now give the capture program `cap_net_raw`, as the deb did. On a tarball, run `./setup.sh` again.

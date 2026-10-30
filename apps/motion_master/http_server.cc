@@ -725,7 +725,7 @@ void HttpServer::run() {
         return mm::api::badRequest("body must be a JSON object");
       }
     }
-    constexpr int kMaxSeconds = 120;
+    constexpr int kMaxSeconds = 300;
     const int seconds = body.value("seconds", 30);
     if (seconds < 1 || seconds > kMaxSeconds) {
       return mm::api::badRequest(

@@ -40,7 +40,7 @@ waits for it to exit with `mm::core::waitChild`. Three facts about it matter:
 
 - **An HTTP worker thread starts it.** That thread is not real-time, so the child does not
   inherit `SCHED_FIFO`.
-- **The worker blocks for the whole capture**, up to 120 s, and holds no lock while it waits.
+- **The worker blocks for the whole capture**, up to 300 s, and holds no lock while it waits.
 - **One capture runs at a time.** The atomic flag `captureRunning_` refuses a second request with
   409 while one runs.
 

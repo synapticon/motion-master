@@ -2173,7 +2173,7 @@ export class Api<
       /**
        * How long to record. A capture is a measurement a person starts.
        * @min 1
-       * @max 120
+       * @max 300
        * @default 30
        */
       seconds?: number;

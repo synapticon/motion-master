@@ -1839,7 +1839,8 @@ std::vector<ProgressStep> configFileLoadSteps();
 ///    or read differently. Refuses a drive that is not in Switch On Disabled or Fault, because the
 ///    drive accepts 0x1011:01 in no other CiA 402 state. Refuses a row in a safety area on a drive
 ///    with 0xF050, which keeps its safety configuration on a safety module. Gives each row its
-///    outcome, and refuses a loadable row whose value does not fit its object.
+///    outcome, and refuses a loadable row whose value does not fit its type. A string longer than
+///    its object loads with a warning in the log, because testing a drive needs that.
 /// 2. **read-config-file** — for a merge, reads the drive's @c config.csv and merges the rows in.
 /// 3. **write-config-file** — writes the new @c config.csv.
 /// 4. **load** — sets 0x1011:01 and waits for the drive to confirm, as

@@ -6285,6 +6285,16 @@ std::expected<void, std::string> runConfigFileLoadProcedure(Device& device,
         break;
       case ConfigRowOutcome::kLoads:
         if (auto value = parseConfigFileValue(*object, row.value, file.format); value) {
+          // A string longer than its object loads as it is, because testing a drive needs that.
+          // The read-back afterwards lists the value the drive kept.
+          if (const auto* text = std::get_if<std::string>(&*value);
+              text != nullptr && text->size() * 8 > object->bitLength) {
+            spdlog::warn(
+                "Device {}: config file line {}, {}: '{}' has {} characters and the "
+                "object holds {}",
+                device.slavePosition(), row.line, address, *text, text->size(),
+                object->bitLength / 8);
+          }
           loads.push_back({row.index, row.subindex, std::move(*value)});
         } else {
           valueErrors += std::format(" line {}, {}: {};", row.line, address, value.error());

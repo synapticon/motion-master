@@ -1475,6 +1475,13 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
     // through to the SDO/offline paths below. No health gate here (unlike the read path): our own
     // setpoint is always safe to send.
     bytes = p->rawValueBytes();
+    // A string or a blob longer than the object goes out as it is, because testing a drive needs
+    // that. The warning is what a support log shows when the drive keeps a cut value.
+    if (!isScalarDataType(p->dataType) && p->bitLength > 0 && bytes.size() * 8 > p->bitLength) {
+      spdlog::warn(
+          "Device {}: the value written to 0x{:04X}:{:02X} has {} bytes and the object holds {}",
+          slavePosition_, index, subindex, bytes.size(), p->bitLength / 8);
+    }
     if (processData_ && exchangesProcessData() &&
         processData_->isOutputMapped(slavePosition_, index, subindex)) {
       p->syncState = SyncState::Synced;

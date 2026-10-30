@@ -1,0 +1,6 @@
+# The log and the record of each run of a production script.
+*/logs/
+# The configuration of a drive type. Each production line supplies its own.
+*/config.csv
+# Firmware packages, shared by every production script.
+packages/

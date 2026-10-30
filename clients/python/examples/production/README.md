@@ -16,7 +16,9 @@ C021 script runs the steps up to the assigned name. Its other steps follow when 
 to test them. Code that the scripts share is in `common.py`.
 
 A script calls the routes and the procedures of the Motion Master server, and shows their
-results. It decides nothing that the server decides. Each step is also available in the Console.
+results. It decides nothing that the server decides. Each step is also available in the Console,
+with the same calls. The configuration load runs there from the Procedures page until the
+Configuration page of [#31](https://github.com/synapticon/motion-master/issues/31) exists.
 
 ## Before you start
 
@@ -38,16 +40,23 @@ from the directory it runs in.
 
 ```bash
 python clients/python/examples/production/integro/commission.py
+python clients/python/examples/production/c021/commission.py
 ```
 
 `--slave` gives the position of the drive on the bus. The default is 1.
 
-The console output has colors when it goes to a terminal. Set `NO_COLOR=1` to turn them off. The
-log file never has them.
-
 ```bash
 python clients/python/examples/production/integro/commission.py --slave 2
 ```
+
+The console output has colors when it goes to a terminal. Set `NO_COLOR=1` to turn them off. The
+log file never has them.
+
+To stop a run, answer `x` at a question, or press Ctrl-C. Ctrl-C during a step cancels the
+procedure that the step runs on the server, which then restores the drive as on any other way
+out. Both write the record with what the run has so far. A script that is ended in another way,
+for example with `kill`, cannot cancel the procedure, and the procedure runs to its end on the
+server.
 
 **The running server is shared.** The script opens the fieldbus driver, scans, and moves the
 drive to other AL states (Application Layer states, the EtherCAT state machine of a device). A
@@ -102,8 +111,6 @@ the drive loads it from there.
 | Velocity controller tuning | Yes | Not yet |
 | Position controller tuning | Yes | Not yet |
 | Integral limits | Yes | Not yet |
-
-The other steps follow one at a time.
 
 ### Connect
 
@@ -226,8 +233,9 @@ auto-tuning program of the server, and writes the model to `plant_model.csv` on 
 Then the script reads the model back from the drive, and shows and records the chirp, the
 numerator, the denominator, the inertia and the friction. The step stores nothing. The procedure
 sets the operation mode to CST for the chirp and can leave it there, but the drive does not
-store the operation mode. On the console, a step value with a long list of numbers, such as the
-Bode data of the fit, shows how many numbers it has. The log file keeps them all.
+store the operation mode. The drive ends the step in Switched On, so a configuration load after
+it fails until the drive is disabled. On the console, a step value with a long list of numbers,
+such as the Bode data of the fit, shows how many numbers it has. The log file keeps them all.
 
 The Integro script uses a logarithmic chirp from 2.3 Hz to 31 Hz, at 460 per mille, for 3000 ms.
 

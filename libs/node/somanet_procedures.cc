@@ -6264,8 +6264,8 @@ std::expected<void, std::string> runConfigFileLoadProcedure(Device& device,
   }
 
   struct Load {
-    uint16_t index;
-    uint8_t subindex;
+    uint16_t index{};
+    uint8_t subindex{};
     DeviceParameterValue value;
   };
   std::vector<Load> loads;

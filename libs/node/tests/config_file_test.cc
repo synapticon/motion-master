@@ -25,7 +25,7 @@ std::string readFixture(std::string_view filename) {
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-DeviceParameter object(ObjectDataType type, uint16_t access = 0x0100, uint16_t bitLength = 32) {
+DeviceParameter definition(ObjectDataType type, uint16_t access = 0x0100, uint16_t bitLength = 32) {
   DeviceParameter p;
   p.dataType = static_cast<uint16_t>(type);
   p.access = access;
@@ -122,9 +122,9 @@ TEST(ConfigFileTest, ComparesRowsByAddressAndByNumber) {
 }
 
 TEST(ConfigFileTest, DecidesTheOutcomeOfARowAsTheDriveDoes) {
-  const auto backedUp = object(ObjectDataType::UNSIGNED32, 0x0100);
-  const auto notBackedUp = object(ObjectDataType::UNSIGNED32, 0x0007);
-  const auto sixtyFourBit = object(ObjectDataType::UNSIGNED64, 0x0100);
+  const auto backedUp = definition(ObjectDataType::UNSIGNED32, 0x0100);
+  const auto notBackedUp = definition(ObjectDataType::UNSIGNED32, 0x0007);
+  const auto sixtyFourBit = definition(ObjectDataType::UNSIGNED64, 0x0100);
 
   EXPECT_EQ(configRowOutcome(0x2001, nullptr), ConfigRowOutcome::kUnknownObject);
   EXPECT_EQ(configRowOutcome(0x2001, &backedUp), ConfigRowOutcome::kLoads);
@@ -139,25 +139,25 @@ TEST(ConfigFileTest, DecidesTheOutcomeOfARowAsTheDriveDoes) {
 }
 
 TEST(ConfigFileTest, ReadsIntegerValuesInTheirTypeRange) {
-  const auto u16 = object(ObjectDataType::UNSIGNED16);
+  const auto u16 = definition(ObjectDataType::UNSIGNED16);
   EXPECT_EQ(std::get<uint16_t>(*parseConfigFileValue(u16, "  65535 ", 2)), 65535);
   EXPECT_FALSE(parseConfigFileValue(u16, "65536", 2));
   EXPECT_FALSE(parseConfigFileValue(u16, "-1", 2));
   EXPECT_FALSE(parseConfigFileValue(u16, "abc", 2));
   EXPECT_FALSE(parseConfigFileValue(u16, "", 2));
 
-  const auto i8 = object(ObjectDataType::INTEGER8);
+  const auto i8 = definition(ObjectDataType::INTEGER8);
   EXPECT_EQ(std::get<int8_t>(*parseConfigFileValue(i8, "-128", 2)), -128);
   EXPECT_EQ(std::get<int8_t>(*parseConfigFileValue(i8, "+5", 2)), 5);
   EXPECT_FALSE(parseConfigFileValue(i8, "128", 2));
 
-  const auto boolean = object(ObjectDataType::BOOLEAN);
+  const auto boolean = definition(ObjectDataType::BOOLEAN);
   EXPECT_EQ(std::get<uint8_t>(*parseConfigFileValue(boolean, "1", 2)), 1);
   EXPECT_FALSE(parseConfigFileValue(boolean, "2", 2));
 }
 
 TEST(ConfigFileTest, ReadsRealValuesAsTheDriveDoes) {
-  const auto real = object(ObjectDataType::REAL32);
+  const auto real = definition(ObjectDataType::REAL32);
   EXPECT_FLOAT_EQ(std::get<float>(*parseConfigFileValue(real, "  0.0247177552", 2)), 0.0247177552F);
   EXPECT_FLOAT_EQ(std::get<float>(*parseConfigFileValue(real, "-1.5", 2)), -1.5F);
   EXPECT_FLOAT_EQ(std::get<float>(*parseConfigFileValue(real, "3", 2)), 3.0F);
@@ -170,7 +170,7 @@ TEST(ConfigFileTest, ReadsRealValuesAsTheDriveDoes) {
 }
 
 TEST(ConfigFileTest, ReadsAStringThatFitsTheObject) {
-  const auto text = object(ObjectDataType::VISIBLE_STRING, 0x0100, 8 * 8);
+  const auto text = definition(ObjectDataType::VISIBLE_STRING, 0x0100, 8 * 8);
   EXPECT_EQ(std::get<std::string>(*parseConfigFileValue(text, "  axis 1", 2)), "axis 1");
   EXPECT_FALSE(parseConfigFileValue(text, "much too long", 2));
 }

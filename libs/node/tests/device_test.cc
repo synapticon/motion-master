@@ -1,6 +1,8 @@
 #include "node/device.h"
 
 #include <gtest/gtest.h>
+#include <spdlog/sinks/ostream_sink.h>
+#include <spdlog/spdlog.h>
 
 #include <atomic>
 #include <chrono>
@@ -9,10 +11,12 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -21,6 +25,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "comm/object_data_types.h"
 #include "node/esi_cache.h"
 #include "node/parameter_cache.h"
 #include "node/synapticon.h"
@@ -906,6 +911,34 @@ TEST(DeviceWriteParameter, OnlineDownloadsAndMarksSynced) {
   ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{123}});
   EXPECT_EQ(p->syncState, SyncState::Synced);
+}
+
+// Sends a string longer than its object and returns what the log says about it.
+std::string logOfAStringWrite(const std::string& value) {
+  SdoFakeDriver driver;
+  driver.programOd(0x20F2, 0x00, static_cast<uint16_t>(mm::comm::ObjectDataType::VISIBLE_STRING),
+                   0x3F, /*bitLength=*/16);
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+  std::ostringstream log;
+  const auto previous = spdlog::default_logger();
+  spdlog::set_default_logger(std::make_shared<spdlog::logger>(
+      "test", std::make_shared<spdlog::sinks::ostream_sink_mt>(log)));
+  const auto written = device.writeParameter(0x20F2, 0x00, DeviceParameterValue{value});
+  spdlog::set_default_logger(previous);
+  EXPECT_TRUE(written.has_value()) << written.error();
+  EXPECT_EQ(driver.writes.size(), 1u);
+  if (!driver.writes.empty()) {
+    EXPECT_EQ(driver.writes[0].data.size(), value.size());
+  }
+  return log.str();
+}
+
+TEST(DeviceWriteParameter, AStringLongerThanItsObjectIsSentWithAWarning) {
+  EXPECT_NE(logOfAStringWrite("abc").find("0x20F2:00 has 3 bytes and the object holds 2"),
+            std::string::npos);
+  EXPECT_EQ(logOfAStringWrite("ab"), "");
 }
 
 TEST(DeviceWriteParameter, OfflineCachesAsPendingAndSucceeds) {

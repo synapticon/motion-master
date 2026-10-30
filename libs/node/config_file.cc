@@ -394,15 +394,8 @@ std::expected<DeviceParameterValue, std::string> parseConfigFileValue(const Devi
       return parseInteger<uint32_t>(value);
     case ObjectDataType::REAL32:
       return format == 0 ? parseRealFormat0(value) : parseReal(value);
-    case ObjectDataType::VISIBLE_STRING: {
-      const auto text = trimLeft(value);
-      const std::size_t capacity = object.bitLength / 8;
-      if (text.size() > capacity) {
-        return std::unexpected(
-            std::format("'{}' is longer than the {} characters the object holds", text, capacity));
-      }
-      return std::string(text);
-    }
+    case ObjectDataType::VISIBLE_STRING:
+      return std::string(trimLeft(value));
     default:
       return std::unexpected(
           std::format("the drive does not load data type 0x{:04X} from a file", object.dataType));

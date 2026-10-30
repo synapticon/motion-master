@@ -1496,7 +1496,8 @@ paths:
         UNSIGNED8), a number with a fraction for an integer type, or a number outside
         the range of a REAL32. Every value that fits the data type is sent unchanged,
         even one outside the object's documented range, because the drive decides
-        whether a value is valid. To send arbitrary bytes, use `sdoDownload`.
+        whether a value is valid. A string longer than its object is sent unchanged too,
+        and the server logs a warning. To send arbitrary bytes, use `sdoDownload`.
 
         Both `index` and `subindex` accept decimal or hexadecimal notation; prefix
         with `0x` for hex.

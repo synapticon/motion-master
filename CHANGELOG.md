@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **A write of a string longer than its object logs a warning.** A parameter write and a `config-file-load` row both send the value to the drive as it is, because a test of a drive needs that. Before, `config-file-load` refused such a row. The warning names the object, the length of the value and what the object holds, so a support log shows why a drive keeps a cut value. (#180)
+
 ## [6.0.0-alpha.120] - 2026-10-30
 
 ### Added

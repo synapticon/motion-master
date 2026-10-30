@@ -172,10 +172,13 @@ TEST(ConfigFileTest, ReadsRealValuesAsTheDriveDoes) {
   EXPECT_FLOAT_EQ(std::get<float>(*parseConfigFileValue(real, "0.100000000", 0)), 0.01F);
 }
 
-TEST(ConfigFileTest, ReadsAStringThatFitsTheObject) {
+TEST(ConfigFileTest, ReadsAStringOfAnyLength) {
+  // A string longer than the object is read too. The load warns about it and sends it, because
+  // testing a drive needs that.
   const auto text = definition(ObjectDataType::VISIBLE_STRING, 0x0100, 8 * 8);
   EXPECT_EQ(std::get<std::string>(*parseConfigFileValue(text, "  axis 1", 2)), "axis 1");
-  EXPECT_FALSE(parseConfigFileValue(text, "much too long", 2));
+  EXPECT_EQ(std::get<std::string>(*parseConfigFileValue(text, "much too long", 2)),
+            "much too long");
 }
 
 TEST(ConfigFileTest, ComparesTwoConfigurationsWithEachOtherAndWithTheDrive) {

@@ -1162,7 +1162,7 @@ sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--sla
 Writes one mailbox request twice with the same counter and reports whether the drive locks its
 receive mailbox (LOCKED), answers the copy (HANDLED), or discards it (DISCARDED). A Circulo locks,
 and INIT followed by PRE-OP frees it. An Integro discards the copy. The request is an SDO upload in PRE-OP.
-With `--boot` it is an FoE read in BOOT, which tests the bootloader. A drive that restarts on its way out of BOOT gets its station address back. It leaves the drive in PRE-OP.
+With `--boot` it is an FoE read in BOOT, which tests the bootloader. The bootloader of a Jasper-based C021 discards the copy (one run, BOOT only; PRE-OP not measured). A drive that restarts on its way out of BOOT gets its station address back. It leaves the drive in PRE-OP.
 It needs raw socket access, and no other master may use the adapter.
 
 ```bash

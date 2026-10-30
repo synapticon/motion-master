@@ -581,22 +581,24 @@ TEST(SpoeFieldbusDriver, TwoFileWritesToOneDriveRunOneAfterTheOther) {
 TEST(SpoeFieldbusDriver, AFileWriteWaitsForAFirmwareActivation) {
   // The activation sleeps between its requests while the drive restarts. A file transfer to the
   // same drive must not run in those gaps.
+  constexpr milliseconds kResetDelay{300};
+  constexpr milliseconds kRestartDuration{500};
   FakeSpoeServer server;
-  server.setRestartTiming(milliseconds{300}, milliseconds{500});
+  server.setRestartTiming(kResetDelay, kRestartDuration);
   server.setState(mm::comm::testing::kSpoeStateBoot);
   SpoeFieldbusDriver driver(configFor(server));
   ASSERT_TRUE(driver.scan().has_value());
-  std::chrono::steady_clock::time_point activated;
-  std::jthread activation([&] {
-    (void)driver.activateFirmware(1, std::chrono::seconds(10));
-    activated = std::chrono::steady_clock::now();
-  });
+  // The write is compared with the earliest end of the activation, not with a time the activation
+  // thread takes after it returns. The write gets the drive as soon as the activation lets it go,
+  // and it can finish before that thread runs again.
+  const auto start = std::chrono::steady_clock::now();
+  std::jthread activation([&] { (void)driver.activateFirmware(1, std::chrono::seconds(10)); });
   std::this_thread::sleep_for(milliseconds{100});
   const auto written = driver.writeFile(1, "config.csv", std::vector<uint8_t>(10, 1));
   const auto writeDone = std::chrono::steady_clock::now();
   activation.join();
   ASSERT_TRUE(written.has_value()) << written.error().message;
-  EXPECT_GE(writeDone, activated);
+  EXPECT_GE(writeDone - start, kResetDelay + kRestartDuration);
 }
 
 TEST(SpoeFieldbusDriver, AStateChangeWaitsForARunningScan) {

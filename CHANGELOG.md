@@ -23,6 +23,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - **A configuration file loads into a SOMANET drive in one action.** The `config-file-load` procedure writes the file as the drive's `config.csv` and makes the drive load it through 0x1011:01. It checks every row against the object dictionary first, and lists the rows the drive will skip. It works while the drive exchanges process data, because it also puts each loaded value of an output-mapped object into the process image, so that the next cycle does not send the old value. Afterwards it reads every loaded object back and lists each value that differs from the file. The drive must be in Switch On Disabled or Fault.
 
+### Fixed
+
+- **A VISIBLE_STRING value ends at its first NUL.** A SOMANET drive writes a shorter string and its NUL over a longer one and keeps the old bytes after the NUL, so `0x2E00:06` read back as `0` followed by the rest of an old text. A read now returns `0`.
+
 ## [6.0.0-alpha.119] - 2026-10-30
 
 ### Changed

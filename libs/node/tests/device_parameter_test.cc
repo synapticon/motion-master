@@ -70,6 +70,17 @@ TEST(EncodeSdoBytes, ScalarRoundTrips) {
   expectRoundTrip(kReal64, DeviceParameterValue{-1234.5});
 }
 
+TEST(DecodeSdoBytes, StringEndsAtTheFirstNul) {
+  // A SOMANET drive wrote "0" and its NUL over "Space Test 123" and kept the bytes after the NUL.
+  const std::vector<uint8_t> bytes{'0', 0x00, 0x00, 0x00, 'a', 'c', 'e', ' ', 'T', 'e', 's', 't'};
+  auto decoded = decodeSdoBytes(kVisibleString, bytes);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(*decoded, DeviceParameterValue{std::string{"0"}});
+
+  const std::vector<uint8_t> padded{'a', 'x', 'i', 's', ' ', ' '};
+  EXPECT_EQ(*decodeSdoBytes(kVisibleString, padded), DeviceParameterValue{std::string{"axis"}});
+}
+
 TEST(EncodeSdoBytes, StringHasNoTrailingNul) {
   DeviceParameterValue v{std::string{"hello"}};
   auto bytes = encodeSdoBytes(kVisibleString, v);

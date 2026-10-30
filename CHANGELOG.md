@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.120] - 2026-10-30
+
 ### Added
 
 - **The Console has a Configuration page for each SOMANET device.** It shows the drive's `config.csv` as a table with the name of each object, beside the value in memory, so a change not stored yet stands out. It compares a configuration file with `config.csv`, or two files with each other: the values that differ, the rows only in one of them, and the value in memory beside each. It loads the rows you select with `config-file-load`, and downloads `config.csv`. The compare is the new `config-file-compare` procedure, and the table the new `GET /api/devices/{slavePosition}/config-file` route, so a script gets the same answers. (#31)
@@ -1051,7 +1053,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.119...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.120...HEAD
+[6.0.0-alpha.120]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.119...v6.0.0-alpha.120
 [6.0.0-alpha.119]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.118...v6.0.0-alpha.119
 [6.0.0-alpha.118]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.117...v6.0.0-alpha.118
 [6.0.0-alpha.117]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.116...v6.0.0-alpha.117

@@ -140,4 +140,18 @@ inline FoeError makeFoeError(FoeErrorKind kind, std::string_view op, uint16_t sl
 FoeError makeFoeRefusal(uint32_t code, std::string_view text, std::string_view op, uint16_t slave,
                         std::string_view filename);
 
+/// @brief Whether a read that the slave refused with @p code is worth asking again.
+///
+/// A refusal is the slave's answer, and asking again usually gets the same answer. Two codes are
+/// the exception, because a SOMANET drive sends them for a read it can serve a moment later:
+///   - 0x8004 Illegal: an XMOS drive answers "Missing reply" to a read request while it still
+///     waits for the last ACK of the read before. That ACK is lost when an AL state request reaches
+///     the drive within about 0.1 ms of it. The refusal puts the drive back to idle.
+///   - 0x800B Program error: an Integro ends a read with it when the file is still not ready 2 s
+///     after the request, in the first seconds of PRE-OP after power-on.
+/// In both cases the next read request got the file, in every run measured.
+///
+/// @param code  ETG.1000.6 error code from the Error packet.
+bool isTransientReadRefusal(uint32_t code);
+
 }  // namespace mm::comm

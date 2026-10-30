@@ -3102,10 +3102,13 @@ paths:
         device is in a suitable state before calling.  The call blocks until the full
         file has been received. Over EtherCAT it waits up to 6 s for the device's answer
         and tries a read that gets no answer up to 3 times, so a device that never answers
-        takes about 18 s to fail. A refusal from the device is not tried again. After a
-        failure without an answer, Motion Master aborts the transfer on the device, so
-        that the next request works. Over SPoE it waits the configured file timeout for
-        each packet.
+        takes about 18 s to fail. A refusal from the device is not tried again, except FoE
+        error 0x8004 Illegal and 0x800B Program error, which a SOMANET drive sends for a
+        file it can serve a moment later; those count as attempts. A device that answers the
+        read with FoE BUSY gets an acknowledgement, and Motion Master keeps waiting for the
+        file for up to 6 s. After a failure without an answer, Motion Master aborts the
+        transfer on the device, so that the next request works. Over SPoE it waits the
+        configured file timeout for each packet.
 
         When the device refuses the read, the error names the FoE error code it sent
         and its meaning, and the device's error text when that adds anything, e.g.

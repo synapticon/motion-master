@@ -29,4 +29,10 @@ FoeError makeFoeRefusal(uint32_t code, std::string_view text, std::string_view o
           std::format("{} slave {} '{}' failed ({})", op, slave, filename, reason)};
 }
 
+bool isTransientReadRefusal(uint32_t code) {
+  constexpr uint32_t kIllegal = 0x8004;
+  constexpr uint32_t kProgramError = 0x800B;
+  return code == kIllegal || code == kProgramError;
+}
+
 }  // namespace mm::comm

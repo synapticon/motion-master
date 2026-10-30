@@ -988,11 +988,11 @@ TEST(BrakeState, ReportsADriveWithoutTheBrakeObjectAsHavingNoBrake) {
 
   auto state = drive->brakeState();
   ASSERT_TRUE(state.has_value()) << state.error();
-  EXPECT_FALSE(state->present);
+  EXPECT_FALSE(state->brakeObject);
   EXPECT_EQ(state->status, somanet::BrakeStatus::kNotConfigured);
   EXPECT_FALSE(state->softwareControllable());
   const nlohmann::json j = *state;
-  EXPECT_EQ(j.at("present"), false);
+  EXPECT_EQ(j.at("brakeObject"), false);
 
   auto status = drive->brakeStatus();
   ASSERT_TRUE(status.has_value()) << status.error();

@@ -850,7 +850,7 @@ std::expected<ObjectDictionaryValues, std::string> SomanetDrive::readObjectDicti
 
 void to_json(nlohmann::json& j, const BrakeState& state) {
   j = nlohmann::json{
-      {"present", state.present},
+      {"brakeObject", state.brakeObject},
       {"status", somanet::toString(state.status)},
       {"releaseStrategy", somanet::toString(state.releaseStrategy)},
       {"pullTimeMs", state.pullTime.count()},
@@ -994,7 +994,7 @@ std::expected<Encoders, std::string> SomanetDrive::encoders() const {
 std::expected<BrakeState, std::string> SomanetDrive::brakeState() const {
   BrakeState state;
   if (!hasBrakeObject()) {
-    state.present = false;
+    state.brakeObject = false;
     return state;
   }
 

@@ -28,6 +28,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+- **A brake state names the brake object `brakeObject`.** The field was `present`, which read as "a brake is fitted". It says whether the object dictionary has 0x2004, and a drive with a brake that is not configured has the object too. (#181)
 - **A route that takes a list of devices answers 404 for an unknown position.** `GET` and `POST /api/devices/state`, `GET /api/devices/diagnostics`, `GET /api/dc-sync` and `POST /api/devices/restart` answered 500, which a client takes for a failure of the bus. They now answer 404 with the position, as the routes for one device do. (#178)
 - **A VISIBLE_STRING value ends at its first NUL.** A SOMANET drive writes a shorter string and its NUL over a longer one and keeps the old bytes after the NUL, so `0x2E00:06` read back as `0` followed by the rest of an old text. A read now returns `0`.
 

@@ -9,9 +9,11 @@ Each kind of drive has its own script:
 | Script | Drive |
 | --- | --- |
 | `integro/commission.py` | Integro |
+| `c021/commission.py` | C021, a Circulo NG board that runs the Jasper firmware |
 
-A script for the Circulo NG, which runs the Jasper firmware, follows in `jasper/`. Code that the
-scripts share is in `common.py`.
+A script belongs to a board, not to a firmware, because one firmware runs on several boards. The
+C021 script runs the steps up to the assigned name. Its other steps follow when a C021 is at hand
+to test them. Code that the scripts share is in `common.py`.
 
 A script calls the routes and the procedures of the Motion Master server, and shows their
 results. It decides nothing that the server decides. Each step is also available in the Console.
@@ -27,7 +29,7 @@ results. It decides nothing that the server decides. Each step is also available
 | File | Content |
 | --- | --- |
 | `packages/*.zip` | Firmware packages, for every kind of drive. The firmware step lists them. |
-| `<drive>/config.csv` | The configuration of one kind of drive, for example `integro/config.csv`. The configuration step loads it. |
+| `<drive>/config.csv` | The configuration of one kind of drive, for example `integro/config.csv` or `c021/config.csv`. The configuration step loads it. |
 
 Git ignores both, so each production line puts its own files there. The script reads nothing
 from the directory it runs in.
@@ -86,20 +88,20 @@ comments carry the firmware version of the drive.
 The configuration step stores nothing, because it writes `config.csv` to the flash itself, and
 the drive loads it from there.
 
-| Step | Integro |
-| --- | --- |
-| Connect | Yes |
-| AL state PRE-OP | Yes |
-| Hardware description | Yes |
-| Firmware | Yes |
-| Configuration | Yes |
-| Assigned name | Yes |
-| AL state OP | Yes |
-| Commutation offset | Yes |
-| Plant model | Yes |
-| Velocity controller tuning | Yes |
-| Position controller tuning | Yes |
-| Integral limits | Yes |
+| Step | Integro | C021 |
+| --- | --- | --- |
+| Connect | Yes | Yes |
+| AL state PRE-OP | Yes | Yes |
+| Hardware description | Yes | Yes |
+| Firmware | Yes | Yes |
+| Configuration | Yes | Yes |
+| Assigned name | Yes | Yes |
+| AL state OP | Yes | Not yet |
+| Commutation offset | Yes | Not yet |
+| Plant model | Yes | Not yet |
+| Velocity controller tuning | Yes | Not yet |
+| Position controller tuning | Yes | Not yet |
+| Integral limits | Yes | Not yet |
 
 The other steps follow one at a time.
 

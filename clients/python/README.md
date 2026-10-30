@@ -173,6 +173,7 @@ decision, and writes a log and a record of the drive. Its steps are in
 | Script | What it does | AL state |
 | --- | --- | --- |
 | `production/integro/commission.py` | Commissions an Integro drive. | PRE-OP |
+| `production/c021/commission.py` | Commissions a C021 drive up to its assigned name. | PRE-OP |
 
 ## Calls by operationId
 

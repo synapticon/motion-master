@@ -343,6 +343,9 @@ int main(int argc, char** argv) {
   // before run(), and the loop never gains or loses one afterwards.
   // gameLoop.addTask(&exampleCyclicTask);
 
+  // Resolved now, while /proc/self/exe still names a file. A rebuild or an upgrade replaces the
+  // binary under a running server, and the link then names a deleted file that canonical refuses.
+  const std::filesystem::path captureBinary = mm::core::exeDir() / mm::captureBinaryName();
   HttpServer httpServer{
       HttpServer::Config{
           .bindAddress = opts.config.server.bindAddress,
@@ -407,10 +410,9 @@ int main(int argc, char** argv) {
                 options.cycleTimeUs = static_cast<uint32_t>(gameLoop.health().periodUs);
                 return options;
               },
-          .runCapture = [&userCache](const std::string& adapter, int seconds)
+          .runCapture = [&userCache, captureBinary](const std::string& adapter, int seconds)
               -> std::expected<std::filesystem::path, std::string> {
-            return mm::runCapture(mm::core::exeDir() / mm::captureBinaryName(), adapter, seconds,
-                                  userCache.root() / "captures");
+            return mm::runCapture(captureBinary, adapter, seconds, userCache.root() / "captures");
           },
           .corsOrigin = opts.config.server.corsOrigin,
       },

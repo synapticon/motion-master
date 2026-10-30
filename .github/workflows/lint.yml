@@ -134,7 +134,7 @@ jobs:
         run: pip install -r clients/python/requirements.txt
 
       - name: Byte-compile
-        run: python -m py_compile clients/python/*.py clients/python/examples/*.py
+        run: python -m py_compile clients/python/*.py clients/python/examples/*.py clients/python/examples/production/*.py clients/python/examples/production/*/*.py
 
       # Guard against swagger drift: every operationId the client and the
       # examples call must still exist in swagger.yml (mirrors the

@@ -164,6 +164,15 @@ Three values in that column are not states:
 | `parse-esi.py` | Parses an ESI (EtherCAT Slave Information) file and lists the devices it describes. | No bus |
 | `export-eni.py` | Saves the bus as an ENI (EtherCAT Network Information) file in `files/`, for another master to replay. | SAFE-OP |
 
+### Production
+
+A production script runs many steps in order on one drive, asks before the steps that need a
+decision, and writes a log and a record of the drive. Each script has a README with its steps.
+
+| Script | What it does | AL state |
+| --- | --- | --- |
+| `production/integro/commission.py` | Commissions an Integro drive. | PRE-OP |
+
 ## Calls by operationId
 
 Every request goes through one method, `MotionMasterClient.call(operationId, ...)`. It takes

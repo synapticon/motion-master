@@ -330,6 +330,18 @@ def heading(label):
     say(text + "━" * max(3, _RULE_WIDTH - len(text)), style="heading")
 
 
+def _shorten(value, limit=8):
+    # A step value can carry measured data, such as the Bode data of a plant model, with hundreds
+    # of numbers. The console shows how many there are, and the log file keeps them all.
+    if isinstance(value, dict):
+        return {key: _shorten(item, limit) for key, item in value.items()}
+    if isinstance(value, list) and len(value) > limit:
+        return f"[{len(value)} values]"
+    if isinstance(value, list):
+        return [_shorten(item, limit) for item in value]
+    return value
+
+
 _STEP_MARKS = {"succeeded": ("✓", "ok"), "failed": ("✗", "error"), "cancelled": ("✗", "warning")}
 
 
@@ -339,7 +351,7 @@ def _step_line(step):
     mark, style = _STEP_MARKS.get(step["status"], ("…", "dim"))
     line = f"  {paint(mark, style)} {step['id']:<24}"
     if "value" in step:
-        line += f" {json.dumps(step['value'], ensure_ascii=False)}"
+        line += f" {json.dumps(_shorten(step['value']), ensure_ascii=False)}"
     if "error" in step:
         line += f" {paint(step['error'], 'error')}"
     return line
@@ -653,3 +665,28 @@ def detect_offset(s, method):
     ]
     s.add(f"commutation offset, step {number}", lines)
 
+
+def identify_plant(s, chirp):
+    """Identify the plant model with the plant-identification procedure, and show the model.
+
+    The chirp turns the motor in both directions for its whole duration, and needs the drive in
+    OP. `chirp` holds the procedure's parameters: startFrequencyMilliHz, targetFrequencyMilliHz,
+    targetAmplitudePermil, transitionTimeMs and signalType. The procedure writes the model to
+    plant_model.csv on the drive and changes no object, so the step stores nothing. The whole
+    model is read back from the drive.
+    """
+    s.heading("plant model")
+    for key, value in chirp.items():
+        say("chirp %s: %s", key, value)
+    run_procedure(s, "plant-identification", chirp)
+    model = s.client.call("getDevicePlantModel", path={"slavePosition": s.slave}).json()
+    lines = [
+        f"chirp: {json.dumps(model['chirp'], ensure_ascii=False)}",
+        f"numerator: {model['numerator']}",
+        f"denominator: {model['denominator']}",
+        f"inertia: {model['inertia']}",
+        f"friction: {model['friction']}",
+    ]
+    for line in lines:
+        say(line, style="ok" if line.startswith(("inertia", "friction")) else None)
+    s.add("plant model", lines)

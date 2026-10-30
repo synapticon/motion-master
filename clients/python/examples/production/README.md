@@ -94,6 +94,7 @@ the drive loads it from there.
 | Assigned name | Yes |
 | AL state OP | Yes |
 | Commutation offset | Yes |
+| Plant model | Yes |
 
 The other steps follow one at a time.
 
@@ -202,3 +203,22 @@ phase order.
 
 The Integro script uses method 0, which turns the rotor by up to one pole pair, needs no tuning,
 and holds the load.
+
+### Plant model
+
+**This step turns the motor in both directions** for the whole chirp. The shaft must be free, and
+whatever it drives must be safe to move.
+
+The script runs the `plant-identification` procedure with the chirp its drive script names: the
+start and the end frequency in millihertz, the amplitude in per mille of the rated torque, the
+duration in milliseconds, and the signal type. Neither the server nor the drive checks the
+amplitude, so choose it for the machine. The procedure enables the drive in cyclic synchronous
+torque mode, runs the chirp, records the velocity and the torque, fits the plant model with the
+auto-tuning program of the server, and writes the model to `plant_model.csv` on the drive.
+
+Then the script reads the model back from the drive, and shows and records the chirp, the
+numerator, the denominator, the inertia and the friction. The step changes no object, so it stores
+nothing. On the console, a step value with a long list of numbers, such as the Bode data of the
+fit, shows how many numbers it has. The log file keeps them all.
+
+The Integro script uses a logarithmic chirp from 2.3 Hz to 31 Hz, at 460 per mille, for 3000 ms.

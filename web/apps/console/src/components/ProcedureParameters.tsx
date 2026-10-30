@@ -16,7 +16,7 @@ const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display
  * into an argument list and blows the call stack somewhere around a hundred kilobytes — a firmware
  * package is several times that.
  */
-function readAsBase64(file: File): Promise<string> {
+export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(reader.error ?? new Error('could not read the file'))

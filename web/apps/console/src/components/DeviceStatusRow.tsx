@@ -4,6 +4,7 @@ import { apiErrorMessage, formatHex, type Cia402Status } from '@synapticon/motio
 import type { DeviceBarContext } from './DeviceBar'
 import { barBtnOutline, barBtnPrimary, barSelect, labelCls } from './deviceBarStyles'
 import SlavePositionBadge from './SlavePositionBadge'
+import StoreParametersButton from './StoreParametersButton'
 import { useConnection } from '../contexts/ConnectionContext'
 import { cia402StatusKey } from '../hooks/useCia402Status'
 import { findMode, useOperationModes } from '../hooks/useOperationModes'
@@ -119,6 +120,7 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
         <div className="flex items-center gap-2">
           <SlavePositionBadge position={slavePosition} />
           <span className="font-display text-sm tracking-wide text-grey-900">{productName}</span>
+          <StoreParametersButton slavePosition={slavePosition} mailboxActive={mailboxActive} />
         </div>
 
         {isCia402 && (

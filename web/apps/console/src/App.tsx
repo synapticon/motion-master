@@ -33,6 +33,7 @@ import ToolsIntegroVariantPage from './pages/ToolsIntegroVariantPage'
 import ToolsSiiPage from './pages/ToolsSiiPage'
 import ToolsUtilitiesPage from './pages/ToolsUtilitiesPage'
 import StorageUserCachePage from './pages/StorageUserCachePage'
+import DeviceConfigurationPage from './pages/DeviceConfigurationPage'
 import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage'
 import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
 import DeviceSiiPage from './pages/DeviceSiiPage'
@@ -113,6 +114,7 @@ export default function App() {
           <Route path="object-dictionary" element={<DeviceObjectDictionaryPage />} />
           <Route path="sii" element={<DeviceSiiPage />} />
           <Route path="registers" element={<DeviceRegistersPage />} />
+          <Route path="configuration" element={<DeviceConfigurationPage />} />
           <Route path="firmware" element={<DeviceFirmwarePage />} />
           <Route path="foe" element={<DeviceFoePage />} />
           <Route path="hrd" element={<DeviceHrdPage />} />

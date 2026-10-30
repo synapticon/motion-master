@@ -96,6 +96,9 @@ Before the first step, the script opens the fieldbus driver when no driver is op
 when the last scan is missing or wrong. It moves the drive to PRE-OP. A drive in SAFE-OP or OP
 stays there.
 
+A step that needs another AL state, such as OP for a step that turns the motor, connects again
+with that state. A drive that reaches PRE-OP but not that state stops the script.
+
 A drive with no running firmware does not reach PRE-OP. The script logs why, and moves the drive
 to BOOT instead. In BOOT, the bootloader of the drive serves the files that step 1 reads, and
 the firmware installation writes the firmware there.

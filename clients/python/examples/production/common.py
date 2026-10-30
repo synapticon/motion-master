@@ -202,17 +202,18 @@ class Session:
         return path
 
 
-def connect(s):
-    """Open the fieldbus driver, scan, and move the drive to PRE-OP, before the first step.
+def connect(s, state=PRE_OP):
+    """Open the fieldbus driver, scan, and move the drive to the AL state `state`.
 
-    The driver is opened when none is open, and the bus is scanned when the last scan is
-    missing or wrong. A drive in SAFE-OP or OP stays there.
+    The driver is opened when none is open, and the bus is scanned when the last scan is missing
+    or wrong. A drive above `state` stays where it is.
 
     A drive with no running firmware does not reach PRE-OP. It goes to BOOT instead, where its
-    bootloader serves the files that step 1 reads and the firmware installation writes.
+    bootloader serves the files that step 1 reads and the firmware installation writes, and stays
+    there whatever `state` is. A drive that reaches PRE-OP but not `state` fails the call.
     """
     log.info("")
-    log.info("== connect ==")
+    log.info("== connect: %s ==", STATE_NAMES[state])
     s.client.init()
     try:
         s.client.ensure_state(PRE_OP, positions=[s.slave])
@@ -221,6 +222,8 @@ def connect(s):
         log.info("moving the drive to BOOT")
         s.client.ensure_state(BOOT, positions=[s.slave])
         s.add("connect", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
+    else:
+        s.client.ensure_state(state, positions=[s.slave])
     log.info("the drive is in %s", STATE_NAMES[s.al_state()])
 
 

@@ -8,6 +8,7 @@ the script, which git ignores, and both have the same name: the build descriptor
 number of the drive, and the start time.
 """
 
+import base64
 import logging
 import re
 import sys
@@ -36,7 +37,7 @@ HARDWARE_DESCRIPTION_WAIT_S = 10
 
 # Firmware packages for every production script. The compatibility check of the server tells
 # which of them fit a drive.
-PACKAGES = Path(__file__).resolve().parent / "packages"
+PACKAGES_DIR = Path(__file__).resolve().parent / "packages"
 
 
 class Exit(Exception):
@@ -55,6 +56,7 @@ class Session:
         self.drive_name = None
         self.drive_id = None
         self.sections = []
+        self.appendices = []
         self.log_path = self._path(".log")
         self._setup_logging()
         self.client = MotionMasterClient.from_config()
@@ -166,6 +168,13 @@ class Session:
         """Add a section to the record."""
         self.sections.append((title, list(lines)))
 
+    def append(self, title, lines):
+        """Add a section to the end of the record, after every step's section.
+
+        For long content, such as a whole file, so that it does not push the results apart.
+        """
+        self.appendices.append((title, list(lines)))
+
     def write_record(self, outcome):
         """Write the record of the drive, with the name of the log file and the suffix .txt."""
         path = self._path(".txt")
@@ -174,7 +183,7 @@ class Session:
             f.write(f"build descriptor and serial number: {self.drive_id or 'unknown'}\n")
             f.write(f"started: {self.started.isoformat(timespec='seconds')}\n")
             f.write(f"outcome: {outcome}\n")
-            for title, lines in self.sections:
+            for title, lines in self.sections + self.appendices:
                 f.write(f"\n[{title}]\n")
                 for line in lines:
                     f.write(f"{line}\n")
@@ -295,7 +304,7 @@ def install_firmware(s):
     before = firmware_version(s)
     log.info("firmware version now: %s", before)
 
-    packages = sorted(PACKAGES.glob("*.zip"))
+    packages = sorted(PACKAGES_DIR.glob("*.zip"))
     verdicts = []
     for i, package in enumerate(packages, start=1):
         r = s.client.call(
@@ -309,7 +318,7 @@ def install_firmware(s):
         mark = "fits" if verdict["compatible"] else "DOES NOT FIT"
         log.info("  %d. %s: %s", i, package.name, mark)
     if not packages:
-        log.info("no firmware package in %s", PACKAGES)
+        log.info("no firmware package in %s", PACKAGES_DIR)
 
     choices = {str(i): package.name for i, package in enumerate(packages, start=1)}
     if s.firmware_running():
@@ -355,3 +364,71 @@ def install_firmware(s):
             f"version after: {after}",
         ],
     )
+
+
+def step_value(snapshot, step_id):
+    """Return the value of one step of a finished procedure run, or None."""
+    for step in snapshot["steps"]:
+        if step["id"] == step_id:
+            return step.get("value")
+    return None
+
+
+def load_configuration(s, path):
+    """Step 3: load a configuration file into the drive with the config-file-load procedure.
+
+    The server checks every row before it writes anything, writes the file as config.csv, makes the
+    drive load it, puts each loaded output value into the process image, and reads every loaded
+    object back. The drive must be in Switch On Disabled or Fault, or the server refuses the load.
+    """
+    s.heading(3, "configuration")
+    if not path.exists():
+        log.info("no configuration file at %s", path)
+        answer = s.ask("skip the step or exit?", {"s": "skip the step", "x": "exit"})
+        if answer == "x":
+            raise Exit("the user chose to exit at the configuration step")
+        s.add("configuration", [f"file: none at {path}", "load: skipped by the user"])
+        return
+
+    content = path.read_bytes()
+    text = content.decode("utf-8", errors="replace")
+    rows = sum(1 for line in text.splitlines() if line.strip().lower().startswith("0x"))
+    comments = [line[1:].strip() for line in text.splitlines() if line.startswith("#")]
+    log.info("file: %s, %d bytes, %d rows", path, len(content), rows)
+    for comment in comments:
+        log.info("  # %s", comment)
+    log.info("firmware version of the drive: %s", firmware_version(s))
+
+    answer = s.ask(
+        "load this configuration?", {"y": "load", "s": "skip the step", "x": "exit"}
+    )
+    if answer == "x":
+        raise Exit("the user chose to exit at the configuration step")
+    if answer == "s":
+        s.add("configuration", [f"file: {path.name}", "load: skipped by the user"])
+        return
+
+    params = {"file": base64.b64encode(content).decode("ascii"), "strategy": "replace"}
+    snapshot = run_procedure(s, "config-file-load", params)
+    validate = step_value(snapshot, "validate") or {}
+    verify = step_value(snapshot, "verify") or {}
+    outputs = step_value(snapshot, "outputs") or {}
+    lines = [
+        f"file: {path.name}",
+        f"rows: {validate.get('rows')}, loaded: {validate.get('loads')}",
+        f"skipped, unknown object: {', '.join(validate.get('unknownObject', [])) or 'none'}",
+        f"skipped, not loadable: {', '.join(validate.get('notLoadable', [])) or 'none'}",
+        f"written into the outputs: {', '.join(outputs.get('written', [])) or 'none'}",
+    ]
+    differing = verify.get("differing", [])
+    if differing:
+        lines.append("read back with a value other than the file's:")
+        for d in differing:
+            live = d.get("live", d.get("error"))
+            lines.append(f"  {d['address']}: file {d['file']}, drive {live}")
+    else:
+        lines.append("read back: every loaded value matches the file")
+    for line in lines:
+        log.info(line)
+    s.add("configuration", lines)
+    s.append(f"configuration file {path.name}", text.splitlines())

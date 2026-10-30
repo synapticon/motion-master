@@ -27,9 +27,10 @@ results. It decides nothing that the server decides. Each step is also available
 | File | Content |
 | --- | --- |
 | `packages/*.zip` | Firmware packages, for every kind of drive. Step 2 lists them. |
+| `<drive>/config.csv` | The configuration of one kind of drive, for example `integro/config.csv`. Step 3 loads it. |
 
-Git ignores `packages/`, so each production line puts its own packages there. The script reads
-nothing from the directory it runs in.
+Git ignores both, so each production line puts its own files there. The script reads nothing
+from the directory it runs in.
 
 ## Run
 
@@ -75,6 +76,7 @@ Each step is described once. The table shows which script runs it.
 | Connect | Yes |
 | 1. Hardware description | Yes |
 | 2. Firmware | Yes |
+| 3. Configuration | Yes |
 
 The other steps follow one at a time.
 
@@ -119,3 +121,24 @@ BOOT, writes the firmware files over FoE, and moves the drive back to PRE-OP. Th
 no process data during the installation. The script shows each step of the procedure, then reads
 the firmware version again. The record gets the version before, the package, the verdict of the
 server and the version after.
+
+### 3. Configuration
+
+The script shows the `config.csv` beside it: its size, its number of rows and its comments. The
+drive writes its name and its firmware version into those comments when it saves the file. The
+script also shows the firmware version of the drive. The user types `y` to load the file, `s` to
+skip the step, or `x` to exit. With no file there, the user skips the step or exits.
+
+The script runs the `config-file-load` procedure of the server with the strategy `replace`. The
+server checks every row against the object dictionary of the drive before it writes anything,
+writes the file as the drive's `config.csv`, and makes the drive load it through 0x1011:01. Then
+it puts each loaded value of an object in the outputs of the process image into that output, so
+that the next cycle does not send the old value, and reads every loaded object back.
+
+The drive must be in Switch On Disabled or Fault, the two CiA 402 states in which the drive
+accepts a load. In any other state the server refuses the load, and the step fails.
+
+The record gets the file name, the number of rows loaded, the rows the drive skipped, and each
+object whose value read back differs from the file. The drive loads `.assembly_config` after
+`config.csv`, so a value of the assembly can win over the file. The whole file goes to the end
+of the record.

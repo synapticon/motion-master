@@ -13,6 +13,7 @@ add_library(
   sii.cc
   soem_fieldbus_driver.cc
   soem_mailbox.cc
+  soem_station_address.cc
   spoe_connection.cc
   spoe_fieldbus_driver.cc
   spoe_frame.cc

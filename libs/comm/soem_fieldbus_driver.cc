@@ -29,6 +29,7 @@
 #include "comm/sdo_abort_codes.h"
 #include "comm/sdo_log.h"
 #include "comm/soem_mailbox.h"
+#include "comm/soem_station_address.h"
 #include "comm/vendor_ids.h"
 #include "core/platform.h"
 
@@ -1887,52 +1888,6 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setPro
 }
 
 namespace {
-
-// BOOT and PRE-OP use different mailbox sizes (e.g. 1024 vs 128 bytes on Integro
-// devices). After a firmware download the slave context still holds BOOT SM parameters;
-// without reprogramming them here an INIT→PRE-OP transition would reuse stale BOOT
-// values and break mailbox communication. SOEM does not do this automatically.
-// Restores the station address of a slave that has reset, and reports whether it is now reachable.
-//
-// A SOMANET bootloader hands over to freshly written firmware by restarting the device, and the
-// restart clears the ESC's configured station address (0x0010) along with everything else the
-// master programmed. Every FPRD/FPWR the master makes is addressed by that value, so from the
-// master's side the slave silently vanishes: state reads return the last value SOEM happened to
-// cache, and every write lands nowhere.
-//
-// Recovering it needs no scan. Auto-increment addressing reaches a slave by its position on the
-// wire and requires no configuration at all, which is precisely how ecx_config_init assigns the
-// address in the first place — so the same single APWR puts it back, for this one device, without
-// touching the rest of the bus.
-//
-// @return true when the slave answers at its configured address (either it never lost it, or it
-//         just got it back).
-// Outcome of checking a slave's station address, which decides what the caller must do next: only a
-// slave that had to be re-addressed also lost the sync managers the master programmed into it.
-enum class AddressState {
-  Answering,    ///< Reachable at its configured address; nothing was changed.
-  Reassigned,   ///< It had lost the address, and now answers again.
-  Unreachable,  ///< It answers at neither address.
-};
-
-AddressState restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
-  const uint16_t configadr = ctx->slavelist[slave].configadr;
-  uint16_t probe = 0;
-  if (ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe, kLateFrameTimeoutUs) >
-      0) {
-    return AddressState::Answering;
-  }
-  // Auto-increment address: 0 for slave 1, -1 for slave 2, and so on (ec_config.c's ADPh).
-  const uint16_t autoIncrement = static_cast<uint16_t>(1 - slave);
-  ecx_APWRw(&ctx->port, autoIncrement, ECT_REG_STADR, htoes(configadr), EC_TIMEOUTRET3);
-  const bool reachable = ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe,
-                                  kLateFrameTimeoutUs) > 0;
-  spdlog::info(
-      "Device {}: it had reset and lost its station address; re-assigned 0x{:04X} at its "
-      "wire position — {}",
-      slave, configadr, reachable ? "it is answering again" : "it is still not answering");
-  return reachable ? AddressState::Reassigned : AddressState::Unreachable;
-}
 
 // Reads the AL status and AL status code of one slave at its configured address into the
 // slavelist. ecx_readstate takes every state from one broadcast read when all slaves report the

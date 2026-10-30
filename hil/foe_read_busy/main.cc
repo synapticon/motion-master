@@ -40,6 +40,7 @@
 
 #include "comm/fieldbus_driver.h"
 #include "comm/soem_mailbox.h"
+#include "comm/soem_station_address.h"
 
 namespace {
 
@@ -47,6 +48,8 @@ using mm::comm::EtherCatState;
 using Clock = std::chrono::steady_clock;
 
 constexpr int kStateTimeoutUs = 10'000'000;
+// How long one state request waits before it is written again.
+constexpr int kStateRetryUs = 1'000'000;
 constexpr int kReceiveTimeoutUs = 100'000;
 constexpr uint8_t kFoeOpcodeRead = 0x01;
 constexpr uint8_t kFoeOpcodeData = 0x03;
@@ -143,11 +146,29 @@ bool parseOptions(int argc, char** argv, Options& options) {
   return !options.ifname.empty() && options.rounds > 0 && options.waitS > 0;
 }
 
+// A drive can restart on its way out of BOOT, and the restart clears its station address: a
+// SOMANET drive on the step to PRE-OP, and a Jasper-based drive on the step to INIT after a commit
+// or on the step to PRE-OP without one. So the request is written again every second until
+// kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PRE-OP
+// its mailbox sync managers too.
 bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
   const auto raw = static_cast<uint16_t>(state);
-  ctx->slavelist[slave].state = raw;
-  ecx_writestate(ctx, slave);
-  return ecx_statecheck(ctx, slave, raw, kStateTimeoutUs) == raw;
+  const auto deadline = Clock::now() + std::chrono::microseconds(kStateTimeoutUs);
+  for (;;) {
+    ctx->slavelist[slave].state = raw;
+    ecx_writestate(ctx, slave);
+    if (ecx_statecheck(ctx, slave, raw, kStateRetryUs) == raw) {
+      return true;
+    }
+    if (Clock::now() >= deadline) {
+      return false;
+    }
+    if (mm::comm::soem::restoreStationAddress(ctx, slave) ==
+            mm::comm::soem::AddressState::Reassigned &&
+        state == EtherCatState::PreOp) {
+      mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::PreOp);
+    }
+  }
 }
 
 // Builds an FoE request with the next mailbox counter: the 6-byte mailbox header, the opcode, a

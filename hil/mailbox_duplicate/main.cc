@@ -40,12 +40,16 @@
 
 #include "comm/fieldbus_driver.h"
 #include "comm/soem_mailbox.h"
+#include "comm/soem_station_address.h"
 
 namespace {
 
 using mm::comm::EtherCatState;
+using Clock = std::chrono::steady_clock;
 
 constexpr int kStateTimeoutUs = 10'000'000;
+// How long one state request waits before it is written again.
+constexpr int kStateRetryUs = 1'000'000;
 // Bit 3 of the SyncManager status: the mailbox holds a message that the slave has not taken.
 constexpr uint8_t kMailboxFull = 0x08;
 
@@ -170,11 +174,29 @@ int readDeviceType(ecx_contextt* ctx, uint16_t slave) {
   return wkc;
 }
 
+// A drive can restart on its way out of BOOT, and the restart clears its station address: a
+// SOMANET drive on the step to PRE-OP, and a Jasper-based drive on the step to INIT after a commit
+// or on the step to PRE-OP without one. So the request is written again every second until
+// kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PRE-OP
+// its mailbox sync managers too.
 bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
   const auto raw = static_cast<uint16_t>(state);
-  ctx->slavelist[slave].state = raw;
-  ecx_writestate(ctx, slave);
-  return ecx_statecheck(ctx, slave, raw, kStateTimeoutUs) == raw;
+  const auto deadline = Clock::now() + std::chrono::microseconds(kStateTimeoutUs);
+  for (;;) {
+    ctx->slavelist[slave].state = raw;
+    ecx_writestate(ctx, slave);
+    if (ecx_statecheck(ctx, slave, raw, kStateRetryUs) == raw) {
+      return true;
+    }
+    if (Clock::now() >= deadline) {
+      return false;
+    }
+    if (mm::comm::soem::restoreStationAddress(ctx, slave) ==
+            mm::comm::soem::AddressState::Reassigned &&
+        state == EtherCatState::PreOp) {
+      mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::PreOp);
+    }
+  }
 }
 
 // Sends one request with counter 0. The firmware never ignores counter 0 and stores it as the last

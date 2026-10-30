@@ -1162,7 +1162,7 @@ sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--sla
 Writes one mailbox request twice with the same counter and reports whether the drive locks its
 receive mailbox (LOCKED), answers the copy (HANDLED), or discards it (DISCARDED). A Circulo locks,
 and INIT followed by PRE-OP frees it. An Integro discards the copy. The request is an SDO upload in PRE-OP.
-With `--boot` it is an FoE read in BOOT, which tests the bootloader. It leaves the drive in PRE-OP.
+With `--boot` it is an FoE read in BOOT, which tests the bootloader. A drive that restarts on its way out of BOOT gets its station address back. It leaves the drive in PRE-OP.
 It needs raw socket access, and no other master may use the adapter.
 
 ```bash
@@ -1189,7 +1189,7 @@ sudo ./build/x64-linux-debug/hil/mailbox_counter0/mailbox_counter0 --ifname <int
 
 ### foe_read_busy
 
-Shows what a drive does when it answers an FoE read request with BUSY, and what each reply of the master does then. Each round puts the drive into INIT, then into `--state` (BOOT or PRE-OP); `--via-preop` goes through PRE-OP and INIT first, because an Integro answers BUSY only on the first read after it enters BOOT from PRE-OP. It sends one read request after `--delay` ms and prints every mailbox message with the time since the request. `--after-busy` picks the reply to a BUSY: `wait`, `abort`, `reread`, `abort-reread` (the reply of the driver before #175), or `ack0`. `--until-file` sends the request again 200 ms after an FoE error. `--gap` pauses after each round, between the last ACK and the next state request. After the rounds it says whether the drive still reaches INIT. On an Integro, `wait` and `abort` hang the drive in BOOT until a power cycle. It leaves the drive in PRE-OP. It needs raw socket access, and no other master may use the adapter.
+Shows what a drive does when it answers an FoE read request with BUSY, and what each reply of the master does then. Each round puts the drive into INIT, then into `--state` (BOOT or PRE-OP); `--via-preop` goes through PRE-OP and INIT first, because an Integro answers BUSY only on the first read after it enters BOOT from PRE-OP. It sends one read request after `--delay` ms and prints every mailbox message with the time since the request. `--after-busy` picks the reply to a BUSY: `wait`, `abort`, `reread`, `abort-reread` (the reply of the driver before #175), or `ack0`. `--until-file` sends the request again 200 ms after an FoE error. `--gap` pauses after each round, between the last ACK and the next state request. After the rounds it says whether the drive still reaches INIT. On an Integro, `wait` and `abort` hang the drive in BOOT until a power cycle. A drive that restarts on its way out of BOOT, as a Jasper-based drive does on the step to PRE-OP, gets its station address back. It leaves the drive in PRE-OP. It needs raw socket access, and no other master may use the adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_read_busy/foe_read_busy --ifname <interface> [--slave 1] \

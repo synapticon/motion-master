@@ -129,7 +129,7 @@ def format_step(step):
     return line
 
 
-def _error_line(error):
+def error_line(error):
     """Return one line that names an error a user can act on, or None for any other error."""
     if isinstance(error, requests.ConnectionError):
         url = urllib.parse.urlsplit(error.request.url) if error.request else None
@@ -158,7 +158,7 @@ def run(main):
     try:
         main()
     except Exception as error:
-        line = _error_line(error)
+        line = error_line(error)
         if line is None or os.environ.get("MM_TRACEBACK") == "1":
             raise
         print(f"error: {line}", file=sys.stderr)

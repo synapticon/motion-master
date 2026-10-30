@@ -24,6 +24,7 @@ from motion_master_client import (  # noqa: E402
     STATE_NAMES,
     MotionMasterClient,
     StateError,
+    error_line,
 )
 
 log = logging.getLogger("production")
@@ -90,6 +91,35 @@ class Session:
         self.log_path = self.log_path.rename(path)
         self._open_log_file()
         log.info("log file renamed to %s", self.log_path)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        """Write the record, also when a step fails.
+
+        A failure goes into the log and into the outcome of the record, then on to the caller, which
+        prints it. An Exit ends the run as stopped, and Ctrl-C as cancelled.
+        """
+        if exc_type is None:
+            outcome = "completed"
+        elif issubclass(exc_type, Exit):
+            outcome = f"stopped: {exc}"
+            log.info("stopped: %s", exc)
+        elif issubclass(exc_type, KeyboardInterrupt):
+            outcome = "cancelled with Ctrl-C"
+            log.info("cancelled with Ctrl-C")
+        else:
+            line = (error_line(exc) if isinstance(exc, Exception) else None) or (
+                f"{exc_type.__name__}: {exc}"
+            )
+            outcome = f"failed: {line}"
+            # The caller prints the error to the terminal, so it goes to the file only.
+            self._log_file.handle(logging.makeLogRecord({"msg": f"error: {line}"}))
+        self.write_record(outcome)
+        if exc_type is not None and issubclass(exc_type, KeyboardInterrupt):
+            raise SystemExit(1) from None
+        return exc_type is not None and issubclass(exc_type, Exit)
 
     def connect(self):
         """Open the fieldbus driver, scan, and move the drive to PRE-OP, before the first step.

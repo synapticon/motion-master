@@ -106,8 +106,17 @@ missing or wrong. It moves no drive.
 
 The script moves the drive to the AL state that the next steps need: PRE-OP before the first
 step, and OP before the first step that turns the motor, because the drive turns the motor only
-while it exchanges process data. A drive above that state stays there. A drive that reaches PRE-OP
-but not the state asked for stops the script.
+while it exchanges process data. A drive that does not reach that state stops the script.
+
+`common.py` has two functions for it:
+
+- `transition_to_state(s, state)` moves the drive to exactly that state, down as well as up. A
+  drive goes down to PRE-OP or SAFE-OP through INIT, because an Integro that steps down from
+  SAFE-OP or OP refuses every write that only PRE-OP allows (synapticon/somanet_software#5823).
+- `ensure_state(s, state)` makes sure the drive is at least in that state. A drive above it stays
+  there.
+
+The drive scripts use `transition_to_state`, so a step that needs no process data runs in PRE-OP.
 
 A drive with no running firmware does not reach PRE-OP. The script logs why, and moves the drive
 to BOOT instead. In BOOT, the bootloader of the drive serves the files that the hardware

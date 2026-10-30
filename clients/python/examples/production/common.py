@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from motion_master_client import (  # noqa: E402
     BOOT,
+    INIT,
     OP,
     PRE_OP,
     SAFE_OP,
@@ -283,16 +284,42 @@ def ensure_state(s, state):
     installation writes, and stays there whatever `state` is. A drive that reaches PRE-OP but not
     `state` fails the call.
     """
+    heading(f"AL state · at least {STATE_NAMES[state]}")
+    _reach(s, state, exact=False)
+
+
+def transition_to_state(s, state):
+    """Move the drive to exactly the AL state `state`, down as well as up.
+
+    A drive goes down to PRE-OP or SAFE-OP through INIT. On an Integro, the SoC misses a step down
+    from SAFE-OP or OP, and then refuses every write that only PRE-OP allows
+    (synapticon/somanet_software#5823). INIT followed by PRE-OP is legal on every drive.
+
+    A drive with no running firmware goes to BOOT, as in ensure_state.
+    """
     heading(f"AL state · {STATE_NAMES[state]}")
-    try:
-        s.client.ensure_state(PRE_OP, positions=[s.slave])
-    except StateError as e:
-        say("the drive did not reach PRE-OP: %s", e, style="warning")
-        say("moving the drive to BOOT", style="warning")
-        s.client.ensure_state(BOOT, positions=[s.slave])
-        s.add("AL state", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
+    ladder = [INIT, PRE_OP, SAFE_OP, OP]
+    current = s.al_state()
+    down = current in ladder and state in ladder and ladder.index(state) < ladder.index(current)
+    if down and state in (PRE_OP, SAFE_OP):
+        say("going down through INIT")
+        s.client.ensure_state(INIT, positions=[s.slave], exact=True)
+    _reach(s, state, exact=True)
+
+
+def _reach(s, state, exact):
+    if state in (INIT, BOOT):
+        s.client.ensure_state(state, positions=[s.slave], exact=exact)
     else:
-        s.client.ensure_state(state, positions=[s.slave])
+        try:
+            s.client.ensure_state(PRE_OP, positions=[s.slave], exact=exact and state == PRE_OP)
+        except StateError as e:
+            say("the drive did not reach PRE-OP: %s", e, style="warning")
+            say("moving the drive to BOOT", style="warning")
+            s.client.ensure_state(BOOT, positions=[s.slave])
+            s.add("AL state", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
+        else:
+            s.client.ensure_state(state, positions=[s.slave], exact=exact)
     say("the drive is in %s", STATE_NAMES[s.al_state()])
 
 
@@ -625,3 +652,4 @@ def detect_offset(s, method):
         store_parameters(s),
     ]
     s.add(f"commutation offset, step {number}", lines)
+

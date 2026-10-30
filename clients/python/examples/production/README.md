@@ -40,6 +40,9 @@ python clients/python/examples/production/integro/commission.py
 
 `--slave` gives the position of the drive on the bus. The default is 1.
 
+The console output has colors when it goes to a terminal. Set `NO_COLOR=1` to turn them off. The
+log file never has them.
+
 ```bash
 python clients/python/examples/production/integro/commission.py --slave 2
 ```

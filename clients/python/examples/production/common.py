@@ -9,7 +9,9 @@ number of the drive, and the start time.
 """
 
 import base64
+import json
 import logging
+import os
 import re
 import sys
 import time
@@ -32,6 +34,52 @@ from motion_master_client import (  # noqa: E402
 )
 
 log = logging.getLogger("production")
+
+# ANSI styles for the console, in the colors of the Synapticon design tokens
+# (web/packages/ui/src/theme.css). The log file gets the plain text. NO_COLOR is the common switch
+# to turn colors off, and a console that is not a terminal gets none either.
+def _rgb(hex_color, bold=False):
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"\033[{'1;' if bold else ''}38;2;{r};{g};{b}m"
+
+
+_STYLES = {
+    "heading": _rgb("#e0004d", bold=True),  # syn-red
+    "mark": _rgb("#e0004d", bold=True),  # syn-red
+    "question": "\033[1m",
+    "key": _rgb("#00849b", bold=True),  # ocean
+    "ok": _rgb("#008d9d"),  # status-good
+    "warning": _rgb("#ffcc03"),  # status-warn
+    "error": _rgb("#8c072f"),  # status-bad
+    "dim": _rgb("#848484"),  # grey-600
+}
+_RESET = "\033[0m"
+_RULE_WIDTH = 78
+
+
+def _colors(stream):
+    return stream.isatty() and not os.environ.get("NO_COLOR")
+
+
+def paint(text, style, stream=sys.stderr):
+    """Return `text` in `style` for `stream`, or plain when the stream gets no colors."""
+    if style is None or not _colors(stream):
+        return text
+    return f"{_STYLES[style]}{text}{_RESET}"
+
+
+def say(message, *args, style=None, console=None):
+    """Log a message. `style` colors it on the console. `console` replaces it on the console only,
+    for a line with colors inside it."""
+    log.info(message, *args, extra={"style": style, "console": console})
+
+
+class _ConsoleFormatter(logging.Formatter):
+    def format(self, record):
+        console = getattr(record, "console", None)
+        if console is not None:
+            return console
+        return paint(record.getMessage(), getattr(record, "style", None))
 
 HARDWARE_DESCRIPTION_WAIT_S = 10
 
@@ -60,7 +108,7 @@ class Session:
         self.log_path = self._path(".log")
         self._setup_logging()
         self.client = MotionMasterClient.from_config()
-        log.info("log file %s", self.log_path)
+        say("log file %s", self.log_path, style="dim")
 
     def _path(self, suffix):
         # Before the hardware description is read, the position on the bus stands in for the
@@ -75,7 +123,7 @@ class Session:
         root = logging.getLogger()
         root.setLevel(logging.INFO)
         console = logging.StreamHandler()
-        console.setFormatter(logging.Formatter("%(message)s"))
+        console.setFormatter(_ConsoleFormatter())
         root.addHandler(console)
         self._open_log_file()
 
@@ -99,7 +147,7 @@ class Session:
         self._log_file.close()
         self.log_path = self.log_path.rename(path)
         self._open_log_file()
-        log.info("log file renamed to %s", self.log_path)
+        say("log file renamed to %s", self.log_path, style="dim")
 
     def __enter__(self):
         return self
@@ -114,10 +162,10 @@ class Session:
             outcome = "completed"
         elif issubclass(exc_type, Exit):
             outcome = f"stopped: {exc}"
-            log.info("stopped: %s", exc)
+            say("stopped: %s", exc, style="warning")
         elif issubclass(exc_type, KeyboardInterrupt):
             outcome = "cancelled with Ctrl-C"
-            log.info("cancelled with Ctrl-C")
+            say("cancelled with Ctrl-C", style="warning")
         else:
             line = (error_line(exc) if isinstance(exc, Exception) else None) or (
                 f"{exc_type.__name__}: {exc}"
@@ -141,39 +189,50 @@ class Session:
 
     def heading(self, number, title):
         """Show and log the start of a step."""
-        log.info("")
-        log.info("== step %d: %s ==", number, title)
+        heading(f"{number} · {title[0].upper()}{title[1:]}")
 
-    def ask(self, question, choices, listed=None):
+    def _file_only(self, message):
+        # A question and its answer are on the console already, as the prompt and what was typed.
+        self._log_file.handle(logging.makeLogRecord({"msg": message}))
+
+    def ask(self, question, choices, shown=None):
         """Ask until the answer is one of `choices`, and log the question and the answer.
 
-        `choices` maps each answer the user types to what it means, and the prompt lists them.
-        `listed` replaces that list in the prompt, for choices already shown above it. End of
-        input counts as an exit.
+        `choices` maps each answer the user types to what it means. The prompt shows the question
+        on one line and the answers below it, each key colored. `shown` replaces those answers with
+        other (key, meaning) pairs, such as ("1-6", "package") for a list already printed above.
+        End of input counts as an exit.
         """
-        listed = listed or ", ".join(f"{key} = {meaning}" for key, meaning in choices.items())
-        log.info("question: %s (%s)", question, listed)
+        shown = shown or list(choices.items())
+        self._file_only(
+            f"question: {question} ({', '.join(f'{key} = {meaning}' for key, meaning in shown)})"
+        )
+        options = " · ".join(f"{paint(key, 'key', sys.stdout)} {meaning}" for key, meaning in shown)
         while True:
-            try:
-                answer = input(f"{question} [{listed}]: ").strip().lower()
-            except EOFError:
-                log.info("answer: end of input")
-                raise Exit("no answer: end of input") from None
+            answer = self._prompt(question, f"  {options}").lower()
             if answer in choices:
-                log.info("answer: %s (%s)", answer, choices[answer])
+                self._file_only(f"answer: {answer} ({choices[answer]})")
                 return answer
-            print(f"type one of: {', '.join(choices)}")
+            print(paint(f"  type one of: {', '.join(choices)}", "warning", sys.stdout))
 
-    def ask_text(self, question):
+    def ask_text(self, question, hint):
         """Ask for a line of text, and log the question and the answer. End of input is an exit."""
-        log.info("question: %s", question)
-        try:
-            answer = input(f"{question}: ").strip()
-        except EOFError:
-            log.info("answer: end of input")
-            raise Exit("no answer: end of input") from None
-        log.info("answer: %r", answer)
+        self._file_only(f"question: {question} ({hint})")
+        answer = self._prompt(question, paint(f"  {hint}", "dim", sys.stdout))
+        self._file_only(f"answer: {answer!r}")
         return answer
+
+    def _prompt(self, question, below):
+        # The question, a line below it, and the input line.
+        print()
+        text = paint(f"{question[0].upper()}{question[1:]}", "question", sys.stdout)
+        print(f"{paint('?', 'mark', sys.stdout)} {text}")
+        print(below)
+        try:
+            return input(paint("› ", "mark", sys.stdout)).strip()
+        except EOFError:
+            self._file_only("answer: end of input")
+            raise Exit("no answer: end of input") from None
 
     def add(self, title, lines):
         """Add a section to the record."""
@@ -198,7 +257,7 @@ class Session:
                 f.write(f"\n[{title}]\n")
                 for line in lines:
                     f.write(f"{line}\n")
-        log.info("record written to %s", path)
+        say("record written to %s", path, style="ok")
         return path
 
 
@@ -212,19 +271,40 @@ def connect(s, state=PRE_OP):
     bootloader serves the files that step 1 reads and the firmware installation writes, and stays
     there whatever `state` is. A drive that reaches PRE-OP but not `state` fails the call.
     """
-    log.info("")
-    log.info("== connect: %s ==", STATE_NAMES[state])
+    heading(f"Connect · {STATE_NAMES[state]}")
     s.client.init()
     try:
         s.client.ensure_state(PRE_OP, positions=[s.slave])
     except StateError as e:
-        log.info("the drive did not reach PRE-OP: %s", e)
-        log.info("moving the drive to BOOT")
+        say("the drive did not reach PRE-OP: %s", e, style="warning")
+        say("moving the drive to BOOT", style="warning")
         s.client.ensure_state(BOOT, positions=[s.slave])
         s.add("connect", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
     else:
         s.client.ensure_state(state, positions=[s.slave])
     log.info("the drive is in %s", STATE_NAMES[s.al_state()])
+
+
+def heading(label):
+    """Show and log a heading: a rule with `label` in it, the width of a line."""
+    text = f"━━ {label} "
+    say("")
+    say(text + "━" * max(3, _RULE_WIDTH - len(text)), style="heading")
+
+
+_STEP_MARKS = {"succeeded": ("✓", "ok"), "failed": ("✗", "error"), "cancelled": ("✗", "warning")}
+
+
+def _step_line(step):
+    # One step of a procedure on the console: a mark for its status, its id, and its value or
+    # error. format_step gives the plain line for the log file.
+    mark, style = _STEP_MARKS.get(step["status"], ("…", "dim"))
+    line = f"  {paint(mark, style)} {step['id']:<24}"
+    if "value" in step:
+        line += f" {json.dumps(step['value'], ensure_ascii=False)}"
+    if "error" in step:
+        line += f" {paint(step['error'], 'error')}"
+    return line
 
 
 def run_procedure(s, name, params=None):
@@ -237,7 +317,7 @@ def run_procedure(s, name, params=None):
     try:
         for snapshot, changed in changes:
             for step in changed:
-                log.info(format_step(step))
+                say(format_step(step), console=_step_line(step))
     finally:
         # Closing the generator cancels a run that is still in progress, for example on Ctrl-C.
         changes.close()
@@ -282,7 +362,8 @@ def read_hardware_description_file(s):
         if r.ok or time.monotonic() >= deadline:
             r.raise_for_status()
             return r.json()
-        log.info("the drive refused the read, asking again: %s", r.json().get("error", r.text))
+        reason = r.json().get("error", r.text)
+        say("the drive refused the read, asking again: %s", reason, style="warning")
         time.sleep(0.5)
 
 
@@ -330,17 +411,18 @@ def install_firmware(s):
         verdict = r.json() if r.ok else {"compatible": False, "explanation": r.json().get("error")}
         verdicts.append(verdict)
         mark = "fits" if verdict["compatible"] else "DOES NOT FIT"
-        log.info("  %d. %s: %s", i, package.name, mark)
+        painted = paint(mark, "ok" if verdict["compatible"] else "error")
+        say("  %d. %s: %s", i, package.name, mark, console=f"  {i}. {package.name}: {painted}")
     if not packages:
-        log.info("no firmware package in %s", PACKAGES_DIR)
+        say("no firmware package in %s", PACKAGES_DIR, style="warning")
 
     choices = {str(i): package.name for i, package in enumerate(packages, start=1)}
     if s.firmware_running():
         choices["s"] = "skip the step"
     choices["x"] = "exit"
-    numbers = f"1-{len(packages)} = package, " if packages else ""
-    others = ", ".join(f"{key} = {meaning}" for key, meaning in choices.items() if key in "sx")
-    answer = s.ask("install which package?", choices, listed=numbers + others)
+    shown = [(f"1-{len(packages)}", "package")] if packages else []
+    shown += [(key, meaning) for key, meaning in choices.items() if key in ("s", "x")]
+    answer = s.ask("install which package?", choices, shown=shown)
     if answer == "x":
         raise Exit("the user chose to exit at the firmware step")
     if answer == "s":
@@ -350,7 +432,7 @@ def install_firmware(s):
     package = packages[int(answer) - 1]
     verdict = verdicts[int(answer) - 1]
     if not verdict["compatible"]:
-        log.info("%s", verdict["explanation"])
+        say("%s", verdict["explanation"], style="warning")
         confirm = s.ask(
             "the package does not fit the drive. install it all the same?",
             {"y": "install", "n": "exit"},
@@ -409,7 +491,7 @@ def load_configuration(s, path):
     """
     s.heading(3, "configuration")
     if not path.exists():
-        log.info("no configuration file at %s", path)
+        say("no configuration file at %s", path, style="warning")
         answer = s.ask("skip the step or exit?", {"s": "skip the step", "x": "exit"})
         if answer == "x":
             raise Exit("the user chose to exit at the configuration step")
@@ -470,7 +552,7 @@ def set_assigned_name(s):
     path = {"slavePosition": s.slave, "index": 0x20F2, "subindex": 0}
     before = s.client.call("readParameter", path=path).json()["value"]
     log.info("assigned name now: %r", before)
-    name = s.ask_text(f"new assigned name (empty keeps {before!r})")
+    name = s.ask_text("new assigned name?", f"empty keeps {before!r}")
     if not name:
         s.add("assigned name", [f"name: {before}", "kept by the user"])
         return

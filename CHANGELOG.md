@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.119] - 2026-10-30
+
 ### Changed
 
 - **A frame capture can run for up to 5 minutes.** `POST /api/captures` and the Capture card on the Console's Fieldbus Diagnostics page accept `seconds` up to 300, where the limit was 120. Run `motion-master-capture` by hand for a longer capture, up to an hour.
@@ -1034,7 +1036,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.118...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.119...HEAD
+[6.0.0-alpha.119]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.118...v6.0.0-alpha.119
 [6.0.0-alpha.118]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.117...v6.0.0-alpha.118
 [6.0.0-alpha.117]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.116...v6.0.0-alpha.117
 [6.0.0-alpha.116]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.115...v6.0.0-alpha.116

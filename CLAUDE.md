@@ -873,7 +873,22 @@ which sends an FoE ERROR request. `hil/foe_abort` shows both on a drive. See iss
 **The FoE timeouts and attempts follow Motion Master v5, which works reliably in the field:**
 reads 6 s with 3 attempts in `SoemFieldbusDriver::readFile`, writes 10 s per packet with 3
 attempts in the firmware installation, removals 10 s (30 s for the ESI), and 2 s after entering
-BOOT. A read or write is asked again only when the drive gave no answer.
+BOOT. A write is asked again only when the drive gave no answer. A read is asked again also after
+FoE error 0x8004 or 0x800B, as below.
+**An Integro answers a read with FoE BUSY, and a master that then aborts it hangs the drive.**
+ETG.1000.5 defines BUSY only for a write. The Integro sends it when the file is not ready 0.5 s
+after the request: on the first read after it enters BOOT from PRE-OP, where the file is ready
+0.99 s after BOOT, and in the first seconds of PRE-OP after power-on, where it ends the read with
+FoE error 0x800B at 2 s. After a BUSY the drive waits for an ACK of packet 0, the rule of the
+Beckhoff slave stack code, or for a new read request. **An abort with no new request after a BUSY
+leaves the drive in BOOT, refusing INIT and every mailbox request, until a power cycle.** So
+`ports/soem` answers each BUSY on a read with an ACK of the last packet and keeps waiting, for up to
+the read timeout from the first BUSY. `readFile` asks again after 0x800B, and after 0x8004, which an
+XMOS drive sends as "Missing reply" when the last ACK of the read before never reached its FoE
+handler: an AL state request within about 0.1 ms of that ACK loses it, and the drive's FoE state
+survives the state change. A Circulo whose file system is wedged (somanet_software#5820) answers
+with the same two codes, so its read fails after 3 fast attempts instead of 1. `hil/foe_read_busy`
+measures all of it. See `NEXTGEN.md`, Session 2026-10-30.
 **A read can ask for a longer timeout.** A SOMANET file removal is an FoE read of
 `fs-remove=<name>`, which the drive answers only after the erase, so `removeDeviceFile` waits
 10 s, and 30 s for the ESI (about 17 s to erase). An abort sent during the erase would end the
@@ -1170,6 +1185,16 @@ other master may use the adapter.
 ```bash
 sudo ./build/x64-linux-debug/hil/mailbox_counter0/mailbox_counter0 --ifname <interface> [--slave 1] \
   [--rounds 50] [--pattern after|double|first|init|skip|all]
+```
+
+### foe_read_busy
+
+Shows what a drive does when it answers an FoE read request with BUSY, and what each reply of the master does then. Each round puts the drive into INIT, then into `--state` (BOOT or PRE-OP); `--via-preop` goes through PRE-OP and INIT first, because an Integro answers BUSY only on the first read after it enters BOOT from PRE-OP. It sends one read request after `--delay` ms and prints every mailbox message with the time since the request. `--after-busy` picks the reply to a BUSY: `wait`, `abort`, `reread`, `abort-reread` (the reply of the driver before #175), or `ack0`. `--until-file` sends the request again 200 ms after an FoE error. `--gap` pauses after each round, between the last ACK and the next state request. After the rounds it says whether the drive still reaches INIT. On an Integro, `wait` and `abort` hang the drive in BOOT until a power cycle. It leaves the drive in PRE-OP. It needs raw socket access, and no other master may use the adapter.
+
+```bash
+sudo ./build/x64-linux-debug/hil/foe_read_busy/foe_read_busy --ifname <interface> [--slave 1] \
+  [--file .hardware_description] [--state boot|preop] [--via-preop] [--rounds 3] [--wait 10] \
+  [--delay 0] [--gap 0] [--after-busy wait|abort|reread|abort-reread|ack0] [--until-file]
 ```
 
 ### foe_read_abort

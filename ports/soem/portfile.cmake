@@ -339,6 +339,90 @@ vcpkg_replace_string(
                      ecx_FOEerror(context, slave, aFOEp);
                      wkc = -EC_ERR_TYPE_FOE_ERROR;")
 
+# A read that the slave answers with FoE BUSY ends as an unexpected packet.
+#
+# ETG.1000.5 defines BUSY only for a write, and ecx_FOEread takes it for a packet it does not
+# expect: it returns -EC_ERR_TYPE_PACKET_ERROR, and the caller gives up on the read. A SOMANET
+# Integro answers a read with BUSY when the file is not ready 0.5 s after the request: the first read
+# after it enters BOOT from PRE-OP, and the reads in the first 2 s of PRE-OP after power-on. The
+# Beckhoff slave stack code answers its own BUSY on a read the same way and then waits for an ACK of
+# the last packet (ecatfoe.c, change V5.11 FOE1). Measured with hil/foe_read_busy on an Integro with
+# firmware v5.6.11: after an ACK of packet 0 the drive sends the file for the same request, 0.99 s
+# after it entered BOOT. A master that aborts after the BUSY and sends no new request leaves the
+# drive in BOOT until a power cycle; it refuses INIT and every mailbox request (3 of 3 runs).
+#
+# So the read answers each BUSY with an ACK of the last packet it received, 0 before the first, and
+# keeps waiting. The BUSY phase ends after the caller's timeout, counted from the first BUSY, with
+# EC_TIMEOUT. A slave that never sends BUSY sees no change. FOEhook gets packet number -2, so a log
+# can tell a BUSY on a read from a BUSY on a write, which is -1.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"   uint8 cnt;
+   boolean worktodo;
+
+   buffersize = *psize;"
+"   uint8 cnt;
+   boolean worktodo;
+   boolean busy = FALSE;
+   osal_timert busytimer;
+
+   buffersize = *psize;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"                     ecx_FOEerror(context, slave, aFOEp);
+                     wkc = -EC_ERR_TYPE_FOE_ERROR;
+                  }
+                  else
+                  {
+                     /* unexpected mailbox received */
+                     wkc = -EC_ERR_TYPE_PACKET_ERROR;
+                  }"
+"                     ecx_FOEerror(context, slave, aFOEp);
+                     wkc = -EC_ERR_TYPE_FOE_ERROR;
+                  }
+                  else if (aFOEp->OpCode == ECT_FOE_BUSY)
+                  {
+                     if (context->FOEhook)
+                     {
+                        context->FOEhook(slave, -2, dataread);
+                     }
+                     if (!busy)
+                     {
+                        busy = TRUE;
+                        osal_timer_start(&busytimer, (uint32)timeout);
+                     }
+                     if (osal_timer_is_expired(&busytimer))
+                     {
+                        wkc = EC_TIMEOUT;
+                     }
+                     else
+                     {
+                        MbxOut = ecx_getmbx(context);
+                        ec_clearmbx(MbxOut);
+                        FOEp = (ec_FOEt *)MbxOut;
+                        FOEp->MbxHeader.length = htoes(0x0006);
+                        FOEp->MbxHeader.address = htoes(0x0000);
+                        FOEp->MbxHeader.priority = 0x00;
+                        cnt = ec_nextmbxcnt(context->slavelist[slave].mbx_cnt);
+                        context->slavelist[slave].mbx_cnt = cnt;
+                        FOEp->MbxHeader.mbxtype = ECT_MBXT_FOE + MBX_HDR_SET_CNT(cnt); /* FoE */
+                        FOEp->OpCode = ECT_FOE_ACK;
+                        FOEp->PacketNumber = htoel(prevpacket);
+                        wkc = ecx_mbxsend(context, slave, MbxOut, EC_TIMEOUTTXM);
+                        MbxOut = NULL;
+                        if (wkc > 0)
+                        {
+                           worktodo = TRUE;
+                        }
+                     }
+                  }
+                  else
+                  {
+                     /* unexpected mailbox received */
+                     wkc = -EC_ERR_TYPE_PACKET_ERROR;
+                  }")
+
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_foe.c"
 "               case ECT_FOE_ERROR:

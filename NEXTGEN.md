@@ -5151,3 +5151,65 @@ producers in the firmware send that much: command 21 on a Circulo with a safety 
 and the read of the Kübler correction table, 2072 bytes. OBLAC reads neither. Reading them needs a
 read during the command plus an ACK of the empty packet, and that is not built. This comes from the
 firmware source and was not tested.
+
+## Session 2026-10-30 — A read answered with FoE BUSY waits, and two refusals are asked again (as-built)
+
+Issue #175. An Integro refused FoE reads for about 2 s after it reached PRE-OP from power-on, and
+the server answered 409. A capture showed what the log could not: the drive answers the read
+request with FoE BUSY, and SOEM's `ecx_FOEread` takes BUSY for a packet it does not expect and
+returns `-EC_ERR_TYPE_PACKET_ERROR`, the `wkc -3` of the issue. ETG.1000.5 defines BUSY only for a
+write ("busy to store the written file data").
+
+**Every rule here comes from measurement, with `hil/foe_read_busy` and a capture beside each run.**
+The program talks to the drive through SOEM and lets one run pick the reply to a BUSY. On an Integro
+with firmware v5.6.11:
+
+- The first read after the drive enters BOOT from PRE-OP gets BUSY 0.5 s after the request. The
+  file is ready 0.99 s after BOOT, wherever the request falls: a read 500 ms after BOOT gets DATA
+  with no BUSY, one at 1000 ms gets it in 23 ms. INIT straight to BOOT after power-on gives no BUSY.
+- After the BUSY, an ACK of packet 0 gets the file for the same request (5 of 5). So does a new
+  read request, with or without an abort before it (20 of 20). Silence gets nothing in 10 s.
+- **An abort with no new request after the BUSY hangs the drive** (3 of 3): it stays in BOOT,
+  refuses INIT, and takes no mailbox request, not even the abort, until a power cycle. The driver
+  before this change aborted and asked again 100 ms later, and the second request is what kept the
+  drive alive. Its last attempt could still end on a bare abort.
+- In PRE-OP after power-on, the drive sends BUSY every 0.5 s and ends the read with FoE error
+  0x800B Program error at 2.0 s, whatever the master sends. The next request gets the file at once.
+  No reply hung the drive here. The server gave up at about 1.9 s, just before the 0x800B, which is
+  the 409. 2 of 3 power-ons through the server hit this window; why the third did not is not known.
+
+**The ACK of packet 0 is the reply the slave stack code expects.** Jasper runs the Beckhoff slave
+stack code, whose `ecatfoe.c` handles "busy on a read request" (change V5.11 FOE1): after its own
+BUSY it waits for an ACK and then sends the data. The Integro's Hilscher stack behaves the same way
+on the wire. Jasper's file system holds its reply instead of sending BUSY, because "SOEM-based
+masters abort a read on a Busy service" (`foe_filesystem.c`). The Circulo sent no BUSY in any run:
+BOOT via PRE-OP (10), PRE-OP via INIT (5), PRE-OP after power-on (1).
+
+**So `ports/soem` answers each BUSY on a read with an ACK of the last packet, and `readFile` asks
+again after two refusals.** The ACK covers the BOOT case with no second request. The BUSY phase is
+bounded by the read timeout, counted from the first BUSY. 0x800B covers the power-on case. Both
+codes count against the 3 attempts, so a read is still bounded.
+
+**0x8004 came from a second, unrelated finding on the Circulo.** In the PRE-OP rounds of the
+program, a read request got FoE error 0x8004 "Missing reply" at once in 13 of 20 rounds when INIT
+followed the last ACK of the round before by about 0.1 ms. With a pause of 1, 2, 3, 5 or 50 ms
+after that ACK: 0 of 20 each. The firmware explains it: `sc_somanet_ip/module_ethercat/libsrc/foe.c`
+answers anything but ACK or ERROR in `FOE_STATE_READ` with "Missing reply" and goes idle, and nothing
+resets that state on an AL state change. So the ACK never reached the FoE handler, and the drive was
+still waiting for it. The next request got the file every time. The server has no code path that
+sends a state request directly after an FoE read, but a state request from another thread can take
+the bus lock right after a read releases the drive lock, and an ACK lost on the wire costs the same.
+A refusal that the next request does not have is worth one more request.
+
+**The cost falls on a Circulo whose file system is wedged** (somanet_software#5820). It answers
+"Illegal" and "File System is busy", 0x8004 and 0x800B, until a power cycle, so its read now fails
+after 3 fast refusals instead of 1.
+
+Measured through the server with this change: 10 of 10 BOOT reads on the Integro returned 200 in
+0.90 s, one BUSY each, no abort; 2 of 2 power-ons that hit the window returned 200 in 2.13 s and
+2.14 s; Integro installs of v5.6.10 and v5.6.11 and a Circulo install of v5.6.11 succeeded; 5 of 5
+Circulo BOOT reads took 0.28 s. The 0x8004 retry is covered by a unit test only, because no HTTP
+client can send a state request within 0.1 ms of a read.
+
+For the firmware team: the Integro sends BUSY in answer to a read, and a master that aborts after it
+hangs the drive; the XMOS FoE handler keeps its READ state across AL state changes.

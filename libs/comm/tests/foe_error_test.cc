@@ -33,5 +33,14 @@ TEST(MakeFoeRefusalTest, EveryOtherCodeIsAProtocolErrorWithTheCodeInTheMessage) 
             "FOEwrite slave 2 'x.bin' failed (FoE error 0x0003, \"Packet Number Wrong\")");
 }
 
+TEST(IsTransientReadRefusalTest, OnlyIllegalAndProgramErrorAreAskedAgain) {
+  EXPECT_TRUE(isTransientReadRefusal(0x8004));
+  EXPECT_TRUE(isTransientReadRefusal(0x800B));
+  EXPECT_FALSE(isTransientReadRefusal(0x8001));
+  EXPECT_FALSE(isTransientReadRefusal(0x8002));
+  EXPECT_FALSE(isTransientReadRefusal(0x8000));
+  EXPECT_FALSE(isTransientReadRefusal(0));
+}
+
 }  // namespace
 }  // namespace mm::comm

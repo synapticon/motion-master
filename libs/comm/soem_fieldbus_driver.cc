@@ -59,7 +59,10 @@ namespace {
 //
 // SOEM's hook is a bare function pointer with no user data, so this is a free function.
 int foeProgressHook(uint16 slave, int packetnumber, int datasize) {
-  if (packetnumber < 0) {
+  if (packetnumber == -2) {
+    spdlog::info("FoE slave {}: the slave answered a read with BUSY ({} bytes read) — waiting",
+                 slave, datasize);
+  } else if (packetnumber < 0) {
     spdlog::info(
         "FoE slave {}: the slave reported BUSY — resending the last packet ({} bytes left)", slave,
         datasize);
@@ -1339,8 +1342,10 @@ FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view
 struct FailedFoeTransfer {
   FoeError error;
   // True when the slave refused the transfer with an FoE Error packet. That is the slave's
-  // answer, and asking again gets the same answer.
+  // answer, and asking again usually gets the same answer.
   bool refused = false;
+  // The error code of that packet, 0 when the slave sent none.
+  uint32_t code = 0;
 };
 
 // Explains a failed ecx_FOEread/ecx_FOEwrite: the slave's own refusal when it sent one, the return
@@ -1352,15 +1357,16 @@ FailedFoeTransfer endFailedFoeTransfer(ecx_contextt* ctx, int wkc, std::string_v
                                        uint16_t slave, std::string_view filename) {
   if (const auto refusal = drainFoeErrors(ctx, slave)) {
     return {.error = makeFoeRefusal(refusal->code, refusal->text, op, slave, filename),
-            .refused = true};
+            .refused = true,
+            .code = refusal->code};
   }
   abortFoeTransfer(ctx, slave);
   return {.error = foeError(wkc, op, slave, filename), .refused = false};
 }
 
-// How often a read the slave did not answer is asked again, and the pause between attempts.
-// Motion Master v5 uses the same 3 attempts and the same pause, and it reads files from SOMANET
-// bootloaders reliably in the field.
+// How often a read the slave did not answer, or refused with a transient code, is asked again, and
+// the pause between attempts. Motion Master v5 uses the same 3 attempts and the same pause, and it
+// reads files from SOMANET bootloaders reliably in the field.
 constexpr int kFoeReadAttempts = 3;
 constexpr auto kFoeReadRetryDelay = std::chrono::milliseconds(100);
 
@@ -1700,7 +1706,10 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
       }
       failed = endFailedFoeTransfer(ctx_.get(), wkc, "FOEread", slavePosition, filename);
     }
-    if (failed->refused || failed->error.retry == Retry::Permanent || attempt == kFoeReadAttempts) {
+    // A refusal ends the read, except the two that a SOMANET drive sends for a file it can serve
+    // a moment later.
+    const bool finalRefusal = failed->refused && !isTransientReadRefusal(failed->code);
+    if (finalRefusal || failed->error.retry == Retry::Permanent || attempt == kFoeReadAttempts) {
       spdlog::debug("{}", failed->error.message);
       return std::unexpected(std::move(failed->error));
     }

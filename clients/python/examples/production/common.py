@@ -121,27 +121,6 @@ class Session:
             raise SystemExit(1) from None
         return exc_type is not None and issubclass(exc_type, Exit)
 
-    def connect(self):
-        """Open the fieldbus driver, scan, and move the drive to PRE-OP, before the first step.
-
-        The driver is opened when none is open, and the bus is scanned when the last scan is
-        missing or wrong. A drive in SAFE-OP or OP stays there.
-
-        A drive with no running firmware does not reach PRE-OP. It goes to BOOT instead, where its
-        bootloader serves the files that step 1 reads and the firmware installation writes.
-        """
-        log.info("")
-        log.info("== connect ==")
-        self.client.init()
-        try:
-            self.client.ensure_state(PRE_OP, positions=[self.slave])
-        except StateError as e:
-            log.info("the drive did not reach PRE-OP: %s", e)
-            log.info("moving the drive to BOOT")
-            self.client.ensure_state(BOOT, positions=[self.slave])
-            self.add("connect", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
-        log.info("the drive is in %s", STATE_NAMES[self.al_state()])
-
     def al_state(self):
         """Return the AL state of the drive, as the server reads it now."""
         query = {"positions": str(self.slave)}
@@ -193,6 +172,28 @@ class Session:
                     f.write(f"{line}\n")
         log.info("record written to %s", path)
         return path
+
+
+def connect(s):
+    """Open the fieldbus driver, scan, and move the drive to PRE-OP, before the first step.
+
+    The driver is opened when none is open, and the bus is scanned when the last scan is
+    missing or wrong. A drive in SAFE-OP or OP stays there.
+
+    A drive with no running firmware does not reach PRE-OP. It goes to BOOT instead, where its
+    bootloader serves the files that step 1 reads and the firmware installation writes.
+    """
+    log.info("")
+    log.info("== connect ==")
+    s.client.init()
+    try:
+        s.client.ensure_state(PRE_OP, positions=[s.slave])
+    except StateError as e:
+        log.info("the drive did not reach PRE-OP: %s", e)
+        log.info("moving the drive to BOOT")
+        s.client.ensure_state(BOOT, positions=[s.slave])
+        s.add("connect", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
+    log.info("the drive is in %s", STATE_NAMES[s.al_state()])
 
 
 def product_lines(title, part):

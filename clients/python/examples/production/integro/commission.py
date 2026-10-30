@@ -19,6 +19,7 @@ from common import (  # noqa: E402
     install_firmware,
     load_configuration,
     read_hardware_description,
+    set_assigned_name,
 )
 from motion_master_client import run  # noqa: E402
 
@@ -36,6 +37,7 @@ def main():
         read_hardware_description(s)
         install_firmware(s)
         load_configuration(s, CONFIG_FILE)
+        set_assigned_name(s)
 
 
 if __name__ == "__main__":

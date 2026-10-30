@@ -83,6 +83,7 @@ carry the firmware version of the drive.
 | 1. Hardware description | Yes |
 | 2. Firmware | Yes |
 | 3. Configuration | Yes |
+| 4. Assigned name | Yes |
 
 The other steps follow one at a time.
 
@@ -148,3 +149,13 @@ Then the script stores the parameters to flash. The record gets the file name, t
 rows loaded, the rows the drive skipped, and each object whose value read back differs from the
 file. The drive loads `.assembly_config` after `config.csv`, so a value of the assembly can win
 over the file. The whole file goes to the end of the record.
+
+### 4. Assigned name
+
+The script shows the assigned name of the drive, object 0x20F2, and asks for a new one. An empty
+answer keeps the name and skips the step. The script writes the name, reads it back, and stops
+when the drive holds something else. Then it stores the parameters to flash. The record gets the
+name before and after.
+
+Step 3 sets the assigned name too, when `config.csv` has a row for 0x20F2. Step 4 comes after it,
+so the name the user types wins.

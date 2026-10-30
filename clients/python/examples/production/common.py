@@ -164,6 +164,17 @@ class Session:
                 return answer
             print(f"type one of: {', '.join(choices)}")
 
+    def ask_text(self, question):
+        """Ask for a line of text, and log the question and the answer. End of input is an exit."""
+        log.info("question: %s", question)
+        try:
+            answer = input(f"{question}: ").strip()
+        except EOFError:
+            log.info("answer: end of input")
+            raise Exit("no answer: end of input") from None
+        log.info("answer: %r", answer)
+        return answer
+
     def add(self, title, lines):
         """Add a section to the record."""
         self.sections.append((title, list(lines)))
@@ -445,3 +456,29 @@ def load_configuration(s, path):
     lines.append(store_parameters(s))
     s.add("configuration", lines)
     s.append(f"configuration file {path.name}", text.splitlines())
+
+
+def set_assigned_name(s):
+    """Step 4: set the assigned name of the drive, 0x20F2, which the user types.
+
+    An empty answer keeps the current name and skips the step. The server refuses a name longer
+    than the object holds.
+    """
+    s.heading(4, "assigned name")
+    path = {"slavePosition": s.slave, "index": 0x20F2, "subindex": 0}
+    before = s.client.call("readParameter", path=path).json()["value"]
+    log.info("assigned name now: %r", before)
+    name = s.ask_text(f"new assigned name (empty keeps {before!r})")
+    if not name:
+        s.add("assigned name", [f"name: {before}", "kept by the user"])
+        return
+
+    r = s.client.call("writeParameter", path=path, body={"value": name}, check=False)
+    if not r.ok:
+        reason = r.json().get("error", r.text) if r.content else r.reason
+        raise ProcedureError(f"writing the assigned name failed: {reason}")
+    after = s.client.call("readParameter", path=path).json()["value"]
+    log.info("assigned name after the write: %r", after)
+    if after != name:
+        raise ProcedureError(f"the drive holds {after!r} after the write of {name!r}")
+    s.add("assigned name", [f"before: {before}", f"after: {after}", store_parameters(s)])

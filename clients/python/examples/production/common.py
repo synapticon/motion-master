@@ -104,6 +104,8 @@ class Session:
         self.stamp = self.started.strftime("%Y%m%d-%H%M%S")
         self.drive_name = None
         self.drive_id = None
+        self.assigned_name = None
+        self.firmware_version = None
         self.sections = []
         self.appendices = []
         self._steps = 0
@@ -256,6 +258,8 @@ class Session:
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"drive: {self.drive_name or 'unknown'}\n")
             f.write(f"build descriptor and serial number: {self.drive_id or 'unknown'}\n")
+            f.write(f"assigned name: {self.assigned_name or 'unknown'}\n")
+            f.write(f"firmware version: {self.firmware_version or 'unknown'}\n")
             f.write(f"started: {self.started.isoformat(timespec='seconds')}\n")
             f.write(f"outcome: {outcome}\n")
             for title, lines in self.sections + self.appendices:
@@ -424,7 +428,8 @@ def read_hardware_description(s):
     lines = product_lines("device", hd["device"])
     if hd.get("assembly"):
         lines += product_lines("assembly", hd["assembly"])
-    lines.append(f"firmware version: {firmware_version(s)}")
+    s.firmware_version = firmware_version(s)
+    lines.append(f"firmware version: {s.firmware_version}")
 
     for line in lines:
         log.info(line)
@@ -500,7 +505,8 @@ def install_firmware(s):
     params = {"packageFilename": package.name, "finalState": PRE_OP}
     run_procedure(s, "firmware-installation", params)
     after = firmware_version(s)
-    log.info("firmware version after the installation: %s", after)
+    s.firmware_version = after
+    say("firmware version after the installation: %s", after)
     s.add(
         "firmware",
         [
@@ -604,6 +610,7 @@ def set_assigned_name(s):
     log.info("assigned name now: %r", before)
     name = s.ask_text("new assigned name?", f"empty keeps {before!r}")
     if not name:
+        s.assigned_name = before
         s.add("assigned name", [f"name: {before}", "kept by the user"])
         return
 
@@ -615,6 +622,7 @@ def set_assigned_name(s):
     log.info("assigned name after the write: %r", after)
     if after != name:
         raise ProcedureError(f"the drive holds {after!r} after the write of {name!r}")
+    s.assigned_name = after
     s.add("assigned name", [f"before: {before}", f"after: {after}", store_parameters(s)])
 
 
@@ -672,8 +680,9 @@ def identify_plant(s, chirp):
     The chirp turns the motor in both directions for its whole duration, and needs the drive in
     OP. `chirp` holds the procedure's parameters: startFrequencyMilliHz, targetFrequencyMilliHz,
     targetAmplitudePermil, transitionTimeMs and signalType. The procedure writes the model to
-    plant_model.csv on the drive and changes no object, so the step stores nothing. The whole
-    model is read back from the drive.
+    plant_model.csv on the drive. It sets the operation mode to CST for the chirp and can leave it
+    there, but 0x6060 has no backup flag, so a store does not keep it. The step stores nothing. The
+    whole model is read back from the drive.
     """
     s.heading("plant model")
     for key, value in chirp.items():
@@ -696,29 +705,36 @@ def tune_controller(s, controller, settings):
     """Tune the velocity or the position controller with the controller-auto-tuning procedure.
 
     `controller` is "velocity" or "position". `settings` holds the other parameters of the
-    procedure, such as full and controllerType. The procedure needs the plant model of the plant
-    model step, computes the gains with the auto-tuning program of the server, and writes them.
-    It turns no motor: a full tuning records the velocity noise with the motor at rest. The step
-    shows each gain before and after, and stores the parameters to flash.
+    procedure, such as full and controllerType, and may hold controlStrategy: the position control
+    strategy 0x2002, 1 for the simple PID controller and 2 for the cascaded one, which the step
+    writes before it tunes. Without it, 0x2002 stays as it is. The procedure needs the plant model
+    of the plant model step, computes the gains with the auto-tuning program of the server, and
+    writes them. It turns no motor: a full tuning records the velocity noise with the motor at
+    rest. The step shows each gain before and after, and stores the parameters to flash.
     """
     s.heading(f"{controller} controller tuning")
     params = {"controller": controller, **settings}
-    for key, value in params.items():
-        say("%s: %s", key, value)
+    strategy = params.pop("controlStrategy", None)
+    lines = []
+    if strategy is not None:
+        before = read_object(s, 0x2002, 0)
+        if before != strategy:
+            write_object(s, 0x2002, 0, strategy)
+        lines.append(f"position control strategy, 0x2002: {before} -> {strategy}")
+    lines += [f"{key}: {value}" for key, value in params.items()]
+    for line in lines:
+        say(line)
     snapshot = run_procedure(s, "controller-auto-tuning", params)
     write = step_value(snapshot, "write") or {}
-    lines = [f"{key}: {value}" for key, value in params.items()]
-    for gain in write.get("gains", []):
-        lines.append(f"{gain['object']}: {gain['before']} -> {gain['after']}")
-    for skipped in write.get("skipped", []):
-        lines.append(f"skipped, the drive has no {skipped}")
-    for line in lines[len(params) :]:
+    gains = write.get("gains", [])
+    results = [f"{gain['object']}: {gain['before']} -> {gain['after']}" for gain in gains]
+    results += [f"skipped, the drive has no {name}" for name in write.get("skipped", [])]
+    for line in results:
         say(line, style="ok")
     if write.get("warning"):
         say("%s", write["warning"], style="warning")
-        lines.append(f"warning: {write['warning']}")
-    lines.append(store_parameters(s))
-    s.add(f"{controller} controller tuning", lines)
+        results.append(f"warning: {write['warning']}")
+    s.add(f"{controller} controller tuning", lines + results + [store_parameters(s)])
 
 
 def set_integral_limits(s):

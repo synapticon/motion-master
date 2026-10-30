@@ -68,7 +68,9 @@ hardware description of the drive. Until the script reads them, the log is named
 reads them. When the script stops before that, both files keep the name `device-<slave>-<time>`.
 
 The script writes the record also when a step fails, with the results it has so far. The first
-lines of the record give the drive name, the start time and the outcome.
+lines of the record give the drive name, the build descriptor and the serial number, the
+assigned name and the firmware version the drive ends with, the start time and the outcome. A
+section for each step follows, and the whole configuration file comes last.
 
 ## Steps
 
@@ -220,9 +222,10 @@ torque mode, runs the chirp, records the velocity and the torque, fits the plant
 auto-tuning program of the server, and writes the model to `plant_model.csv` on the drive.
 
 Then the script reads the model back from the drive, and shows and records the chirp, the
-numerator, the denominator, the inertia and the friction. The step changes no object, so it stores
-nothing. On the console, a step value with a long list of numbers, such as the Bode data of the
-fit, shows how many numbers it has. The log file keeps them all.
+numerator, the denominator, the inertia and the friction. The step stores nothing. The procedure
+sets the operation mode to CST for the chirp and can leave it there, but the drive does not
+store the operation mode. On the console, a step value with a long list of numbers, such as the
+Bode data of the fit, shows how many numbers it has. The log file keeps them all.
 
 The Integro script uses a logarithmic chirp from 2.3 Hz to 31 Hz, at 460 per mille, for 3000 ms.
 
@@ -237,9 +240,12 @@ the motor at rest.
 The script shows each gain before and after, and a warning when the noise was not measured. Then
 it stores the parameters to flash. The record gets the settings and every gain before and after.
 
-The Integro script uses full tuning for both controllers, which lets the auto-tuning program choose
-the targets, and the controller type PI-P for the position controller. The drive uses the new gains
-on its next control cycle.
+The settings of the position controller may name the position control strategy, object 0x2002: 1
+for the simple PID controller, 2 for the cascaded one. The script writes it before it tunes and
+records it. Position tuning needs the cascaded controller. The Integro script sets 2, uses full
+tuning for both controllers, which lets the auto-tuning program choose the targets, and the
+controller type PI-P for the position controller. The drive uses the new gains on its next
+control cycle.
 
 ### Integral limits
 

@@ -40,10 +40,10 @@ PLANT_IDENTIFICATION_CHIRP = {
     "signalType": "logarithmic",
 }
 
-# Full tuning lets the auto-tuning program choose the targets. PI-P puts the integral action in
-# the position loop.
+# Full tuning lets the auto-tuning program choose the targets. Control strategy 2 is the cascaded
+# position controller, and PI-P puts the integral action in its position loop.
 VELOCITY_TUNING = {"full": True}
-POSITION_TUNING = {"full": True, "controllerType": "PI-P"}
+POSITION_TUNING = {"controlStrategy": 2, "full": True, "controllerType": "PI-P"}
 
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
 CONFIG_FILE = Path(__file__).resolve().parent / "config.csv"

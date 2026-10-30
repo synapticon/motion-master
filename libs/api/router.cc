@@ -5,6 +5,8 @@
 #include <atomic>
 #include <charconv>
 #include <cstdint>
+#include <exception>
+#include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -240,7 +242,7 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
                          headers = std::move(headers), body = std::move(body)]() mutable {
         const Request request(std::move(url), std::move(parameters), std::move(queryString),
                               std::move(headers), std::move(body));
-        Response response = (*shared)(request);
+        Response response = invokeHandler(*shared, request);
         loop->defer([corsOrigin, res, aborted, response = std::move(response)]() mutable {
           if (aborted->load()) {
             return;  // The connection is gone and res with it.
@@ -281,6 +283,18 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
     app_.put(pattern, onRequest);
   } else {
     app_.del(pattern, onRequest);
+  }
+}
+
+Response invokeHandler(const Handler& handler, const Request& request) {
+  try {
+    return handler(request);
+  } catch (const std::exception& e) {
+    spdlog::error("{}: the handler threw: {}", request.url(), e.what());
+    return error("500 Internal Server Error", std::format("the handler threw: {}", e.what()));
+  } catch (...) {
+    spdlog::error("{}: the handler threw something that is not a std::exception", request.url());
+    return error("500 Internal Server Error", "the handler threw");
   }
 }
 

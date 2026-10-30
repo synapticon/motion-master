@@ -288,6 +288,15 @@ Response timed(Op&& op, StatusOf&& statusOf) {
 /// @brief What a route does: a pure function from a snapshotted request to a response.
 using Handler = std::function<Response(const Request&)>;
 
+/// @brief Calls @p handler with @p request, and turns an exception it lets out into a 500.
+///
+/// The code of this repository returns errors and throws none, but the standard library and
+/// nlohmann::json do: a filesystem call on a path that is gone, a JSON value of the wrong type. A
+/// handler runs on a pool thread whose loop drops an exception without a word, so without this the
+/// request got no answer and the log no line. The 500 carries the exception's message, and the log
+/// gets an error line with the request's URL.
+Response invokeHandler(const Handler& handler, const Request& request);
+
 /// @brief Registers routes whose handlers run off the event loop.
 ///
 /// Holds no ownership: the app, loop, pool and CORS origin all outlive it, and it is used only

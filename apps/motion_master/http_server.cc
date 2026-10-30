@@ -769,8 +769,12 @@ void HttpServer::run() {
     if (captureRunning_.exchange(true)) {
       return mm::api::error("409 Conflict", "a capture is running; wait for it to finish");
     }
+    // Cleared on every way out, a throw included, so a capture that fails never refuses the next.
+    struct ClearOnExit {
+      std::atomic<bool>& flag;
+      ~ClearOnExit() { flag.store(false); }
+    } clearOnExit{captureRunning_};
     auto file = config_.runCapture(adapter, seconds);
-    captureRunning_.store(false);
     if (!file) {
       return mm::api::error("500 Internal Server Error", file.error());
     }

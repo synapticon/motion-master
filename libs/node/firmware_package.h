@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <expected>
 #include <nlohmann/json_fwd.hpp>
@@ -33,19 +32,6 @@ namespace mm::node {
 
 /// @brief The name of the ESI in a SOMANET firmware package and on the drive.
 inline constexpr std::string_view kEsiFileName = "SOMANET_CiA_402.xml.zip";
-
-/// @brief The entries an install skips unless the request names a different set.
-///
-/// Both are descriptive extras rather than firmware: @c SOMANET_CiA_402.xml.zip is the ESI, which a
-/// commissioning tool reads from the package itself rather than from the drive, and
-/// @c stack_image.svg.zip is a picture of the hardware. Writing them costs a slow FoE transfer each
-/// (the ESI alone takes ~17 s to erase before it can be rewritten) and consumes drive flash to
-/// store something nothing on the drive reads. They are skipped by default and un-skippable only
-/// deliberately, by sending a request that omits them from the list.
-inline constexpr std::array<std::string_view, 2> kDefaultSkippedFirmwareFiles = {
-    kEsiFileName,
-    "stack_image.svg.zip",
-};
 
 /// @brief A SOMANET firmware package filename, broken into the five fields the naming convention
 ///        defines (Hardware description specification §3.4.2).
@@ -105,6 +91,51 @@ std::expected<FirmwarePackageName, std::string> parseFirmwarePackageName(std::st
 /// a client has to null-check.
 void to_json(nlohmann::json& j, const FirmwarePackageName& name);
 
+/// @brief Where an install sends one entry of a firmware package.
+///
+/// The class comes from the entry name, which is the convention the bootloader of the drive
+/// expects.
+enum class FirmwarePackageEntryKind {
+  kAppFirmware,  ///< @c app_*.bin: written in BOOT as @c app_firmware.bin.
+  kComFirmware,  ///< @c com_*.bin: written in BOOT as @c com_firmware.bin.
+  kSii,          ///< @c *.sii: written to the EEPROM of the ESC.
+  kExtraFile,    ///< Anything else: written to flash under its own name, only on request.
+};
+
+/// @brief The name of a kind in a JSON body: "app-firmware", "com-firmware", "sii", "extra-file".
+std::string_view toString(FirmwarePackageEntryKind kind);
+
+/// @brief One entry of a package, by name, without its content.
+struct FirmwarePackageEntry {
+  std::string name;  ///< Entry name as it appears in the zip.
+  FirmwarePackageEntryKind kind = FirmwarePackageEntryKind::kExtraFile;  ///< Where it goes.
+  uint64_t size = 0;  ///< Decompressed size in bytes.
+};
+
+/// @brief Serialises an entry as @c {name, kind, size}.
+void to_json(nlohmann::json& j, const FirmwarePackageEntry& entry);
+
+/// @brief Lists the entries of a firmware package zip held in memory.
+///
+/// Reads the zip directory only and decompresses nothing, so a client can choose the extra files
+/// of a package before an install. A directory entry is left out, because it carries no content.
+///
+/// @param zip  Package bytes.
+/// @return The entries in zip order, or a message that says why the zip does not read.
+std::expected<std::vector<FirmwarePackageEntry>, std::string> listFirmwarePackageEntries(
+    std::span<const uint8_t> zip);
+
+/// @brief Checks that each name in @p extraFiles is an extra file of the package, once.
+///
+/// The firmware binaries and the SII are always written, so a name of one of them is refused, as
+/// is a name the package does not hold. An install calls this before it takes the device to BOOT.
+///
+/// @param entries     The entries of the package, from @c listFirmwarePackageEntries.
+/// @param extraFiles  The entry names the request asks to write.
+/// @return Nothing, or a message that names the first name that is refused.
+std::expected<void, std::string> checkExtraFiles(std::span<const FirmwarePackageEntry> entries,
+                                                 std::span<const std::string> extraFiles);
+
 /// @brief One entry of a package, extracted.
 struct FirmwarePackageFile {
   std::string name;              ///< Entry name as it appears in the zip.
@@ -112,34 +143,30 @@ struct FirmwarePackageFile {
 };
 
 /// @brief A firmware package's contents, sorted by where each entry is going.
-///
-/// The classification is by filename convention, which is what the drive's own bootloader expects:
-/// @c app_*.bin is the application firmware, @c com_*.bin the communication (netX) firmware,
-/// @c *.sii an EEPROM image, and anything else an ordinary file stored on the drive's flash.
 struct FirmwarePackage {
-  std::optional<FirmwarePackageFile> appBinary;  ///< @c app_*.bin — flashed in BOOT over FoE.
-  std::optional<FirmwarePackageFile> comBinary;  ///< @c com_*.bin — flashed in BOOT over FoE.
-  std::optional<FirmwarePackageFile> sii;        ///< @c *.sii — written to the ESC EEPROM.
-  std::vector<FirmwarePackageFile> extras;       ///< Everything else — stored on flash as-is.
-  std::vector<std::string> skipped;              ///< Entry names the skip list removed, in order.
+  std::optional<FirmwarePackageFile> appBinary;  ///< @c app_*.bin: written in BOOT over FoE.
+  std::optional<FirmwarePackageFile> comBinary;  ///< @c com_*.bin: written in BOOT over FoE.
+  std::optional<FirmwarePackageFile> sii;        ///< @c *.sii: written to the ESC EEPROM.
+  std::vector<FirmwarePackageFile> extras;       ///< The extra files the request named.
+  std::vector<std::string> skipped;              ///< The extra files left out, in zip order.
 };
 
-/// @brief Reads a firmware package zip held in memory, dropping the entries named in @p skipFiles.
+/// @brief Reads a firmware package zip held in memory, with the extra files in @p extraFiles.
 ///
-/// Skipping happens during extraction rather than after it, so a skipped entry is never
-/// decompressed — which is most of the point, since the two default-skipped files are the largest
-/// in a typical package.
+/// The firmware binaries and the SII are always extracted. Another entry is extracted only when
+/// @p extraFiles names it, so a package that gets a new file does not write it to a drive unasked.
+/// An entry that is left out is never decompressed.
 ///
-/// One content check is made here rather than left to the caller: a zip with no @c app_*.bin entry
-/// at all is rejected, because that is not a firmware package and saying so before a device is
-/// taken to BOOT is far better than discovering it afterwards. An @c app_*.bin that is present but
-/// *skipped* is fine — that is a deliberate request to install only the rest.
+/// Two checks run here, before a device is taken to BOOT. @p extraFiles must pass
+/// @c checkExtraFiles. The zip must hold an @c app_*.bin, because without one it is not a firmware
+/// package.
 ///
-/// @param zip        Package bytes.
-/// @param skipFiles  Entry names to leave out, compared exactly.
-/// @return The classified contents, or a message describing what made the zip unreadable.
+/// @param zip         Package bytes.
+/// @param extraFiles  The extra files to extract, compared exactly with the entry names.
+/// @return The classified contents, or a message that says what is wrong with the zip or the
+///         request.
 std::expected<FirmwarePackage, std::string> openFirmwarePackage(
-    std::span<const uint8_t> zip, std::span<const std::string> skipFiles);
+    std::span<const uint8_t> zip, std::span<const std::string> extraFiles);
 
 /// @brief The ESI of a SOMANET firmware package, as XML text.
 ///

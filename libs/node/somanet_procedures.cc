@@ -844,15 +844,6 @@ std::expected<EtherCatState, std::string> parseFinalState(const nlohmann::json& 
   return requested;
 }
 
-std::vector<std::string> defaultSkipFiles() {
-  std::vector<std::string> files;
-  files.reserve(kDefaultSkippedFirmwareFiles.size());
-  for (std::string_view name : kDefaultSkippedFirmwareFiles) {
-    files.emplace_back(name);
-  }
-  return files;
-}
-
 /// Resolves a client-supplied package filename to its place in the firmware cache.
 ///
 /// This is the only thing standing between a caller and the rest of the filesystem, and the API in
@@ -4665,10 +4656,24 @@ std::expected<void, std::string> runTorqueConstantMeasurementProcedure(Device& d
 
 std::filesystem::path firmwareCacheDir() { return mm::core::userCacheDir() / "firmwares"; }
 
+std::expected<std::optional<std::vector<FirmwarePackageEntry>>, std::string>
+listCachedFirmwarePackageEntries(std::string_view filename) {
+  auto path = resolveCachedPackage(filename);
+  if (!path) {
+    return std::unexpected(path.error());
+  }
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(*path, ec) || ec) {
+    return std::nullopt;
+  }
+  auto bytes = readCachedPackage(*path);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  return listFirmwarePackageEntries(*bytes);
+}
+
 std::vector<ProcedureParameter> firmwareInstallationParameters() {
-  // Built from the same helper the parser defaults to, so the advertised default and the applied
-  // one cannot drift.
-  nlohmann::json skipDefault = defaultSkipFiles();
   return {
       fileParameter(
           "packageContent", "Firmware package",
@@ -4686,12 +4691,13 @@ std::vector<ProcedureParameter> firmwareInstallationParameters() {
                       "just not cached.",
                       ""),
       stringArrayParameter(
-          "skipFiles", "Files to skip",
-          "Entries inside the package that are not written to the device. The defaults are the ESI "
-          "and the stack image, which are descriptive extras nothing on the drive reads and which "
-          "are slow to write. Any entry can be listed, including the SII and the firmware binaries "
-          "themselves.",
-          std::move(skipDefault)),
+          "extraFiles", "Extra files",
+          "Entries of the package to write to the flash of the device, under their own names. The "
+          "firmware binaries (app_*.bin, com_*.bin) and the SII (*.sii) are always written and "
+          "cannot be named here. No other entry is written unless it is named, so a package that "
+          "gets a new file does not write it unasked. Each name must be an entry of the package. "
+          "GET /api/firmware-package-entries lists the entries of a cached package.",
+          nlohmann::json::array()),
       booleanParameter("cachePackage", "Cache the package",
                        "Keep a copy of the package on the server so it can be re-installed without "
                        "uploading it again. Only possible when a filename is given and it follows "
@@ -4740,7 +4746,6 @@ std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallatio
   }
 
   FirmwareInstallationRequest request;
-  request.skipFiles = defaultSkipFiles();
 
   if (auto filename = body.find("packageFilename"); filename != body.end()) {
     if (!filename->is_string()) {
@@ -4748,16 +4753,15 @@ std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallatio
     }
     request.filename = filename->get<std::string>();
   }
-  if (auto skip = body.find("skipFiles"); skip != body.end()) {
-    if (!skip->is_array()) {
-      return std::unexpected("'skipFiles' must be an array of entry names");
+  if (auto extra = body.find("extraFiles"); extra != body.end()) {
+    if (!extra->is_array()) {
+      return std::unexpected("'extraFiles' must be an array of entry names");
     }
-    request.skipFiles.clear();
-    for (const auto& name : *skip) {
+    for (const auto& name : *extra) {
       if (!name.is_string()) {
-        return std::unexpected("every entry of 'skipFiles' must be a string");
+        return std::unexpected("every entry of 'extraFiles' must be a string");
       }
-      request.skipFiles.push_back(name.get<std::string>());
+      request.extraFiles.push_back(name.get<std::string>());
     }
   }
   if (auto cache = body.find("cachePackage"); cache != body.end()) {
@@ -4820,6 +4824,15 @@ std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallatio
   if (request.package.empty()) {
     return std::unexpected("the firmware package is empty");
   }
+  // Checked here, so a name the package does not hold is a bad request and the device never
+  // leaves its state. The package step checks it again, in openFirmwarePackage.
+  auto entries = listFirmwarePackageEntries(request.package);
+  if (!entries) {
+    return std::unexpected(entries.error());
+  }
+  if (auto checked = checkExtraFiles(*entries, request.extraFiles); !checked) {
+    return std::unexpected(checked.error());
+  }
   return request;
 }
 
@@ -4828,7 +4841,7 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
     std::stop_token stop, const FirmwareInstallationRequest& request) {
   // ── package ────────────────────────────────────────────────────────────────────────────────
   reporter.start(kPackageStep);
-  auto package = openFirmwarePackage(request.package, request.skipFiles);
+  auto package = openFirmwarePackage(request.package, request.extraFiles);
   if (!package) {
     reporter.fail(kPackageStep, package.error());
     return std::unexpected(package.error());
@@ -4863,14 +4876,6 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
       manifest["fullFirmwareDescriptor"] = request.name->fullFirmwareDescriptor;
     }
     reporter.succeed(kPackageStep, std::move(manifest));
-  }
-
-  const bool writesAnything =
-      package->appBinary || package->comBinary || package->sii || !package->extras.empty();
-  if (!writesAnything) {
-    const std::string reason = "every entry in the package is in the skip list — nothing to write";
-    reporter.fail(kPackageStep, reason);
-    return std::unexpected(reason);
   }
 
   // ── cache ──────────────────────────────────────────────────────────────────────────────────
@@ -4960,7 +4965,7 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
   // ── extra-files ────────────────────────────────────────────────────────────────────────────
   reporter.start(kExtraFilesStep);
   if (package->extras.empty()) {
-    reporter.succeed(kExtraFilesStep, "no extra files to write");
+    reporter.succeed(kExtraFilesStep, "no extra file was requested");
   } else {
     auto results = nlohmann::json::object();
     for (const auto& extra : package->extras) {

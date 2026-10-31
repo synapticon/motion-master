@@ -3452,6 +3452,43 @@ paths:
           description: >
             No `filename` was given, or it is not a SOMANET firmware package name. The `error`
             message names the part of the grammar it missed.
+  /api/firmware-package-entries:
+    get:
+      summary: List the entries of a cached firmware package
+      operationId: listFirmwarePackageEntries
+      description: >
+        Lists the entries of a package in the firmware cache (`firmwares/` in the user cache), each
+        with the place a `firmware-installation` sends it. An install always writes the entries of
+        kind `app-firmware`, `com-firmware` and `sii`. It writes an entry of kind `extra-file` only
+        when its `extraFiles` names it. Only the zip directory is read, and no entry is
+        decompressed.
+      parameters:
+        - name: filename
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The package filename, with no directory part.
+          example: package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip
+      responses:
+        "200":
+          description: The entries, in zip order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FirmwarePackageEntry"
+        "400":
+          description: >
+            No `filename` was given, the filename is not a plain name, or the cached file is not a
+            zip.
+        "404":
+          description: The firmware cache does not hold a file of that name.
   /api/hardware-description/parse:
     post:
       summary: Parse a .hardware_description file
@@ -6128,6 +6165,27 @@ components:
           items: { $ref: "#/components/schemas/ParameterOption" }
           description: "`enum` only: the values that may be chosen."
       required: [name, title, description, type, required]
+    FirmwarePackageEntry:
+      type: object
+      description: One entry of a firmware package.
+      required: [name, kind, size]
+      properties:
+        name:
+          type: string
+          description: The entry name in the zip.
+          example: stack_image.svg.zip
+        kind:
+          type: string
+          enum: [app-firmware, com-firmware, sii, extra-file]
+          description: >
+            Where an install sends the entry. `app-firmware` (`app_*.bin`) is written in BOOT as
+            `app_firmware.bin`, and `com-firmware` (`com_*.bin`) as `com_firmware.bin`. `sii`
+            (`*.sii`) is written to the EEPROM. These three are always written. `extra-file` is
+            written to flash under its own name, and only when `extraFiles` names it.
+        size:
+          type: integer
+          format: int64
+          description: The decompressed size in bytes.
     FirmwarePackageName:
       type: object
       description: >
@@ -7241,15 +7299,18 @@ components:
             caching and identifies a cached one to re-install without uploading it again. A name
             outside the SOMANET convention still installs, it is just not cached.
           example: package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip
-        skipFiles:
+        extraFiles:
           type: array
           items: { type: string }
-          default: ["SOMANET_CiA_402.xml.zip", "stack_image.svg.zip"]
+          default: []
           description: >
-            `firmware-installation`: entries inside the package that are not written to the device.
-            An explicit list replaces the defaults wholesale rather than adding to them, so `[]`
-            means "write everything the package holds". Any entry can be named, including the SII
-            and the firmware binaries.
+            `firmware-installation`: entries of the package to write to the flash of the device,
+            under their own names. The firmware binaries (`app_*.bin`, `com_*.bin`) and the SII
+            (`*.sii`) are always written and cannot be named here. No other entry is written unless
+            it is named, so a package that gets a new file does not write it unasked. A name that
+            the package does not hold, a name of a firmware binary or of the SII, or a name given
+            twice is refused with 400 before the device leaves its state.
+            `GET /api/firmware-package-entries` lists the entries of a cached package.
         cachePackage:
           type: boolean
           default: true

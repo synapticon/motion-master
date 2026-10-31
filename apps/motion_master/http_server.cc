@@ -53,6 +53,7 @@
 #include "node/procedure_manager.h"
 #include "node/procedure_registry.h"
 #include "node/somanet_control.h"
+#include "node/somanet_procedures.h"
 #include "swagger_spec.h"
 
 namespace {
@@ -891,6 +892,25 @@ void HttpServer::run() {
       return mm::api::badRequest(name.error());
     }
     return mm::api::json(nlohmann::json(*name));
+  });
+
+  // The entries of a cached firmware package, each with the place an install sends it. A client
+  // reads it to offer the extra files of a package before an install. A GET with a query, like
+  // /api/firmware-package-name, because the input is a filename. The package lives in the user
+  // cache, which has its own routes to upload, download and delete it.
+  router.get("/api/firmware-package-entries", [](const mm::api::Request& req) -> mm::api::Response {
+    const auto filename = req.query("filename");
+    if (!filename || filename->empty()) {
+      return mm::api::badRequest("a 'filename' query parameter is required");
+    }
+    auto entries = mm::node::listCachedFirmwarePackageEntries(*filename);
+    if (!entries) {
+      return mm::api::badRequest(entries.error());
+    }
+    if (!*entries) {
+      return mm::api::notFound(std::format("'{}' is not in the firmware cache", *filename));
+    }
+    return mm::api::json(nlohmann::json{{"entries", **entries}});
   });
 
   // Decodes a .hardware_description supplied in the body — the same parse a device read uses, so a

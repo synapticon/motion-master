@@ -134,8 +134,8 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "into the EEPROM, and is then returned to the state you choose. PRE-OP is the default and is "
       "the confirmation that it worked: the bootloader hands over to the newly written firmware on "
       "that transition, so reaching PRE-OP means the new firmware booted and answered. The "
-      "descriptive extras a package carries — the ESI and the stack image — are skipped by default "
-      "and can be un-skipped by editing the list.";
+      "binaries and the SII are always written. Another entry of the package, such as the ESI or "
+      "the stack image, is written only when you name it in the extra files.";
   firmware.caveats = {
       "The device stops exchanging process data for the whole installation, so anything it was "
       "driving is uncontrolled from the moment it leaves OP. Other devices on the bus keep "

@@ -1564,8 +1564,10 @@ struct FirmwareInstallationRequest {
   /// The decoded filename, present only when @c filename parses as a SOMANET package name. Its
   /// absence is what makes a package uncacheable — see @c cachePackage.
   std::optional<FirmwarePackageName> name;
-  std::vector<std::string> skipFiles;  ///< Entries not to write; defaults per the descriptor.
-  bool cachePackage = true;            ///< Keep a copy under @c firmwareCacheDir when named.
+  /// The entries to write besides the firmware binaries and the SII. Empty by default, so a package
+  /// that gets a new file does not write it to a drive unasked.
+  std::vector<std::string> extraFiles;
+  bool cachePackage = true;  ///< Keep a copy under @c firmwareCacheDir when named.
   mm::comm::EtherCatState finalState = mm::comm::EtherCatState::PreOp;
 
   /// How long to wait after entering BOOT before the first file transfer.
@@ -1584,6 +1586,18 @@ struct FirmwareInstallationRequest {
 /// downloadable and deletable through the API and the Console with no endpoint of its own.
 std::filesystem::path firmwareCacheDir();
 
+/// @brief Lists the entries of the package @p filename in @c firmwareCacheDir.
+///
+/// A client calls it to choose the @c extraFiles of an install. It reads the zip directory only.
+/// The filename goes through the same check an install uses, so it cannot reach a path outside the
+/// cache.
+///
+/// @param filename  A bare package filename.
+/// @return The entries, @c std::nullopt when the cache does not hold @p filename, or a message that
+///         says why the name or the zip is refused.
+std::expected<std::optional<std::vector<FirmwarePackageEntry>>, std::string>
+listCachedFirmwarePackageEntries(std::string_view filename);
+
 /// @brief What the procedure accepts, as its descriptor advertises it.
 std::vector<ProcedureParameter> firmwareInstallationParameters();
 
@@ -1593,13 +1607,15 @@ std::vector<ProgressStep> firmwareInstallationSteps();
 /// @brief Parses and validates a client's installation request.
 ///
 /// Accepts `{"packageContent": "<base64 zip>", "packageFilename": "package_….zip",
-/// "skipFiles": [...], "cachePackage": true, "finalState": "preop"}`. Every field is optional
+/// "extraFiles": [...], "cachePackage": true, "finalState": "preop"}`. Every field is optional
 /// except that **one of @c packageContent or @c packageFilename must resolve to a package**:
 /// @c packageContent wins when both are given, and a lone @c packageFilename is looked up in
 /// @c firmwareCacheDir, so re-installing a package already on the server costs no upload.
 ///
 /// Resolving the bytes here rather than in the body is deliberate: "the package you named is not
-/// cached" is a bad request, answerable immediately, not a run that starts and then fails.
+/// cached" is a bad request, answerable immediately, not a run that starts and then fails. For the
+/// same reason @c extraFiles is checked against the entries of the package here, with
+/// @c checkExtraFiles.
 ///
 /// @param body  Parsed request JSON.
 /// @return The validated request, or a message naming what is wrong with it.
@@ -1617,9 +1633,10 @@ std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallatio
 ///   - @c package, @c cache — offline; a package that will not open fails before anything is
 ///     touched on the bus.
 ///   - @c boot — fatal. Nothing can be written without it.
-///   - @c extra-files — **best effort**. These are descriptive files (an ESI, a picture); a failure
-///     is recorded in the step's value and the install continues, because aborting a firmware
-///     update over a picture would be worse than not having the picture.
+///   - @c extra-files — **best effort**. Only the entries the request names in @c extraFiles. These
+///     are descriptive files (an ESI, a picture); a failure is recorded in the step's value and the
+///     install continues, because aborting a firmware update over a picture would be worse than not
+///     having the picture.
 ///   - @c sii, @c app-firmware, @c com-firmware — fatal. These are the firmware. A transport with
 ///     no SII, such as SPoE, records that the SII was not written and continues.
 ///   - @c activate-firmware — fatal. Over EtherCAT it does nothing, because leaving BOOT applies

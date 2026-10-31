@@ -11,9 +11,8 @@ Each kind of drive has its own script:
 | `integro/commission.py` | Integro |
 | `c021/commission.py` | C021, a Jasper-based board |
 
-A script belongs to a board, not to a firmware, because one firmware runs on several boards. The
-C021 script runs the steps up to the assigned name. Its other steps follow when a C021 is at hand
-to test them. Code that the scripts share is in `common.py`.
+A script belongs to a board, not to a firmware, because one firmware runs on several boards. Code
+that the scripts share is in `common.py`.
 
 A script calls the routes and the procedures of the Motion Master server, and shows their
 results. It decides nothing that the server decides. Each step is also available in the Console,
@@ -106,12 +105,15 @@ the drive loads it from there.
 | Firmware | Yes | Yes |
 | Configuration | Yes | Yes |
 | Assigned name | Yes | Yes |
-| AL state OP | Yes | Not yet |
-| Commutation offset | Yes | Not yet |
-| Plant model | Yes | Not yet |
-| Velocity controller tuning | Yes | Not yet |
-| Position controller tuning | Yes | Not yet |
-| Integral limits | Yes | Not yet |
+| AL state OP | Yes | Yes |
+| Commutation offset | Yes | Yes |
+| Plant model | Yes | Yes |
+| Velocity controller tuning | Yes | Yes |
+| Position controller tuning | Yes | Yes |
+| Integral limits | Yes | Yes |
+| Encoder configuration | No | Yes |
+| Encoder calibration | No | Yes |
+| Commutation offset, again | No | When the calibrated encoder is the commutation source |
 
 ### Connect
 
@@ -219,6 +221,9 @@ phase order.
 The Integro script uses method 0, which turns the rotor by up to one pole pair, needs no tuning,
 and holds the load.
 
+Jasper firmware has no 0x2009:03. The C021 script leaves the method out, and the record has no
+line for it.
+
 ### Plant model
 
 **This step turns the motor in both directions** for the whole chirp. The shaft must be free, and
@@ -267,3 +272,47 @@ motor speed, the feed constant, the gear ratio and the controller type. It write
 
 The script shows each limit before and after, and names a limit object the drive does not have.
 Then it stores the parameters to flash. The record gets every limit before and after.
+
+### Encoder configuration
+
+The script runs the `ic-mu-encoder-configuration` procedure for the encoder its drive script
+names. The procedure configures the iC-MU encoder for the ring and the output word that the
+encoder configuration object of the drive states, 0x2110 for encoder 1 and 0x2112 for encoder 2.
+It writes the registers into the EEPROM of the encoder, reads them back, and writes the restore
+file, from which the drive restores a corrupted EEPROM. The step does not turn the motor. The
+server refuses it while the drive is in Operation Enabled.
+
+The encoder keeps its configuration in its own EEPROM, so the step stores no parameters. The
+record gets the sensor port, the path, the bits of the output word, the registers read back and
+the restore file.
+
+Jasper firmware takes only the singleturn path, because a Jasper-based drive has no iC-PVL. On a
+C021, 0x2110:0C and 0x2112:0C hold no ring size, so the server takes the singleturn bits from the
+resolution, and the record says so in a warning.
+
+The C021 has an iC-MU encoder on each of sensor ports 1 and 2. The script configures both, encoder
+2 first, because commutation and velocity control use it. Position control uses encoder 1. The
+calibration step then calibrates both in the same order.
+
+### Encoder calibration
+
+**This step turns the motor several revolutions in both directions.** The shaft must be free,
+and whatever it drives must be safe to move.
+
+The script runs the `ic-mu-calibration` procedure for the encoder its drive script names. The
+procedure needs a tuned velocity controller, so the step comes after the controller tuning. The
+drive turns the motor at constant velocity while it records the raw tracks of the encoder. The
+server computes the corrections, and writes them until the master and the nonius track pass. A
+validation pass then checks that both nonius phase margins are at least 10 %. The procedure stores
+the EEPROM of the encoder and writes the restore file. It restores the operation mode and the CiA
+402 state of the drive on every way out.
+
+The calibration runs only on a server built with the iC-Haus MU_3SL library: Linux x86_64 and
+Windows x64.
+
+The record gets the part, the sensor port, the ring, the velocity, the number of iterations, the
+two phase margins and the restore file. When the absolute position changed after the
+calibration, the record also gets the warning of the server.
+
+When the calibrated encoder is the commutation source, the commutation offset is not valid any
+more. The script then runs the commutation offset step again, which stores the parameters.

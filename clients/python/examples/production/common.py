@@ -670,14 +670,20 @@ def detect_offset(s, method):
 
     The procedure turns the rotor and releases the brake. It needs the drive in OP, so move the
     drive to OP before this step. The drive takes the method from 0x2009:03, which this step sets
-    first. Each measurement shows as a step of the procedure. The offset is read back from 0x2001
-    and the phase order from 0x2003:05.
+    first. A `method` of None leaves 0x2009:03 out, for firmware that has no such object, as Jasper
+    firmware does. Each measurement shows as a step of the procedure. The offset is read back from
+    0x2001 and the phase order from 0x2003:05.
     """
     number = s.heading("commutation offset")
-    before = read_object(s, 0x2009, 3)
-    if before != method:
-        write_object(s, 0x2009, 3, method)
-    say("offset detection method, 0x2009:03: %s (was %s)", method, before)
+    lines = []
+    if method is None:
+        say("offset detection method: the firmware has none")
+    else:
+        before = read_object(s, 0x2009, 3)
+        if before != method:
+            write_object(s, 0x2009, 3, method)
+        say("offset detection method, 0x2009:03: %s (was %s)", method, before)
+        lines.append(f"method, 0x2009:03: {method} (was {before})")
 
     snapshot = run_procedure(s, "offset-detection")
     offset = read_object(s, 0x2001, 0)
@@ -685,7 +691,6 @@ def detect_offset(s, method):
     say("commutation offset, 0x2001: %s", offset, style="ok")
     say("motor phases inverted, 0x2003:05: %s", inverted)
 
-    lines = [f"method, 0x2009:03: {method} (was {before})"]
     for step in snapshot["steps"]:
         if "value" in step and step["value"] is not None:
             lines.append(f"{step['id']}: {json.dumps(step['value'], ensure_ascii=False)}")
@@ -777,3 +782,84 @@ def set_integral_limits(s):
         say(line, style="ok")
     lines.append(store_parameters(s))
     s.add("integral limits", lines)
+
+
+def configure_encoder(s, settings):
+    """Configure an iC-MU encoder with the ic-mu-encoder-configuration procedure.
+
+    `settings` holds the parameters of the procedure: encoderOrdinal, and optionally batteryMode
+    and writeRestoreFile. The procedure configures the encoder for the ring and the output word
+    that the encoder configuration object of the drive states, writes the registers into the
+    EEPROM of the encoder, reads them back, and writes the restore file. It turns no motor, and
+    the server refuses it while the drive is in Operation Enabled. A Jasper-based drive takes only
+    the singleturn path. The encoder holds its configuration in its own EEPROM, so the step stores
+    no parameters.
+    """
+    title = f"encoder {settings['encoderOrdinal']} configuration"
+    s.heading(title)
+    for key, value in settings.items():
+        say("%s: %s", key, value)
+    snapshot = run_procedure(s, "ic-mu-encoder-configuration", settings)
+    plan = step_value(snapshot, "validate") or {}
+    restore = step_value(snapshot, "restore-file") or {}
+    lines = [f"{key}: {value}" for key, value in settings.items()]
+    lines += [
+        f"sensor port: {plan.get('sensorPort')}",
+        f"path: {plan.get('path')}",
+        f"singleturn bits: {plan.get('singleturnBits')}, "
+        f"multiturn bits: {plan.get('multiturnBits')}",
+        f"verify: {json.dumps(step_value(snapshot, 'verify'), ensure_ascii=False)}",
+        f"restore file: {restore.get('file') or restore.get('reason')}",
+    ]
+    for warning in plan.get("warnings", []):
+        say("%s", warning, style="warning")
+        lines.append(f"warning: {warning}")
+    s.add(title, lines)
+
+
+def calibrate_encoder(s, settings):
+    """Calibrate an iC-MU encoder with the ic-mu-calibration procedure. Returns True when the
+    calibrated encoder is the commutation source, so that the commutation offset must be measured
+    again.
+
+    **The motor turns several revolutions in both directions.** The procedure needs a tuned
+    velocity controller, and the server refuses it while the drive is in Operation Enabled.
+    `settings` holds the parameters of the procedure: encoderOrdinal, and optionally ringPosition,
+    activateHealthMonitoring and ringVelocity. The procedure records the raw tracks, writes the
+    corrections until both tracks pass, checks the nonius phase margins in a validation pass,
+    stores the EEPROM of the encoder, and writes the restore file. It restores the operation mode
+    and the CiA 402 state of the drive on every path out.
+    """
+    title = f"encoder {settings['encoderOrdinal']} calibration"
+    s.heading(title)
+    for key, value in settings.items():
+        say("%s: %s", key, value)
+    snapshot = run_procedure(s, "ic-mu-calibration", settings)
+    plan = step_value(snapshot, "validate") or {}
+    validation = step_value(snapshot, "validation") or {}
+    reset = step_value(snapshot, "abs-reset") or {}
+    restore = step_value(snapshot, "restore-file") or {}
+    iterations = sum(1 for step in snapshot["steps"] if step["id"].startswith("iteration-")
+                     and step["status"] == "succeeded")
+    lines = [f"{key}: {value}" for key, value in settings.items()]
+    lines += [
+        f"part: {plan.get('part')}, sensor port: {plan.get('sensorPort')}, "
+        f"ring: {plan.get('ringPosition')}, master pole pairs: {plan.get('masterPolePairs')}",
+        f"velocity: {plan.get('velocityRpm')} rpm",
+        f"iterations: {iterations}",
+        f"nonius phase margin: lower {validation.get('lowerMarginPercent')} %, "
+        f"upper {validation.get('upperMarginPercent')} % ({validation.get('marginBand')})",
+        f"restore file: {restore.get('file') or restore.get('reason')}",
+    ]
+    for line in lines[-3:-1]:
+        say(line, style="ok")
+    for warning in [*plan.get("warnings", []), reset.get("warning")]:
+        if warning:
+            say("%s", warning, style="warning")
+            lines.append(f"warning: {warning}")
+    commutation = bool(validation.get("commutationWarning"))
+    if commutation:
+        say("the calibrated encoder is the commutation source", style="warning")
+        lines.append("the calibrated encoder is the commutation source")
+    s.add(title, lines)
+    return commutation

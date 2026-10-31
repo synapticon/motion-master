@@ -4,6 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import {
   apiErrorMessage,
   type FirmwareCompatibility,
+  type FirmwarePackageEntry,
   type ProcedureRequest,
   type ProcedureSnapshot,
   type ProgressStep,
@@ -27,6 +28,13 @@ const STEP_DOT: Record<ProgressStep['status'], string> = {
   running: 'bg-ocean',
   succeeded: 'bg-green-600',
   failed: 'bg-syn-red',
+}
+
+// How the page names each kind of entry an install always writes.
+const ALWAYS_WRITTEN: Record<Exclude<FirmwarePackageEntry['kind'], 'extra-file'>, string> = {
+  'app-firmware': 'application firmware',
+  'com-firmware': 'communication firmware',
+  sii: 'SII',
 }
 
 // What each step of the installation does, for a reader who has not read the procedure.
@@ -124,14 +132,33 @@ export default function DeviceFirmwarePage() {
     listing => listing.descriptor.name === PROCEDURE,
   )?.descriptor
   const finalStateParameter = descriptor?.parameters.find(p => p.name === 'finalState')
-  const skipFilesParameter = descriptor?.parameters.find(p => p.name === 'skipFiles')
+  const extraFilesParameter = descriptor?.parameters.find(p => p.name === 'extraFiles')
 
   const [finalState, setFinalState] = useState<number | undefined>()
-  const [skipFiles, setSkipFiles] = useState<string | undefined>()
   const [selected, setSelected] = useState<string | undefined>()
+  // The choice belongs to one package, so choosing another package starts with none selected.
+  const [extraFiles, setExtraFiles] = useState<{ filename?: string; names: string[] }>({
+    names: [],
+  })
   const finalStateValue = finalState ?? (finalStateParameter?.defaultValue as number | undefined)
-  const skipFilesValue =
-    skipFiles ?? ((skipFilesParameter?.defaultValue as string[] | undefined) ?? []).join('\n')
+  const extraFilesValue = extraFiles.filename === selected ? extraFiles.names : []
+
+  const entriesQuery = useQuery({
+    queryKey: ['firmware-package-entries', selected],
+    queryFn: () =>
+      api.listFirmwarePackageEntries({ filename: selected as string }).then(r => r.data.entries),
+    enabled: selected !== undefined,
+    staleTime: Infinity,
+    retry: false,
+  })
+  const toggleExtraFile = (name: string, checked: boolean) => {
+    setExtraFiles({
+      filename: selected,
+      names: checked
+        ? [...extraFilesValue, name]
+        : extraFilesValue.filter(other => other !== name),
+    })
+  }
 
   const upload = useMutation({
     // The generated client JSON-encodes request bodies, which turns a File into "{}", so the raw
@@ -159,10 +186,7 @@ export default function DeviceFirmwarePage() {
         ...(finalStateValue !== undefined
           ? { finalState: finalStateValue as ProcedureRequest['finalState'] }
           : {}),
-        skipFiles: skipFilesValue
-          .split('\n')
-          .map(line => line.trim())
-          .filter(line => line !== ''),
+        extraFiles: extraFilesValue,
       }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ['procedure', slavePosition, PROCEDURE] }),
@@ -347,19 +371,42 @@ export default function DeviceFirmwarePage() {
               </div>
             )}
           </div>
-          {skipFilesParameter && (
+          {extraFilesParameter && selected && (
             <details className="px-5 pb-4">
               <summary className="text-xs text-grey-600 cursor-pointer">Advanced</summary>
-              <label className={`${labelCls} mt-3`} htmlFor="firmware-skip-files">
-                Files to skip, one per line
-              </label>
-              <textarea
-                id="firmware-skip-files"
-                className="border border-grey-300 px-3 py-2 text-sm font-mono w-full max-w-xl h-24"
-                value={skipFilesValue}
-                onChange={event => setSkipFiles(event.target.value)}
-              />
-              <p className="text-xs text-grey-600 mt-1">{skipFilesParameter.description}</p>
+              <p className={`${labelCls} mt-3`}>Files to write</p>
+              {entriesQuery.isPending && <p className="text-sm">Reading the package…</p>}
+              {entriesQuery.isError && (
+                <Callout variant="error">{apiErrorMessage(entriesQuery.error)}</Callout>
+              )}
+              {entriesQuery.data && (
+                <ul className="space-y-1 text-sm">
+                  {entriesQuery.data.map(entry => (
+                    <li key={entry.name}>
+                      {entry.kind === 'extra-file' ? (
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={extraFilesValue.includes(entry.name)}
+                            disabled={running}
+                            onChange={event => toggleExtraFile(entry.name, event.target.checked)}
+                          />
+                          <span className="font-mono">{entry.name}</span>
+                        </label>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <input type="checkbox" checked disabled className="invisible" />
+                          <span className="font-mono">{entry.name}</span>
+                          <span className="text-xs text-grey-600">
+                            {ALWAYS_WRITTEN[entry.kind]}, always written
+                          </span>
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-xs text-grey-600 mt-2">{extraFilesParameter.description}</p>
             </details>
           )}
           {selectedVerdict && !selectedVerdict.compatible && (

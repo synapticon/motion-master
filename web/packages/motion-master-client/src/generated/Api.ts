@@ -28,6 +28,7 @@ import {
   EscRegister,
   EsiParseResult,
   FirmwareCompatibility,
+  FirmwarePackageEntry,
   FirmwarePackageName,
   FoeErrorCode,
   FullFirmwareDescriptors,
@@ -1960,6 +1961,35 @@ export class Api<
   ) =>
     this.request<FirmwarePackageName, void>({
       path: `/api/firmware-package-name`,
+      method: "GET",
+      query: query,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Lists the entries of a package in the firmware cache (`firmwares/` in the user cache), each with the place a `firmware-installation` sends it. An install always writes the entries of kind `app-firmware`, `com-firmware` and `sii`. It writes an entry of kind `extra-file` only when its `extraFiles` names it. Only the zip directory is read, and no entry is decompressed.
+   *
+   * @name ListFirmwarePackageEntries
+   * @summary List the entries of a cached firmware package
+   * @request GET:/api/firmware-package-entries
+   */
+  listFirmwarePackageEntries = (
+    query: {
+      /**
+       * The package filename, with no directory part.
+       * @example "package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip"
+       */
+      filename: string;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        entries: FirmwarePackageEntry[];
+      },
+      void
+    >({
+      path: `/api/firmware-package-entries`,
       method: "GET",
       query: query,
       format: "json",

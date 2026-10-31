@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <expected>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -105,10 +106,11 @@ struct FileDeleter {
   void operator()(zip_file_t* file) const { zip_fclose(file); }
 };
 
-/// The first entry of @p zip whose name ends in @p suffix, decompressed, or nothing when no entry
-/// does.
-std::expected<std::optional<std::vector<uint8_t>>, std::string> readEntryEndingIn(
-    std::span<const uint8_t> zip, std::string_view suffix) {
+using Archive = std::unique_ptr<zip_t, ArchiveDeleter>;
+
+/// Opens @p zip in place. The source borrows the buffer (freep = 0), so @p zip must outlive the
+/// archive.
+std::expected<Archive, std::string> openArchive(std::span<const uint8_t> zip) {
   zip_error_t error;
   zip_error_init(&error);
   zip_source_t* source = zip_source_buffer_create(zip.data(), zip.size(), 0, &error);
@@ -117,27 +119,87 @@ std::expected<std::optional<std::vector<uint8_t>>, std::string> readEntryEndingI
     zip_error_fini(&error);
     return std::unexpected(reason);
   }
-  std::unique_ptr<zip_t, ArchiveDeleter> archive(zip_open_from_source(source, ZIP_RDONLY, &error));
+  Archive archive(zip_open_from_source(source, ZIP_RDONLY, &error));
   if (!archive) {
+    // Ownership of the source transfers only on success, so a failed open must free it here.
     zip_source_free(source);
     std::string reason = zip_error_strerror(&error);
     zip_error_fini(&error);
     return std::unexpected(reason);
   }
   zip_error_fini(&error);
+  return archive;
+}
 
-  const zip_int64_t entries = zip_get_num_entries(archive.get(), 0);
+FirmwarePackageEntryKind classify(std::string_view name) {
+  if (name.starts_with("app_") && endsWithIgnoringCase(name, ".bin")) {
+    return FirmwarePackageEntryKind::kAppFirmware;
+  }
+  if (name.starts_with("com_") && endsWithIgnoringCase(name, ".bin")) {
+    return FirmwarePackageEntryKind::kComFirmware;
+  }
+  if (endsWithIgnoringCase(name, ".sii")) {
+    return FirmwarePackageEntryKind::kSii;
+  }
+  return FirmwarePackageEntryKind::kExtraFile;
+}
+
+/// An entry plus its index in the zip, which opens it even when two entries share a name.
+struct IndexedEntry {
+  FirmwarePackageEntry entry{};
+  zip_uint64_t index = 0;
+};
+
+/// The entries of @p archive with content, in zip order.
+std::expected<std::vector<IndexedEntry>, std::string> listEntries(zip_t* archive) {
+  std::vector<IndexedEntry> entries;
+  const zip_int64_t count = zip_get_num_entries(archive, 0);
+  for (zip_int64_t i = 0; i < count; ++i) {
+    zip_stat_t stat;
+    zip_stat_init(&stat);
+    if (zip_stat_index(archive, i, 0, &stat) != 0) {
+      return std::unexpected(std::format("could not read entry {} of the firmware package: {}", i,
+                                         zip_strerror(archive)));
+    }
+    std::string name = stat.name != nullptr ? stat.name : "";
+    if (name.empty() || name.back() == '/') {
+      continue;  // A directory entry carries no content.
+    }
+    const FirmwarePackageEntryKind kind = classify(name);
+    entries.push_back({.entry = {.name = std::move(name), .kind = kind, .size = stat.size},
+                       .index = static_cast<zip_uint64_t>(i)});
+  }
+  return entries;
+}
+
+std::vector<FirmwarePackageEntry> withoutIndex(const std::vector<IndexedEntry>& indexed) {
+  std::vector<FirmwarePackageEntry> entries;
+  entries.reserve(indexed.size());
+  std::ranges::transform(indexed, std::back_inserter(entries), &IndexedEntry::entry);
+  return entries;
+}
+
+/// The first entry of @p zip whose name ends in @p suffix, decompressed, or nothing when no entry
+/// does.
+std::expected<std::optional<std::vector<uint8_t>>, std::string> readEntryEndingIn(
+    std::span<const uint8_t> zip, std::string_view suffix) {
+  auto archive = openArchive(zip);
+  if (!archive) {
+    return std::unexpected(archive.error());
+  }
+
+  const zip_int64_t entries = zip_get_num_entries(archive->get(), 0);
   for (zip_int64_t i = 0; i < entries; ++i) {
     zip_stat_t stat;
     zip_stat_init(&stat);
-    if (zip_stat_index(archive.get(), i, 0, &stat) != 0 || stat.name == nullptr ||
+    if (zip_stat_index(archive->get(), i, 0, &stat) != 0 || stat.name == nullptr ||
         !endsWithIgnoringCase(stat.name, suffix)) {
       continue;
     }
-    std::unique_ptr<zip_file_t, FileDeleter> file(zip_fopen_index(archive.get(), i, 0));
+    std::unique_ptr<zip_file_t, FileDeleter> file(zip_fopen_index(archive->get(), i, 0));
     if (!file) {
       return std::unexpected(
-          std::format("could not open '{}': {}", stat.name, zip_strerror(archive.get())));
+          std::format("could not open '{}': {}", stat.name, zip_strerror(archive->get())));
     }
     std::vector<uint8_t> content(stat.size);
     if (stat.size > 0) {
@@ -205,83 +267,118 @@ std::optional<std::string> FirmwarePackageName::buildDescriptor() const {
   return std::format("{}-{}", *firmwareId, *firmwareVersion);
 }
 
-std::expected<FirmwarePackage, std::string> openFirmwarePackage(
-    std::span<const uint8_t> zip, std::span<const std::string> skipFiles) {
-  zip_error_t error;
-  zip_error_init(&error);
-  // The source borrows the buffer (freep = 0): `zip` must outlive this call, which it does — the
-  // archive is closed before returning.
-  zip_source_t* source = zip_source_buffer_create(zip.data(), zip.size(), 0, &error);
-  if (source == nullptr) {
-    std::string reason = zip_error_strerror(&error);
-    zip_error_fini(&error);
-    return std::unexpected(std::format("could not read the firmware package: {}", reason));
+std::string_view toString(FirmwarePackageEntryKind kind) {
+  switch (kind) {
+    case FirmwarePackageEntryKind::kAppFirmware:
+      return "app-firmware";
+    case FirmwarePackageEntryKind::kComFirmware:
+      return "com-firmware";
+    case FirmwarePackageEntryKind::kSii:
+      return "sii";
+    case FirmwarePackageEntryKind::kExtraFile:
+      return "extra-file";
   }
-  std::unique_ptr<zip_t, ArchiveDeleter> archive(zip_open_from_source(source, ZIP_RDONLY, &error));
+  return "extra-file";
+}
+
+void to_json(nlohmann::json& j, const FirmwarePackageEntry& entry) {
+  j = nlohmann::json{{"name", entry.name}, {"kind", toString(entry.kind)}, {"size", entry.size}};
+}
+
+std::expected<std::vector<FirmwarePackageEntry>, std::string> listFirmwarePackageEntries(
+    std::span<const uint8_t> zip) {
+  auto archive = openArchive(zip);
   if (!archive) {
-    // Ownership of the source only transfers on success, so a failed open must free it here.
-    zip_source_free(source);
-    std::string reason = zip_error_strerror(&error);
-    zip_error_fini(&error);
-    return std::unexpected(std::format("could not read the firmware package: {}", reason));
+    return std::unexpected(std::format("could not read the firmware package: {}", archive.error()));
   }
-  zip_error_fini(&error);
+  auto indexed = listEntries(archive->get());
+  if (!indexed) {
+    return std::unexpected(indexed.error());
+  }
+  return withoutIndex(*indexed);
+}
+
+std::expected<void, std::string> checkExtraFiles(std::span<const FirmwarePackageEntry> entries,
+                                                 std::span<const std::string> extraFiles) {
+  for (auto it = extraFiles.begin(); it != extraFiles.end(); ++it) {
+    const std::string& name = *it;
+    if (std::find(extraFiles.begin(), it, name) != it) {
+      return std::unexpected(std::format("'extraFiles' names '{}' twice", name));
+    }
+    const auto entry = std::ranges::find(entries, name, &FirmwarePackageEntry::name);
+    if (entry == entries.end()) {
+      return std::unexpected(
+          std::format("'extraFiles' names '{}', which the firmware package does not hold", name));
+    }
+    if (entry->kind != FirmwarePackageEntryKind::kExtraFile) {
+      return std::unexpected(
+          std::format("'extraFiles' names '{}', which is {} and is always written", name,
+                      entry->kind == FirmwarePackageEntryKind::kSii ? "the SII" : "firmware"));
+    }
+  }
+  return {};
+}
+
+std::expected<FirmwarePackage, std::string> openFirmwarePackage(
+    std::span<const uint8_t> zip, std::span<const std::string> extraFiles) {
+  auto archive = openArchive(zip);
+  if (!archive) {
+    return std::unexpected(std::format("could not read the firmware package: {}", archive.error()));
+  }
+  auto indexed = listEntries(archive->get());
+  if (!indexed) {
+    return std::unexpected(indexed.error());
+  }
+  const std::vector<FirmwarePackageEntry> entries = withoutIndex(*indexed);
+  if (auto checked = checkExtraFiles(entries, extraFiles); !checked) {
+    return std::unexpected(checked.error());
+  }
+  if (std::ranges::none_of(entries, [](const FirmwarePackageEntry& entry) {
+        return entry.kind == FirmwarePackageEntryKind::kAppFirmware;
+      })) {
+    return std::unexpected(
+        "the firmware package holds no app_*.bin application firmware, so it is not a SOMANET "
+        "firmware package");
+  }
 
   FirmwarePackage package;
-  bool sawAppBinary = false;
-
-  const zip_int64_t entries = zip_get_num_entries(archive.get(), 0);
-  for (zip_int64_t i = 0; i < entries; ++i) {
-    zip_stat_t stat;
-    zip_stat_init(&stat);
-    if (zip_stat_index(archive.get(), i, 0, &stat) != 0) {
-      return std::unexpected(std::format("could not read entry {} of the firmware package: {}", i,
-                                         zip_strerror(archive.get())));
-    }
-    const std::string name = stat.name != nullptr ? stat.name : "";
-    if (name.empty() || name.back() == '/') {
-      continue;  // A directory entry carries no content.
+  for (const auto& [entry, index] : *indexed) {
+    if (entry.kind == FirmwarePackageEntryKind::kExtraFile &&
+        std::ranges::find(extraFiles, entry.name) == extraFiles.end()) {
+      package.skipped.push_back(entry.name);
+      continue;  // Before the read, so an entry that is left out is never decompressed.
     }
 
-    const bool isAppBinary = name.starts_with("app_") && endsWithIgnoringCase(name, ".bin");
-    sawAppBinary = sawAppBinary || isAppBinary;
-
-    if (std::ranges::find(skipFiles, name) != skipFiles.end()) {
-      package.skipped.push_back(name);
-      continue;  // Deliberately before the read: a skipped entry is never decompressed.
-    }
-
-    std::unique_ptr<zip_file_t, FileDeleter> file(zip_fopen_index(archive.get(), i, 0));
+    std::unique_ptr<zip_file_t, FileDeleter> file(zip_fopen_index(archive->get(), index, 0));
     if (!file) {
-      return std::unexpected(std::format("could not open '{}' in the firmware package: {}", name,
-                                         zip_strerror(archive.get())));
+      return std::unexpected(std::format("could not open '{}' in the firmware package: {}",
+                                         entry.name, zip_strerror(archive->get())));
     }
-    std::vector<uint8_t> content(stat.size);
-    if (stat.size > 0) {
-      const zip_int64_t read = zip_fread(file.get(), content.data(), stat.size);
-      if (read < 0 || static_cast<zip_uint64_t>(read) != stat.size) {
+    std::vector<uint8_t> content(entry.size);
+    if (entry.size > 0) {
+      const zip_int64_t read = zip_fread(file.get(), content.data(), entry.size);
+      if (read < 0 || static_cast<zip_uint64_t>(read) != entry.size) {
         return std::unexpected(std::format(
-            "'{}' in the firmware package is truncated: {} of {} bytes could be decompressed", name,
-            read < 0 ? 0 : read, stat.size));
+            "'{}' in the firmware package is truncated: {} of {} bytes could be decompressed",
+            entry.name, read < 0 ? 0 : read, entry.size));
       }
     }
 
-    FirmwarePackageFile entry{name, std::move(content)};
-    if (isAppBinary) {
-      package.appBinary = std::move(entry);
-    } else if (name.starts_with("com_") && endsWithIgnoringCase(name, ".bin")) {
-      package.comBinary = std::move(entry);
-    } else if (endsWithIgnoringCase(name, ".sii")) {
-      package.sii = std::move(entry);
-    } else {
-      package.extras.push_back(std::move(entry));
+    FirmwarePackageFile extracted{entry.name, std::move(content)};
+    switch (entry.kind) {
+      case FirmwarePackageEntryKind::kAppFirmware:
+        package.appBinary = std::move(extracted);
+        break;
+      case FirmwarePackageEntryKind::kComFirmware:
+        package.comBinary = std::move(extracted);
+        break;
+      case FirmwarePackageEntryKind::kSii:
+        package.sii = std::move(extracted);
+        break;
+      case FirmwarePackageEntryKind::kExtraFile:
+        package.extras.push_back(std::move(extracted));
+        break;
     }
-  }
-
-  if (!sawAppBinary) {
-    return std::unexpected(
-        "the firmware package holds no app_*.bin application firmware — it is not a SOMANET "
-        "firmware package");
   }
   return package;
 }

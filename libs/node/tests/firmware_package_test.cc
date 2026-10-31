@@ -2,10 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace mm::node {
@@ -25,15 +29,6 @@ std::vector<uint8_t> readPackage(std::string_view filename) {
   std::ifstream in(path, std::ios::binary);
   EXPECT_TRUE(in) << "missing test fixture: " << path;
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
-
-std::vector<std::string> defaultSkipFiles() {
-  std::vector<std::string> files;
-  files.reserve(std::size(kDefaultSkippedFirmwareFiles));
-  for (std::string_view name : kDefaultSkippedFirmwareFiles) {
-    files.emplace_back(name);
-  }
-  return files;
 }
 
 // ── Filename grammar ───────────────────────────────────────────────────────────────────────────
@@ -115,7 +110,7 @@ TEST(FirmwarePackageTest, RefusesToReadAnEsiFromBytesThatAreNotAZip) {
 
 TEST(FirmwarePackageTest, ClassifiesACirculoPackage) {
   const std::vector<uint8_t> zip = readPackage(kCirculoPackage);
-  auto package = openFirmwarePackage(zip, defaultSkipFiles());
+  auto package = openFirmwarePackage(zip, {});
   ASSERT_TRUE(package) << package.error();
 
   ASSERT_TRUE(package->appBinary.has_value());
@@ -135,7 +130,7 @@ TEST(FirmwarePackageTest, ClassifiesACirculoPackage) {
 
 TEST(FirmwarePackageTest, ClassifiesAnActilinkPackage) {
   const std::vector<uint8_t> zip = readPackage(kActilinkPackage);
-  auto package = openFirmwarePackage(zip, defaultSkipFiles());
+  auto package = openFirmwarePackage(zip, {});
   ASSERT_TRUE(package) << package.error();
 
   ASSERT_TRUE(package->appBinary.has_value());
@@ -150,7 +145,7 @@ TEST(FirmwarePackageTest, ClassifiesAnActilinkPackage) {
 // the app binary is deflated in both fixtures, so this is a genuine round trip through zlib.
 TEST(FirmwarePackageTest, ExtractsDecompressedContent) {
   const std::vector<uint8_t> zip = readPackage(kCirculoPackage);
-  auto package = openFirmwarePackage(zip, defaultSkipFiles());
+  auto package = openFirmwarePackage(zip, {});
   ASSERT_TRUE(package) << package.error();
   // The SII in the package is byte-identical to the one the SII parser's own fixture pins, so its
   // first bytes are a known-good anchor rather than a self-fulfilling expectation.
@@ -163,28 +158,77 @@ TEST(FirmwarePackageTest, ExtractsDecompressedContent) {
   EXPECT_EQ(sii[17], 0x22u);
 }
 
-TEST(FirmwarePackageTest, AnEmptySkipListKeepsEverything) {
+TEST(FirmwarePackageTest, WritesAnExtraFileOnlyWhenItIsNamed) {
   const std::vector<uint8_t> zip = readPackage(kCirculoPackage);
-  auto package = openFirmwarePackage(zip, {});
+  const std::vector<std::string> extraFiles = {"stack_image.svg.zip"};
+  auto package = openFirmwarePackage(zip, extraFiles);
   ASSERT_TRUE(package) << package.error();
-  EXPECT_TRUE(package->skipped.empty());
-  ASSERT_EQ(package->extras.size(), 2u);
-  EXPECT_EQ(package->extras[0].name, "SOMANET_CiA_402.xml.zip");
-  EXPECT_EQ(package->extras[1].name, "stack_image.svg.zip");
+  ASSERT_EQ(package->extras.size(), 1u);
+  EXPECT_EQ(package->extras[0].name, "stack_image.svg.zip");
   EXPECT_FALSE(package->extras[0].content.empty());
+  EXPECT_EQ(package->skipped, (std::vector<std::string>{"SOMANET_CiA_402.xml.zip"}));
+  EXPECT_TRUE(package->appBinary.has_value());
+  EXPECT_TRUE(package->sii.has_value());
 }
 
-// One mechanism for skipping, so naming the SII or a binary in the list works exactly as naming an
-// extra does. Skipping the application firmware is a deliberate "install only the rest".
-TEST(FirmwarePackageTest, TheSkipListReachesEveryKindOfEntry) {
+TEST(FirmwarePackageTest, RefusesAnExtraFileThePackageDoesNotHold) {
   const std::vector<uint8_t> zip = readPackage(kCirculoPackage);
-  const std::vector<std::string> skip = {"somanet_cia402.sii",
-                                         "app_8500-04_motion-drive_v5.6.10_2332.bin"};
-  auto package = openFirmwarePackage(zip, skip);
-  ASSERT_TRUE(package) << package.error();
-  EXPECT_FALSE(package->sii.has_value());
-  EXPECT_FALSE(package->appBinary.has_value());
-  EXPECT_EQ(package->skipped.size(), 2u);
+  const std::vector<std::string> extraFiles = {"CHANGELOG.md"};
+  auto package = openFirmwarePackage(zip, extraFiles);
+  ASSERT_FALSE(package);
+  EXPECT_NE(package.error().find("CHANGELOG.md"), std::string::npos) << package.error();
+}
+
+// The binaries and the SII are always written, so no request can name them, and so none can leave
+// one out.
+TEST(FirmwarePackageTest, RefusesTheFirmwareAndTheSiiAsExtraFiles) {
+  const std::vector<uint8_t> circulo = readPackage(kCirculoPackage);
+  const std::vector<uint8_t> actilink = readPackage(kActilinkPackage);
+  for (const auto& [zip, name] : {
+           std::pair{&circulo, "app_8500-04_motion-drive_v5.6.10_2332.bin"},
+           std::pair{&circulo, "somanet_cia402.sii"},
+           std::pair{&actilink, "com_motion-drive-v5.6.10-9010-02-1_2423-netx.bin"},
+       }) {
+    const std::vector<std::string> extraFiles = {name};
+    auto package = openFirmwarePackage(*zip, extraFiles);
+    ASSERT_FALSE(package) << name;
+    EXPECT_NE(package.error().find("always written"), std::string::npos) << package.error();
+  }
+}
+
+TEST(FirmwarePackageTest, RefusesAnExtraFileNamedTwice) {
+  const std::vector<uint8_t> zip = readPackage(kCirculoPackage);
+  const std::vector<std::string> extraFiles = {"stack_image.svg.zip", "stack_image.svg.zip"};
+  auto package = openFirmwarePackage(zip, extraFiles);
+  ASSERT_FALSE(package);
+  EXPECT_NE(package.error().find("twice"), std::string::npos) << package.error();
+}
+
+TEST(FirmwarePackageTest, ListsTheEntriesWithTheirKinds) {
+  const auto entries = listFirmwarePackageEntries(readPackage(kActilinkPackage));
+  ASSERT_TRUE(entries) << entries.error();
+  auto kindOf = [&](std::string_view name) -> std::optional<FirmwarePackageEntryKind> {
+    const auto it = std::ranges::find(*entries, name, &FirmwarePackageEntry::name);
+    if (it == entries->end()) {
+      return std::nullopt;
+    }
+    return it->kind;
+  };
+  EXPECT_EQ(kindOf("app_9010-02-1_motion-drive_v5.6.10_2332.bin"),
+            FirmwarePackageEntryKind::kAppFirmware);
+  EXPECT_EQ(kindOf("com_motion-drive-v5.6.10-9010-02-1_2423-netx.bin"),
+            FirmwarePackageEntryKind::kComFirmware);
+  EXPECT_EQ(kindOf("SOMANET_CiA_402.xml.zip"), FirmwarePackageEntryKind::kExtraFile);
+  EXPECT_EQ(kindOf("stack_image.svg.zip"), FirmwarePackageEntryKind::kExtraFile);
+
+  const auto sii = listFirmwarePackageEntries(readPackage(kCirculoPackage));
+  ASSERT_TRUE(sii) << sii.error();
+  const auto it = std::ranges::find(*sii, "somanet_cia402.sii", &FirmwarePackageEntry::name);
+  ASSERT_NE(it, sii->end());
+  EXPECT_EQ(it->kind, FirmwarePackageEntryKind::kSii);
+  EXPECT_EQ(it->size, 252u);
+  EXPECT_EQ(nlohmann::json(*it),
+            (nlohmann::json{{"name", "somanet_cia402.sii"}, {"kind", "sii"}, {"size", 252}}));
 }
 
 TEST(FirmwarePackageTest, RejectsBytesThatAreNotAZip) {
@@ -196,7 +240,8 @@ TEST(FirmwarePackageTest, RejectsAZipWithNoApplicationFirmware) {
   // The ESI is a zip in its own right, and one that holds no app_*.bin — a convenient stand-in for
   // "a valid archive that is not a firmware package", taken from the package itself.
   const std::vector<uint8_t> zip = readPackage(kCirculoPackage);
-  auto outer = openFirmwarePackage(zip, {});
+  const std::vector<std::string> esi = {std::string(kEsiFileName)};
+  auto outer = openFirmwarePackage(zip, esi);
   ASSERT_TRUE(outer) << outer.error();
   auto inner = openFirmwarePackage(outer->extras[0].content, {});
   ASSERT_FALSE(inner);

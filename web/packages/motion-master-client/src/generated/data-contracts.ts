@@ -792,6 +792,22 @@ export interface ProcedureParameter {
   options?: ParameterOption[];
 }
 
+/** One entry of a firmware package. */
+export interface FirmwarePackageEntry {
+  /**
+   * The entry name in the zip.
+   * @example "stack_image.svg.zip"
+   */
+  name: string;
+  /** Where an install sends the entry. `app-firmware` (`app_*.bin`) is written in BOOT as `app_firmware.bin`, and `com-firmware` (`com_*.bin`) as `com_firmware.bin`. `sii` (`*.sii`) is written to the EEPROM. These three are always written. `extra-file` is written to flash under its own name, and only when `extraFiles` names it. */
+  kind: "app-firmware" | "com-firmware" | "sii" | "extra-file";
+  /**
+   * The decompressed size in bytes.
+   * @format int64
+   */
+  size: number;
+}
+
 /** A SOMANET firmware package filename broken into its fields. The four decoded-descriptor properties are absent — not null — when the full firmware descriptor is not the numeric kind, which the naming specification explicitly allows. */
 export interface FirmwarePackageName {
   /**
@@ -1679,10 +1695,10 @@ export interface ProcedureRequest {
    */
   packageFilename?: string;
   /**
-   * `firmware-installation`: entries inside the package that are not written to the device. An explicit list replaces the defaults wholesale rather than adding to them, so `[]` means "write everything the package holds". Any entry can be named, including the SII and the firmware binaries.
-   * @default ["SOMANET_CiA_402.xml.zip","stack_image.svg.zip"]
+   * `firmware-installation`: entries of the package to write to the flash of the device, under their own names. The firmware binaries (`app_*.bin`, `com_*.bin`) and the SII (`*.sii`) are always written and cannot be named here. No other entry is written unless it is named, so a package that gets a new file does not write it unasked. A name that the package does not hold, a name of a firmware binary or of the SII, or a name given twice is refused with 400 before the device leaves its state. `GET /api/firmware-package-entries` lists the entries of a cached package.
+   * @default []
    */
-  skipFiles?: string[];
+  extraFiles?: string[];
   /**
    * `firmware-installation`: keep a copy of the package on the server so it can be re-installed without uploading it again. Only possible when a filename is given and it follows the SOMANET package naming convention.
    * @default true

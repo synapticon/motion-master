@@ -21,6 +21,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- **A firmware installation writes an extra file only when you name it. This breaks the API.** `firmware-installation` always writes the application firmware (`app_*.bin`), the communication firmware (`com_*.bin`) and the SII (`*.sii`) of a package. It writes another entry, such as the ESI or the stack image, only when the new request field `extraFiles` names it. Before, every entry not named in `skipFiles` was written, so a package that got a new file wrote it to the drive unasked: an install of a Jasper package wrote `SOMANET_CiA_402.xml` and `CHANGELOG.md` to the flash. `skipFiles` is gone. A name in `extraFiles` that the package does not hold, or that names a firmware binary or the SII, gets 400 before the device leaves its state. The new `GET /api/firmware-package-entries` lists the entries of a cached package and the kind of each one. On the Console's Firmware page, "Advanced" shows these entries, with a checkbox for each extra file, none selected. (#191)
 - **A write of a string longer than its object logs a warning.** A parameter write and a `config-file-load` row both send the value to the drive as it is, because a test of a drive needs that. Before, `config-file-load` refused such a row. The warning names the object, the length of the value and what the object holds, so a support log shows why a drive keeps a cut value. (#180)
 
 ### Fixed

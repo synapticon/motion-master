@@ -2288,7 +2288,6 @@ TEST(RunOpenPhaseDetectionProcedure, FailsTheDeviceCheckBeforeAnyStepRuns) {
 
 using mm::node::firmwareInstallationParameters;
 using mm::node::firmwareInstallationSteps;
-using mm::node::kDefaultSkippedFirmwareFiles;
 using mm::node::parseFirmwareInstallationRequest;
 
 constexpr std::string_view kCirculoPackageName =
@@ -2326,19 +2325,28 @@ TEST(FirmwareInstallationRequest, DefaultsMatchTheDescriptor) {
   ASSERT_TRUE(request) << request.error();
   EXPECT_TRUE(request->cachePackage);
   EXPECT_EQ(request->finalState, EtherCatState::PreOp);
-  ASSERT_EQ(request->skipFiles.size(), kDefaultSkippedFirmwareFiles.size());
-  EXPECT_EQ(request->skipFiles[0], "SOMANET_CiA_402.xml.zip");
-  EXPECT_EQ(request->skipFiles[1], "stack_image.svg.zip");
+  EXPECT_TRUE(request->extraFiles.empty());
 }
 
-// An explicit list replaces the defaults wholesale rather than adding to them — including an empty
-// list, which is the only way to say "write everything the package holds".
-TEST(FirmwareInstallationRequest, AnExplicitSkipListReplacesTheDefaults) {
+TEST(FirmwareInstallationRequest, ReadsTheExtraFiles) {
   nlohmann::json body = requestWithPackage();
-  body["skipFiles"] = nlohmann::json::array();
+  body["extraFiles"] = {"stack_image.svg.zip", "SOMANET_CiA_402.xml.zip"};
   auto request = parseFirmwareInstallationRequest(body);
   ASSERT_TRUE(request) << request.error();
-  EXPECT_TRUE(request->skipFiles.empty());
+  EXPECT_EQ(request->extraFiles,
+            (std::vector<std::string>{"stack_image.svg.zip", "SOMANET_CiA_402.xml.zip"}));
+}
+
+// Refused in the parser, so the route answers 400 and the device never leaves its state.
+TEST(FirmwareInstallationRequest, RefusesAnExtraFileThatIsNotAnExtraFileOfThePackage) {
+  for (const std::string_view name :
+       {"CHANGELOG.md", "somanet_cia402.sii", "app_8500-04_motion-drive_v5.6.10_2332.bin"}) {
+    nlohmann::json body = requestWithPackage();
+    body["extraFiles"] = {name};
+    auto request = parseFirmwareInstallationRequest(body);
+    ASSERT_FALSE(request) << name;
+    EXPECT_NE(request.error().find(name), std::string::npos) << request.error();
+  }
 }
 
 // The AL state numbers POST /api/devices/state uses, not a vocabulary of this procedure's own.
@@ -2389,7 +2397,11 @@ TEST(FirmwareInstallationRequest, RejectsContentThatIsNotBase64) {
 
 TEST(FirmwareInstallationRequest, RejectsWrongFieldTypes) {
   nlohmann::json body = requestWithPackage();
-  body["skipFiles"] = "SOMANET_CiA_402.xml.zip";
+  body["extraFiles"] = "SOMANET_CiA_402.xml.zip";
+  EXPECT_FALSE(parseFirmwareInstallationRequest(body));
+
+  body = requestWithPackage();
+  body["extraFiles"] = {1};
   EXPECT_FALSE(parseFirmwareInstallationRequest(body));
 
   body = requestWithPackage();
@@ -2410,7 +2422,7 @@ TEST(FirmwareInstallationDescriptor, StepsAndParametersLineUp) {
   }
   EXPECT_NE(std::ranges::find(names, "packageContent"), names.end());
   EXPECT_NE(std::ranges::find(names, "packageFilename"), names.end());
-  EXPECT_NE(std::ranges::find(names, "skipFiles"), names.end());
+  EXPECT_NE(std::ranges::find(names, "extraFiles"), names.end());
   EXPECT_NE(std::ranges::find(names, "cachePackage"), names.end());
   EXPECT_NE(std::ranges::find(names, "finalState"), names.end());
 }
@@ -2431,10 +2443,11 @@ using mm::node::runFirmwareInstallationProcedure;
 class FirmwareFakeDriver : public FieldbusDriver {
  public:
   std::map<std::string, std::vector<uint8_t>>
-      written;                       ///< FoE writes, by the name sent on the wire.
-  std::vector<std::string> removed;  ///< Targets of the fs-remove= pseudo-file.
-  std::vector<uint8_t> siiWritten;   ///< Last EEPROM image written.
-  std::vector<uint16_t> commanded;   ///< Every AL state commanded, in order.
+      written;                          ///< FoE writes, by the name sent on the wire.
+  std::vector<std::string> writeOrder;  ///< The name of each FoE write that succeeded, in order.
+  std::vector<std::string> removed;     ///< Targets of the fs-remove= pseudo-file.
+  std::vector<uint8_t> siiWritten;      ///< Last EEPROM image written.
+  std::vector<uint16_t> commanded;      ///< Every AL state commanded, in order.
   std::vector<std::chrono::steady_clock::duration> timeouts;  ///< The timeout of each command.
 
   /// Programmed failures, keyed by the name as sent over FoE.
@@ -2474,6 +2487,7 @@ class FirmwareFakeDriver : public FieldbusDriver {
           mm::comm::makeFoeError(mm::comm::FoeErrorKind::PacketMismatch, "FOEwrite", 1, name));
     }
     written[name] = std::vector<uint8_t>(data.begin(), data.end());
+    writeOrder.push_back(name);
     return {};
   }
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
@@ -2600,9 +2614,6 @@ FirmwareInstallationRequest installRequest() {
   request.package = circuloPackageBytes();
   request.filename = std::string(kCirculoPackageName);
   request.name = parseFirmwarePackageName(kCirculoPackageName).value();
-  for (std::string_view name : kDefaultSkippedFirmwareFiles) {
-    request.skipFiles.emplace_back(name);
-  }
   request.cachePackage = false;  // Redirected explicitly by the one test that wants it.
   request.bootWarmUp = std::chrono::milliseconds::zero();
   return request;
@@ -2736,7 +2747,7 @@ TEST(FirmwareInstallationBody, CarriesOnWhenAnExtraFileCannotBeWritten) {
   std::stop_source source;
 
   auto request = installRequest();
-  request.skipFiles.clear();  // Write everything, so the extras path runs at all.
+  request.extraFiles = {"SOMANET_CiA_402.xml.zip", "stack_image.svg.zip"};
   auto result = runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), request);
   ASSERT_TRUE(result) << result.error();
 
@@ -2749,6 +2760,26 @@ TEST(FirmwareInstallationBody, CarriesOnWhenAnExtraFileCannotBeWritten) {
   // Each extra is removed before being rewritten, so a rewrite cannot mix with what was there.
   EXPECT_EQ(bus.driver->removed.size(), 2u);
   EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
+}
+
+// With no extraFiles an install writes the firmware and the SII and nothing else.
+TEST(FirmwareInstallationBody, WritesNoExtraFileThatIsNotRequested) {
+  FirmwareBus bus;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto result =
+      runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
+  ASSERT_TRUE(result) << result.error();
+
+  const auto extras = stepNamed(reporter.steps(), "extra-files");
+  EXPECT_EQ(extras.status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(extras.value, "no extra file was requested");
+  EXPECT_TRUE(bus.driver->removed.empty());
+  EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
+  EXPECT_FALSE(bus.driver->written.contains("SOMANET_CiA_402.xml.zip"));
+  EXPECT_FALSE(bus.driver->written.contains("stack_image.svg.zip"));
+  EXPECT_EQ(stepNamed(reporter.steps(), "sii").status, ProgressStatus::kSucceeded);
 }
 
 TEST(FirmwareInstallationBody, CachesThePackageUnderItsName) {
@@ -2865,9 +2896,6 @@ FirmwareInstallationRequest actilinkRequest() {
   FirmwareInstallationRequest request;
   request.package = {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
   request.filename = std::string(kActilinkPackageName);
-  for (std::string_view name : kDefaultSkippedFirmwareFiles) {
-    request.skipFiles.emplace_back(name);
-  }
   request.cachePackage = false;
   request.bootWarmUp = std::chrono::milliseconds::zero();
   return request;
@@ -2881,8 +2909,8 @@ TEST(FirmwareInstallationBody, WritesBothBinariesOfAPackageThatHasThem) {
   auto result =
       runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), actilinkRequest());
   ASSERT_TRUE(result) << result.error();
-  EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
-  EXPECT_TRUE(bus.driver->written.contains("com_firmware.bin"));
+  EXPECT_EQ(bus.driver->writeOrder,
+            (std::vector<std::string>{"app_firmware.bin", "com_firmware.bin"}));
 }
 
 // ── Over SPoE ────────────────────────────────────────────────────────────────────────────────────

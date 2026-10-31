@@ -103,6 +103,16 @@ TEST(FirmwarePackageTest, ReadsTheEsiOfAPackage) {
   }
 }
 
+// A Jasper package holds the ESI as XML, not zipped. The fixture has the entries of such a package,
+// with small content in place of the real files.
+TEST(FirmwarePackageTest, ReadsAnEsiThatIsNotZipped) {
+  const auto esi = readPackageEsi(readPackage("package-with-an-esi-not-zipped.zip"));
+  ASSERT_TRUE(esi.has_value()) << esi.error();
+  ASSERT_TRUE(esi->has_value());
+  EXPECT_NE((*esi)->find("<EtherCATInfo"), std::string::npos);
+  EXPECT_NE((*esi)->find("#x22D2"), std::string::npos);
+}
+
 TEST(FirmwarePackageTest, RefusesToReadAnEsiFromBytesThatAreNotAZip) {
   const std::vector<uint8_t> notAZip{'n', 'o', 't', ' ', 'a', ' ', 'z', 'i', 'p'};
   EXPECT_FALSE(readPackageEsi(notAZip).has_value());

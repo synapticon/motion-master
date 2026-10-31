@@ -33,6 +33,9 @@ namespace mm::node {
 /// @brief The name of the ESI in a SOMANET firmware package and on the drive.
 inline constexpr std::string_view kEsiFileName = "SOMANET_CiA_402.xml.zip";
 
+/// @brief The name of the ESI in a package that holds it as XML, not zipped. A Jasper package does.
+inline constexpr std::string_view kEsiXmlFileName = "SOMANET_CiA_402.xml";
+
 /// @brief A SOMANET firmware package filename, broken into the five fields the naming convention
 ///        defines (Hardware description specification §3.4.2).
 ///
@@ -170,8 +173,9 @@ std::expected<FirmwarePackage, std::string> openFirmwarePackage(
 
 /// @brief The ESI of a SOMANET firmware package, as XML text.
 ///
-/// The package holds the ESI zipped a second time, as @c kEsiFileName. Only that entry and the XML
-/// inside it are decompressed.
+/// A package holds the ESI zipped a second time, as @c kEsiFileName, or as XML, as
+/// @c kEsiXmlFileName. Which one is a fact of the package, so both are read for every package, the
+/// zipped one first. Only the ESI entry and the XML inside it are decompressed.
 ///
 /// @param zip  Package bytes.
 /// @return The XML, @c std::nullopt when the package holds no ESI, or an error when either zip does

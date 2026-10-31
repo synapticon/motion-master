@@ -390,7 +390,14 @@ std::expected<std::optional<std::string>, std::string> readPackageEsi(
     return std::unexpected(std::format("could not read the firmware package: {}", inner.error()));
   }
   if (!*inner) {
-    return std::nullopt;
+    auto plain = readEntryEndingIn(zip, kEsiXmlFileName);
+    if (!plain) {
+      return std::unexpected(std::format("could not read the firmware package: {}", plain.error()));
+    }
+    if (!*plain) {
+      return std::nullopt;
+    }
+    return std::string((*plain)->begin(), (*plain)->end());
   }
   auto xml = readEntryEndingIn(**inner, ".xml");
   if (!xml) {

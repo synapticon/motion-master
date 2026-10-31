@@ -23,6 +23,7 @@
 #include "comm/foe_error.h"
 #include "core/util.h"
 #include "node/firmware_package.h"
+#include "node/ic_mu_encoder.h"
 #include "node/kuebler_registers.h"
 #include "node/plant_identification.h"
 #include "node/synapticon.h"
@@ -899,6 +900,7 @@ void to_json(nlohmann::json& j, const EncoderConfiguration& encoder) {
       {"inverted", encoder.inverted},
       {"multiturnBits", encoder.multiturnBits},
       {"singleturnBits", encoder.singleturnBits},
+      {"singleturnBitsFromResolution", encoder.singleturnBitsFromResolution},
   };
 }
 
@@ -956,6 +958,15 @@ std::expected<Encoders, std::string> SomanetDrive::encoders() const {
         return std::unexpected(singleturn.error());
       }
       encoder.singleturnBits = *singleturn;
+    }
+    const bool icMuType = encoder.type == somanet::EncoderType::kBiss ||
+                          encoder.type == somanet::EncoderType::kInternal;
+    const int resolutionBits =
+        std::has_single_bit(encoder.resolution) ? std::countr_zero(encoder.resolution) : 0;
+    if (icMuType && !somanet::isIcMuSingleturnBits(encoder.singleturnBits) &&
+        somanet::isIcMuSingleturnBits(static_cast<uint8_t>(resolutionBits))) {
+      encoder.singleturnBits = static_cast<uint8_t>(resolutionBits);
+      encoder.singleturnBitsFromResolution = true;
     }
     result.encoders.push_back(encoder);
   }
@@ -1603,20 +1614,27 @@ std::expected<MotorPhaseOrderResult, std::string> SomanetDrive::runMotorPhaseOrd
 }
 
 std::string CommutationOffsetResult::describe() const {
+  if (!method) {
+    return std::format("commutation angle offset {} (method unknown)", angleOffset);
+  }
   return std::format("commutation angle offset {} ({} method)", angleOffset,
-                     somanet::toString(method));
+                     somanet::toString(*method));
 }
 
 void to_json(nlohmann::json& j, const CommutationOffsetResult& result) {
   j = nlohmann::json{{"angleOffset", result.angleOffset},
-                     {"method", somanet::toString(result.method)},
+                     {"method", result.method ? somanet::toString(*result.method) : "unknown"},
                      {"description", result.describe()}};
 }
 
-std::expected<somanet::CommutationOffsetMethod, std::string> SomanetDrive::commutationOffsetMethod()
-    const {
-  // INTEGER8, not UNSIGNED8: the drive declares the method signed, and reading it as unsigned is
-  // refused outright ("parameter 0x2009:03 holds a different type") rather than quietly misread.
+std::expected<std::optional<somanet::CommutationOffsetMethod>, std::string>
+SomanetDrive::commutationOffsetMethod() const {
+  if (device_.hasParameters() &&
+      !device_.parameter(somanet::kCommutationOffsetDetection, somanet::kCommutationOffsetMethod)) {
+    return std::nullopt;
+  }
+  // INTEGER8, as the drive declares it, so a negative value reaches the range check below and is
+  // not refused as a type mismatch.
   auto raw = device_.readValue<int8_t>(somanet::kCommutationOffsetDetection,
                                        somanet::kCommutationOffsetMethod);
   if (!raw) {
@@ -1626,11 +1644,11 @@ std::expected<somanet::CommutationOffsetMethod, std::string> SomanetDrive::commu
     return std::unexpected(
         std::format("commutation offset method {} is outside the defined range 0-2", *raw));
   }
-  return static_cast<somanet::CommutationOffsetMethod>(*raw);
+  return std::optional(static_cast<somanet::CommutationOffsetMethod>(*raw));
 }
 
 std::expected<CommutationOffsetResult, std::string> SomanetDrive::runCommutationOffsetMeasurement(
-    somanet::CommutationOffsetMethod method, const OsCommandConfig& config) {
+    std::optional<somanet::CommutationOffsetMethod> method, const OsCommandConfig& config) {
   static constexpr std::string_view kWhat = "commutation offset measurement";
   auto payload = runMotorMeasurement(*this, somanet::OsCommandId::kCommutationOffsetMeasurement,
                                      kWhat, CommandSpecificFault::kNone, config);

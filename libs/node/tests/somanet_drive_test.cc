@@ -940,6 +940,36 @@ TEST(SomanetDrive, EncodersReportsBothRecordsAndTheControllerSources) {
   EXPECT_TRUE(j.at("commutation").is_null());
 }
 
+TEST(SomanetDrive, EncodersTakeTheRingFromTheResolutionWhenSingleturnBitsHoldNone) {
+  // Jasper firmware on a C021 holds 0 or 1 in :0C for its iC-MU encoders. The resolution, 2^19,
+  // gives the ring. An incremental encoder with the same resolution keeps its :0C.
+  OsCommandFakeDriver driver;
+  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  programEncoderObjects(driver);
+  using Driver = OsCommandFakeDriver;
+  driver.store[Driver::key(somanet::kEncoder1Configuration, somanet::kEncoderResolution)] = {
+      0x00, 0x00, 0x08, 0x00};
+  driver.store[Driver::key(somanet::kEncoder1Configuration, somanet::kEncoderSingleturnBits)] = {0};
+  driver.store[Driver::key(somanet::kEncoder2Configuration, somanet::kEncoderType)] = {
+      static_cast<uint8_t>(somanet::EncoderType::kIncremental)};
+  driver.store[Driver::key(somanet::kEncoder2Configuration, somanet::kEncoderResolution)] = {
+      0x00, 0x00, 0x08, 0x00};
+  driver.store[Driver::key(somanet::kEncoder2Configuration, somanet::kEncoderSingleturnBits)] = {1};
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto encoders = drive->encoders();
+  ASSERT_TRUE(encoders.has_value()) << encoders.error();
+  EXPECT_EQ(encoders->encoders[0].singleturnBits, 19);
+  EXPECT_TRUE(encoders->encoders[0].singleturnBitsFromResolution);
+  EXPECT_EQ(encoders->encoders[1].singleturnBits, 1);
+  EXPECT_FALSE(encoders->encoders[1].singleturnBitsFromResolution);
+}
+
 TEST(SomanetDrive, EncodersFailsWhenARecordIsMissing) {
   // A drive without the encoder records, such as one with an older dictionary, fails the whole
   // read rather than answering with zeros a client would take for a resolution.

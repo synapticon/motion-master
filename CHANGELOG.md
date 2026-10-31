@@ -19,6 +19,16 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A drive whose firmware declares an object with another integer type is read.** A typed read of an integer object takes any integer type, and gives the value when it fits in the type the server expects. A value that does not fit is still refused, so an INTEGER8 of -1 is never read as 255. A float, a string or a byte array must still have the expected type. Jasper firmware on a C021 declares 56 objects with another type than the SOMANET dictionary, for example 0x2110:03 as INTEGER32 and 0x2003:05 as UNSIGNED16, and the tuning and integral-limit procedures failed with "holds a different type" (synapticon/jasper#712).
+- **Offset detection runs on a drive without 0x2009:03.** `offset-detection` and `commutation-offset-measurement` refused to start when the drive has no offset measurement method object, as Jasper firmware on a C021 has none. The firmware then chooses the method. The procedures release the brake as for the rotating method, and report the method as `unknown`.
+- **The iC-MU procedures take the ring from the resolution when :0C holds no ring size.** Jasper firmware on a C021 holds 0 or 1 in 0x2110:0C and 0x2112:0C. For a BiSS or internal encoder whose :0C is not 18, 19 or 20, and whose resolution is 2^18, 2^19 or 2^20, the encoder takes the exponent of the resolution as its singleturn bits. `ic-mu-encoder-configuration` and `ic-mu-calibration` report this as a warning in their validate step. The encoder object of a response carries `singleturnBitsFromResolution`.
+
+### Added
+
+- **The C021 production script runs every step.** After the assigned name it moves the drive to OP, detects the commutation offset, identifies the plant model, tunes the velocity and the position controller, and sets the integral limits. Then it configures and calibrates both iC-MU encoders, encoder 2 first, because commutation uses it, and detects the commutation offset again. `common.py` has the two new steps, and `detect_offset` takes no method for a drive without 0x2009:03.
+
 ## [6.0.0-alpha.121] - 2026-10-31
 
 ### Changed

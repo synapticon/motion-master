@@ -214,6 +214,15 @@ constexpr bool requiresBrakeReleased(CommutationOffsetMethod method) {
   return method != CommutationOffsetMethod::kStationary;
 }
 
+/// @brief Whether the method needs the brake released, for a drive that may not state its method.
+///
+/// Firmware without 0x2009:03, such as Jasper firmware on a C021, does not state its method. The
+/// brake is released for it, because the default method on a SOMANET drive is @c kRotating, which
+/// the firmware refuses with the brake engaged.
+constexpr bool requiresBrakeReleased(std::optional<CommutationOffsetMethod> method) {
+  return !method || requiresBrakeReleased(*method);
+}
+
 /// @brief Which of a drive's two encoders a command addresses. The enum value @b is the ordinal the
 ///        firmware expects.
 ///
@@ -1381,6 +1390,13 @@ struct EncoderConfiguration {
   bool inverted = false;                                   ///< :05.
   uint8_t multiturnBits = 0;                               ///< :0A, 0 where it is missing.
   uint8_t singleturnBits = 0;                              ///< :0C, 0 where it is missing.
+
+  /// @brief True when @c singleturnBits comes from the resolution, not from :0C.
+  ///
+  /// Jasper firmware on a C021 holds 0 or 1 in :0C for an iC-MU encoder, which is no ring size.
+  /// A BiSS or internal encoder whose :0C is not 18, 19 or 20, and whose resolution is 2^18, 2^19
+  /// or 2^20, takes the exponent of the resolution instead.
+  bool singleturnBitsFromResolution = false;
 };
 
 /// @brief Both encoder records and which of them each controller uses. One read answers every
@@ -1579,8 +1595,10 @@ void to_json(nlohmann::json& j, const MotorPhaseOrderResult& result);
 struct CommutationOffsetResult {
   int16_t angleOffset = 0;  ///< The measured offset, signed as the drive's own 0x2001 is.
 
-  /// @brief The method the measurement ran under, which decides whether the rotor turned.
-  somanet::CommutationOffsetMethod method{somanet::CommutationOffsetMethod::kRotating};
+  /// @brief The method the measurement ran under, which decides whether the rotor turned. Empty
+  ///        when the firmware has no 0x2009:03.
+  std::optional<somanet::CommutationOffsetMethod> method{
+      somanet::CommutationOffsetMethod::kRotating};
 
   /// @brief One line describing the measurement, ready to put in front of a user.
   std::string describe() const;
@@ -2210,7 +2228,11 @@ class SomanetDrive : public Cia402Drive {
   /// @c somanet::requiresBrakeReleased. A value outside the defined 0-2 range is reported as an
   /// error rather than cast, since acting on a misread method would mean handling the brake the
   /// wrong way.
-  std::expected<somanet::CommutationOffsetMethod, std::string> commutationOffsetMethod() const;
+  ///
+  /// Empty when the enumerated object dictionary has no 0x2009:03, as with Jasper firmware on a
+  /// C021. There the firmware chooses the method itself.
+  std::expected<std::optional<somanet::CommutationOffsetMethod>, std::string>
+  commutationOffsetMethod() const;
 
   /// @brief Runs commutation offset measurement (OS command 5) and decodes the offset it reports.
   ///
@@ -2235,7 +2257,7 @@ class SomanetDrive : public Cia402Drive {
   /// @param config  Timing and cancellation. The default timeout is sized for this command.
   /// @return The measured offset, or why none was produced.
   std::expected<CommutationOffsetResult, std::string> runCommutationOffsetMeasurement(
-      somanet::CommutationOffsetMethod method,
+      std::optional<somanet::CommutationOffsetMethod> method,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
                                        .pollInterval = std::chrono::milliseconds(100)});
 

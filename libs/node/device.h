@@ -598,22 +598,23 @@ class Device {
   /// @brief Typed convenience wrapper for @c readParameter.
   ///
   /// Refreshes the value from the device when online (otherwise serves the cache) and
-  /// returns it as @p T — e.g. @c device.readValue<int32_t>(0x6064, 0). The request is
-  /// type-exact; use @c parameter(index, subindex)->numeric() when you only need a number.
+  /// returns it as @p T — e.g. @c device.readValue<int32_t>(0x6064, 0). An integer @p T takes
+  /// any integer object whose value fits in it, as @c valueAs says; every other type is exact. Use
+  /// @c parameter(index, subindex)->numeric() when you only need a number.
   ///
-  /// @tparam T        The expected variant alternative.
+  /// @tparam T        The expected variant alternative, or an integer type.
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
   /// @return The value as @p T, or an error string if the parameter is unknown, the read
-  ///         fails, or the stored value is not a @p T.
+  ///         fails, or the stored value cannot be returned as a @p T.
   template <typename T>
   std::expected<T, std::string> readValue(uint16_t index, uint8_t subindex) {
     auto v = readParameter(index, subindex);
     if (!v) {
       return std::unexpected(v.error());
     }
-    if (const auto* p = std::get_if<T>(&*v)) {
-      return *p;
+    if (auto value = valueAs<T>(*v)) {
+      return *value;
     }
     return std::unexpected(
         std::format("parameter 0x{:04X}:{:02X} holds a different type", index, subindex));

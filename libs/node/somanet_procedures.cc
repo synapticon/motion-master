@@ -1432,6 +1432,19 @@ std::expected<void, std::string> waitForEncoder(std::chrono::milliseconds durati
   return {};
 }
 
+// Says that the ring of an encoder comes from its resolution, because its :0C holds no ring size.
+std::optional<std::string> ringFromResolutionWarning(const EncoderConfiguration& encoder) {
+  if (!encoder.singleturnBitsFromResolution) {
+    return std::nullopt;
+  }
+  return std::format(
+      "0x{:04X}:0C holds no ring size, so the {} singleturn bits come from the resolution {}",
+      static_cast<uint16_t>(encoder.encoderOrdinal == somanet::EncoderOrdinal::kEncoder1
+                                ? somanet::kEncoder1Configuration
+                                : somanet::kEncoder2Configuration),
+      encoder.singleturnBits, encoder.resolution);
+}
+
 // What the validate step decides before anything is written.
 struct IcMuPlan {
   EncoderConfiguration encoder;
@@ -1493,6 +1506,9 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
   }
 
   IcMuPlan plan{.encoder = *found, .configuration = {}, .warnings = {}};
+  if (auto warning = ringFromResolutionWarning(*found)) {
+    plan.warnings.push_back(std::move(*warning));
+  }
   auto& configuration = plan.configuration;
   configuration.path = somanet::icMuPath(found->sensorPort, found->multiturnBits);
   configuration.singleturnBits = found->singleturnBits;
@@ -2511,6 +2527,9 @@ std::expected<IcMuCalibrationPlan, std::string> planIcMuCalibration(
                     somanet::toString(request.encoderOrdinal)));
   }
   plan.encoder = *found;
+  if (auto warning = ringFromResolutionWarning(*found)) {
+    plan.warnings.push_back(std::move(*warning));
+  }
   if (auto error = somanet::icMuSingleturnBitsError(found->singleturnBits)) {
     return std::unexpected(std::move(*error));
   }

@@ -5928,7 +5928,8 @@ components:
     EncoderConfiguration:
       type: object
       description: One encoder configuration record, 0x2110 for encoder 1 or 0x2112 for encoder 2.
-      required: [encoderOrdinal, sensorPort, type, resolution, inverted, multiturnBits, singleturnBits]
+      required: [encoderOrdinal, sensorPort, type, resolution, inverted, multiturnBits, singleturnBits,
+        singleturnBitsFromResolution]
       properties:
         encoderOrdinal:
           type: integer
@@ -5960,8 +5961,17 @@ components:
           example: 0
         singleturnBits:
           type: integer
-          description: Bits of the position within one turn in the encoder's frame (:0C).
+          description: >-
+            Bits of the position within one turn in the encoder's frame (:0C). For a BiSS or internal
+            encoder whose :0C is not 18, 19 or 20, and whose resolution is 2^18, 2^19 or 2^20, the
+            exponent of the resolution.
           example: 18
+        singleturnBitsFromResolution:
+          type: boolean
+          description: >-
+            Whether `singleturnBits` comes from the resolution and not from :0C. Jasper firmware on a
+            C021 holds 0 or 1 in :0C.
+          example: false
     Encoders:
       type: object
       description: >

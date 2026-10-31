@@ -194,7 +194,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
                   {static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kClutch)});
     programObject(somanet::kBrakeOptions, somanet::kBrakeStatus, ObjectDataType::UNSIGNED8,
                   {static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
-    // INTEGER8, matching the drive: reading it as unsigned is refused outright.
+    // INTEGER8, matching the drive.
     programObject(somanet::kCommutationOffsetDetection, somanet::kCommutationOffsetMethod,
                   ObjectDataType::INTEGER8,
                   {static_cast<uint8_t>(somanet::CommutationOffsetMethod::kRotating)});
@@ -1588,6 +1588,60 @@ TEST(RunCommutationOffsetMeasurementProcedure, AnUnreadableMethodLeavesTheDriveU
   }
   EXPECT_TRUE(driver.brakeStatusWrites.empty());
   EXPECT_EQ(driver.commandWrites, 0);
+}
+
+TEST(RunCommutationOffsetMeasurementProcedure, AMissingMethodReleasesTheBrakeAndSaysUnknown) {
+  // Jasper firmware on a C021 has no 0x2009:03 and chooses the method itself. The default method
+  // rotates and needs the brake released, so the brake is released, and the result does not name a
+  // method.
+  OsCommandFakeDriver driver;
+  driver.programDrive();
+  std::erase_if(driver.ods, [](const OdEntry& e) {
+    return e.index == somanet::kCommutationOffsetDetection &&
+           e.subindex == somanet::kCommutationOffsetMethod;
+  });
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+
+  driver.responses = {{1, 0, 0x07, 0xF3, 0, 0, 0, 0}};
+  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "release-brake")->status, ProgressStatus::kSucceeded);
+  EXPECT_FALSE(driver.brakeStatusWrites.empty());
+  const auto measured = stepById(steps, "commutation-offset-measurement");
+  ASSERT_TRUE(measured.has_value());
+  EXPECT_EQ(measured->value.at("angleOffset").get<int16_t>(), 2035);
+  EXPECT_EQ(measured->value.at("method").get<std::string>(), "unknown");
+}
+
+TEST(RunCommutationOffsetMeasurementProcedure, ReadsSixteenBitBrakeObjects) {
+  // Jasper firmware on a C021 declares the release strategy and the brake status UNSIGNED16. A
+  // read as UNSIGNED8 is refused, which would fail the brake step before the measurement.
+  OsCommandFakeDriver driver;
+  driver.programDrive();
+  for (auto& e : driver.ods) {
+    if (e.index == somanet::kBrakeOptions &&
+        (e.subindex == somanet::kBrakeReleaseStrategy || e.subindex == somanet::kBrakeStatus)) {
+      e.dataType = static_cast<uint16_t>(ObjectDataType::UNSIGNED16);
+      e.bitLength = 16;
+      driver.store[OsCommandFakeDriver::key(e.index, e.subindex)].push_back(0);
+    }
+  }
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+
+  driver.responses = {{1, 0, 0x07, 0xF3, 0, 0, 0, 0}};
+  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  EXPECT_EQ(stepById(reporter.steps(), "release-brake")->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(driver.brakeStatusWrites,
+            (std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged),
+                                  static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)}));
 }
 
 // --- Phase resistance measurement procedure ------------------------------------------------------
@@ -3370,7 +3424,13 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
       programObject(index, 1, ObjectDataType::UNSIGNED8,
                     {static_cast<uint8_t>(mine ? sensorPort : 0)});
       programObject(index, 2, ObjectDataType::UNSIGNED8, {static_cast<uint8_t>(mine ? 4 : 0)});
-      programObject(index, 3, ObjectDataType::UNSIGNED32, {0, 0, 8, 0});
+      // The resolution of a BiSS encoder is 2^singleturnBits, as on a real drive.
+      const uint32_t resolution =
+          mine && singleturnBits > 0 && singleturnBits < 32 ? 1U << singleturnBits : 1U << 19;
+      programObject(
+          index, 3, ObjectDataType::UNSIGNED32,
+          {static_cast<uint8_t>(resolution), static_cast<uint8_t>(resolution >> 8),
+           static_cast<uint8_t>(resolution >> 16), static_cast<uint8_t>(resolution >> 24)});
       programObject(index, 5, ObjectDataType::UNSIGNED8, {0});
       programObject(index, 10, ObjectDataType::UNSIGNED8, {mine ? multiturnBits : uint8_t{0}});
       programObject(index, 12, ObjectDataType::UNSIGNED8, {mine ? singleturnBits : uint8_t{0}});

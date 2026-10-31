@@ -1012,8 +1012,9 @@ TEST(DeviceTypedHelpers, WriteValueAndReadValueRoundTrip) {
   ASSERT_TRUE(v.has_value());
   EXPECT_EQ(*v, 42u);
 
-  // A type-mismatched read is rejected.
-  EXPECT_FALSE(device.readValue<int32_t>(0x6065, 0x00).has_value());
+  // Another integer type takes a value that fits. A float is never converted.
+  EXPECT_EQ(device.readValue<int32_t>(0x6065, 0x00).value_or(0), 42);
+  EXPECT_FALSE(device.readValue<float>(0x6065, 0x00).has_value());
 }
 
 // --- readFlatPdoMapping ---------------------------------------------------------

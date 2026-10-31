@@ -26,6 +26,7 @@ using mm::node::packLeBits;
 using mm::node::scalarByteWidth;
 using mm::node::SyncState;
 using mm::node::unpackLeBits;
+using mm::node::valueAs;
 
 // ETG.1020 data type codes used across the tests.
 constexpr uint16_t kU8 = 0x0005;
@@ -107,13 +108,28 @@ TEST(NumericValue, ConvertsArithmeticAlternatives) {
   EXPECT_FALSE(numericValue(DeviceParameterValue{std::vector<uint8_t>{1, 2}}).has_value());
 }
 
-TEST(DeviceParameterGetValue, TypeExactSucceedsAndMismatchFails) {
+TEST(DeviceParameterGetValue, AnIntegerThatFitsConvertsAndOtherTypesAreExact) {
   DeviceParameter p = param(kU32, DeviceParameterValue{uint32_t{42}});
   auto exact = p.getValue<uint32_t>();
   ASSERT_TRUE(exact.has_value());
   EXPECT_EQ(*exact, 42u);
-  // Type-exact: a uint32 parameter does not satisfy getValue<int32_t>().
-  EXPECT_FALSE(p.getValue<int32_t>().has_value());
+  // Another firmware may declare the same object with another integer type.
+  auto narrower = p.getValue<uint8_t>();
+  ASSERT_TRUE(narrower.has_value());
+  EXPECT_EQ(*narrower, 42);
+  EXPECT_EQ(p.getValue<int32_t>().value_or(0), 42);
+  // An integer is never read as a float.
+  EXPECT_FALSE(p.getValue<float>().has_value());
+}
+
+TEST(ValueAs, RefusesAnIntegerThatDoesNotFit) {
+  EXPECT_FALSE(valueAs<uint8_t>(DeviceParameterValue{int8_t{-1}}).has_value());
+  EXPECT_FALSE(valueAs<uint8_t>(DeviceParameterValue{uint16_t{256}}).has_value());
+  EXPECT_FALSE(valueAs<int32_t>(DeviceParameterValue{uint32_t{0x80000000}}).has_value());
+  EXPECT_EQ(valueAs<uint32_t>(DeviceParameterValue{int32_t{524288}}), 524288u);
+  EXPECT_EQ(valueAs<int8_t>(DeviceParameterValue{uint16_t{2}}), 2);
+  EXPECT_FALSE(valueAs<uint8_t>(DeviceParameterValue{1.0F}).has_value());
+  EXPECT_FALSE(valueAs<uint8_t>(DeviceParameterValue{std::string{"1"}}).has_value());
 }
 
 TEST(DeviceParameterNumeric, WorksRegardlessOfWidthAndRejectsStrings) {

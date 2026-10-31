@@ -53,6 +53,8 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "is engaged unless the brake is set to manual release — so anything it was holding is free "
       "to "
       "move, and the load must be supported first. The stationary method leaves the brake alone.",
+      "A drive without 0x2009:03, such as a C021 with Jasper firmware, chooses the method "
+      "itself. The brake is released for it, and the result reports the method as unknown.",
       "On the rotating methods, releasing a pin brake turns the motor by design, to lift the load "
       "off the pin.",
       "Method 1 does not work at all until the gains in 0x2009:04-06 are tuned: with all three "
@@ -800,6 +802,8 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "measurements do not need it — and stays released until the end. Anything it was holding is "
       "free to move for that whole stretch: on a vertical or loaded axis, support the load first.",
       "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The brake is released also on a drive without 0x2009:03, such as a C021 with Jasper "
+      "firmware, which chooses the offset method itself.",
       "The measured resistance, inductance and pole pair count are reported but not stored — the "
       "drive does not write them, and this does not either. Objects 0x2003:03, :04 and :01 are "
       "where they belong. The phase order and the commutation offset the firmware does write "

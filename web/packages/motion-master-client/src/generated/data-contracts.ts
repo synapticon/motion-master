@@ -618,10 +618,15 @@ export interface EncoderConfiguration {
    */
   multiturnBits: number;
   /**
-   * Bits of the position within one turn in the encoder's frame (:0C).
+   * Bits of the position within one turn in the encoder's frame (:0C). For a BiSS or internal encoder whose :0C is not 18, 19 or 20, and whose resolution is 2^18, 2^19 or 2^20, the exponent of the resolution.
    * @example 18
    */
   singleturnBits: number;
+  /**
+   * Whether `singleturnBits` comes from the resolution and not from :0C. Jasper firmware on a C021 holds 0 or 1 in :0C.
+   * @example false
+   */
+  singleturnBitsFromResolution: boolean;
 }
 
 /** Both encoder records of a SOMANET drive and which of them each controller uses. The three controller fields hold an ordinal of the `encoders` list, or `null` when the controller names no encoder. */

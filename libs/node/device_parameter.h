@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -76,6 +77,35 @@ struct ObjectAddress {
 /// The variant alternative a value of this type is reported as, holding its type-appropriate zero.
 /// Unknown data types fall back to @c std::vector<uint8_t>{}.
 DeviceParameterValue defaultValueForDataType(uint16_t dataType);
+
+/// @brief Returns @p value as @p T, or @c nullopt.
+///
+/// The alternative @p T is returned as it is. For an integer @p T, any integer alternative is
+/// returned too when its value fits in @p T. Firmware families declare the same object with
+/// different integer types: Jasper firmware on a C021 declares 0x2110:03 INTEGER32, where SOMANET
+/// firmware declares UNSIGNED32. A value that does not fit is refused, so an INTEGER8 of -1 is
+/// never read as an UNSIGNED8 of 255. A float, a string or a byte array is never converted.
+template <typename T>
+std::optional<T> valueAs(const DeviceParameterValue& value) {
+  if (const auto* p = std::get_if<T>(&value)) {
+    return *p;
+  }
+  if constexpr (std::is_integral_v<T>) {
+    return std::visit(
+        [](const auto& v) -> std::optional<T> {
+          using V = std::decay_t<decltype(v)>;
+          if constexpr (std::is_integral_v<V>) {
+            if (std::in_range<T>(v)) {
+              return static_cast<T>(v);
+            }
+          }
+          return std::nullopt;
+        },
+        value);
+  } else {
+    return std::nullopt;
+  }
+}
 
 /// @brief Whether a value of @p dataType is stored in @c DeviceParameter::bits.
 ///
@@ -311,16 +341,15 @@ struct DeviceParameter {
 
   /// @brief Returns the value as the requested type @p T.
   ///
-  /// Type-exact: @p T must be the alternative @c dataType maps to (e.g. @c uint32_t for an
-  /// UNSIGNED32 parameter — booleans are stored as @c uint8_t, see @c defaultValueForDataType).
-  /// Use @c numeric() when you only need a number and do not care about the exact width.
+  /// @p T is the alternative @c dataType maps to (e.g. @c uint32_t for an UNSIGNED32 parameter —
+  /// booleans are stored as @c uint8_t, see @c defaultValueForDataType), or any integer type the
+  /// value fits in, as @c valueAs says. Use @c numeric() when you only need a number.
   ///
-  /// @return The value, or an error string if @p T is not the parameter's alternative.
+  /// @return The value, or an error string if it cannot be returned as @p T.
   template <typename T>
   std::expected<T, std::string> getValue() const {
-    const DeviceParameterValue v = currentValue();
-    if (const auto* p = std::get_if<T>(&v)) {
-      return *p;
+    if (auto v = valueAs<T>(currentValue())) {
+      return *v;
     }
     return std::unexpected(
         std::format("parameter 0x{:04X}:{:02X} holds a different type", index, subindex));

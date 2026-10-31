@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.121] - 2026-10-31
+
 ### Changed
 
 - **A firmware installation writes an extra file only when you name it. This breaks the API.** `firmware-installation` always writes the application firmware (`app_*.bin`), the communication firmware (`com_*.bin`) and the SII (`*.sii`) of a package. It writes another entry, such as the ESI or the stack image, only when the new request field `extraFiles` names it. Before, every entry not named in `skipFiles` was written, so a package that got a new file wrote it to the drive unasked: an install of a Jasper package wrote `SOMANET_CiA_402.xml` and `CHANGELOG.md` to the flash. `skipFiles` is gone. A name in `extraFiles` that the package does not hold, or that names a firmware binary or the SII, gets 400 before the device leaves its state. The new `GET /api/firmware-package-entries` lists the entries of a cached package and the kind of each one. On the Console's Firmware page, "Advanced" shows these entries, with a checkbox for each extra file, none selected. (#191)
@@ -1065,7 +1067,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.120...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.121...HEAD
+[6.0.0-alpha.121]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.120...v6.0.0-alpha.121
 [6.0.0-alpha.120]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.119...v6.0.0-alpha.120
 [6.0.0-alpha.119]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.118...v6.0.0-alpha.119
 [6.0.0-alpha.118]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.117...v6.0.0-alpha.118

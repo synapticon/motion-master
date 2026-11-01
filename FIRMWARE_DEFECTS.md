@@ -7,6 +7,8 @@ Motion Master works around most of the defects. A workaround in Motion Master do
 ## Terms
 
 - **AL state**: the EtherCAT state of a device: INIT, PRE-OP, SAFE-OP, OP or BOOT.
+- **Frame**: one Ethernet packet with EtherType 0x88A4. The master sends it, it passes through every device on the bus, and it comes back to the master. A frame carries one or more datagrams.
+- **Datagram**: one command inside a frame, such as LRD (logical read), LWR (logical write), LRW (logical read and write) or FPWR (write to a register of one device). It has a header with the command, an 8-bit index, the address and the length, then the data, then the WKC.
 - **Mailbox**: the acyclic channel to a device. SM0 (SyncManager 0) holds a request from the master, and SM1 holds the answer from the device.
 - **Mailbox counter**: a 3-bit number in each mailbox header. ETG.1000.4 Table 29 lets the device use it to find a repeated request.
 - **SDO**: a CoE read or write of one object dictionary entry over the mailbox.

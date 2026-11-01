@@ -2,7 +2,7 @@
 
 **Status, 2026-11-01.** This page is for the firmware team. It lists every firmware defect that the Motion Master team filed, every firmware behaviour that Motion Master works around without an issue, and every fix in Motion Master that deals with a drive that misbehaves on the bus. Motion Master 6 is this repository. Motion Master 5 is `synapticon/motion_master`. Each item says, for each of the two, whether it is solved.
 
-No defect in the list is fixed in the firmware yet. Motion Master works around most of them. A workaround in Motion Master does not help a customer who uses another master, such as TwinCAT, CODESYS or the IgH EtherCAT Master. It also does not help a customer who runs an older Motion Master.
+Motion Master works around most of the defects. A workaround in Motion Master does not help a customer who uses another master, such as TwinCAT, CODESYS or the IgH EtherCAT Master. It also does not help a customer who runs an older Motion Master.
 
 ## Terms
 
@@ -33,7 +33,7 @@ In the change lists, a tag at the start of each line names where the cause is:
 
 ## 1. Defects filed
 
-Every issue below is open. The issue holds the evidence, the reproduction and the source references. A number with no repository is in `synapticon/somanet_software`.
+Each issue holds the evidence, the reproduction and the source references. A number with no repository is in `synapticon/somanet_software`.
 
 | Issue | Device | Defect | Motion Master 6 | Motion Master 5 | What stays broken |
 | --- | --- | --- | --- | --- | --- |

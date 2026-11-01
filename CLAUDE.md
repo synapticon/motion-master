@@ -122,7 +122,7 @@ vcpkg binaries with `actions/cache@v5`, keyed on OS plus the `vcpkg.json` hash.
 **Do not use the `x-gha` vcpkg binary caching backend.** It was removed in the pinned
 vcpkg version.
 
-Four more workflows:
+More workflows:
 
 - **`cert-renewal.yml`** — monthly. Issues a Let's Encrypt cert via acme.sh with the
   `dns_acmedns` plugin and publishes it to the rolling `tls-cert` release. Needs only the
@@ -133,6 +133,9 @@ Four more workflows:
   overwrites them.
 - **`lint.yml`** — clang-format, cpplint, cppcheck, the API client drift check, and the
   Python client example.
+- **`client-package.yml`** — packs `@synapticon/motion-master-client`, installs the tarball in
+  an empty project, and loads it with `import` and `require()`. The workspace links the client's
+  TypeScript source, so this is the only check of what npm users get.
 - **`deploy-pages.yml`** — publishes `motion-master.synapticon.com`. Docs and landing
   track `main`; the web apps are pinned to the latest `v*` tag and cached per tag.
 

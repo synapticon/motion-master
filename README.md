@@ -169,7 +169,7 @@ The API is plain HTTPS + JSON, so any language works. Two reference clients ship
   python examples/scan.py
   ```
 
-- **[`@synapticon/motion-master-client`](web/packages/motion-master-client)** — the published, isomorphic TypeScript SDK (browser and Node): the generated HTTP client plus the WebSocket connection, and a parser for `.mmpd` recorder dumps. It ships on npm at the same version as the server binary, so `client@X` is known-good against `binary@X`. This is what the console and the integration tests use.
+- **[`@synapticon/motion-master-client`](web/packages/motion-master-client)** — the published, isomorphic TypeScript SDK (browser and Node): the generated HTTP client plus the WebSocket connection, and a parser for `.mmpd` recorder dumps. It ships on npm at the same version as the server binary, so `client@X` is known-good against `binary@X`. This is what the console and the integration tests use. Its [README](web/packages/motion-master-client/README.md) shows how to use it.
 
   ```bash
   npm install @synapticon/motion-master-client

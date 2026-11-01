@@ -1,0 +1,69 @@
+name: Client package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  client-package:
+    name: TypeScript client installs from its tarball
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the client
+        run: pnpm run build:client
+
+      # The workspace consumes the TypeScript source, so only a packed tarball shows what an npm
+      # user gets. pnpm pack applies publishConfig, the same as pnpm publish.
+      - name: Pack the client
+        working-directory: web/packages/motion-master-client
+        run: pnpm pack --pack-destination "$RUNNER_TEMP"
+
+      - name: Install the tarball in an empty project and load it
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir consumer && cd consumer
+          echo '{ "name": "consumer", "private": true }' > package.json
+          npm install --no-audit --no-fund ../synapticon-motion-master-client-*.tgz
+          test -f node_modules/@synapticon/motion-master-client/README.md
+          # No server listens on port 9, so the request must fail inside fetch. A TypeError from the
+          # client itself means the client never reached fetch.
+          node --input-type=module -e "
+            import { MotionMasterClient, parseMmpd } from '@synapticon/motion-master-client'
+            const client = new MotionMasterClient({ baseUrl: 'http://127.0.0.1:9' })
+            if (typeof client.api.getVersion !== 'function' || typeof parseMmpd !== 'function') {
+              throw new Error('the ES module import is incomplete')
+            }
+            try {
+              await client.api.getVersion()
+              throw new Error('a request to a closed port succeeded')
+            } catch (err) {
+              if (!(err instanceof TypeError) || err.message !== 'fetch failed') {
+                throw err
+              }
+            }
+          "
+          node -e "
+            const { MotionMasterClient } = require('@synapticon/motion-master-client')
+            if (typeof MotionMasterClient !== 'function') {
+              throw new Error('require() of the package is incomplete')
+            }
+          "

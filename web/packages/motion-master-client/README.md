@@ -110,6 +110,8 @@ Each batch holds one row per cycle since the last batch. A row is the time in mi
 
 The server keeps a monitoring until you delete it. A second monitoring with the same topic fails with 409.
 
+The section "Monitoring WebSocket" in the description of the OpenAPI specification gives the full message format, including the type of each value and the fields of each notification.
+
 ## Notifications
 
 The server sends events, such as a short working counter on the bus, as notifications. One listener receives every kind of event:

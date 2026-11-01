@@ -175,6 +175,8 @@ The API is plain HTTPS + JSON, so any language works. Two reference clients ship
   npm install @synapticon/motion-master-client
   ```
 
+For another language, generate an HTTP client from the spec that the server serves at `GET /api/swagger.yml`, for example with [OpenAPI Generator](https://openapi-generator.tech). A generated client covers the HTTP API only. The section "Monitoring WebSocket" in the description of the spec tells how to receive monitoring data and notifications. The Console shows the same text under API Docs.
+
 ## Development
 
 [Development](docs/DEVELOPMENT.md) covers building from a source checkout, running the server against a development Console, the `web/` workspace, adding your own HTTP routes in C++, the developer scripts, and the hardware-in-the-loop tests.

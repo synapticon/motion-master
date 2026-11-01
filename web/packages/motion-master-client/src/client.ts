@@ -40,7 +40,13 @@ export class MotionMasterClient {
   constructor(options: MotionMasterClientOptions = {}) {
     this.httpBaseUrl = options.baseUrl ?? API_BASE_URL
     this.customFetch = options.customFetch
-    this.api = new Api({ baseUrl: this.httpBaseUrl, customFetch: options.customFetch })
+    // The generated HttpClient copies its config onto itself with Object.assign, so a
+    // `customFetch: undefined` replaces its default fetch and every request fails with
+    // "this.customFetch is not a function". Pass the key only when there is a value.
+    this.api = new Api({
+      baseUrl: this.httpBaseUrl,
+      ...(options.customFetch ? { customFetch: options.customFetch } : {}),
+    })
     this.ws = new WebSocketConnection({
       url: options.wsUrl ?? WS_URL,
       WebSocket: options.WebSocket,

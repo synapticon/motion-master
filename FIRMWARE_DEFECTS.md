@@ -2,6 +2,14 @@
 
 **Status, 2026-11-01.** This page is for the firmware team. It lists the filed firmware defects that concern EtherCAT or Motion Master, every firmware behaviour that Motion Master works around without an issue, and every fix in Motion Master that deals with a drive that misbehaves on the bus. Motion Master 6 is this repository. Motion Master 5 is `synapticon/motion_master`. Each item says, for each of the two, whether it is solved.
 
+A master that works on every SOMANET device in every setup is hard to keep working, because the devices and the hosts differ in many ways:
+
+- **Three EtherCAT slave stacks.** A Circulo and a Node run Synapticon's own stack on an XMOS processor, `sc_somanet_ip/module_ethercat`. The ESC (EtherCAT Slave Controller) of a Node is an ET1100, and the ESC of a Circulo reports type 0xC0. An Integro runs the Hilscher stack on a netX processor, ESC type 0x85, with its application on a separate SoC. A Jasper-based drive, such as the C021, runs the Beckhoff slave stack code on a TI AM2612, whose ESC is a PRU-ICSS, type 0x90. The three stacks answer the same request in different ways.
+- **Many firmware versions.** A rule can hold from one version on and not before it. For example, firmware v5.6.0 and newer resets the mailbox counter on INIT, and older firmware does not.
+- **Network adapters.** Some adapters hold a frame before they send it. On Linux, a USB adapter on the `cdc_ncm` driver holds each frame for up to three times `tx_timer_usecs`, by default 1.2 ms (#154). The master then sees a late frame or a lost frame.
+- **Operating systems.** On Linux the master sends frames through a raw socket (`AF_PACKET`). On Windows it uses Npcap, and on macOS a BPF device.
+- **Two transports.** SOEM sends EtherCAT frames to the ESC of each device. SPoE (SOMANET Protocol over Ethernet) reaches the netX of each Integro over its own TCP connection, and there is no ESC.
+
 Motion Master works around most of the defects. A workaround in Motion Master does not help a customer who uses another master, such as TwinCAT, CODESYS or the IgH EtherCAT Master. It also does not help a customer who runs an older Motion Master.
 
 ## Terms

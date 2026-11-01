@@ -67,7 +67,9 @@ info:
     Every message is published to a topic, and a client receives nothing until it
     subscribes: send `{"subscribe":"<topic>"}` over the socket, and
     `{"unsubscribe":"<topic>"}` to stop. Subscribing to a topic nothing publishes to
-    is accepted and simply delivers nothing.
+    is accepted and simply delivers nothing. The server ignores a frame that is not
+    JSON, has no `subscribe` or `unsubscribe` string, or names an invalid topic. It
+    sends no reply, so a client cannot tell that a frame was ignored.
 
     There are two kinds of topic, and the difference is how wide they are.
 
@@ -108,11 +110,30 @@ info:
     bus did not fully answer. Tell them apart by `data.event`, which is kebab-case;
     every other key in `data` is camelCase, and times are epoch microseconds.
 
+    The events, with every field of `data`:
+
+    - **`short-working-counter`** — cycles since the bus came up in which a device
+      did not process the frame. Sent at most once a second, and only when the count
+      grew since the last message.
+      - `shortWkcCycles`: the number of such cycles since the bus came up.
+      - `firstShortWkcUs`, `lastShortWkcUs`: epoch microseconds of the first and the
+        most recent such cycle.
+      - `expectedWkc`: the working counter expected from the devices that exchange
+        process data.
+      - `lastWkc`: the working counter of the most recent cycle.
+
+    A new event is added to this list in the version that sends it. Make a client
+    ignore an event that it does not know, so that it keeps working with a later
+    server.
+
     `data` is an array of cycle rows; each row is `[timestampUs, v0, v1, ...]` where
     `timestampUs` is epoch microseconds and the values are positionally ordered by
     the monitoring's `parameters` (fetch the order, and how each value is sourced,
     via `GET /api/monitorings/{topic}`). A value is `null` while its owning device
-    is not exchanging (SAFE-OP/OP). Numbers beyond 2^53 lose precision in a JS
+    is not exchanging (SAFE-OP/OP). Otherwise a value is a number for a boolean,
+    integer or floating-point object (a boolean is 0 or 1), a string for a
+    `VISIBLE_STRING` or `UNICODE_STRING` object, and an array of byte values for
+    any other type, such as `OCTET_STRING`. Numbers beyond 2^53 lose precision in a JS
     client; epoch microseconds stay exact until ~year 2255 and the targeted values
     are 32-bit integers and floats.
 

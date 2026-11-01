@@ -52,7 +52,7 @@ jobs:
         run: |
           dir=build/x64-linux-release/apps/motion_master
           cp setup.sh install-auto-tuning.sh "$dir/"
-          cp SETUP-linux.md "$dir/SETUP.md"
+          cp SETUP_LINUX.md "$dir/SETUP.md"
           cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
           tar -czf "motion-master-${GITHUB_REF_NAME#v}-linux-x64.tar.gz" \
             -C "$dir" motion-master motion-master-capture libMU_3SL_interface.so.3 cert.pem \
@@ -142,7 +142,7 @@ jobs:
         run: |
           dir=build/arm64-linux-release/apps/motion_master
           cp setup.sh install-auto-tuning.sh "$dir/"
-          cp SETUP-linux.md "$dir/SETUP.md"
+          cp SETUP_LINUX.md "$dir/SETUP.md"
           cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
           tar -czf "motion-master-${GITHUB_REF_NAME#v}-linux-arm64.tar.gz" \
             -C "$dir" motion-master motion-master-capture cert.pem key.pem setup.sh \
@@ -270,7 +270,7 @@ jobs:
         run: |
           dir=build/arm64-osx-release/apps/motion_master
           cp setup.sh install-auto-tuning.sh "$dir/"
-          cp SETUP-macos.md "$dir/SETUP.md"
+          cp SETUP_MACOS.md "$dir/SETUP.md"
           cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
           tar -czf "motion-master-${GITHUB_REF_NAME#v}-macos-arm64.tar.gz" \
             -C "$dir" motion-master motion-master-capture cert.pem key.pem setup.sh \

@@ -47,7 +47,7 @@ and nothing to install.
 
 ## Part 1 — the server machine
 
-Install as usual. See [SETUP-linux.md](../SETUP-linux.md). On a Raspberry Pi use the `-arm64.deb`,
+Install as usual. See [SETUP_LINUX.md](../SETUP_LINUX.md). On a Raspberry Pi use the `-arm64.deb`,
 which needs Raspberry Pi OS **trixie**, because the binaries require glibc 2.38.
 
 **On a Raspberry Pi 5 there is a second route**, and it skips this whole part. `rt/image/build-rpi-image.sh`
@@ -95,7 +95,7 @@ file rather than a release shipping it. A machine with no internet access theref
 without it, which is not an error: the server runs, and only the auto-tuning endpoints fail. There
 are two ways to add the file later. Run `./install-auto-tuning.sh` on the server, once it reaches
 the internet. Or download the asset for its platform on another machine, rename it to
-`auto-tuning`, and copy it next to the server binary. `SETUP-linux.md` covers both.
+`auto-tuning`, and copy it next to the server binary. `SETUP_LINUX.md` covers both.
 
 ## Part 2 — the client machine
 

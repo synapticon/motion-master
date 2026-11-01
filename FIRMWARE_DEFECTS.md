@@ -1,6 +1,6 @@
-# SOMANET firmware defects on EtherCAT, and what Motion Master does about them
+# Defects of SOMANET devices on EtherCAT, and what Motion Master does about them
 
-**Status, 2026-11-01.** This page is for the firmware team. It lists the filed firmware defects that concern EtherCAT or Motion Master, every firmware behaviour that Motion Master works around without an issue, and every fix in Motion Master that deals with a drive that misbehaves on the bus. Motion Master 6 is this repository. Motion Master 5 is `synapticon/motion_master`. Each item says, for each of the two, whether it is solved.
+**Status, 2026-11-01.** This page lists the filed firmware defects that concern EtherCAT or Motion Master, every firmware behaviour that Motion Master works around without an issue, and every fix in Motion Master that deals with a drive that misbehaves on the bus. Motion Master 6 is this repository. Motion Master 5 is `synapticon/motion_master`. Each item says, for each of the two, whether it is solved.
 
 A master that works on every SOMANET device in every setup is hard to keep working, because the devices and the hosts differ in many ways:
 

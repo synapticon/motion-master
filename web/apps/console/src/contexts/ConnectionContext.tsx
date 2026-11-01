@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { Api } from '@synapticon/motion-master-client'
+import { MotionMasterClient, type Api } from '@synapticon/motion-master-client'
 import { useApiHealth } from '../hooks/useApiHealth'
 
 const ENDPOINT_KEY = 'mm:endpoint'
@@ -65,6 +65,10 @@ interface ConnectionContextValue {
   setWsPort: (wsPort: string) => void
   /// Reset host/httpPort/wsPort back to the built-in defaults (and persist them).
   resetEndpoint: () => void
+  /// The client for the current endpoint. A new endpoint gives a new client, and the old one is
+  /// closed.
+  client: MotionMasterClient
+  /// The HTTP API of `client`.
   api: Api
   /// True while the Motion Master HTTP API is reachable at the current endpoint.
   /// Driven by a single `useApiHealth` probe here (the sole writer, so it also
@@ -124,16 +128,24 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     setWsPort(DEFAULT_WS_PORT)
   }, [])
 
-  const api = useMemo(
-    () => new Api({ baseUrl: `https://${host}:${httpPort}` }),
-    [host, httpPort],
+  const client = useMemo(
+    () =>
+      new MotionMasterClient({
+        baseUrl: `https://${host}:${httpPort}`,
+        wsUrl: `wss://${host}:${wsPort}`,
+      }),
+    [host, httpPort, wsPort],
   )
+  // The WebSocket opens lazily, so a client that is never subscribed to holds no socket. One that
+  // is replaced or unmounted has its socket closed here.
+  useEffect(() => () => client.close(), [client])
+  const api = client.api
 
   const online = useApiHealth(api)
 
   return (
     <ConnectionContext.Provider
-      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online, driver, setDriver, adapter, setAdapter, ipAddresses, setIpAddresses, spoeMode, setSpoeMode, spoePort, setSpoePort, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
+      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, client, api, online, driver, setDriver, adapter, setAdapter, ipAddresses, setIpAddresses, spoeMode, setSpoeMode, spoePort, setSpoePort, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
     >
       {children}
     </ConnectionContext.Provider>

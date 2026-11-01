@@ -1,6 +1,6 @@
 # SOMANET firmware defects on EtherCAT, and what Motion Master does about them
 
-**Status, 2026-11-01.** This page is for the firmware team. It lists every firmware defect that the Motion Master team filed, every firmware behaviour that Motion Master works around without an issue, and every fix in Motion Master that deals with a drive that misbehaves on the bus. Motion Master 6 is this repository. Motion Master 5 is `synapticon/motion_master`. Each item says, for each of the two, whether it is solved.
+**Status, 2026-11-01.** This page is for the firmware team. It lists the filed firmware defects that concern EtherCAT or Motion Master, every firmware behaviour that Motion Master works around without an issue, and every fix in Motion Master that deals with a drive that misbehaves on the bus. Motion Master 6 is this repository. Motion Master 5 is `synapticon/motion_master`. Each item says, for each of the two, whether it is solved.
 
 Motion Master works around most of the defects. A workaround in Motion Master does not help a customer who uses another master, such as TwinCAT, CODESYS or the IgH EtherCAT Master. It also does not help a customer who runs an older Motion Master.
 
@@ -169,7 +169,7 @@ A number in brackets is an issue or pull request in `synapticon/motion-master`, 
 
 ## Sources
 
-- The issues in `synapticon/somanet_software` and `synapticon/jasper` that the Motion Master team filed.
+- The issues in `synapticon/somanet_software` and `synapticon/jasper`.
 - `CHANGELOG.md` in this repository.
 - `CHANGELOG.md` in `synapticon/motion_master`.
 

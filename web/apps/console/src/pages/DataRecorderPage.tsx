@@ -3,7 +3,6 @@ import { Link } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type uPlot from 'uplot'
 import {
-  fetchProcessDataDump,
   parseMmpd,
   isPlottableDataType,
   formatHex,
@@ -92,7 +91,7 @@ function EntryCheckbox({
 }
 
 export default function DataRecorderPage() {
-  const { api, host, httpPort } = useConnection()
+  const { api, client } = useConnection()
   const queryClient = useQueryClient()
 
   const [file, setFile] = useState<MmpdFile | null>(null)
@@ -142,7 +141,7 @@ export default function DataRecorderPage() {
     setLoading(true)
     setViewError(null)
     try {
-      const parsed = await fetchProcessDataDump(`https://${host}:${httpPort}`)
+      const parsed = await client.fetchProcessDataDump()
       load(parsed, `Recorder ring — ${parsed.rowCount.toLocaleString()} cycles`)
     } catch (e) {
       setViewError(errorText(e))

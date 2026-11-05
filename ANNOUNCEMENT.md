@@ -1,7 +1,7 @@
 # Announcing Motion Master v6 — Next Generation
 
 **To:** everyone at Synapticon
-**Status:** in active development (`6.0.0-alpha.60`) · **Beta: end of 2026**
+**Status:** in active development (`6.0.0-alpha.60`) · **Beta: 2027**
 **Try it now:** <https://motion-master.synapticon.com>
 
 ---
@@ -318,9 +318,9 @@ We report these openly on purpose: the roadmap is in the repository, not in some
 
 | When | What |
 | --- | --- |
-| Now → end of 2026 | Alpha releases continue; the remaining features above land. Effort on the current tools is reduced. |
-| **End of 2026** | **Beta — feature-complete, API frozen.** |
-| Q1 2027 | Official v6.0.0 release. |
+| Now → 2027 | Alpha releases continue; the remaining features above land. Effort on the current tools is reduced. |
+| **2027** | **Beta — feature-complete, API frozen.** |
+| 2027 | Official v6.0.0 release. |
 
 Until the beta, the HTTP and WebSocket API may break between any two alphas — that is the
 point of a pre-release line, and it is why we would rather break it now than carry it for a

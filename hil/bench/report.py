@@ -79,7 +79,7 @@ def _entry(bench: Bench, device: BenchDevice, live: dict | None) -> dict:
     )
     if live["productName"] != device.product_name:
         entry["differences"].append(
-            f"productName is {live['productName']!r}, the bench file says {device.product_name!r}"
+            f"productName is {live['productName']!r}, bench.toml says {device.product_name!r}"
         )
 
     entry["firmwareVersion"] = _read(
@@ -124,7 +124,7 @@ def _identity_differences(stored: dict, live: dict) -> list[str]:
 
 def _markdown(bench: Bench, server_version: str, entries: list[dict]) -> str:
     lines = [
-        f"## Devices of bench {bench.description.name}",
+        "## Devices of the bench",
         "",
         f"Server version: {server_version}",
         "",
@@ -141,7 +141,7 @@ def _markdown(bench: Bench, server_version: str, entries: list[dict]) -> str:
         )
     differences = [(e["position"], d) for e in entries for d in e["differences"]]
     if differences:
-        lines += ["", "**The devices differ from the bench folder:**", ""]
+        lines += ["", "**The devices differ from their folders:**", ""]
         lines += [f"- Position {position}: {d}" for position, d in differences]
     failed = [
         (e["position"], field, value)

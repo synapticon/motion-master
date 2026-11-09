@@ -32,7 +32,6 @@ jobs:
 
     env:
       CONTAINER: motion-master-bench
-      MM_BENCH: ci-belgrade-linux
       MM_URL: https://127.0.0.1:61447
 
     steps:
@@ -118,7 +117,7 @@ jobs:
         working-directory: hil/bench
         env:
           PYTHONPATH: ../../clients/python
-        run: python -c "import bench; bench.switch_off('$MM_BENCH')" || true
+        run: python -c "import bench; bench.switch_off()" || true
 
       - name: Upload the results
         if: always()

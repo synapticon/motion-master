@@ -1,4 +1,4 @@
-"""The bench under test: its description file, its power supply, and the server that drives it."""
+"""The bench under test: its description, its power supply, and the server that drives it."""
 
 from __future__ import annotations
 
@@ -30,9 +30,8 @@ class BenchDevice:
 
 @dataclass(frozen=True)
 class BenchDescription:
-    """The contents of one folder in benches/."""
+    """The contents of bench.toml, with the folder of each device in devices/."""
 
-    name: str
     adapter: str
     psu_host: str
     psu_off_seconds: float
@@ -44,18 +43,16 @@ class BenchDescription:
         return [d.product_name for d in self.devices]
 
     @classmethod
-    def load(cls, name: str) -> BenchDescription:
-        folder = _HERE / "benches" / name
-        with open(folder / "bench.toml", "rb") as f:
+    def load(cls) -> BenchDescription:
+        with open(_HERE / "bench.toml", "rb") as f:
             data = tomllib.load(f)
         return cls(
-            name=name,
             adapter=data["adapter"],
             psu_host=data["psu"]["host"],
             psu_off_seconds=data["psu"]["off_seconds"],
             boot_timeout_seconds=data["psu"]["boot_timeout_seconds"],
             devices=[
-                BenchDevice(position, d["productName"], folder / d["folder"])
+                BenchDevice(position, d["productName"], _HERE / "devices" / d["folder"])
                 for position, d in enumerate(data["devices"], start=1)
             ],
         )
@@ -73,7 +70,7 @@ class Psu:
 
 
 class Bench:
-    """The server under test, connected to the bench that the description names."""
+    """The server under test, connected to the bench."""
 
     def __init__(self, description: BenchDescription, url: str):
         self.description = description
@@ -84,8 +81,8 @@ class Bench:
 
     @classmethod
     def from_environment(cls) -> Bench:
-        """Build the bench from MM_BENCH and MM_URL, after the server answers."""
-        description = BenchDescription.load(os.environ.get("MM_BENCH", "ci-belgrade-linux"))
+        """Build the bench from bench.toml and MM_URL, after the server answers."""
+        description = BenchDescription.load()
         url = os.environ.get("MM_URL", "https://127.0.0.1:61447")
         _wait_for_server(url, timeout=60)
         return cls(description, url)
@@ -126,9 +123,9 @@ class Bench:
         )
 
 
-def switch_off(bench_name: str) -> None:
-    """Switch the drives of a bench off, with no server. The workflow calls this as its last step."""
-    Psu(BenchDescription.load(bench_name).psu_host).switch(False)
+def switch_off() -> None:
+    """Switch the drives off, with no server. The workflow calls this as its last step."""
+    Psu(BenchDescription.load().psu_host).switch(False)
 
 
 def _wait_for_server(url: str, timeout: float) -> None:

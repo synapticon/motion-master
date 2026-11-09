@@ -11,8 +11,8 @@ off_seconds = 5
 # How long the drives get after power-on until every one of them answers on the wire.
 boot_timeout_seconds = 60
 
-# The devices in bus order. folder holds the files of the device, with the names they have on the
-# device. productName is the value that GET /api/devices reports.
+# The devices in bus order. folder names a folder in devices/, which holds the files of the device
+# with the names they have on the device. productName is the value that GET /api/devices reports.
 [[devices]]
 folder = "1-integro"
 productName = "SOMANET Integro"

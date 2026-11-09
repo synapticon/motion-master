@@ -1235,14 +1235,14 @@ Python tests (pytest) that run against a server connected to the drives of a ben
 Python reference client in `clients/python`. A run starts with a power cycle through the P 1535,
 then writes `devices.json`: what each drive says it is, and where it differs from its folder.
 
-`hil/bench/benches/<bench>/` describes one bench. `bench.toml` holds the adapter, the P 1535 and
-the devices in bus order. Each device folder holds the known-good files of that drive, with the
-names they have on the drive (`.hardware_description`, `config.csv`, …).
+`hil/bench/bench.toml` describes the bench: the adapter, the P 1535 and the devices in bus order.
+Each folder in `hil/bench/devices/` holds the known-good files of one drive, with the names they
+have on the drive (`.hardware_description`, `config.csv`, …).
 
 ```bash
 cd hil/bench && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest                         # MM_BENCH picks the bench, MM_URL the server
+pytest                         # MM_URL picks the server
 pytest -k "scan and not power" # some tests only
 ```
 

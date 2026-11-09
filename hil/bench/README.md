@@ -8,10 +8,9 @@ supplies the drives. The tests switch the output of the power supply through the
 The tests use the Python reference client in [`clients/python`](../../clients/python). So a run
 also checks that client.
 
-## The bench folder
+## The bench description
 
-Each folder in `benches/` describes one bench. `ci-belgrade-linux` describes the bench of the
-self-hosted runner `ci-belgrade-linux`.
+This folder describes one bench: the bench of the self-hosted runner `ci-belgrade-linux`.
 
 `bench.toml` holds the settings of the bench:
 
@@ -19,7 +18,7 @@ self-hosted runner `ci-belgrade-linux`.
 - `[psu]` gives the address of the P 1535, the time the output stays off in a power cycle, and the
   time the drives get to boot.
 - `[[devices]]` lists the devices in bus order. `productName` is the value that
-  `GET /api/devices` reports. `folder` names the folder of the device.
+  `GET /api/devices` reports. `folder` names the folder of the device in `devices/`.
 
 The folder of a device holds the files of that device, with the names they have on the device:
 `config.csv`, `.hardware_description`, `.factory_config` and others. A file is a known-good copy.
@@ -64,11 +63,10 @@ off.
    pytest -k "scan and not power"
    ```
 
-Two environment variables select the bench and the server:
+One environment variable selects the server:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `MM_BENCH` | `ci-belgrade-linux` | The name of the bench file in `benches/`, without `.toml` |
 | `MM_URL` | `https://127.0.0.1:61447` | The HTTP API of the server under test |
 
 The tests reset the server and switch the drives off. Do not run them against a server that

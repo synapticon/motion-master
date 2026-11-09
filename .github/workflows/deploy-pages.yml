@@ -39,7 +39,7 @@ jobs:
           sudo apt-get install -y doxygen graphviz
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Generate Doxyfile
         run: |
@@ -72,12 +72,12 @@ jobs:
           path: apps-dist
           key: pages-apps-v1-${{ steps.tag.outputs.tag }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         if: steps.apps-cache.outputs.cache-hit != 'true'
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.apps-cache.outputs.cache-hit != 'true'
         with:
           node-version: '22'
@@ -127,9 +127,12 @@ jobs:
           echo "motion-master.synapticon.com" > build/pages/CNAME
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: build/pages
+          # The site is assembled from known outputs only, so every file in it is meant to be
+          # served, a dotfile too.
+          include-hidden-files: true
 
   deploy:
     needs: build
@@ -141,4 +144,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

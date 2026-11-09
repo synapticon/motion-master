@@ -1,0 +1,120 @@
+Safety Parameters Report
+
+Set by username: Test
+Verification Checksum: 0x2DBBFBCF
+
+
+GROUP_GENERAL:
+Drive Name                            : SMM
+Safe Fieldbus Active                  : FALSE
+Safe Address                          : 0
+FSoE Parameter Download               : FALSE
+
+GROUP_SAFETYIO:
+Acknowledge via Drive Enabled         : FALSE
+Acknowledgment Input                  : No input
+Input Test Pulse Detection            : No input
+Input Filter Time                     : 4 ms
+Test Pulse max. Distance              : 1.000 s
+Output Test Pulse Active              : No output
+Output1 Function                      : Output unused
+Output2 Function                      : Output unused
+
+GROUP_ANALOGINPUT:
+Analog Input1 Gain                    : 0
+Analog Input1 Offset                  : 0
+Analog Input2 Gain                    : 0
+Analog Input2 Offset                  : 0
+Analog Allowed Error                  : 0
+
+GROUP_ENCODERA1:
+Encoder Source Type                   : No encoder
+Encoder Resolution                    : 524288 inc
+Encoder Multiturn Bits                : 0 bits
+Encoder Clock Frequency               : ENCODER CLOCK 4167kHz
+Encoder Timeout                       : 0.001 s
+Multiturn Counting By SMM             : FALSE
+Verification Sensor Source Type       : ENCODER_VERIFICATION_NONE
+Verification Sensor Source Resolution : 524288 inc
+Verification Sensor Multiturn Bits    : 0 bits
+
+GROUP_ENCODERA2:
+Speed Computation Time                : 4 ms
+Position Reset Input                  : No input
+Absolute Position On Reset            : 0 inc
+Allowed Position Discrepancy          : 64 inc
+Allowed Speed Discrepancy             : 100 inc/sec
+Discrepancy Timer                     : 0.010 s
+Verification Scaling Numerator        : 1
+Verification Scaling Denominator      : 1
+
+GROUP_STO/SBC:
+STO Configured Input                  : No input
+STO Restart Behavior                  : Acknowledge required before Restart
+Brake Delay Time                      : 0.000 s
+Brake With STO                        : TRUE
+
+GROUP_SOS:
+SOS Input                             : No input
+t_D_SOS                               : 0.000 s
+n_Zero_SOS                            : 0 inc/sec
+s_Zero_SOS                            : 1 inc
+SOS Restart Behavior                  : Acknowledge required before Restart
+
+GROUP_SS1:
+SS1 Input                             : No input
+t_SS1                                 : 1.000 s
+Deceleration Monitoring Active        : FALSE
+t_D_SS1                               : 0.020 s
+t_L_SS1                               : 0.020 s
+a_SS1                                 : 0 inc/(sec*sec)
+n_Zero_SS1                            : 20 inc/sec
+
+GROUP_SS2:
+SS2 Input                             : No input
+t_SS2                                 : 1.000 s
+t_D_SS2                               : 0.020 s
+t_L_SS2                               : 0.020 s
+a_SS2                                 : 0 inc/(sec*sec)
+SS2 Limit Violation Reaction          : STO
+
+GROUP_SLS1:
+SLS1 Input                            : No input
+t_SLS1                                : 0.200 s
+t_D_SLS1                              : 0.020 s
+t_L_SLS1                              : 0.020 s
+a_SLS1                                : 0 inc/(sec*sec)
+n_SLS1                                : 1 inc/sec
+SLS1 Limit Violation Reaction         : STO
+
+GROUP_SLS2:
+SLS2 Input                            : No input
+t_SLS2                                : 0.200 s
+t_D_SLS2                              : 0.020 s
+t_L_SLS2                              : 0.020 s
+a_SLS2                                : 0 inc/(sec*sec)
+n_SLS2                                : 1 inc/sec
+SLS2 Limit Violation Reaction         : STO
+
+GROUP_SLS3:
+SLS3 Input                            : No input
+t_SLS3                                : 0.200 s
+t_D_SLS3                              : 0.020 s
+t_L_SLS3                              : 0.020 s
+a_SLS3                                : 0 inc/(sec*sec)
+n_SLS3                                : 1 inc/sec
+SLS3 Limit Violation Reaction         : STO
+
+GROUP_SLS4:
+SLS4 Input                            : No input
+t_SLS4                                : 0.200 s
+t_D_SLS4                              : 0.020 s
+t_L_SLS4                              : 0.020 s
+a_SLS4                                : 0 inc/(sec*sec)
+n_SLS4                                : 1 inc/sec
+SLS4 Limit Violation Reaction         : STO
+
+GROUP_SMS:
+n_pos_max                             : 0 inc/sec
+n_neg_max                             : 0 inc/sec
+SMS Limit Violation Reaction          : SS1

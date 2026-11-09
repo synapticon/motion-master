@@ -1,0 +1,2 @@
+-r ../../clients/python/requirements.txt
+pytest>=8

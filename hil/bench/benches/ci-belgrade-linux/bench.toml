@@ -1,0 +1,26 @@
+# The bench of the self-hosted runner ci-belgrade-linux.
+
+# The network interface that the EtherCAT bus is connected to.
+adapter = "enp2s0"
+
+# The PeakTech P 1535 that supplies the drives. hil/p1535 switches its output over HTTP.
+[psu]
+host = "10.10.1.250"
+# How long the output stays off in a power cycle, so that every drive loses power.
+off_seconds = 5
+# How long the drives get after power-on until every one of them answers on the wire.
+boot_timeout_seconds = 60
+
+# The devices in bus order. folder holds the files of the device, with the names they have on the
+# device. productName is the value that GET /api/devices reports.
+[[devices]]
+folder = "1-integro"
+productName = "SOMANET Integro"
+
+[[devices]]
+folder = "2-circulo"
+productName = "SOMANET Circulo"
+
+[[devices]]
+folder = "3-node"
+productName = "SOMANET Node"

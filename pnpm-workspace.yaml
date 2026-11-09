@@ -8,3 +8,6 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: true
+  # Its install script picks the Vue 2 or the Vue 3 build. The package ships the Vue 3 build as its
+  # default, and Vue 3 is the only Vue here, so the script has nothing to do.
+  vue-demi: false

@@ -1,9 +1,6 @@
 name: Bench Tests
 
 on:
-  # Temporary: runs the suite from the branch until the workflow is on main. Remove before merge.
-  push:
-    branches: [204-bench-python-tests]
   workflow_dispatch:
     inputs:
       tests:

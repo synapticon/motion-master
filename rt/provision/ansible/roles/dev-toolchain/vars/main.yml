@@ -41,9 +41,9 @@ packages:
   - vim
   - lazygit
 
-  # Docker (hil/api integration tests)
+  # Docker (the server image)
   - docker.io
   - docker-buildx
 
-  # Node.js (hil/api TypeScript/Vitest tests; bundles npm)
+  # Node.js (the web/ workspace; bundles npm)
   - nodejs

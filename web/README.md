@@ -7,7 +7,7 @@ All of Motion Master's browser/Node TypeScript lives here:
 - [`packages/motion-master-client`](packages/motion-master-client) — `@synapticon/motion-master-client`, the published, isomorphic SDK (the generated HTTP API client + the WebSocket connection). Apps consume it as a `workspace:*` dependency.
 - [`packages/ui`](packages/ui) — `@synapticon/ui`, the shared Synapticon design system (the Tailwind theme at `@synapticon/ui/theme.css`) and a starter set of React components (`Callout`, `PageHeader`, `Button`). Consumed as source via `workspace:*`. An app keeps the shared look by importing the theme; one that needs to diverge can drop the import and define its own.
 
-These are members of a single pnpm workspace **rooted at the repository root** (`pnpm-workspace.yaml`), alongside `hil/api`. So pnpm commands run from the repo root, not from `web/`.
+These are members of a single pnpm workspace **rooted at the repository root** (`pnpm-workspace.yaml`). So pnpm commands run from the repo root, not from `web/`.
 
 ## Deployment layout (GitHub Pages)
 
@@ -55,8 +55,4 @@ pnpm build:client   # generate + tsc-build the client library only (the publishe
 
 ## Tests
 
-The HTTP/WebSocket integration tests (which drive the client library against a real server in Docker) live in [`hil/api`](../hil/api):
-
-```bash
-pnpm --filter motion-master-api-tests test
-```
+The tests against a real server live in [`hil/bench`](../hil/bench). They are Python tests and use the Python reference client.

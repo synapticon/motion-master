@@ -98,7 +98,12 @@ def _entry(bench: Bench, device: BenchDevice, live: dict | None) -> dict:
 
 def _read(bench: Bench, operation: str, path: dict, pick=lambda r: r):
     """Return the answer of one read, or a line that says why there is none."""
-    response = bench.client.call(operation, path=path, check=False)
+    # An older server, such as a pulled image, can lack the operation. The report then says so,
+    # and the tests still run.
+    try:
+        response = bench.client.call(operation, path=path, check=False)
+    except KeyError:
+        return f"error: the server has no operation {operation}"
     if not response.ok:
         return f"error: HTTP {response.status_code}, {response.text.strip()}"
     return pick(response.json())

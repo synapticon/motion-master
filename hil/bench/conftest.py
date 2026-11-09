@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 from motion_master_client import PRE_OP
 
@@ -20,7 +22,13 @@ def bench() -> Bench:
     bench = Bench.from_environment()
     bench.power_cycle()
     bench.client.ensure_state(PRE_OP, exact=True)
-    write_device_report(bench)
+    # The report describes the run, and the tests decide its result. So a report that fails is
+    # logged and named in the job summary, and the tests still run.
+    try:
+        write_device_report(bench)
+    except Exception as error:
+        logging.getLogger(__name__).exception("the device report failed")
+        append_to_job_summary(f"The device report failed: `{error!r}`\n\n")
     return bench
 
 

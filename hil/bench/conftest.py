@@ -64,8 +64,9 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
 
 
 def _message(report: pytest.TestReport) -> str:
+    # A passed test says what it saw, through record_property("message", ...).
     if report.passed:
-        return ""
+        return "; ".join(str(v) for k, v in report.user_properties if k == "message")
     crash = getattr(report.longrepr, "reprcrash", None)
     if crash is not None:
         return crash.message

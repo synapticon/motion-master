@@ -39,7 +39,8 @@ for it. The report compares the product name, and the id, the version and the se
 ## Run the tests
 
 A run starts with one power cycle. Every test then starts with the driver closed. A test does not
-leave the bus as it found it.
+leave the bus as it found it. When the last test ends, passed or not, the run switches the drives
+off.
 
 1. Start the server, and connect the bench to it.
 2. Install the dependencies.

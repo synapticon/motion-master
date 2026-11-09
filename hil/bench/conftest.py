@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 
 import pytest
 from motion_master_client import PRE_OP
@@ -13,13 +14,21 @@ _results: list[tuple[str, str, str]] = []
 
 
 @pytest.fixture(scope="session")
-def bench() -> Bench:
+def bench() -> Iterator[Bench]:
     """The bench, after one power cycle, so that a run starts from drives that just booted.
 
     The power supply has no read of its output state, so a power cycle is the only start that
-    is the same on every run. The device report is written here, before the first test.
+    is the same on every run. The device report is written here, before the first test. When
+    the last test ends, passed or not, the drives are switched off.
     """
     bench = Bench.from_environment()
+    try:
+        yield _started(bench)
+    finally:
+        bench.psu.switch(False)
+
+
+def _started(bench: Bench) -> Bench:
     bench.power_cycle()
     bench.client.ensure_state(PRE_OP, exact=True)
     # The report describes the run, and the tests decide its result. So a report that fails is

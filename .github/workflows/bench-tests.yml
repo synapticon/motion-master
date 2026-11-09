@@ -111,6 +111,15 @@ jobs:
         if: always()
         run: docker stop "$CONTAINER" || true
 
+      # The tests switch the drives off when they end. This step also covers a run that was
+      # cancelled, timed out, or stopped before the tests.
+      - name: Switch the drives off
+        if: always()
+        working-directory: hil/bench
+        env:
+          PYTHONPATH: ../../clients/python
+        run: python -c "import bench; bench.switch_off('$MM_BENCH')" || true
+
       - name: Upload the results
         if: always()
         uses: actions/upload-artifact@v5

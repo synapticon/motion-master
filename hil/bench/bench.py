@@ -126,6 +126,11 @@ class Bench:
         )
 
 
+def switch_off(bench_name: str) -> None:
+    """Switch the drives of a bench off, with no server. The workflow calls this as its last step."""
+    Psu(BenchDescription.load(bench_name).psu_host).switch(False)
+
+
 def _wait_for_server(url: str, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while True:

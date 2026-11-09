@@ -90,7 +90,7 @@ FROM ubuntu:24.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -q && apt-get install -y --no-install-recommends \
-        ninja-build gcc-14 g++-14 \
+        ninja-build gcc-14 g++-14 ccache \
         curl ca-certificates git \
         zip unzip tar pkg-config \
         make perl \
@@ -149,11 +149,20 @@ RUN ./install-auto-tuning.sh /src \
 ARG CMAKE_BUILD_PARALLEL_LEVEL
 ARG VCPKG_MAX_CONCURRENCY
 
-# vcpkg binary cache is reused across image rebuilds when building with BuildKit.
+# Two BuildKit cache mounts survive from one image build to the next on the same machine. The vcpkg
+# archives hold the built dependencies. The ccache directory holds every compiled object, keyed on
+# its source and flags. COPY . . above starts this step again after any change in the repository,
+# also one that touches no C++, so without ccache every build compiled every file. CMake reads the
+# compiler launcher from the environment.
+#
+# Only the two binaries that the image ships are built. The tests and the HIL programs are not.
+ENV CCACHE_DIR=/root/.cache/ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache CMAKE_C_COMPILER_LAUNCHER=ccache
 RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
+    --mount=type=cache,target=/root/.cache/ccache \
     . /target.env \
     && cmake --preset "${PRESET}" \
-    && cmake --build --preset "${PRESET}"
+    && cmake --build --preset "${PRESET}" --target motion_master motion_master_capture \
+    && ccache --show-stats
 
 # Collect any vcpkg shared libraries needed at runtime (empty when all deps
 # are header-only or statically linked).

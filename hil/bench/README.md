@@ -48,6 +48,8 @@ everything about a run:
 | Property | Value |
 | --- | --- |
 | `server.version` | The version of the server under test |
+| `setup.seconds` | How long the start of the run took: the wait for the server, the power cycle and the init. JUnit counts this time in the time of the first test |
+| `report.seconds` | How long the device report took, with the transition to PRE-OP that its reads need. JUnit counts this time in the time of the first test too |
 | `device.<position>.folder` | The folder of the device in `devices/` |
 | `device.<position>.productName` | The product name that `GET /api/devices` reports |
 | `device.<position>.productCode` | The product code, in hexadecimal |

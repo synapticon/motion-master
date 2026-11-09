@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterator
 
 import pytest
@@ -22,25 +23,37 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
     test-suite properties of report.xml and to the job summary. When the last test ends, passed
     or not, the drives are switched off.
     """
+    record = record_testsuite_property
+    # JUnit counts the setup and the report in the time of the first test, so each one is also
+    # recorded alone.
+    start = time.monotonic()
     bench = Bench.from_environment()
     try:
-        yield _started(bench, record_testsuite_property)
+        bench.power_cycle()
+        record("setup.seconds", _seconds_since(start))
+        start = time.monotonic()
+        _report(bench, record)
+        record("report.seconds", _seconds_since(start))
+        yield bench
     finally:
         bench.psu.switch(False)
 
 
-def _started(bench: Bench, record: Callable[[str, object], None]) -> Bench:
-    bench.power_cycle()
-    bench.client.ensure_state(PRE_OP, exact=True)
+def _report(bench: Bench, record: Callable[[str, object], None]) -> None:
     # The report describes the run, and the tests decide its result. So a report that fails is
-    # logged and named in report.xml and the job summary, and the tests still run.
+    # logged and named in report.xml and the job summary, and the tests still run. PRE-OP is part
+    # of the report, because its reads go over the mailbox.
     try:
+        bench.client.ensure_state(PRE_OP, exact=True)
         write_device_report(bench, record)
     except Exception as error:
         logging.getLogger(__name__).exception("the device report failed")
         record("report.error", repr(error))
         append_to_job_summary(f"The device report failed: `{error!r}`\n\n")
-    return bench
+
+
+def _seconds_since(start: float) -> float:
+    return round(time.monotonic() - start, 3)
 
 
 @pytest.fixture

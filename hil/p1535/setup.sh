@@ -14,6 +14,14 @@ else
   git clone --depth 1 --branch "$P1535_IDF_VERSION" --recursive --shallow-submodules \
     https://github.com/espressif/esp-idf.git "$P1535_IDF_DIR"
 fi
+
+if ! p1535_use_supported_python 2> /dev/null; then
+  if command -v dnf > /dev/null; then
+    echo "Installing $P1535_PYTHON, because python3 is too new for ESP-IDF $P1535_IDF_VERSION."
+    sudo dnf install -y "$P1535_PYTHON"
+  fi
+  p1535_use_supported_python
+fi
 "$P1535_IDF_DIR/install.sh" esp32
 
 if id -nG | grep -qw dialout; then

@@ -82,9 +82,12 @@ Do this once on each computer that flashes the board.
 The script does these steps. It skips a step that is already done, so you can run it again.
 
 1. It downloads ESP-IDF to `~/esp/esp-idf`, at the version in `env.sh`.
-2. It installs the ESP32 toolchain to `~/.espressif`.
-3. It adds your user to the `dialout` group. This takes effect at your next login.
-4. It gives your user access to the serial port of the board until you unplug it. So the first
+2. It checks the Python version. ESP-IDF uses the first `python3` on `PATH`. When that is newer
+   than 3.13, the scripts give ESP-IDF `python3.13` instead. On Fedora the script installs
+   `python3.13` with `dnf`. On other systems, install it yourself.
+3. It installs the ESP32 toolchain to `~/.espressif`.
+4. It adds your user to the `dialout` group. This takes effect at your next login.
+5. It gives your user access to the serial port of the board until you unplug it. So the first
    flash works without a new login.
 
 ## Configure
@@ -188,6 +191,7 @@ not documented. Send `/output-on` or `/output-off` after each restart to put it 
 | The log shows `Failed to connect to SSID` | The SSID and the password in the configuration. Most ESP32 chips support 2.4 GHz WiFi only, so the network must offer 2.4 GHz. |
 | The log shows `got ip`, but `curl` gets no answer | The computer is on the same network. No other device uses the address. |
 | `idf.py` cannot open the serial port | The port name. Run `setup.sh` again after you plug the board in, or log in again after the first `setup.sh`. |
+| `setup.sh` fails with `Python.h: No such file or directory` for `tree_sitter` | ESP-IDF ran with a Python newer than 3.13. Run `setup.sh` again. It switches to `python3.13`. |
 | A script says `ESP-IDF is not installed` | Run `setup.sh`, or set `IDF_PATH` to your ESP-IDF directory. |
 
 After a fixed number of failed connection attempts, the firmware stops the attempts. It still starts

@@ -11,7 +11,7 @@ jobs:
   clang-format:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install clang-format-22
         run: |
@@ -37,7 +37,7 @@ jobs:
   cpplint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install cpplint
         run: pip install cpplint
@@ -50,7 +50,7 @@ jobs:
   cppcheck:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # cppcheck is built from source at the version pinned in .cppcheck-version, rather than
       # installed from apt. Its findings change between releases, so a suppression list is only valid
@@ -60,7 +60,7 @@ jobs:
       # same binary, and the result is cached on the pinned version so it compiles once per bump.
       - name: Cache cppcheck
         id: cache-cppcheck
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cppcheck-pinned
           key: cppcheck-${{ runner.os }}-${{ hashFiles('.cppcheck-version') }}
@@ -96,14 +96,14 @@ jobs:
     name: Generated API client is up to date
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: pnpm
@@ -124,9 +124,9 @@ jobs:
     name: Python client example
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 

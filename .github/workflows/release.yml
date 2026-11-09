@@ -10,12 +10,12 @@ jobs:
   linux-x64:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Cache vcpkg packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/vcpkg/archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
@@ -101,12 +101,12 @@ jobs:
             make perl \
             dpkg-dev rpm
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Cache vcpkg packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/vcpkg/archives
           # Deliberately distinct from build-linux-arm64.yml's key: that cache holds
@@ -164,27 +164,27 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Cache vcpkg packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/AppData/Local/vcpkg/archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
 
+      # Before get-cmake, because vcvars64.bat also puts the CMake and Ninja of Visual Studio on
+      # PATH, and the CMake that get-cmake installs must come first.
+      - name: Set up MSVC environment
+        uses: ./.github/actions/msvc-env
+
       - name: Install CMake 4.x + Ninja
         uses: lukka/get-cmake@latest
         with:
           cmakeVersion: "~4.0.0"
-
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Configure
         run: cmake --preset x64-windows-release
@@ -231,12 +231,12 @@ jobs:
     # CMAKE_OSX_DEPLOYMENT_TARGET — not the image — sets the floor of the artifact it builds.
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Cache vcpkg packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/vcpkg/archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
@@ -296,24 +296,24 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
       # `registry-url` above makes setup-node write `_authToken=${NODE_AUTH_TOKEN}` into the job's
-      # .npmrc and export NODE_AUTH_TOKEN with the placeholder `XXXXX-XXXXX-XXXXX-XXXXX`. That
-      # counts as configured authentication, so npm publishes with a credential the registry
-      # rejects instead of exchanging the OIDC token, and the registry answers 404 on PUT. The
-      # `registry-url` input is still needed: it is what points the publish at npmjs.org.
-      - name: Clear the placeholder credential that would suppress the OIDC exchange
+      # .npmrc. The publish has no token, because it exchanges the OIDC token. npm uses a
+      # configured credential instead of that exchange, and with a credential that is not valid
+      # the registry answers 404 on PUT. The `registry-url` input is still needed: it is what
+      # points the publish at npmjs.org.
+      - name: Clear the credential line that would suppress the OIDC exchange
         run: sed -i '/_authToken/d' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
       # The upload itself is made by the npm CLI, which learned trusted publishing in 11.5.1. The
@@ -363,7 +363,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -21,22 +21,22 @@ jobs:
       # otherwise rebuild every dependency (openssl alone is ~8 min) on each red run.
       - name: Restore vcpkg cache
         id: vcpkg-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ~/AppData/Local/vcpkg/archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
 
+      # Before get-cmake, because vcvars64.bat also puts the CMake and Ninja of Visual Studio on
+      # PATH, and the CMake that get-cmake installs must come first.
+      - name: Set up MSVC environment
+        uses: ./.github/actions/msvc-env
+
       - name: Install CMake 4.x + Ninja
         uses: lukka/get-cmake@latest
         with:
           cmakeVersion: "~4.0.0"
-
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Configure
         run: cmake --preset x64-windows-debug
@@ -44,7 +44,7 @@ jobs:
       - name: Save vcpkg cache
         # Persist the freshly built dependencies even if the build/test below fails.
         if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ~/AppData/Local/vcpkg/archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}

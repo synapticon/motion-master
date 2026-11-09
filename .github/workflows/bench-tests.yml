@@ -39,7 +39,7 @@ jobs:
       # The tests always come from the selected branch. vcpkg, a submodule, is needed only to
       # build the image.
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: ${{ inputs.version == '' && 'recursive' || 'false' }}
 
@@ -80,7 +80,7 @@ jobs:
             --ulimit memlock=-1 "$IMAGE"
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 

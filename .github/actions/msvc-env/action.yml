@@ -1,0 +1,43 @@
+name: MSVC environment
+description: >-
+  Import the MSVC x64 build environment from vcvars64.bat into every later step of the job.
+runs:
+  using: composite
+  steps:
+    - name: Import vcvars64.bat
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        $vs = & $vswhere -latest -products * `
+          -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if (-not $vs) { throw 'No Visual Studio installation has the MSVC x64 tools.' }
+        $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+
+        $before = @{}
+        foreach ($item in Get-ChildItem env:) { $before[$item.Name] = $item.Value }
+        $after = cmd /c "call `"$vcvars`" >nul && set"
+        if ($LASTEXITCODE -ne 0) { throw "$vcvars failed with exit code $LASTEXITCODE." }
+
+        # Only what vcvars64.bat changed goes to the job, so the rest of the environment of the
+        # runner stays as the runner sets it.
+        $variables = 0
+        $directories = @()
+        foreach ($line in $after) {
+          if ($line -notmatch '^([^=]+)=(.*)$') { continue }
+          $name, $value = $Matches[1], $Matches[2]
+          if ($before[$name] -ceq $value) { continue }
+          if ($name -ieq 'PATH') {
+            $old = @{}
+            foreach ($entry in ($before[$name] -split ';')) { $old[$entry.TrimEnd('\')] = $true }
+            $directories = @($value -split ';' | Where-Object { $_ -and -not $old[$_.TrimEnd('\')] })
+          } else {
+            "$name=$value" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            $variables++
+          }
+        }
+        # The runner puts the last line of GITHUB_PATH first, so the directories go in reverse
+        # to keep the order that vcvars64.bat gave them.
+        [array]::Reverse($directories)
+        $directories | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        Write-Host "Imported $variables variables and $($directories.Count) PATH directories from $vcvars"

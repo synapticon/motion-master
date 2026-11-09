@@ -19,7 +19,7 @@ productName = "SOMANET Integro"
 
 [[devices]]
 folder = "2-circulo"
-productName = "SOMANET Circulo"
+productName = "SOMANET Circulo SMM"
 
 [[devices]]
 folder = "3-node"

@@ -106,7 +106,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "digests/${digest#sha256:}"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: docker-digest-${{ matrix.arch }}
           path: digests/*
@@ -117,7 +117,7 @@ jobs:
     needs: [version, image]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: digests
           pattern: docker-digest-*

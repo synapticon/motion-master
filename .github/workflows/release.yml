@@ -62,7 +62,7 @@ jobs:
         run: ./tools/package.sh x64-linux-release
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: linux-x64
           path: |
@@ -152,7 +152,7 @@ jobs:
         run: ./tools/package.sh arm64-linux-release
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: linux-arm64
           path: |
@@ -220,7 +220,7 @@ jobs:
           Compress-Archive -Force -DestinationPath $zip -Path $files
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: windows
           path: motion-master-*-windows-x64.zip
@@ -277,7 +277,7 @@ jobs:
             install-auto-tuning.sh SETUP.md motion-master.example.jsonc
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: macos
           path: motion-master-*-macos-arm64.tar.gz
@@ -363,7 +363,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true

@@ -1233,7 +1233,8 @@ hil/p1535/power.sh off   # or on; P1535_HOST overrides 10.10.1.250
 
 Python tests (pytest) that run against a server connected to the drives of a bench. They use the
 Python reference client in `clients/python`. A run starts with a power cycle through the P 1535,
-then writes `devices.json`: what each drive says it is, and where it differs from its folder.
+then records what each drive says it is, and where it differs from its folder. That goes into
+`report.xml`, the JUnit report, as test-suite properties, and into the job summary.
 
 `hil/bench/bench.toml` describes the bench: the adapter, the P 1535 and the devices in bus order.
 Each folder in `hil/bench/devices/` holds the known-good files of one drive, with the names they
@@ -1249,7 +1250,7 @@ pytest -k "scan and not power" # some tests only
 The tests reset the server and switch the drives off. Never run them against the shared server.
 The workflow `bench-tests.yml` runs them on `ci-belgrade-linux` when started by hand. Its input
 `tests` is a `-k` expression. It builds the Docker image, runs it with `--network host` and the
-SOEM capabilities, and uploads `report.xml`, `devices.json` and `server.log`. A `concurrency`
+SOEM capabilities, and uploads `report.xml` and `server.log`. A `concurrency`
 group keeps a second run off the bench.
 
 ## Code Style

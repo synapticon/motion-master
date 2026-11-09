@@ -127,5 +127,4 @@ jobs:
           name: bench-tests-${{ github.run_id }}
           path: |
             hil/bench/report.xml
-            hil/bench/devices.json
             hil/bench/server.log

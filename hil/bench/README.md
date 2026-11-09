@@ -28,13 +28,39 @@ A test can compare the device with it, or write it back to the device.
 ## The device report
 
 Before the first test, the run brings every device to PRE-OP and reads what it says it is: the
-product code, the revision, the firmware version from object `0x100A`, the hardware description,
-and the build descriptor. The run writes this to `devices.json`. In GitHub Actions it also writes a
-table to the job summary.
+product code, the revision, the firmware version from object `0x100A`, and the build descriptor and
+the serial number from the hardware description. In GitHub Actions the run writes this as a table
+to the job summary.
 
 Where a device does not match its folder, the report names the difference. The run does not fail
 for it. The report compares the product name, and the id, the version and the serial number in
 `.hardware_description`.
+
+## The report file
+
+With `--junitxml=report.xml`, pytest writes a JUnit XML report. JUnit XML is the test report format
+that most CI tools read. A passed test case carries a `message` property with what the test saw. A
+failed one carries the failure and its traceback, as JUnit XML always does.
+
+The device report goes into the same file, as properties of the test suite, so that one file holds
+everything about a run:
+
+| Property | Value |
+| --- | --- |
+| `server.version` | The version of the server under test |
+| `device.<position>.folder` | The folder of the device in `devices/` |
+| `device.<position>.productName` | The product name that `GET /api/devices` reports |
+| `device.<position>.productCode` | The product code, in hexadecimal |
+| `device.<position>.revisionNumber` | The revision number, in hexadecimal |
+| `device.<position>.firmwareVersion` | The value of object `0x100A` |
+| `device.<position>.buildDescriptor` | The build descriptor from the hardware description |
+| `device.<position>.serialNumber` | The serial number from the hardware description |
+| `device.<position>.differences` | Where the device differs from its folder, separated by `;` |
+| `device.<position>.failedReads` | The reads that failed, separated by `;` |
+| `report.error` | Only when the device report failed: why |
+
+A field that the device did not give is empty. Every device has every property, so a reader can
+rely on the keys.
 
 ## Run the tests
 
@@ -86,10 +112,10 @@ The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the test
 
 The tests always come from the selected branch, also when the server is a pulled image. The job
 summary names the server that ran. The workflow starts the server with the capabilities that SOEM
-needs. When the tests end, it uploads three files: `report.xml`, the JUnit
-report, `devices.json`, the device report, and `server.log`, the log of the server.
+needs. When the tests end, it uploads two files: `report.xml`, the report file, and `server.log`,
+the log of the server.
 
 The run page shows two tables below the job graph, in the job summary: the device report, and one
-row for each test with its result and, for a test that did not pass, its message.
+row for each test with its result and its message.
 
 Only one run uses the bench at a time. A second run waits.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 from motion_master_client import PRE_OP
@@ -14,29 +14,31 @@ _results: list[tuple[str, str, str]] = []
 
 
 @pytest.fixture(scope="session")
-def bench() -> Iterator[Bench]:
+def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[Bench]:
     """The bench, after one power cycle, so that a run starts from drives that just booted.
 
     The power supply has no read of its output state, so a power cycle is the only start that
-    is the same on every run. The device report is written here, before the first test. When
-    the last test ends, passed or not, the drives are switched off.
+    is the same on every run. The device report is written here, before the first test, to the
+    test-suite properties of report.xml and to the job summary. When the last test ends, passed
+    or not, the drives are switched off.
     """
     bench = Bench.from_environment()
     try:
-        yield _started(bench)
+        yield _started(bench, record_testsuite_property)
     finally:
         bench.psu.switch(False)
 
 
-def _started(bench: Bench) -> Bench:
+def _started(bench: Bench, record: Callable[[str, object], None]) -> Bench:
     bench.power_cycle()
     bench.client.ensure_state(PRE_OP, exact=True)
     # The report describes the run, and the tests decide its result. So a report that fails is
-    # logged and named in the job summary, and the tests still run.
+    # logged and named in report.xml and the job summary, and the tests still run.
     try:
-        write_device_report(bench)
+        write_device_report(bench, record)
     except Exception as error:
         logging.getLogger(__name__).exception("the device report failed")
+        record("report.error", repr(error))
         append_to_job_summary(f"The device report failed: `{error!r}`\n\n")
     return bench
 

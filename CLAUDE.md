@@ -180,6 +180,7 @@ motion-master/
     example/           ← copy-me starter: a route plug-in and a cyclic task
   hil/
     jitter_bench/      ← RT jitter benchmark (Linux only)
+    p1535/             ← ESP32 firmware: bench power supply on/off over HTTP. ESP-IDF, not CMake
     api/               ← HTTP + WebSocket integration tests (TypeScript / Vitest)
   cmake/lint.cmake     ← lint, cppcheck, format targets
   packaging/postinst   ← deb postinst; sets capabilities
@@ -1206,6 +1207,22 @@ Wedges the file system of a Circulo on purpose, which is the reproduction of syn
 
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interface> [--slave 1]   [--file config.csv] [--packets 2] [--pause 200] [--no-abort]
+```
+
+### p1535
+
+ESP32 firmware that switches the output of the PeakTech P 1535 bench power supply over HTTP:
+`GET /output-on` and `GET /output-off` set GPIO 18 high and low. It joins "Wifi Office" with a
+static address, `10.10.1.250` by default. It is an ESP-IDF project, so `hil/CMakeLists.txt` does
+not include it and the lint and format jobs do not read it.
+
+**The WiFi password lives only in `hil/p1535/sdkconfig`, which is gitignored.** This repository is
+public. Set it with `./configure.sh` (`idf.py menuconfig`). Never write it into a source file. The
+endpoints have no authentication. Guide: `docs/P1535_REMOTE_CONTROL.md`.
+
+```bash
+cd hil/p1535 && ./configure.sh && ./run.sh   # needs ESP-IDF's export.sh loaded
+curl http://10.10.1.250/output-off
 ```
 
 ### api

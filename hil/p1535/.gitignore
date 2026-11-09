@@ -1,0 +1,6 @@
+# sdkconfig holds the WiFi password, and this repository is public.
+sdkconfig
+sdkconfig.old
+build/
+managed_components/
+dependencies.lock

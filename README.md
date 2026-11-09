@@ -14,6 +14,7 @@ Design documents (the Mermaid diagrams render natively on GitHub):
 - [Locking and synchronisation](https://github.com/synapticon/motion-master/blob/main/docs/LOCKING.md) — every mutex, the lock ordering, and the lock-free protocols that carry the RT path.
 - [LAN deployment](https://github.com/synapticon/motion-master/blob/main/docs/LAN_DEPLOYMENT.md) — running the server on a separate machine (Raspberry Pi, industrial PC) and reaching it from the Console over the network.
 - [Raspberry Pi 5](https://github.com/synapticon/motion-master/blob/main/docs/RASPBERRY_PI.md) — the card image: download it, write it, set its Wi-Fi, reach it, and keep it up to date.
+- [P 1535 Remote Control](https://github.com/synapticon/motion-master/blob/main/docs/P1535_REMOTE_CONTROL.md) — the ESP32 firmware that switches a bench power supply on and off over HTTP: configure it, flash it, and call it.
 - [Writing guide](https://github.com/synapticon/motion-master/blob/main/docs/WRITING.md) — the English style for documentation, code comments, and commit messages.
 
 ## Installation

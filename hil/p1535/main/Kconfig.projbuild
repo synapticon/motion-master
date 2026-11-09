@@ -1,0 +1,31 @@
+menu "P1535 remote control"
+
+    config P1535_WIFI_SSID
+        string "WiFi SSID"
+        default "Wifi Office"
+        help
+            The network the ESP32 joins.
+
+    config P1535_WIFI_PASSWORD
+        string "WiFi password"
+        default ""
+        help
+            Set this in menuconfig only. The value goes into sdkconfig, which git ignores,
+            because this repository is public.
+
+    config P1535_STATIC_IP
+        string "Static IP address"
+        default "10.10.1.250"
+        help
+            Pick an address outside the DHCP pool of the router. Otherwise the router can give
+            the same address to another device.
+
+    config P1535_GATEWAY
+        string "Gateway"
+        default "10.10.1.1"
+
+    config P1535_NETMASK
+        string "Netmask"
+        default "255.255.255.0"
+
+endmenu

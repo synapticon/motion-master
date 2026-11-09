@@ -89,7 +89,7 @@ ctest --test-dir build/x64-linux-debug --output-on-failure
 ```
 
 The script also updates `vcpkg.json`, the root and per-package `package.json` files,
-`hil/api/package.json`, `apps/motion_master/swagger.yml`, the assertion in
+`apps/motion_master/swagger.yml`, the assertion in
 `libs/core/tests/version_test.cc`, the sidebar badge in
 `web/apps/console/src/layouts/RootLayout.tsx`, and `motion_master_version` in
 `rt/provision/ansible/roles/motion-master/defaults/main.yml`.
@@ -181,7 +181,7 @@ motion-master/
   hil/
     jitter_bench/      ← RT jitter benchmark (Linux only)
     p1535/             ← ESP32 firmware: bench power supply on/off over HTTP. ESP-IDF, not CMake
-    api/               ← HTTP + WebSocket integration tests (TypeScript / Vitest)
+    bench/             ← Python tests on the drives of a bench, with the P 1535 (pytest)
   cmake/lint.cmake     ← lint, cppcheck, format targets
   packaging/postinst   ← deb postinst; sets capabilities
   extern/vcpkg/        ← git submodule
@@ -1229,20 +1229,28 @@ hil/p1535/run.sh         # build, flash, monitor; P1535_PORT overrides the port
 hil/p1535/power.sh off   # or on; P1535_HOST overrides 10.10.1.250
 ```
 
-### api
+### bench
 
-TypeScript integration tests (Vitest) for the HTTP API and the WebSocket. They drive the
-published client library against a real server, so one run exercises the binary, the contract,
-and the client together. The global setup manages the Docker lifecycle.
+Python tests (pytest) that run against a server connected to the drives of a bench. They use the
+Python reference client in `clients/python`. A run starts with a power cycle through the P 1535,
+then writes `devices.json`: what each drive says it is, and where it differs from its folder.
+
+`hil/bench/benches/<bench>/` describes one bench. `bench.toml` holds the adapter, the P 1535 and
+the devices in bus order. Each device folder holds the known-good files of that drive, with the
+names they have on the drive (`.hardware_description`, `config.csv`, …).
 
 ```bash
-pnpm install                                 # repo root, first time only
-pnpm --filter motion-master-api-tests test
+cd hil/bench && python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pytest                         # MM_BENCH picks the bench, MM_URL the server
+pytest -k "scan and not power" # some tests only
 ```
 
-The image is built from the repo root and run with `--network host`, which is required because
-the server binds to `127.0.0.1`. Set `MM_SKIP_DOCKER=1` to test against an already-running
-instance.
+The tests reset the server and switch the drives off. Never run them against the shared server.
+The workflow `bench-tests.yml` runs them on `ci-belgrade-linux` when started by hand. Its input
+`tests` is a `-k` expression. It builds the Docker image, runs it with `--network host` and the
+SOEM capabilities, and uploads `report.xml`, `devices.json` and `server.log`. A `concurrency`
+group keeps a second run off the bench.
 
 ## Code Style
 

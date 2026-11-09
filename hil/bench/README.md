@@ -1,0 +1,89 @@
+# hil/bench: tests on the drives of a bench
+
+These tests run against a Motion Master server that is connected to real drives. A bench is a
+computer with an EtherCAT bus, the drives on that bus, and a PeakTech P 1535 power supply that
+supplies the drives. The tests switch the output of the power supply through the ESP32 firmware in
+[`hil/p1535`](../p1535), so a test can start from drives that just booted.
+
+The tests use the Python reference client in [`clients/python`](../../clients/python). So a run
+also checks that client.
+
+## The bench folder
+
+Each folder in `benches/` describes one bench. `ci-belgrade-linux` describes the bench of the
+self-hosted runner `ci-belgrade-linux`.
+
+`bench.toml` holds the settings of the bench:
+
+- `adapter` is the network interface of the EtherCAT bus.
+- `[psu]` gives the address of the P 1535, the time the output stays off in a power cycle, and the
+  time the drives get to boot.
+- `[[devices]]` lists the devices in bus order. `productName` is the value that
+  `GET /api/devices` reports. `folder` names the folder of the device.
+
+The folder of a device holds the files of that device, with the names they have on the device:
+`config.csv`, `.hardware_description`, `.factory_config` and others. A file is a known-good copy.
+A test can compare the device with it, or write it back to the device.
+
+## The device report
+
+Before the first test, the run brings every device to PRE-OP and reads what it says it is: the
+product code, the revision, the firmware version from object `0x100A`, the hardware description,
+and the build descriptor. The run writes this to `devices.json`. In GitHub Actions it also writes a
+table to the job summary.
+
+Where a device does not match its folder, the report names the difference. The run does not fail
+for it. The report compares the product name, and the id, the version and the serial number in
+`.hardware_description`.
+
+## Run the tests
+
+A run starts with one power cycle. Every test then starts with the driver closed. A test does not
+leave the bus as it found it.
+
+1. Start the server, and connect the bench to it.
+2. Install the dependencies.
+
+   ```bash
+   cd hil/bench
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+3. Run all tests.
+
+   ```bash
+   pytest
+   ```
+
+4. To run some tests only, give a pytest `-k` expression.
+
+   ```bash
+   pytest -k "scan and not power"
+   ```
+
+Two environment variables select the bench and the server:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MM_BENCH` | `ci-belgrade-linux` | The name of the bench file in `benches/`, without `.toml` |
+| `MM_URL` | `https://127.0.0.1:61447` | The HTTP API of the server under test |
+
+The tests reset the server and switch the drives off. Do not run them against a server that
+somebody else uses.
+
+## Run the tests in GitHub Actions
+
+The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the tests on
+`ci-belgrade-linux`. Start it by hand from the Actions tab. The input `tests` takes a pytest `-k`
+expression. An empty input runs every test.
+
+The workflow builds the Docker image of the server from the repository, and starts it with the
+capabilities that SOEM needs. When the tests end, it uploads three files: `report.xml`, the JUnit
+report, `devices.json`, the device report, and `server.log`, the log of the server.
+
+The run page shows two tables below the job graph, in the job summary: the device report, and one
+row for each test with its result and, for a test that did not pass, its message.
+
+Only one run uses the bench at a time. A second run waits.

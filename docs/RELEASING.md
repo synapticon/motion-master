@@ -15,7 +15,7 @@ Never edit `VERSION` by hand. Run the bump script with the new version:
 ./tools/bump-version.sh 6.1.0-alpha.0
 ```
 
-It writes `VERSION`, then propagates the value to every location that *isn't* auto-derived: `vcpkg.json`, the `package.json` manifests (root workspace + `motion-master`, `motion-master-client`, `hil/api`), `swagger.yml` (`info.version`), the `version_test.cc` assertion, and the UI sidebar badge in `RootLayout.tsx`.
+It writes `VERSION`, then propagates the value to every location that *isn't* auto-derived: `vcpkg.json`, the `package.json` manifests (root workspace + `motion-master`, `motion-master-client`), `swagger.yml` (`info.version`), the `version_test.cc` assertion, and the UI sidebar badge in `RootLayout.tsx`.
 
 ### How it reaches the C++ binary
 
@@ -59,7 +59,7 @@ That publishes `synapticon/motion-master:6.1.0` to Docker Hub for `linux/amd64` 
 | `build-macos-arm64.yml` | push / PR to `main` | Build & test (macOS Apple Silicon) |
 | `build-windows-x64.yml` | push / PR to `main` | Build & test (Windows x64) |
 | `lint.yml` | push / PR to `main` | Five gates: clang-format, cpplint, cppcheck, `api-client-drift` (the committed TS client must match `swagger.yml`), and `python-client-example` (every `operationId` the Python examples call must still resolve against the spec) |
-| `api-tests.yml` | push to `main` | Run the [`hil/api`](DEVELOPMENT.md#api-integration-tests) HTTP + WebSocket integration tests against a containerised server |
+| `bench-tests.yml` | manual dispatch | Run the [`hil/bench`](../hil/bench) tests on the drives of the `ci-belgrade-linux` bench. The input `tests` selects tests with a pytest `-k` expression |
 | `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; publish it to the rolling `tls-cert` release |
 | `deploy-pages.yml` | push to `main`, `v*` tag | Publish `motion-master.synapticon.com` — landing page, `/docs` Doxygen, the `swagger.yml` spec, and each PWA under `/apps/<name>/`. Docs and landing track `main`; the **apps are pinned to the latest `v*` tag** so the hosted console always matches a released binary |
 | `jitter.yml` | manual dispatch | Run `jitter_bench` on a `PREEMPT_RT` CI machine (duration / period / workload as inputs) |

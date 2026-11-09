@@ -15,8 +15,8 @@ Only needed for the parts you actually touch:
 
 | For | Needs |
 | --- | --- |
-| The web apps, the TS SDK, and the API integration tests | Node.js 22+ and pnpm 10+ (plus Docker for the [API tests](#api-integration-tests)) |
-| The [Python reference client](../README.md#clients) and the `jitter_bench` plot script | Python 3.11+ (`matplotlib` for plotting) |
+| The web apps and the TS SDK | Node.js 22+ and pnpm 10+ |
+| The [Python reference client](../README.md#clients), the [bench tests](#bench-tests), and the `jitter_bench` plot script | Python 3.11+ (`matplotlib` for plotting) |
 | Static analysis and formatting | `pip install cpplint cmakelang`, plus `clang-format` and `cppcheck` from your package manager |
 
 ## Building from source
@@ -31,7 +31,7 @@ git submodule update --init --recursive
 ./tools/build.sh
 ```
 
-`./tools/install-deps.sh` installs everything the repository needs from the distro: the C++23 toolchain, the tools vcpkg uses to build the dependencies from source, the lint and format set (`clang-format`, `clang-tidy`, `cppcheck`, `shellcheck`, plus `cpplint` and `cmake-format` via pipx), `dpkg-dev`/`rpm` for packaging, Node for the `web/` workspace, Ansible and QEMU for `rt/`, and Docker for the `hil/api` tests. It supports **Debian/Ubuntu (apt)** and **Fedora (dnf)**, and takes `--dry-run` to list the packages without installing, plus `--no-qemu` / `--no-docker` to skip the heavier groups. Everything else is built by the build itself — the script deliberately installs no vcpkg dependencies, only the tools that compile them.
+`./tools/install-deps.sh` installs everything the repository needs from the distro: the C++23 toolchain, the tools vcpkg uses to build the dependencies from source, the lint and format set (`clang-format`, `clang-tidy`, `cppcheck`, `shellcheck`, plus `cpplint` and `cmake-format` via pipx), `dpkg-dev`/`rpm` for packaging, Node for the `web/` workspace, Ansible and QEMU for `rt/`, and Docker for the server image. It supports **Debian/Ubuntu (apt)** and **Fedora (dnf)**, and takes `--dry-run` to list the packages without installing, plus `--no-qemu` / `--no-docker` to skip the heavier groups. Everything else is built by the build itself — the script deliberately installs no vcpkg dependencies, only the tools that compile them.
 
 Every script defaults to the **`x64-linux-debug`** preset (`CMAKE_BUILD_TYPE=Debug`), so the binary lands in `build/x64-linux-debug/apps/motion_master/`. Pass a preset name as the first argument to build optimised instead:
 
@@ -121,7 +121,7 @@ Calling the binary directly, set it in your config file instead:
 
 ## Web UI development
 
-All browser and Node TypeScript lives under [`web/`](../web) — the console PWA, a copy-me starter app, the published SDK, and the shared design system. They are members of one pnpm workspace **rooted at the repository root** (together with `hil/api`), so pnpm commands run from the root, not from `web/`:
+All browser and Node TypeScript lives under [`web/`](../web) — the console PWA, a copy-me starter app, the published SDK, and the shared design system. They are members of one pnpm workspace **rooted at the repository root**, so pnpm commands run from the root, not from `web/`:
 
 ```bash
 pnpm install            # once, from the repo root
@@ -274,13 +274,6 @@ python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
 
 The plot shows a time-series with P99/P99.9 reference lines and a jitter histogram. The terminal output prints min/max/mean/stddev/P50/P95/P99/P99.9 and an overrun count. Compare a standard kernel against `PREEMPT_RT` by running with `--workload 300` (a realistic 1 ms cycle budget) on each. The `Jitter Bench` workflow runs the same benchmark on demand on a `PREEMPT_RT` CI machine, with duration, period, and workload as dispatch inputs.
 
-### api integration tests
+### Bench tests
 
-[`hil/api`](../hil/api) drives the published TypeScript SDK against a real server with Vitest, so one run exercises the binary, the HTTP/WebSocket contract, and the client library together. The Docker lifecycle is fully managed by the test setup — no manual server startup:
-
-```bash
-pnpm install                # from the repo root — first time only
-pnpm test:api               # build image → start container → run tests → stop & remove
-```
-
-The image runs with `--network host` because the server binds to `127.0.0.1`. Set `MM_SKIP_DOCKER=1` to skip Docker entirely and test against an already-running instance, e.g. one started by `./tools/run.sh`.
+[`hil/bench`](../hil/bench) holds Python tests that run against a server connected to the drives of a bench. They switch the drives off and on through the P 1535 power supply. Its README tells how to run them, locally and in the `Bench Tests` workflow.

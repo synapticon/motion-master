@@ -1,0 +1,21 @@
+{
+  "mac_address": 70684592113016,
+  "stack_serial_number": "9501-02-0001845-1914",
+  "boards": [
+    {
+      "description": "Drive400",
+      "serial_number": "0003-02-0003522-1910",
+      "revision": "E.1"
+    },
+    {
+      "description": "Com EtherCAT",
+      "serial_number": "1000-02-0006851-1909",
+      "revision": "B.2"
+    },
+    {
+      "description": "Core C2X",
+      "serial_number": "0500-02-0003788-1909",
+      "revision": "A.5"
+    }
+  ]
+}

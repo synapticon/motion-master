@@ -1,0 +1,87 @@
+name: Bench Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: >-
+          The tests to run, as a pytest -k expression, for example "scan and not power".
+          Empty runs every test.
+        required: false
+        default: ""
+
+# One bench, one run. A second run waits until the first one ends.
+concurrency:
+  group: bench-ci-belgrade-linux
+  cancel-in-progress: false
+
+jobs:
+  bench-tests:
+    name: Run bench tests
+    runs-on: [self-hosted, ci-belgrade-linux]
+    timeout-minutes: 60
+
+    env:
+      CONTAINER: motion-master-bench
+      MM_BENCH: ci-belgrade-linux
+      MM_URL: https://127.0.0.1:61447
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Build the server image
+        run: docker build -t "$CONTAINER" .
+
+      # --network host, because the server binds to 127.0.0.1. The capabilities are those of
+      # SOEM (raw socket, promiscuous mode) and of the RT loop (SCHED_FIFO, mlockall).
+      - name: Start the server
+        run: |
+          docker rm -f "$CONTAINER" > /dev/null 2>&1 || true
+          docker run -d --rm --name "$CONTAINER" --network host \
+            --cap-add NET_RAW --cap-add NET_ADMIN --cap-add SYS_NICE --cap-add IPC_LOCK \
+            --ulimit memlock=-1 "$CONTAINER"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install the test dependencies
+        working-directory: hil/bench
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The selection goes through an environment variable, so that the shell never reads it as
+      # code.
+      - name: Run the tests
+        working-directory: hil/bench
+        env:
+          TESTS: ${{ inputs.tests }}
+        run: |
+          args=(--junitxml=report.xml)
+          if [[ -n "$TESTS" ]]; then
+            args+=(-k "$TESTS")
+          fi
+          pytest "${args[@]}"
+
+      - name: Save the server log
+        if: always()
+        run: docker logs "$CONTAINER" > hil/bench/server.log 2>&1 || true
+
+      - name: Stop the server
+        if: always()
+        run: docker stop "$CONTAINER" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: bench-tests-${{ github.run_id }}
+          path: |
+            hil/bench/report.xml
+            hil/bench/devices.json
+            hil/bench/server.log

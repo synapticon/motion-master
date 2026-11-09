@@ -7,7 +7,7 @@
 #   ./tools/install-deps.sh              # install everything
 #   ./tools/install-deps.sh --dry-run    # print what would be installed
 #   ./tools/install-deps.sh --no-qemu    # skip virtualization (rt/ won't work)
-#   ./tools/install-deps.sh --no-docker  # skip Docker (hil/api tests won't work)
+#   ./tools/install-deps.sh --no-docker  # skip Docker (no server image)
 #
 # Not covered here, on purpose:
 #   * vcpkg dependencies — built from source by the build itself; this script
@@ -83,7 +83,7 @@ if [ "$FAMILY" = debian ]; then
     # tools/package.sh builds both a .deb and an .rpm, on either distro.
     packages+=(dpkg-dev rpm)
 
-    # web/ workspace (Console, client library) and hil/api tests. Checked
+    # web/ workspace (Console, client library). Checked
     # separately: adding both when only one is missing would pull the distro's
     # nodejs alongside an existing nvm/fnm or versioned install.
     have node || packages+=(nodejs)
@@ -139,8 +139,8 @@ else
                    genisoimage xorriso dosfstools)
     fi
 
-    # Fedora defaults to podman; Docker proper is moby-engine. hil/api drives
-    # containers through the docker CLI, so install the engine rather than
+    # Fedora defaults to podman; Docker proper is moby-engine. The server image is
+    # built and run through the docker CLI, so install the engine rather than
     # relying on a podman-docker shim. Skipped when docker is already present —
     # commonly docker-ce from Docker's repository, which moby-engine conflicts
     # with (as does containerd.io against moby-engine's containerd).

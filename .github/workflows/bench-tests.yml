@@ -3,10 +3,19 @@ name: Bench Tests
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: >-
+          Server version. Empty: build the Docker image from the branch selected above, about
+          20 s when no C++ changed. A version such as 6.0.0-alpha.95: pull
+          synapticon/motion-master:<version> from Docker Hub and test that image. A version that
+          is not on Docker Hub fails the run before any test runs.
+        required: false
+        default: ""
       tests:
         description: >-
-          The tests to run, as a pytest -k expression, for example "scan and not power".
-          Empty runs every test.
+          Tests to run, as a pytest -k expression. Empty: run every test. "scan": run the tests
+          with scan in their name. "scan and not power": leave out the power-cycle test. An
+          expression that matches no test fails the run.
         required: false
         default: ""
 
@@ -27,13 +36,39 @@ jobs:
       MM_URL: https://127.0.0.1:61447
 
     steps:
+      # The tests always come from the selected branch. vcpkg, a submodule, is needed only to
+      # build the image.
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          submodules: recursive
+          submodules: ${{ inputs.version == '' && 'recursive' || 'false' }}
 
       - name: Build the server image
-        run: docker build -t "$CONTAINER" .
+        if: inputs.version == ''
+        run: |
+          docker build -t "$CONTAINER" .
+          echo "IMAGE=$CONTAINER" >> "$GITHUB_ENV"
+          echo "Server: image built from \`$GITHUB_REF_NAME\` at \`${GITHUB_SHA::7}\`." >> "$GITHUB_STEP_SUMMARY"
+
+      # The version goes through an environment variable, so that the shell never reads it as code.
+      # A tag on Docker Hub has no v, so a leading v is dropped.
+      - name: Pull the server image
+        if: inputs.version != ''
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          version="${VERSION#v}"
+          if [[ ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::'$VERSION' is not a version."
+            exit 1
+          fi
+          image="synapticon/motion-master:$version"
+          if ! docker pull "$image"; then
+            echo "::error::$image is not on Docker Hub."
+            exit 1
+          fi
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "Server: \`$image\`, pulled from Docker Hub." >> "$GITHUB_STEP_SUMMARY"
 
       # --network host, because the server binds to 127.0.0.1. The capabilities are those of
       # SOEM (raw socket, promiscuous mode) and of the RT loop (SCHED_FIFO, mlockall).
@@ -42,7 +77,7 @@ jobs:
           docker rm -f "$CONTAINER" > /dev/null 2>&1 || true
           docker run -d --rm --name "$CONTAINER" --network host \
             --cap-add NET_RAW --cap-add NET_ADMIN --cap-add SYS_NICE --cap-add IPC_LOCK \
-            --ulimit memlock=-1 "$CONTAINER"
+            --ulimit memlock=-1 "$IMAGE"
 
       - name: Set up Python
         uses: actions/setup-python@v6

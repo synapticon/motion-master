@@ -76,11 +76,16 @@ somebody else uses.
 ## Run the tests in GitHub Actions
 
 The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the tests on
-`ci-belgrade-linux`. Start it by hand from the Actions tab. The input `tests` takes a pytest `-k`
-expression. An empty input runs every test.
+`ci-belgrade-linux`. Start it by hand from the Actions tab. It has two inputs:
 
-The workflow builds the Docker image of the server from the repository, and starts it with the
-capabilities that SOEM needs. When the tests end, it uploads three files: `report.xml`, the JUnit
+| Input | Empty | Set |
+| --- | --- | --- |
+| `version` | Build the Docker image of the server from the selected branch. | Pull `synapticon/motion-master:<version>` from Docker Hub and test that image. A version that is not on Docker Hub fails the run before any test runs. |
+| `tests` | Run every test. | Run the tests that a pytest `-k` expression selects, for example `scan and not power`. |
+
+The tests always come from the selected branch, also when the server is a pulled image. The job
+summary names the server that ran. The workflow starts the server with the capabilities that SOEM
+needs. When the tests end, it uploads three files: `report.xml`, the JUnit
 report, `devices.json`, the device report, and `server.log`, the log of the server.
 
 The run page shows two tables below the job graph, in the job summary: the device report, and one

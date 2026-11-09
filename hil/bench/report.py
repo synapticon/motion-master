@@ -27,7 +27,8 @@ def write_device_report(bench: Bench) -> list[dict]:
         live = live_devices[device.position - 1] if device.position <= len(live_devices) else None
         entries.append(_entry(bench, device, live))
     REPORT_PATH.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
-    append_to_job_summary(_markdown(bench, entries))
+    server_version = bench.client.call("getVersion").json()["version"]
+    append_to_job_summary(_markdown(bench, server_version, entries))
     return entries
 
 
@@ -116,9 +117,11 @@ def _identity_differences(stored: dict, live: dict) -> list[str]:
     return differences
 
 
-def _markdown(bench: Bench, entries: list[dict]) -> str:
+def _markdown(bench: Bench, server_version: str, entries: list[dict]) -> str:
     lines = [
         f"## Devices of bench {bench.description.name}",
+        "",
+        f"Server version: {server_version}",
         "",
         "| Position | Product | Product code | Revision | Firmware | Build descriptor | Serial number |",
         "| --- | --- | --- | --- | --- | --- | --- |",

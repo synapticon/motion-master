@@ -27,11 +27,39 @@ def write_device_report(bench: Bench) -> list[dict]:
         live = live_devices[device.position - 1] if device.position <= len(live_devices) else None
         entries.append(_entry(bench, device, live))
     REPORT_PATH.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
+    append_to_job_summary(_markdown(bench, entries))
+    return entries
+
+
+def append_to_job_summary(markdown: str) -> None:
+    """Add markdown to the job summary of GitHub Actions. Outside GitHub Actions, do nothing."""
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
-            f.write(_markdown(bench, entries))
-    return entries
+            f.write(markdown)
+
+
+def test_results_markdown(results: list[tuple[str, str, str]]) -> str:
+    """Return a table of (test, outcome, message), one row per test, in the order they ran."""
+    counts = {}
+    for _, outcome, _ in results:
+        counts[outcome] = counts.get(outcome, 0) + 1
+    lines = [
+        "## Test results",
+        "",
+        ", ".join(f"{count} {outcome}" for outcome, count in counts.items()) or "No test ran.",
+        "",
+        "| Test | Result | Message |",
+        "| --- | --- | --- |",
+    ]
+    for name, outcome, message in results:
+        lines.append(f"| `{name}` | {outcome} | {_cell(message)} |")
+    return "\n".join(lines) + "\n\n"
+
+
+def _cell(text: str) -> str:
+    """Make text safe for one cell of a markdown table."""
+    return text.replace("|", "\\|").replace("\n", "<br>")
 
 
 def _entry(bench: Bench, device: BenchDevice, live: dict | None) -> dict:

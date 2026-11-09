@@ -83,4 +83,7 @@ The workflow builds the Docker image of the server from the repository, and star
 capabilities that SOEM needs. When the tests end, it uploads three files: `report.xml`, the JUnit
 report, `devices.json`, the device report, and `server.log`, the log of the server.
 
+The run page shows two tables below the job graph, in the job summary: the device report, and one
+row for each test with its result and, for a test that did not pass, its message.
+
 Only one run uses the bench at a time. A second run waits.

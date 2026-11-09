@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.122] - 2026-11-10
+
 ### Fixed
 
 - **`MotionMasterClient` of the TypeScript client sends requests when it gets no `customFetch`.** Every request failed with "this.customFetch is not a function", because the client replaced the default `fetch` with the missing option. (#196)
@@ -1079,7 +1081,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.121...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.122...HEAD
+[6.0.0-alpha.122]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.121...v6.0.0-alpha.122
 [6.0.0-alpha.121]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.120...v6.0.0-alpha.121
 [6.0.0-alpha.120]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.119...v6.0.0-alpha.120
 [6.0.0-alpha.119]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.118...v6.0.0-alpha.119

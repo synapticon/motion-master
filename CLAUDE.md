@@ -1242,7 +1242,7 @@ have on the drive (`.hardware_description`, `config.csv`, …).
 ```bash
 cd hil/bench && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pytest                         # MM_URL picks the server
+pytest                         # MM_HTTP_URL and MM_WS_URL pick the server
 pytest -k "scan and not power" # some tests only
 ```
 

@@ -18,7 +18,8 @@ This folder describes one bench: the bench of the self-hosted runner `ci-belgrad
 - `[psu]` gives the address of the P 1535, the time the output stays off in a power cycle, and the
   time the drives get to boot.
 - `[[devices]]` lists the devices in bus order. `productName` is the value that
-  `GET /api/devices` reports. `folder` names the folder of the device in `devices/`.
+  `GET /api/devices` reports. `folder` is the name of the device's subfolder in `devices/`, for
+  example `2-circulo`.
 
 The folder of a device holds the files of that device, with the names they have on the device:
 `config.csv`, `.hardware_description`, `.factory_config` and others. A file is a known-good copy.
@@ -63,11 +64,12 @@ off.
    pytest -k "scan and not power"
    ```
 
-One environment variable selects the server:
+Two environment variables select the server:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `MM_URL` | `https://127.0.0.1:61447` | The HTTP API of the server under test |
+| `MM_HTTP_URL` | `https://127.0.0.1:61447` | The HTTP API of the server under test |
+| `MM_WS_URL` | `wss://127.0.0.1:62281` | The WebSocket of the server under test |
 
 The tests reset the server and switch the drives off. Do not run them against a server that
 somebody else uses.

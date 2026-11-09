@@ -32,7 +32,8 @@ jobs:
 
     env:
       CONTAINER: motion-master-bench
-      MM_URL: https://127.0.0.1:61447
+      MM_HTTP_URL: https://127.0.0.1:61447
+      MM_WS_URL: wss://127.0.0.1:62281
 
     steps:
       # The tests always come from the selected branch. vcpkg, a submodule, is needed only to

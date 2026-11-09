@@ -72,20 +72,24 @@ class Psu:
 class Bench:
     """The server under test, connected to the bench."""
 
-    def __init__(self, description: BenchDescription, url: str):
+    def __init__(self, description: BenchDescription, http_url: str, ws_url: str):
         self.description = description
         self.psu = Psu(description.psu_host)
         self.client = MotionMasterClient(
-            url, verify=False, fieldbus={"driver": "soem", "adapter": description.adapter}
+            http_url,
+            ws_url=ws_url,
+            verify=False,
+            fieldbus={"driver": "soem", "adapter": description.adapter},
         )
 
     @classmethod
     def from_environment(cls) -> Bench:
-        """Build the bench from bench.toml and MM_URL, after the server answers."""
+        """Build the bench from bench.toml, MM_HTTP_URL and MM_WS_URL, after the server answers."""
         description = BenchDescription.load()
-        url = os.environ.get("MM_URL", "https://127.0.0.1:61447")
-        _wait_for_server(url, timeout=60)
-        return cls(description, url)
+        http_url = os.environ.get("MM_HTTP_URL", "https://127.0.0.1:61447")
+        ws_url = os.environ.get("MM_WS_URL", "wss://127.0.0.1:62281")
+        _wait_for_server(http_url, timeout=60)
+        return cls(description, http_url, ws_url)
 
     def reset(self) -> None:
         """Close the driver and forget every device, so that the next step starts from nothing."""

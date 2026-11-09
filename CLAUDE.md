@@ -1220,9 +1220,13 @@ not include it and the lint and format jobs do not read it.
 public. Set it with `./configure.sh` (`idf.py menuconfig`). Never write it into a source file. The
 endpoints have no authentication. Guide: `docs/P1535_REMOTE_CONTROL.md`.
 
+The scripts load ESP-IDF themselves. `env.sh` pins the ESP-IDF version and finds the port.
+
 ```bash
-cd hil/p1535 && ./configure.sh && ./run.sh   # needs ESP-IDF's export.sh loaded
-curl http://10.10.1.250/output-off
+hil/p1535/setup.sh       # once per computer: ESP-IDF in ~/esp/esp-idf, dialout, port access
+hil/p1535/configure.sh   # menuconfig: WiFi password and address
+hil/p1535/run.sh         # build, flash, monitor; P1535_PORT overrides the port
+hil/p1535/power.sh off   # or on; P1535_HOST overrides 10.10.1.250
 ```
 
 ### api

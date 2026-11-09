@@ -33,41 +33,59 @@ address. It does not use DHCP.
 ## What you need
 
 - The ESP32 board with the firmware circuit, and a USB cable.
-- A Linux computer with [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup.html)
-  installed. ESP-IDF is the Espressif build system for the ESP32.
+- A Linux computer with `git`, `sudo` rights, and the
+  [ESP-IDF prerequisites](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup.html).
+  ESP-IDF is the Espressif build system for the ESP32.
 - The password of the WiFi network.
 - An address on that network that is outside the DHCP pool of the router. Otherwise the router can
   give the same address to another device.
 
-The ESP-IDF version that the firmware was last built with is not recorded. The ESP32 chip on the
-board is not recorded either. The steps below use `esp32`, which is also the default target of
-`idf.py`. Run `idf.py set-target <chip>` once if the board has a different chip.
+The ESP32 chip on the board is not recorded. The scripts build for `esp32`, which is also the
+default target of `idf.py`. Run `idf.py set-target <chip>` once if the board has a different chip.
 
-## Install ESP-IDF
+## Scripts
 
-Do these steps once on the computer that flashes the board.
+All scripts are in `hil/p1535`. Run them from any directory. Each script loads the ESP-IDF
+environment itself, so you do not run `export.sh` first.
 
-1. Install ESP-IDF. Follow the Espressif guide that is linked above.
+| Script | Does | When |
+| --- | --- | --- |
+| `setup.sh` | Install ESP-IDF, and give your user access to the serial port | Once per computer |
+| `configure.sh` | Open the configuration menu: WiFi and address | Once, and after each change of network |
+| `run.sh` | Build, flash, and open the serial monitor | After each change of the firmware or the configuration |
+| `power.sh on` | Turn the power supply output on | Any time |
+| `power.sh off` | Turn the power supply output off | Any time |
+
+`env.sh` holds what the other scripts share: the ESP-IDF version and the search for the serial
+port. You do not run it.
+
+These environment variables change what the scripts use:
+
+| Variable | Default | Used by |
+| --- | --- | --- |
+| `IDF_PATH` | `~/esp/esp-idf` | `setup.sh`, `configure.sh`, `run.sh` |
+| `P1535_PORT` | The first CP210x USB serial adapter, else `/dev/ttyUSB0` | `setup.sh`, `run.sh` |
+| `P1535_HOST` | `10.10.1.250` | `power.sh` |
+
+## Set up the computer
+
+Do this once on each computer that flashes the board.
+
+1. Connect the ESP32 to the computer with the USB cable.
+
+2. Run the setup script. It asks for your `sudo` password.
 
    ```bash
-   mkdir -p ~/esp
-   cd ~/esp
-   git clone --recursive https://github.com/espressif/esp-idf.git
-   cd esp-idf
-   ./install.sh esp32
+   hil/p1535/setup.sh
    ```
 
-2. Give your user access to the serial port. Log out and log in again after this command.
+The script does these steps. It skips a step that is already done, so you can run it again.
 
-   ```bash
-   sudo usermod -aG dialout "$USER"
-   ```
-
-Load the ESP-IDF environment in each new shell before you use `idf.py`:
-
-```bash
-. ~/esp/esp-idf/export.sh
-```
+1. It downloads ESP-IDF to `~/esp/esp-idf`, at the version in `env.sh`.
+2. It installs the ESP32 toolchain to `~/.espressif`.
+3. It adds your user to the `dialout` group. This takes effect at your next login.
+4. It gives your user access to the serial port of the board until you unplug it. So the first
+   flash works without a new login.
 
 ## Configure
 
@@ -81,25 +99,19 @@ The firmware reads its network settings from the ESP-IDF configuration. These ar
 | Gateway | `10.10.1.1` |
 | Netmask | `255.255.255.0` |
 
-1. Go to the firmware directory.
+1. Open the configuration menu. Run it in a terminal, because the menu is interactive.
 
    ```bash
-   cd hil/p1535
+   hil/p1535/configure.sh
    ```
 
-2. Open the configuration menu.
+2. Open **P1535 remote control**.
 
-   ```bash
-   ./configure.sh
-   ```
+3. Set **WiFi password**.
 
-3. Open **P1535 remote control**.
+4. Change the other settings if your network is different.
 
-4. Set **WiFi password**.
-
-5. Change the other settings if your network is different.
-
-6. Save, and exit the menu.
+5. Press `S` to save, and `Q` to exit the menu.
 
 The menu writes the settings to `hil/p1535/sdkconfig`. Git ignores that file, because it holds the
 WiFi password and this repository is public. Never commit the password.
@@ -108,25 +120,22 @@ WiFi password and this repository is public. Never commit the password.
 
 1. Connect the ESP32 to the computer with the USB cable.
 
-2. Find its serial port. It is usually `/dev/ttyUSB0`.
+2. Build, flash, and open the serial monitor. Run it in a terminal, because the monitor is
+   interactive.
 
    ```bash
-   ls /dev/ttyUSB*
+   hil/p1535/run.sh
    ```
 
-3. Build, flash, and open the serial monitor. `run.sh` uses `/dev/ttyUSB0`.
+   The script stops if no WiFi password is set. Run `configure.sh` first.
+
+   For a port that the script does not find, set `P1535_PORT`:
 
    ```bash
-   ./run.sh
+   P1535_PORT=/dev/ttyUSB1 hil/p1535/run.sh
    ```
 
-   For a different port, run `idf.py` yourself:
-
-   ```bash
-   idf.py -p /dev/ttyUSB1 flash monitor
-   ```
-
-4. Read the serial monitor. A good start shows these lines:
+3. Read the serial monitor. A good start shows these lines:
 
    ```text
    I (...) wifi station: got ip:10.10.1.250
@@ -134,7 +143,7 @@ WiFi password and this repository is public. Never commit the password.
    I (...) http server: HTTP server started
    ```
 
-5. Press `Ctrl+]` to close the monitor. The ESP32 keeps running.
+4. Press `Ctrl+]` to close the monitor. The ESP32 keeps running.
 
 ## Use
 
@@ -145,6 +154,21 @@ The computer must be on the same network as the ESP32.
 | `GET /` | Show a page that describes the endpoints |
 | `GET /output-on` | Turn the output on |
 | `GET /output-off` | Turn the output off |
+
+Use the script:
+
+```bash
+hil/p1535/power.sh off
+hil/p1535/power.sh on
+```
+
+For a board with another address, set `P1535_HOST`:
+
+```bash
+P1535_HOST=10.10.1.251 hil/p1535/power.sh off
+```
+
+Or call the endpoints directly:
 
 ```bash
 curl http://10.10.1.250/output-off
@@ -163,8 +187,8 @@ not documented. Send `/output-on` or `/output-off` after each restart to put it 
 | --- | --- |
 | The log shows `Failed to connect to SSID` | The SSID and the password in the configuration. Most ESP32 chips support 2.4 GHz WiFi only, so the network must offer 2.4 GHz. |
 | The log shows `got ip`, but `curl` gets no answer | The computer is on the same network. No other device uses the address. |
-| `idf.py` cannot open the serial port | The port name, and that your user is in the `dialout` group. |
-| `idf.py: command not found` | Load the ESP-IDF environment with `export.sh`. |
+| `idf.py` cannot open the serial port | The port name. Run `setup.sh` again after you plug the board in, or log in again after the first `setup.sh`. |
+| A script says `ESP-IDF is not installed` | Run `setup.sh`, or set `IDF_PATH` to your ESP-IDF directory. |
 
 After a fixed number of failed connection attempts, the firmware stops the attempts. It still starts
 the HTTP server, but nothing can reach it. Reset the ESP32 to try again.

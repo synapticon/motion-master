@@ -121,6 +121,11 @@ def cia402_state(statusword):
 _LADDER = [INIT, PRE_OP, SAFE_OP, OP]
 
 
+def _path(position, **more):
+    """Return the path parameters that address the device at `position`, plus any others."""
+    return {"slavePosition": position, **more}
+
+
 def _not_reached(result, step):
     """Say which devices of a state change did not reach `step`, and why."""
     failed = ", ".join(
@@ -337,12 +342,11 @@ class MotionMasterClient:
 
         The list is the object dictionary as the server enumerated it (getDeviceParameters).
         """
-        return self.call("getDeviceParameters", path={"slavePosition": position}).json()
+        return self.call("getDeviceParameters", path=_path(position)).json()
 
     def hardware_description(self, position):
         """Return the .hardware_description of a device, parsed (getDeviceHardwareDescription)."""
-        path = {"slavePosition": position}
-        return self.call("getDeviceHardwareDescription", path=path).json()
+        return self.call("getDeviceHardwareDescription", path=_path(position)).json()
 
     def read_value(self, position, obj):
         """Read one object of a device and return its value, decoded by the server.
@@ -352,7 +356,7 @@ class MotionMasterClient:
         value with the data type from the object dictionary, so the caller needs no type.
         """
         index, subindex = obj
-        path = {"slavePosition": position, "index": index, "subindex": subindex}
+        path = _path(position, index=index, subindex=subindex)
         return self.call("readParameter", path=path).json()["value"]
 
     def wait_for_value(self, position, obj, predicate, timeout=1.0, interval=0.05):
@@ -456,8 +460,8 @@ class MotionMasterClient:
         Returns the CiA402 snapshot after the write. The drive takes the mode some cycles later;
         0x6061 shows when.
         """
-        path = {"slavePosition": position}
-        return self.call("setCia402OperationMode", path=path, body={"mode": mode}).json()
+        body = {"mode": mode}
+        return self.call("setCia402OperationMode", path=_path(position), body=body).json()
 
     def set_target(self, position, kind, value):
         """Write the target of one kind, "position", "velocity" or "torque" (setCia402Target).
@@ -465,7 +469,7 @@ class MotionMasterClient:
         The value is in the units of the object: 0x607A, 0x60FF or 0x6071.
         """
         body = {"target": kind, "value": value}
-        self.call("setCia402Target", path={"slavePosition": position}, body=body)
+        self.call("setCia402Target", path=_path(position), body=body)
 
     def enable(self, position):
         """Bring a drive to Operation Enabled, and return its CiA402 snapshot.
@@ -485,12 +489,12 @@ class MotionMasterClient:
         It returns at once. The drive stops on its quick stop ramp, and 0x605A says the state it
         ends in.
         """
-        path = {"slavePosition": position}
-        return self.call("runCia402Command", path=path, body={"command": "quickStop"}).json()
+        body = {"command": "quickStop"}
+        return self.call("runCia402Command", path=_path(position), body=body).json()
 
     def _to_cia402_state(self, position, state):
-        path = {"slavePosition": position}
-        return self.call("transitionToCia402State", path=path, body={"state": state}).json()
+        body = {"state": state}
+        return self.call("transitionToCia402State", path=_path(position), body=body).json()
 
     def run_procedure(self, position, name, params=None, poll_interval=0.5):
         """Start a procedure on a device and yield its snapshot at every poll until the run ends.
@@ -505,7 +509,7 @@ class MotionMasterClient:
         on the device, 404 when the device has no procedure of that name, 400 for a parameter the
         procedure refuses.
         """
-        path = {"slavePosition": position, "procedureName": name}
+        path = _path(position, procedureName=name)
         r = self.call("startProcedure", path=path, body=params or {}, check=False)
         if not r.ok:
             try:

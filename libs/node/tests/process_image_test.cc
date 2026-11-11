@@ -1355,11 +1355,12 @@ TEST(DeviceManagerProcessData, CountsCyclesTheBusDidNotFullyAnswer) {
   EXPECT_EQ(dm.processImageInfo().lastShortWkcUs, 0u);
 }
 
-TEST(DeviceManagerProcessData, RejectsIllegalAlStateTransitions) {
-  // Motion Master enforces the EtherCAT AL state machine before touching the bus. The critical
-  // case is BOOT -> SAFE-OP/OP: entering an exchange state re-maps by reading PDO mappings over the
-  // CoE mailbox, which a device in BOOT cannot serve — that read segfaults inside SOEM. So an
-  // illegal jump must be rejected up front, never reaching the mapper.
+TEST(DeviceManagerProcessData, CommandsOnlyLegalAlStateTransitions) {
+  // Motion Master walks the EtherCAT AL state machine and never commands a transition it does not
+  // allow. The critical case is BOOT -> SAFE-OP/OP: entering an exchange state re-maps by reading
+  // PDO mappings over the CoE mailbox, which a device in BOOT cannot serve — that read segfaults
+  // inside SOEM. So a device in BOOT is sent to INIT first. This bus never changes state, so each
+  // walk stops after its first step, and that step is what each case checks.
   const auto kNow = std::chrono::milliseconds(0);
   auto bus = makeCia402Bus();
   FakeBus* busPtr = bus.get();
@@ -1367,29 +1368,27 @@ TEST(DeviceManagerProcessData, RejectsIllegalAlStateTransitions) {
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  // BOOT reaches only INIT.
-  busPtr->state = static_cast<uint16_t>(EtherCatState::Boot);
-  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::PreOp, kNow).has_value());
-  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::SafeOp, kNow).has_value());
-  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Op, kNow).has_value());
-  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Init, kNow).has_value());
+  const auto firstStep = [&](EtherCatState from, EtherCatState to) {
+    busPtr->state = static_cast<uint16_t>(from);
+    busPtr->commandedStates.clear();
+    EXPECT_TRUE(dm.transitionToState({}, to, kNow).has_value());
+    return busPtr->commandedStates;
+  };
+  using Steps = std::vector<EtherCatState>;
 
-  // INIT climbs only to PRE-OP (or enters BOOT); skipping to SAFE-OP/OP is rejected.
-  busPtr->state = static_cast<uint16_t>(EtherCatState::Init);
-  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::SafeOp, kNow).has_value());
-  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Op, kNow).has_value());
-  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::PreOp, kNow).has_value());
-  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Boot, kNow).has_value());
+  // BOOT leaves only through INIT.
+  EXPECT_EQ(firstStep(EtherCatState::Boot, EtherCatState::Op), Steps{EtherCatState::Init});
+  EXPECT_EQ(firstStep(EtherCatState::Boot, EtherCatState::PreOp), Steps{EtherCatState::Init});
 
-  // PRE-OP climbs only one step (to SAFE-OP); OP is two steps and BOOT is reachable only from INIT.
-  busPtr->state = static_cast<uint16_t>(EtherCatState::PreOp);
-  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Op, kNow).has_value());
-  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Boot, kNow).has_value());
-  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Init, kNow).has_value());
+  // A climb goes one state at a time.
+  EXPECT_EQ(firstStep(EtherCatState::Init, EtherCatState::Op), Steps{EtherCatState::PreOp});
+  EXPECT_EQ(firstStep(EtherCatState::PreOp, EtherCatState::Op), Steps{EtherCatState::SafeOp});
 
-  // Drops may skip levels: OP -> INIT is allowed.
-  busPtr->state = static_cast<uint16_t>(EtherCatState::Op);
-  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Init, kNow).has_value());
+  // BOOT is entered only from INIT.
+  EXPECT_EQ(firstStep(EtherCatState::PreOp, EtherCatState::Boot), Steps{EtherCatState::Init});
+
+  // A drop may skip states: OP -> INIT is one step.
+  EXPECT_EQ(firstStep(EtherCatState::Op, EtherCatState::Init), Steps{EtherCatState::Init});
 }
 
 TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {

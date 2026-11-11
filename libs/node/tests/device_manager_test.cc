@@ -50,6 +50,16 @@ class FakeDriver : public FieldbusDriver {
   /// The object dictionary that readObjectDictionary() reports for every slave.
   std::vector<mm::comm::OdEntry> od;
 
+  /// AL state of each slave, by position. A slave listed here reports it in place of reportState,
+  /// and transitionToState() moves it to the commanded state, unless refuses names that state.
+  std::map<uint16_t, uint16_t> states;
+
+  /// The state a slave does not reach: transitionToState() leaves it where it is.
+  std::map<uint16_t, uint16_t> refuses;
+
+  /// Every transitionToState() call, as the commanded positions and the target state.
+  std::vector<std::pair<std::vector<uint16_t>, EtherCatState>> commanded;
+
   /// Slaves that readStates() reports as not answering, with the reason. Every other slave answers.
   std::map<uint16_t, mm::comm::Reachability> unreachable;
 
@@ -111,19 +121,24 @@ class FakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     // Mimic ecx_readstate: a read refreshes the cached state that slaveState() returns.
     cachedState_ = reportState;
-    std::vector<SlaveStateRaw> states;
+    std::vector<SlaveStateRaw> result;
     for (const uint16_t position : positions) {
       const auto it = unreachable.find(position);
-      states.push_back(it == unreachable.end()
-                           ? SlaveStateRaw{.alStatus = reportState, .alStatusCode = 0}
+      const auto state = this->states.find(position);
+      const uint16_t alStatus = state == this->states.end() ? reportState : state->second;
+      result.push_back(it == unreachable.end()
+                           ? SlaveStateRaw{.alStatus = alStatus, .alStatusCode = 0}
                            : SlaveStateRaw{.reachability = it->second});
     }
-    return states;
+    return result;
   }
 
   std::optional<int> readDevicesOnWire() override { return devicesOnWire; }
 
-  uint16_t slaveState(uint16_t) const override { return cachedState_; }
+  uint16_t slaveState(uint16_t position) const override {
+    const auto state = states.find(position);
+    return state == states.end() ? cachedState_ : state->second;
+  }
   // Emulated SOMANET drives all speak CoE, so their PDO mapping is read over the mailbox
   // (not from SII) — the CoE-mapping reads these tests program are what drive readFlatPdoMapping.
   uint16_t mailboxProtocols(uint16_t) const override {
@@ -187,10 +202,20 @@ class FakeDriver : public FieldbusDriver {
     return watchdogConfig;
   }
 
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
-                         std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
-                         std::function<void()>, std::function<bool()>) override {
+  void transitionToState(const std::vector<uint16_t>& positions, std::optional<EtherCatState>,
+                         EtherCatState target, std::chrono::steady_clock::duration,
+                         std::chrono::steady_clock::duration, std::function<void()>,
+                         std::function<bool()>) override {
     ++transitions;
+    commanded.emplace_back(positions, target);
+    for (const uint16_t position : positions) {
+      const auto refused = refuses.find(position);
+      const bool refusesTarget =
+          refused != refuses.end() && refused->second == static_cast<uint16_t>(target);
+      if (states.contains(position) && !refusesTarget) {
+        states[position] = static_cast<uint16_t>(target);
+      }
+    }
   }
 
   std::optional<std::string> stateChangeRefusal() const override { return refusal; }
@@ -337,6 +362,100 @@ TEST(DeviceManagerState, ADeviceThatDoesNotAnswerDoesNotFailTheOthers) {
   ASSERT_EQ(result->size(), 2U);
   EXPECT_EQ((*result)[0].reachability, mm::comm::Reachability::Answering);
   EXPECT_EQ((*result)[1].reachability, mm::comm::Reachability::NotAnswering);
+}
+
+// A bus of @p initial.size() devices, scanned, each in the AL state given for it.
+std::pair<std::unique_ptr<DeviceManager>, FakeDriver*> busInStates(
+    const std::vector<EtherCatState>& initial) {
+  auto driver = std::make_unique<FakeDriver>(true, static_cast<int>(initial.size()));
+  for (std::size_t i = 0; i < initial.size(); ++i) {
+    driver->states[static_cast<uint16_t>(i + 1)] = static_cast<uint16_t>(initial[i]);
+  }
+  FakeDriver* raw = driver.get();
+  auto dm = std::make_unique<DeviceManager>();
+  EXPECT_TRUE(dm->init(std::move(driver)).has_value());
+  EXPECT_TRUE(dm->scan().has_value());
+  raw->commanded.clear();
+  return {std::move(dm), raw};
+}
+
+using Commanded = std::vector<std::pair<std::vector<uint16_t>, EtherCatState>>;
+
+TEST(DeviceManagerStateWalk, ClimbsOneStateAtATime) {
+  auto [dm, driver] = busInStates({EtherCatState::Init, EtherCatState::Init});
+
+  const auto result = dm->transitionToState({}, EtherCatState::Op, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded, (Commanded{{{1, 2}, EtherCatState::PreOp},
+                                          {{1, 2}, EtherCatState::SafeOp},
+                                          {{1, 2}, EtherCatState::Op}}));
+  for (const auto& info : *result) {
+    EXPECT_EQ(info.alState, static_cast<uint16_t>(EtherCatState::Op));
+  }
+}
+
+TEST(DeviceManagerStateWalk, LeavesBootThroughInit) {
+  auto [dm, driver] = busInStates({EtherCatState::Boot});
+
+  const auto result = dm->transitionToState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded,
+            (Commanded{{{1}, EtherCatState::Init}, {{1}, EtherCatState::PreOp}}));
+}
+
+TEST(DeviceManagerStateWalk, EntersBootThroughInit) {
+  auto [dm, driver] = busInStates({EtherCatState::PreOp});
+
+  const auto result = dm->transitionToState({}, EtherCatState::Boot, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::Init}, {{1}, EtherCatState::Boot}}));
+}
+
+TEST(DeviceManagerStateWalk, DropsInOneStep) {
+  auto [dm, driver] = busInStates({EtherCatState::SafeOp});
+
+  const auto result = dm->transitionToState({}, EtherCatState::Init, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::Init}}));
+}
+
+TEST(DeviceManagerStateWalk, CommandsADeviceAlreadyThereOnce) {
+  // As a single transition always did, so that an error the device holds is acknowledged.
+  auto [dm, driver] = busInStates({EtherCatState::PreOp});
+
+  const auto result = dm->transitionToState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::PreOp}}));
+}
+
+TEST(DeviceManagerStateWalk, DevicesInDifferentStatesTakeTheLowestStepFirst) {
+  // Device 1 needs a mailbox before device 2's step to SAFE-OP maps the bus.
+  auto [dm, driver] = busInStates({EtherCatState::Init, EtherCatState::PreOp});
+
+  const auto result = dm->transitionToState({}, EtherCatState::SafeOp, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::PreOp},
+                                          {{2}, EtherCatState::SafeOp},
+                                          {{1}, EtherCatState::SafeOp}}));
+}
+
+TEST(DeviceManagerStateWalk, StopsAtTheFirstStepADeviceDoesNotReach) {
+  auto [dm, driver] = busInStates({EtherCatState::Init});
+  driver->refuses[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
+
+  const auto result = dm->transitionToState({}, EtherCatState::Op, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded,
+            (Commanded{{{1}, EtherCatState::PreOp}, {{1}, EtherCatState::SafeOp}}));
+  ASSERT_EQ(result->size(), 1U);
+  EXPECT_EQ((*result)[0].alState, static_cast<uint16_t>(EtherCatState::PreOp));
 }
 
 // Scans a bus of @p slaves devices, all in PRE-OP, with as many on the wire.

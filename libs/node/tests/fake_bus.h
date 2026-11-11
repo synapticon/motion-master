@@ -150,6 +150,9 @@ class FakeBus : public FieldbusDriver {
   std::optional<uint8_t> escType;
   bool mailboxWriteOnce = false;
   void stop() override {}
+  /// The target of every transitionToState() call, in order. The states do not change with it.
+  std::vector<EtherCatState> commandedStates;
+
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& p) override {
     // Mirror slaveState() so the per-position state the test set up is what callers read back —
@@ -195,9 +198,11 @@ class FakeBus : public FieldbusDriver {
   // working-counter expectation has to already be correct.
   std::function<void()> whileTransitioning;
 
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
-                         std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
-                         std::function<void()>, std::function<bool()>) override {
+  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>,
+                         EtherCatState target, std::chrono::steady_clock::duration,
+                         std::chrono::steady_clock::duration, std::function<void()>,
+                         std::function<bool()>) override {
+    commandedStates.push_back(target);
     if (whileTransitioning) {
       whileTransitioning();
     }

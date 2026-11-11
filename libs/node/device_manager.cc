@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -98,6 +99,38 @@ const std::map<EtherCatState, std::set<EtherCatState>> kValidStateTransitions = 
 bool isValidStateTransition(EtherCatState currentState, EtherCatState targetState) {
   const auto allowed = kValidStateTransitions.find(currentState);
   return allowed != kValidStateTransitions.end() && allowed->second.contains(targetState);
+}
+
+// The steps from @p current to @p target, each one transition the AL state machine allows: a climb
+// is one step per state, a drop is one step, and BOOT is entered and left only through INIT. An
+// unknown current state, such as a device that does not answer, gets the target as its one step.
+std::vector<EtherCatState> alSteps(EtherCatState current, EtherCatState target) {
+  using enum EtherCatState;
+  static constexpr std::array kLadder = {Init, PreOp, SafeOp, Op};
+  if (current == target) {
+    return {};
+  }
+  if (target == Boot) {
+    return current == Init ? std::vector{Boot} : std::vector{Init, Boot};
+  }
+  std::vector<EtherCatState> steps;
+  if (current == Boot) {
+    steps.push_back(Init);
+    current = Init;
+  }
+  const auto from = std::ranges::find(kLadder, current);
+  const auto to = std::ranges::find(kLadder, target);
+  if (from == kLadder.end() || to == kLadder.end()) {
+    return {target};
+  }
+  if (to <= from) {
+    if (to < from) {
+      steps.push_back(target);
+    }
+    return steps;
+  }
+  steps.insert(steps.end(), std::next(from), std::next(to));
+  return steps;
 }
 
 }  // namespace
@@ -955,22 +988,11 @@ std::expected<RestartOutcome, std::string> DeviceManager::restartToState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
   using mm::comm::EtherCatState;
-  // The AL state machine climbs one state at a time, and BOOT is a side step from INIT.
   std::vector<EtherCatState> steps = {EtherCatState::Init};
-  if (targetState == EtherCatState::Boot) {
-    steps.push_back(EtherCatState::Boot);
-  } else {
-    for (const EtherCatState climb :
-         {EtherCatState::PreOp, EtherCatState::SafeOp, EtherCatState::Op}) {
-      if (static_cast<uint16_t>(climb) > static_cast<uint16_t>(targetState)) {
-        break;
-      }
-      steps.push_back(climb);
-    }
-  }
+  std::ranges::copy(alSteps(EtherCatState::Init, targetState), std::back_inserter(steps));
   RestartOutcome outcome;
   for (const EtherCatState step : steps) {
-    auto states = transitionToState(positions, step, timeout);
+    auto states = transitionOneStep(positions, step, timeout);
     if (!states) {
       return std::unexpected(
           std::format("restart stopped at {}: {}", mm::comm::toString(step), states.error()));
@@ -1044,6 +1066,79 @@ std::expected<void, std::string> DeviceManager::followObservedStates() {
 }
 
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
+    const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+    std::chrono::steady_clock::duration timeout) {
+  using mm::comm::EtherCatState;
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  if (!set->driver) {
+    return std::unexpected("no driver — call init() first");
+  }
+  if (set->devices.empty()) {
+    return std::unexpected("no devices — call scan() first");
+  }
+  if (auto refusal = set->driver->stateChangeRefusal(); refusal) {
+    return std::unexpected(std::move(*refusal));
+  }
+  auto resolved = resolveTargets(positions);
+  if (!resolved) {
+    return std::unexpected(resolved.error());
+  }
+  const std::vector<uint16_t> targets = std::move(*resolved);
+
+  // The longest walk is BOOT to OP: INIT, PRE-OP, SAFE-OP, OP. A round moves every device that is
+  // not there yet by one step, so this bound is never reached by a walk that makes progress.
+  constexpr int kMaxRounds = 5;
+  // A device that does not answer has no state to walk from. It is commanded once, with the
+  // target, and the read-back reports it.
+  std::vector<uint16_t> commandedWithoutState;
+  for (int round = 0; round < kMaxRounds; ++round) {
+    auto current = set->driver->readStates(targets);
+    if (!current) {
+      return std::unexpected(current.error());
+    }
+    // std::map orders the steps by state value, so the lowest step goes first: a device climbing
+    // to PRE-OP has a mailbox before another one's step to SAFE-OP re-maps the bus.
+    std::map<EtherCatState, std::vector<uint16_t>> stepGroups;
+    for (std::size_t i = 0; i < targets.size(); ++i) {
+      const auto& raw = (*current)[i];
+      if (raw.reachability != mm::comm::Reachability::Answering) {
+        if (!std::ranges::contains(commandedWithoutState, targets[i])) {
+          commandedWithoutState.push_back(targets[i]);
+          stepGroups[targetState].push_back(targets[i]);
+        }
+        continue;
+      }
+      const auto steps = alSteps(mm::comm::alState(raw.alStatus), targetState);
+      // A device already at the target is commanded there once, as a single transition always
+      // was. That acknowledges an error the device holds, and reads its object dictionary when
+      // that read is missing.
+      if (!steps.empty() || round == 0) {
+        stepGroups[steps.empty() ? targetState : steps.front()].push_back(targets[i]);
+      }
+    }
+    if (stepGroups.empty()) {
+      break;
+    }
+    for (const auto& [step, group] : stepGroups) {
+      auto states = transitionOneStep(group, step, timeout);
+      if (!states) {
+        return std::unexpected(states.error());
+      }
+      const bool allReached = std::ranges::all_of(*states, [step](const DeviceStateInfo& info) {
+        return info.reachability != mm::comm::Reachability::Answering ||
+               (!info.error && info.alState == static_cast<uint16_t>(step));
+      });
+      if (!allReached) {
+        spdlog::warn("Transition to {} stopped at {}: not every device reached it",
+                     mm::comm::toString(targetState), mm::comm::toString(step));
+        return deviceStates(targets);
+      }
+    }
+  }
+  return deviceStates(targets);
+}
+
+std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionOneStep(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
   // busOperationMutex_ only, and this is the operation the split exists for. Driving AL state
@@ -1179,7 +1274,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
   }
 
-  spdlog::debug("transitionToState -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),
+  spdlog::debug("transitionOneStep -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),
                 targets.size());
   // A drop that leaves other devices exchanging keeps the image published, so the RT loop runs
   // throughout the seconds this call takes. Bring the expectation down first: the targets stop

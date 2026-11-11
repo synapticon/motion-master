@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import pytest
 from motion_master_client import PRE_OP
@@ -12,6 +13,11 @@ from report import append_to_job_summary, test_results_markdown, write_bench_rep
 
 # (test, outcome, message) for each test, in the order they ran.
 _results: list[tuple[str, str, str]] = []
+
+# The workflow uploads every file in this folder with report.xml.
+DUMPS = Path(__file__).resolve().parent / "dumps"
+
+log = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="session")
@@ -40,13 +46,47 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
             bench.client.ensure_state(PRE_OP, exact=True)
             write_bench_report(bench, record)
         except Exception as error:
-            logging.getLogger(__name__).exception("the bench report failed")
+            log.exception("the bench report failed")
             record("report.error", repr(error))
             append_to_job_summary(f"The bench report failed: `{error!r}`\n\n")
         record("report.seconds", _seconds_since(start))
         yield bench
     finally:
         bench.psu.switch(False)
+
+
+@pytest.fixture
+def process_data_dump(bench: Bench, request: pytest.FixtureRequest) -> Iterator[None]:
+    """Save the recorder ring of the server to dumps/<test>.mmpd when the test ends.
+
+    A test that asks for this fixture gets the file also when it fails. The teardown runs after
+    the finally of the test, so the dump holds the steps that end the test too. The test resets the
+    server first, which frees the ring, so the dump holds that test only. A test that exchanged no
+    process data gets no file, because the server answers 409. A failed fetch is logged and does not
+    change the result of the test.
+    """
+    yield
+    name = request.node.name
+    try:
+        response = bench.client.call("streamProcessDataDump", check=False)
+    except Exception:
+        log.exception("%s: the process-data dump failed", name)
+        return
+    if response.status_code == 409:
+        log.info("%s: no process-data dump, %s", name, response.json().get("error", ""))
+        return
+    if not response.ok:
+        log.warning(
+            "%s: the process-data dump failed, HTTP %d %s",
+            name,
+            response.status_code,
+            response.text.strip(),
+        )
+        return
+    DUMPS.mkdir(exist_ok=True)
+    path = DUMPS / f"{name}.mmpd"
+    path.write_bytes(response.content)
+    log.info("%s: saved %s, %d bytes", name, path.relative_to(DUMPS.parent), len(response.content))
 
 
 def _seconds_since(start: float) -> float:

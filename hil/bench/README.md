@@ -63,6 +63,21 @@ The message of the test gives the acceleration and the quick stop deceleration r
 the ramp time, the mean, the minimum and the maximum velocity, and the stop time. When the test
 ends, passed or not, it disables the drive and brings it to INIT.
 
+## Process-data dumps
+
+The server records the process data of every cycle in its recorder ring. A test marked with
+`@pytest.mark.usefixtures("process_data_dump")` gets that ring as a file when it ends, also when
+it fails: `dumps/<test name>.mmpd`. A `.mmpd` file holds the raw input and output images of every cycle,
+with a timestamp, and the layout of the process image, so every PDO object of every exchanging
+device can be read from it. Open it in the Recorder page of the Console.
+
+Each test resets the server first, and a reset frees the ring, so a dump holds one test only. A
+test that exchanged no process data gets no file. A re-map that changes the layout of the process
+image starts a new ring, so a dump holds only the cycles after the last such re-map.
+
+The motion test asks for a dump. In GitHub Actions, the workflow uploads every dump with
+`report.xml`.
+
 ## The bench report
 
 Before the first test, the run reads the version of the server. Then it brings every device to
@@ -155,8 +170,8 @@ The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the test
 
 The tests always come from the selected branch, also when the server is a pulled image. The job
 summary names the server that ran. The workflow starts the server with the capabilities that SOEM
-needs. When the tests end, it uploads two files: `report.xml`, the report file, and `server.log`,
-the log of the server.
+needs. When the tests end, it uploads `report.xml`, the report file, `server.log`, the log of the
+server, and the process-data dumps.
 
 The run page shows two tables below the job graph, in the job summary: the bench report, and one
 row for each test with its result and its message.

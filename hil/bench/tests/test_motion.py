@@ -48,6 +48,7 @@ STOP_DEADLINE_US = 300_000
 END_STATE_AFTER_QUICK_STOP = {2: "SwitchOnDisabled", 6: "QuickStopActive"}
 
 
+@pytest.mark.usefixtures("process_data_dump")
 def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     bench: Bench, record_property
 ):

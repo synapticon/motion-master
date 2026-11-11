@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 report.xml
 server.log
+dumps/

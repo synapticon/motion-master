@@ -128,3 +128,4 @@ jobs:
           path: |
             hil/bench/report.xml
             hil/bench/server.log
+            hil/bench/dumps/*.mmpd

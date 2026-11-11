@@ -1,6 +1,7 @@
 """Turn the motor of a drive in Profile Velocity, quick stop it, and check the recorded velocity.
 
-Each test is for one device, because devices differ in their inputs and in what to expect.
+The file has one test per device, because each device needs its own target velocity, limits
+and times.
 """
 
 from __future__ import annotations

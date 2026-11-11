@@ -30,14 +30,15 @@ A test can compare the device with it, or write it back to the device.
 The run has one bench, and the tests use it one after the other. Each test brings the bench to the
 start it needs with its first lines: `bench.reset()` for no state on the server,
 `bench.power_cycle()` for drives that just booted, and `client.ensure_state(INIT, exact=True)` for
-every drive in INIT. A reset of the server does not command an AL state, so a drive that the test
-before left in OP is still in OP until a test moves it.
+every drive in INIT. A reset of the server does not send the drives to any AL state. So a drive
+keeps the state that the test before left it in, or drops to SAFE-OP with an error when its watchdog
+trips. A test that needs a known state requests it.
 
 ## The motion test
 
 `tests/test_motion.py` turns the motor of a device in Profile Velocity, the operation mode in which
-the drive ramps to a target velocity. Each test there is for one device, because devices differ in
-their inputs and in what to expect. Today it holds the test of the Integro, which it finds in
+the drive ramps to a target velocity. The file has one test per device, because each device needs
+its own target velocity, limits and times. The test of the Integro finds it in
 `bench.description.toml` by its folder, `integro`. The test brings every drive to INIT, then every
 drive to PRE-OP, then only the Integro to OP, enables it, holds 1000 rpm for 3 s, and sends a quick
 stop. A monitoring records the velocity actual value (`0x606C`), the target velocity (`0x60FF`) and

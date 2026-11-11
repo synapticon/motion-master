@@ -29,9 +29,9 @@ def test_scan_finds_the_devices_in_bus_order(bench: Bench, record_property):
 
     found = bench.client.call("scan").json()["slaves"]
 
-    assert found == len(bench.description.product_names)
+    assert found == len(bench.description.devices)
     names = [d["productName"] for d in bench.client.devices()]
-    assert names == bench.description.product_names
+    assert names == [d.product_name for d in bench.description.devices]
     record_property("message", _found(names))
 
 
@@ -47,9 +47,9 @@ def test_scan_after_a_power_cycle_finds_the_devices_again(bench: Bench, record_p
     found = bench.client.call("scan").json()["slaves"]
 
     assert status["required"], status
-    assert found == len(bench.description.product_names)
+    assert found == len(bench.description.devices)
     names = [d["productName"] for d in bench.client.devices()]
-    assert names == bench.description.product_names
+    assert names == [d.product_name for d in bench.description.devices]
     record_property("message", f"the server asked for a new scan; {_found(names)}")
 
 
@@ -61,10 +61,11 @@ def test_pre_op_reads_the_object_dictionary_of_every_device(bench: Bench, record
     bench.client.restart(PRE_OP)
 
     states = bench.client.call("getDeviceStates").json()
-    assert [d["alState"] for d in states] == [PRE_OP] * len(bench.description.product_names)
+    assert [d["alState"] for d in states] == [PRE_OP] * len(bench.description.devices)
     counts = []
-    for position in range(1, len(bench.description.product_names) + 1):
-        parameters = bench.client.call("getDeviceParameters", path={"slavePosition": position})
-        assert parameters.json(), f"device {position} has no parameters"
-        counts.append(f"{position}: {len(parameters.json())}")
+    for device in bench.description.devices:
+        path = {"slavePosition": device.position}
+        parameters = bench.client.call("getDeviceParameters", path=path).json()
+        assert parameters, f"device {device.position} has no parameters"
+        counts.append(f"{device.position}: {len(parameters)}")
     record_property("message", f"{len(states)} devices in PRE-OP; parameters {', '.join(counts)}")

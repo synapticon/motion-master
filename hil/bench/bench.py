@@ -38,10 +38,6 @@ class BenchDescription:
     boot_timeout_seconds: float
     devices: list[BenchDevice]
 
-    @property
-    def product_names(self) -> list[str]:
-        return [d.product_name for d in self.devices]
-
     def device(self, folder: str) -> BenchDevice:
         """Return the device whose files are in devices/<folder>, for example "integro"."""
         for d in self.devices:
@@ -127,7 +123,7 @@ class Bench:
 
     def wait_for_devices_on_wire(self) -> None:
         """Wait until the wire carries as many devices as the description names. Open the driver first."""
-        expected = len(self.description.product_names)
+        expected = len(self.description.devices)
         deadline = time.monotonic() + self.description.boot_timeout_seconds
         on_wire = None
         while time.monotonic() < deadline:

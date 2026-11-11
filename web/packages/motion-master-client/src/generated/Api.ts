@@ -2353,13 +2353,13 @@ export class Api<
       ...params,
     });
   /**
-   * @description Commands one or more devices to the requested EtherCAT Application Layer state and blocks until all targeted devices arrive or the timeout elapses. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+   * @description Commands one EtherCAT Application Layer transition to one or more devices and blocks until all targeted devices arrive or the timeout elapses. The transition must be one the AL state machine allows for every targeted device: a climb of one state (INIT, PRE-OP, SAFE-OP, OP), a drop of any number of states, BOOT entered and left only through INIT, or the state a device is in, which acknowledges an AL error it holds. Any other request is refused with 409, and no device is commanded. To reach a state that is more than one transition away, use POST /api/devices/state/transition, which walks. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
    *
-   * @name TransitionToState
-   * @summary Transition devices to an EtherCAT AL state
+   * @name ChangeState
+   * @summary Change the AL state of devices by one transition
    * @request POST:/api/devices/state
    */
-  transitionToState = (
+  changeState = (
     data: {
       /**
        * 1-based slave positions to target. Omit or pass an empty array to target all discovered devices.
@@ -2428,7 +2428,7 @@ export class Api<
       },
       | void
       | {
-          /** Why the driver refuses state changes */
+          /** Which device cannot take the transition, or why the driver refuses state changes */
           error: string;
         }
       | {
@@ -2447,11 +2447,105 @@ export class Api<
       ...params,
     });
   /**
+   * @description Brings one or more devices to the requested EtherCAT Application Layer state, one legal transition at a time, and blocks until the walk ends. The AL state machine climbs one state at a time, may drop any number of states at once, and enters and leaves BOOT only through INIT, so a request for OP takes a device in INIT through PRE-OP and SAFE-OP, and a device in BOOT through INIT first. Each device walks from the state it is in. Each step waits up to `timeout` for its devices, and the walk stops at the first step a device does not reach. A device already in the requested state is commanded there once, which acknowledges an AL error it holds. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+   *
+   * @name TransitionToState
+   * @summary Walk devices to an EtherCAT AL state
+   * @request POST:/api/devices/state/transition
+   */
+  transitionToState = (
+    data: {
+      /**
+       * 1-based slave positions to target. Omit or pass an empty array to target all discovered devices.
+       * @example [1,2]
+       */
+      positions?: number[];
+      /**
+       * Target EtherCAT AL state (ETG.1000.6 AL control register encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+       * @example 8
+       */
+      state: 1 | 2 | 3 | 4 | 8;
+      /**
+       * Maximum time to wait for all devices, in milliseconds, for each step
+       * @default 5000
+       * @example 5000
+       */
+      timeout?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        /**
+         * True only when every targeted device reached the target state.
+         * @example true
+         */
+        ok: boolean;
+        /** Settled state of each targeted device, in the order targeted. */
+        devices: {
+          /**
+           * 1-based position on the fieldbus
+           * @example 1
+           */
+          slavePosition: number;
+          /**
+           * Raw AL Status register value (ETG.1000.6 §6.4.1). Bits 3:0 encode the state; bit 4 is the error indicator.
+           * @example 2
+           */
+          alStatus: number;
+          /**
+           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op. 0 when the device does not answer (see `reachability`).
+           * @example 2
+           */
+          alState: 0 | 1 | 2 | 3 | 4 | 8;
+          /**
+           * True when the AL Status error indicator bit (bit 4) is set
+           * @example false
+           */
+          error: boolean;
+          /**
+           * AL Status Code register (ETG.1000.6 §6.4.1). Non-zero when error is true; identifies the error cause (e.g. 0x0014 = No valid firmware).
+           * @example 0
+           */
+          alStatusCode: number;
+          /**
+           * Whether the device answers at the station address the master gave it. `addressLost`: nothing answers at that address, but a device answers at its wire position. A reset, such as a power cycle, clears the address. Run `POST /api/scan` to command it again. `notAnswering`: nothing answers at that address or at its wire position. Check the cabling and the power. If devices were removed from the chain, run a scan. The wire position is checked by position only, so after a change to the chain the device that answers there can be a different one. When the value is not `answering`, the state of the device is unknown, and `alStatus`, `alState` and `alStatusCode` are 0.
+           * @example "answering"
+           */
+          reachability: "answering" | "addressLost" | "notAnswering";
+          /**
+           * True when this device reached the requested target state (error clear and alState equal to the requested state).
+           * @example true
+           */
+          reached: boolean;
+        }[];
+      },
+      | void
+      | {
+          /** Why the driver refuses state changes */
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+    >({
+      path: `/api/devices/state/transition`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Commands one or more devices to INIT and then up to `target` one EtherCAT Application Layer state at a time: PRE-OP, SAFE-OP, OP. A `target` of BOOT is INIT and then BOOT. Each step blocks until every targeted device arrives or the timeout elapses, and the walk stops at the first step a device does not reach. `step` is the last state commanded, and `devices` holds the settled state of every targeted device after it, each with a `reached` flag. `ok` is true only when `step` is `target` and every device reached it. A restart drops every targeted device out of process data exchange, so a drive that was enabled is disabled, and a monitoring reports null for it until it exchanges again. The body is optional: no body restarts every discovered device to OP (8). State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
    *
    * @name RestartDevices
    * @summary Restart devices through INIT up to an AL state
-   * @request POST:/api/devices/restart
+   * @request POST:/api/devices/state/restart
    */
   restartDevices = (
     data?: {
@@ -2539,7 +2633,7 @@ export class Api<
           error: string;
         }
     >({
-      path: `/api/devices/restart`,
+      path: `/api/devices/state/restart`,
       method: "POST",
       body: data,
       type: ContentType.Json,

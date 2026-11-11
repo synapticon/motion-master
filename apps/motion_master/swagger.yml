@@ -4110,13 +4110,18 @@ paths:
           $ref: "#/components/responses/DriverError"
 
     post:
-      summary: Transition devices to an EtherCAT AL state
-      operationId: transitionToState
+      summary: Change the AL state of devices by one transition
+      operationId: changeState
       description: >
-        Commands one or more devices to the requested EtherCAT Application Layer state
-        and blocks until all targeted devices arrive or the timeout elapses. The settled
-        state of every targeted device is then read back and returned in `devices`, each
-        with a `reached` flag; `ok` is true only when every device reached the target.
+        Commands one EtherCAT Application Layer transition to one or more devices and blocks until
+        all targeted devices arrive or the timeout elapses. The transition must be one the AL state
+        machine allows for every targeted device: a climb of one state (INIT, PRE-OP, SAFE-OP,
+        OP), a drop of any number of states, BOOT entered and left only through INIT, or the state
+        a device is in, which acknowledges an AL error it holds. Any other request is refused with
+        409, and no device is commanded. To reach a state that is more than one transition away,
+        use POST /api/devices/state/transition, which walks.
+        The settled state of every targeted device is then read back and returned in `devices`,
+        each with a `reached` flag; `ok` is true only when every device reached the target.
         A device that did not reach it carries an `alStatusCode` explaining why.
         A device that does not answer at its address is not commanded, so the request does not
         wait out the timeout for it. Its `reachability` says why, and the other devices are
@@ -4230,6 +4235,154 @@ paths:
           description: Request body is malformed or `state` is not a valid AL state value
         "409":
           description: >
+            The AL state machine does not allow the transition for a targeted device, and no
+            device was commanded. Or the fieldbus driver refuses every state change: with SPoE in
+            Monitor mode, the PLC owns the drive's state; set `fieldbus.spoe.mode` to `control` to
+            change it from Motion Master.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: >-
+                      Which device cannot take the transition, or why the driver refuses state
+                      changes
+        "404":
+          description: A listed position names no device
+        "500":
+          $ref: "#/components/responses/DriverError"
+
+  /api/devices/state/transition:
+    post:
+      summary: Walk devices to an EtherCAT AL state
+      operationId: transitionToState
+      description: >
+        Brings one or more devices to the requested EtherCAT Application Layer state, one legal
+        transition at a time, and blocks until the walk ends. The AL state machine climbs one
+        state at a time, may drop any number of states at once, and enters and leaves BOOT only
+        through INIT, so a request for OP takes a device in INIT through PRE-OP and SAFE-OP, and
+        a device in BOOT through INIT first. Each device walks from the state it is in. Each step
+        waits up to `timeout` for its devices, and the walk stops at the first step a device does
+        not reach. A device already in the requested state is commanded there once, which
+        acknowledges an AL error it holds.
+        The settled state of every targeted device is then read back and returned in `devices`,
+        each with a `reached` flag; `ok` is true only when every device reached the target.
+        A device that did not reach it carries an `alStatusCode` explaining why.
+        A device that does not answer at its address is not commanded, so the request does not
+        wait out the timeout for it. Its `reachability` says why, and the other devices are
+        still commanded.
+        Omit `positions` or pass an empty array to target all discovered devices.
+        State values are the standard AL state register encodings from ETG.1000.6:
+        1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                positions:
+                  type: array
+                  items:
+                    type: integer
+                    minimum: 1
+                  description: >
+                    1-based slave positions to target. Omit or pass an empty array
+                    to target all discovered devices.
+                  example: [1, 2]
+                state:
+                  type: integer
+                  enum: [1, 2, 3, 4, 8]
+                  description: >
+                    Target EtherCAT AL state (ETG.1000.6 AL control register encoding):
+                    1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                  example: 8
+                timeout:
+                  type: integer
+                  description: Maximum time to wait for all devices, in milliseconds, for each step
+                  default: 5000
+                  example: 5000
+      responses:
+        "200":
+          description: >
+            Transition command completed and the settled state of each targeted device
+            was read back. `ok` is true only when every device reached the target state
+            within the timeout; otherwise inspect `devices` to see which fell short and why.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, devices]
+                properties:
+                  ok:
+                    type: boolean
+                    description: True only when every targeted device reached the target state.
+                    example: true
+                  devices:
+                    type: array
+                    description: Settled state of each targeted device, in the order targeted.
+                    items:
+                      type: object
+                      required: [slavePosition, alStatus, alState, error, alStatusCode, reachability, reached]
+                      properties:
+                        slavePosition:
+                          type: integer
+                          description: 1-based position on the fieldbus
+                          example: 1
+                        alStatus:
+                          type: integer
+                          description: >
+                            Raw AL Status register value (ETG.1000.6 §6.4.1).
+                            Bits 3:0 encode the state; bit 4 is the error indicator.
+                          example: 2
+                        alState:
+                          type: integer
+                          enum: [0, 1, 2, 3, 4, 8]
+                          description: >
+                            Current AL state decoded from alStatus (ETG.1000.6 encoding):
+                            1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                            0 when the device does not answer (see `reachability`).
+                          example: 2
+                        error:
+                          type: boolean
+                          description: True when the AL Status error indicator bit (bit 4) is set
+                          example: false
+                        alStatusCode:
+                          type: integer
+                          description: >
+                            AL Status Code register (ETG.1000.6 §6.4.1).
+                            Non-zero when error is true; identifies the error cause
+                            (e.g. 0x0014 = No valid firmware).
+                          example: 0
+                        reachability:
+                          type: string
+                          enum: [answering, addressLost, notAnswering]
+                          description: >
+                            Whether the device answers at the station address the master gave it.
+                            `addressLost`: nothing answers at that address, but a device answers at its wire
+                            position. A reset, such as a power cycle, clears the address. Run `POST /api/scan`
+                            to command it again.
+                            `notAnswering`: nothing answers at that address or at its wire position. Check
+                            the cabling and the power. If devices were removed from the chain, run a scan.
+                            The wire position is checked by position only, so after a change to the chain the
+                            device that answers there can be a different one. When the value is not
+                            `answering`, the state of the device is unknown, and `alStatus`, `alState` and
+                            `alStatusCode` are 0.
+                          example: answering
+                        reached:
+                          type: boolean
+                          description: >
+                            True when this device reached the requested target state
+                            (error clear and alState equal to the requested state).
+                          example: true
+        "400":
+          description: Request body is malformed or `state` is not a valid AL state value
+        "409":
+          description: >
             The fieldbus driver refuses every state change. With SPoE in Monitor mode, the
             PLC owns the drive's state; set `fieldbus.spoe.mode` to `control` to change it from
             Motion Master.
@@ -4247,7 +4400,7 @@ paths:
         "500":
           $ref: "#/components/responses/DriverError"
 
-  /api/devices/restart:
+  /api/devices/state/restart:
     post:
       summary: Restart devices through INIT up to an AL state
       operationId: restartDevices

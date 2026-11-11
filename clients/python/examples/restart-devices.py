@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restart devices through INIT up to an AL state (POST /api/devices/restart).
+"""Restart devices through INIT up to an AL state (POST /api/devices/state/restart).
 
 The server commands each device to INIT, and then up one state at a time to --state: PRE-OP,
 SAFE-OP, OP. A --state of BOOT goes from INIT to BOOT. The walk stops at the first state that a

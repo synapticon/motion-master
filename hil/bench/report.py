@@ -100,7 +100,8 @@ def _row(bench: Bench, device: BenchDevice, live: dict | None) -> dict:
     )
     if live["productName"] != device.product_name:
         row["differences"].append(
-            f"productName is {live['productName']!r}, bench.toml says {device.product_name!r}"
+            f"productName is {live['productName']!r},"
+            f" bench.description.toml says {device.product_name!r}"
         )
 
     firmware, error = _read(bench, "readParameter", {**path, "index": 0x100A, "subindex": 0})

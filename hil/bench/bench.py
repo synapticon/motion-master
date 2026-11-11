@@ -35,7 +35,7 @@ class BenchDevice:
 
 @dataclass(frozen=True)
 class BenchDescription:
-    """The contents of bench.toml, with the folder of each device in devices/."""
+    """The contents of bench.description.toml, with the folder of each device in devices/."""
 
     adapter: str
     psu_host: str
@@ -52,11 +52,11 @@ class BenchDescription:
         for d in self.devices:
             if d.folder.name == folder:
                 return d
-        raise KeyError(f"bench.toml has no device with folder {folder!r}")
+        raise KeyError(f"bench.description.toml has no device with folder {folder!r}")
 
     @classmethod
     def load(cls) -> BenchDescription:
-        with open(_HERE / "bench.toml", "rb") as f:
+        with open(_HERE / "bench.description.toml", "rb") as f:
             data = tomllib.load(f)
         return cls(
             adapter=data["adapter"],
@@ -96,7 +96,10 @@ class Bench:
 
     @classmethod
     def from_environment(cls) -> Bench:
-        """Build the bench from bench.toml, MM_HTTP_URL and MM_WS_URL, after the server answers."""
+        """Build the bench from bench.description.toml, MM_HTTP_URL and MM_WS_URL.
+
+        Returns after the server answers.
+        """
         description = BenchDescription.load()
         http_url = os.environ.get("MM_HTTP_URL", "https://127.0.0.1:61447")
         ws_url = os.environ.get("MM_WS_URL", "wss://127.0.0.1:62281")

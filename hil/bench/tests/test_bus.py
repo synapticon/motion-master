@@ -1,8 +1,10 @@
-"""Open the driver, scan the bus, and bring the devices to PRE-OP."""
+"""Open the driver, scan the bus, and change the AL state of the devices."""
 
 from __future__ import annotations
 
-from motion_master_client import PRE_OP
+import time
+
+from motion_master_client import INIT, OP, PRE_OP, SAFE_OP, STATE_NAMES
 
 from bench import Bench
 
@@ -68,3 +70,46 @@ def test_pre_op_reads_the_object_dictionary_of_every_device(bench: Bench, record
         assert parameters, f"device {device.position} has no parameters"
         counts.append(f"{device.position}: {len(parameters)}")
     record_property("message", f"{len(states)} devices in PRE-OP; parameters {', '.join(counts)}")
+
+
+def _al_states(bench: Bench) -> list[int]:
+    return [d["alState"] for d in bench.client.call("getDeviceStates").json()]
+
+
+def test_transition_walks_every_device_from_init_to_safe_op(bench: Bench, record_property):
+    bench.reset()
+    bench.client.init()
+    bench.client.restart(INIT)
+
+    # One request. The server walks every device through PRE-OP to SAFE-OP.
+    start = time.monotonic()
+    result = bench.client.call("transitionToState", body={"state": SAFE_OP}).json()
+    seconds = time.monotonic() - start
+
+    assert result["ok"], result
+    assert _al_states(bench) == [SAFE_OP] * len(bench.description.devices)
+    record_property(
+        "message", f"{len(result['devices'])} devices from INIT to SAFE-OP in {seconds:.1f} s"
+    )
+
+
+def test_a_single_step_refuses_an_illegal_transition(bench: Bench, record_property):
+    bench.reset()
+    bench.client.init()
+    bench.client.restart(INIT)
+
+    # INIT to OP is three transitions, so the single step refuses it and commands nothing.
+    illegal = bench.client.call("changeState", body={"state": OP}, check=False)
+    after_illegal = _al_states(bench)
+    legal = bench.client.call("changeState", body={"state": PRE_OP}, check=False)
+
+    assert illegal.status_code == 409, illegal.text
+    assert after_illegal == [INIT] * len(bench.description.devices)
+    assert legal.status_code == 200, legal.text
+    assert legal.json()["ok"], legal.json()
+    record_property(
+        "message",
+        f"INIT to {STATE_NAMES[OP]} answered 409 and moved no device;"
+        f" INIT to {STATE_NAMES[PRE_OP]} answered 200",
+    )
+

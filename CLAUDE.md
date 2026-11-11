@@ -551,7 +551,9 @@ freed memory.
 
 ### AL State and Re-mapping
 
-Changing AL state is the user's job, via `POST /api/devices/state`. Motion Master reacts in
+Changing AL state is the user's job: one transition with `POST /api/devices/state`, a walk from
+the current state with `POST /api/devices/state/transition`, or a walk from INIT with
+`POST /api/devices/state/restart`. Motion Master reacts in
 `DeviceManager::transitionToState`. The image is one whole-bus layout, but the logic supports
 partial-bus operations.
 
@@ -567,11 +569,13 @@ pauses the whole bus, which is the accepted cost.
 
 **Three rules the re-map depends on:**
 
-1. **Illegal AL transitions are rejected up front** (`kValidStateTransitions` in
-   `device_manager.cc`). This is not UX. The re-map reads PDO mapping over the CoE mailbox,
-   which is only live from PRE-OP up, so a device commanded straight from BOOT would reach
-   that read while still in BOOT and **segfault inside SOEM** before the slave could reject
-   it.
+1. **Only legal AL transitions are ever commanded** (`kValidStateTransitions` in
+   `device_manager.cc`). `changeState` commands one transition and refuses an illegal one with
+   `StateChangeError::kIllegalTransition`, which the route answers with 409. `transitionToState`
+   and `restartToState` walk with `changeState`, one legal step at a time. This is not UX. The re-map reads PDO
+   mapping over the CoE mailbox, which is only live from PRE-OP up, so a device commanded
+   straight from BOOT would reach that read while still in BOOT and **segfault inside SOEM**
+   before the slave could reject it.
 2. **Per-slave FMMU state is reset first.** `configureProcessData()` runs
    `ecx_config_map_group` without an `ecx_config_init`, but SOEM's mappers start at
    `FMMUunused` and append, trusting that init memset it. The driver zeroes each slave's

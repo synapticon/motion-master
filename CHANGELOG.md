@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **AL state changes have three routes under `/api/devices/state`.** `POST /api/devices/state` commands one legal AL transition, as before, and now answers 409 instead of 500 for one the AL state machine does not allow; its operationId is `changeState`. `POST /api/devices/state/transition` (operationId `transitionToState`) walks to the state from where each device is: a climb goes one state at a time, a drop is one step, and BOOT is entered and left only through INIT, with `timeout` for each step. `POST /api/devices/restart` moves to `POST /api/devices/state/restart`. A client that calls `transitionToState` now walks, and the Console's AL state buttons and per-device select walk too.
+
 ## [6.0.0-alpha.122] - 2026-11-10
 
 ### Fixed

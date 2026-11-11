@@ -49,13 +49,13 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
     value: 4,
     label: 'SafeOp',
     cls: 'bg-status-info text-white hover:brightness-110',
-    hint: 'Inputs (TxPDO) are exchanged and the mailbox stays active; outputs are held in their safe state, not applied. Entered from PRE-OP.',
+    hint: 'Inputs (TxPDO) are exchanged and the mailbox stays active; outputs are held in their safe state, not applied.',
   },
   {
     value: 8,
     label: 'Op',
     cls: 'bg-green-600 text-white hover:brightness-110',
-    hint: 'Everything active: inputs, outputs, and mailbox. Reachable only from SAFE-OP, and only once valid outputs are already being sent.',
+    hint: 'Everything active: inputs, outputs, and mailbox. The drive enters it only once valid outputs are already being sent.',
   },
 ]
 
@@ -221,8 +221,8 @@ export default function FieldbusControlPage() {
   })
 
   // Per-device transition: same endpoint, but scoped to a single slave via `positions`.
-  // The server validates the AL transition itself (illegal jumps are rejected with
-  // 0x0011), so the dropdown stays permissive and we surface whatever the slave reports.
+  // The server walks to the target one legal AL transition at a time, so the dropdown offers
+  // every state and we surface where the slave ended up.
   // Last result is kept per slave position for the inline row feedback.
   type DeviceTransitionResult = {
     target: 1 | 2 | 3 | 4 | 8
@@ -658,7 +658,7 @@ export default function FieldbusControlPage() {
                                           deviceTransitionMutation.mutate({ position: pos, state })
                                         }
                                       }}
-                                      title="Command just this slave to an AL state. Illegal jumps are rejected by the slave."
+                                      title="Bring just this slave to an AL state, one legal step at a time."
                                       className="border border-grey-300 px-2 py-1 text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                                     >
                                       <option value="">{rowPending ? 'Transitioning…' : 'Change AL state…'}</option>
@@ -729,10 +729,10 @@ export default function FieldbusControlPage() {
                 first.
               </p>
               <p className="text-xs text-grey-600">
-                Going up must be step by step — INIT → PRE-OP → SAFE-OP → OP — but you can drop
-                down several states at once (e.g. OP → INIT). BOOT is reachable only from INIT.
-                Illegal jumps (skipping a step upward, or entering BOOT from elsewhere) are rejected
-                by the slave with AL status 0x0011, “Invalid requested state change”.
+                The server takes each slave there one legal step at a time. Going up is step by
+                step — INIT → PRE-OP → SAFE-OP → OP — a drop of several states is one step (e.g.
+                OP → INIT), and BOOT is entered and left only through INIT. The walk stops at the
+                first step a slave does not reach, and its AL status code says why.
               </p>
               <div className="space-y-4">
                 {TRANSITION_TARGETS.map(({ value, label, cls, hint }) => {

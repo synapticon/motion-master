@@ -8,6 +8,12 @@ supplies the drives. The tests switch the output of the power supply through the
 The tests use the Python reference client in [`clients/python`](../../clients/python). So a run
 also checks that client.
 
+The recording below shows a run. The steps are in [Run the tests](#run-the-tests).
+[VHS](https://github.com/charmbracelet/vhs) records it from `demo.tape`. To record it again, run
+`vhs demo.tape` on the computer of the bench.
+
+![A run of the bench tests](demo.gif)
+
 ## The bench description
 
 This folder describes one bench: the bench of the self-hosted runner `ci-belgrade-linux`.

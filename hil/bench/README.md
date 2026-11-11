@@ -19,11 +19,40 @@ This folder describes one bench: the bench of the self-hosted runner `ci-belgrad
   time the drives get to boot.
 - `[[devices]]` lists the devices in bus order. `productName` is the value that
   `GET /api/devices` reports. `folder` is the name of the device's subfolder in `devices/`, for
-  example `2-circulo`.
+  example `circulo`.
 
 The folder of a device holds the files of that device, with the names they have on the device:
 `config.csv`, `.hardware_description`, `.factory_config` and others. A file is a known-good copy.
 A test can compare the device with it, or write it back to the device.
+
+## The start of each test
+
+The run has one bench, and the tests use it one after the other. Each test brings the bench to the
+start it needs with its first lines: `bench.reset()` for no state on the server,
+`bench.power_cycle()` for drives that just booted, and `client.ensure_state(INIT, exact=True)` for
+every drive in INIT. A reset of the server does not command an AL state, so a drive that the test
+before left in OP is still in OP until a test moves it.
+
+## The motion test
+
+`tests/test_motion.py` turns the motor of a device in Profile Velocity, the operation mode in which
+the drive ramps to a target velocity. Each test there is for one device, because devices differ in
+their inputs and in what to expect. Today it holds the test of the Integro, which it finds in
+`bench.toml` by its folder, `integro`. The test brings every drive to INIT, then only the Integro to
+OP, enables it, holds 1000 rpm for 3 s, and sends a quick stop. A monitoring records the velocity actual value
+(`0x606C`), the target velocity (`0x60FF`) and the statusword (`0x6041`) in every cycle. The test
+then checks the recorded rows:
+
+- The mean velocity in the last second before the quick stop is within 2 % of the target, and every
+  sample is within 10 %.
+- The velocity falls below 20 rpm within 500 ms after the quick stop.
+- The drive ends in the state that the quick stop option code (`0x605A`) names: Switch On Disabled
+  for 2, Quick Stop Active for 6. Other codes fail the test before the motor turns.
+- The drive is never in Fault, and every cycle has a value.
+
+The message of the test gives the acceleration and the quick stop deceleration read from the drive,
+the ramp time, the mean, the minimum and the maximum velocity, and the stop time. When the test
+ends, passed or not, it disables the drive and brings it to INIT.
 
 ## The device report
 

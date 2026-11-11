@@ -23,6 +23,11 @@ class BenchDevice:
     product_name: str
     folder: Path
 
+    @property
+    def path(self) -> dict[str, int]:
+        """The path parameters that address this device in the API, for client.call(path=...)."""
+        return {"slavePosition": self.position}
+
     def file(self, name: str) -> Path:
         """Return the path of a file of the device, by the name it has on the device."""
         return self.folder / name
@@ -41,6 +46,13 @@ class BenchDescription:
     @property
     def product_names(self) -> list[str]:
         return [d.product_name for d in self.devices]
+
+    def device(self, folder: str) -> BenchDevice:
+        """Return the device whose files are in devices/<folder>, for example "integro"."""
+        for d in self.devices:
+            if d.folder.name == folder:
+                return d
+        raise KeyError(f"bench.toml has no device with folder {folder!r}")
 
     @classmethod
     def load(cls) -> BenchDescription:
@@ -90,6 +102,10 @@ class Bench:
         ws_url = os.environ.get("MM_WS_URL", "wss://127.0.0.1:62281")
         _wait_for_server(http_url, timeout=60)
         return cls(description, http_url, ws_url)
+
+    def device(self, folder: str) -> BenchDevice:
+        """Return the device whose files are in devices/<folder>, for example "integro"."""
+        return self.description.device(folder)
 
     def reset(self) -> None:
         """Close the driver and forget every device, so that the next step starts from nothing."""

@@ -201,7 +201,20 @@ Other methods:
 
 - `run_procedure()` runs a procedure to its end.
 - `monitor(topic)` streams the batches of a monitoring from the WebSocket.
+- `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,
+  keeps every row while the block runs, and deletes the monitoring at the end. `column()` then
+  returns the values of one object with their timestamps.
 - `notifications()` streams the notifications from the WebSocket.
+- `read_value(position, obj)` reads one object and returns the value that the server decoded with
+  the data type from the object dictionary.
+- `wait_for_value(position, obj, predicate)` reads one object until the predicate is true, and
+  raises `TimeoutError` with the last value when the time runs out.
+
+The module also has CiA402 helpers. Constants such as `STATUSWORD` and `VELOCITY_ACTUAL_VALUE` give
+an object as `(index, subindex)`, so `read_value(1, STATUSWORD)` and the monitoring parameter
+`(1, *STATUSWORD)` name it the same way. `cia402_state(statusword)` returns the state that a
+statusword reports, by the name that `GET /api/devices/{slavePosition}/cia402` uses. It is meant for
+recorded rows, where the server sends the raw statusword.
 - `run(main)` calls `main` and prints an error that a user can correct as one line instead of a
   traceback. An example is a server that is not running. Set `MM_TRACEBACK=1` to get the
   traceback.

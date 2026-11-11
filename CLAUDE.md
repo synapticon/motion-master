@@ -1236,7 +1236,7 @@ Python reference client in `clients/python`. A run starts with a power cycle thr
 then records what each drive says it is, and where it differs from its folder. That goes into
 `report.xml`, the JUnit report, as test-suite properties, and into the job summary.
 
-`hil/bench/bench.toml` describes the bench: the adapter, the P 1535 and the devices in bus order.
+`hil/bench/bench.toml` describes the bench: the adapter, the P 1535 and the devices in bus order. There is one `bench` fixture for the whole run. Each test brings the bench to the start it needs in its first lines, because a reset of the server commands no AL state.
 Each folder in `hil/bench/devices/` holds the known-good files of one drive, with the names they
 have on the drive (`.hardware_description`, `config.csv`, …).
 

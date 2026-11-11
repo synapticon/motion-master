@@ -56,13 +56,6 @@ def _seconds_since(start: float) -> float:
     return round(time.monotonic() - start, 3)
 
 
-@pytest.fixture
-def fresh(bench: Bench) -> Bench:
-    """The bench with the driver closed and no device known. The drives keep their power."""
-    bench.reset()
-    return bench
-
-
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     # A test has one result: the call, or the setup when the setup did not pass, because then
     # no call runs. A failed teardown after a passed call is an error too.

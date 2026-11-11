@@ -25,9 +25,14 @@ script that wants to see them turns on logging at INFO. run_procedure() starts a
 procedure, polls it until it ends, and cancels it when the caller stops early.
 step_changes() picks out the steps whose status changed, and format_step() turns
 one into a line.
-monitor() and notifications() stream from the WebSocket. run(main) calls a
-script's main() and turns an error a user can act on, such as a server that is
-not running, into one line on stderr.
+monitor() and notifications() stream from the WebSocket. monitoring() creates a
+monitoring, records its rows while a with block runs, and deletes it at the
+end, so a script can check the rows afterwards. read_value() reads one object,
+decoded by the server, and wait_for_value() reads it until a condition holds.
+Constants such as STATUSWORD name the CiA402 objects as (index, subindex), and
+cia402_state() names the state a statusword reports.
+run(main) calls a script's main() and turns an error a user can act on, such as
+a server that is not running, into one line on stderr.
 """
 
 from __future__ import annotations
@@ -37,9 +42,11 @@ import logging
 import os
 import ssl
 import sys
+import threading
 import time
 import tomllib
 import urllib.parse
+import uuid
 from pathlib import Path
 
 import requests
@@ -60,6 +67,49 @@ SAFE_OP = 4
 OP = 8
 
 STATE_NAMES = {0: "UNKNOWN", INIT: "INIT", PRE_OP: "PRE-OP", BOOT: "BOOT", SAFE_OP: "SAFE-OP", OP: "OP"}
+
+# CiA402 objects, as (index, subindex). The names follow libs/node/cia402_drive_objects.h. A
+# monitoring parameter is (position, *VELOCITY_ACTUAL_VALUE).
+CONTROLWORD = (0x6040, 0)
+STATUSWORD = (0x6041, 0)
+QUICK_STOP_OPTION_CODE = (0x605A, 0)
+MODES_OF_OPERATION = (0x6060, 0)
+MODES_OF_OPERATION_DISPLAY = (0x6061, 0)
+POSITION_ACTUAL_VALUE = (0x6064, 0)
+VELOCITY_ACTUAL_VALUE = (0x606C, 0)
+TARGET_TORQUE = (0x6071, 0)
+TORQUE_ACTUAL_VALUE = (0x6077, 0)
+TARGET_POSITION = (0x607A, 0)
+PROFILE_ACCELERATION = (0x6083, 0)
+PROFILE_DECELERATION = (0x6084, 0)
+QUICK_STOP_DECELERATION = (0x6085, 0)
+SI_UNIT_VELOCITY = (0x60A9, 0)
+TARGET_VELOCITY = (0x60FF, 0)
+
+
+def cia402_state(statusword):
+    """Return the CiA402 state that a statusword (0x6041) reports, by the name the API uses.
+
+    The same masks as cia402::decodeState on the server, so a state decoded here from a recorded
+    row has the name that GET /api/devices/{slavePosition}/cia402 gives. A pattern that matches no
+    state is NotReadyToSwitchOn.
+    """
+    if statusword & 0x4F == 0x40:
+        return "SwitchOnDisabled"
+    if statusword & 0x6F == 0x21:
+        return "ReadyToSwitchOn"
+    if statusword & 0x6F == 0x23:
+        return "SwitchedOn"
+    if statusword & 0x6F == 0x27:
+        return "OperationEnabled"
+    if statusword & 0x6F == 0x07:
+        return "QuickStopActive"
+    if statusword & 0x4F == 0x0F:
+        return "FaultReactionActive"
+    if statusword & 0x4F == 0x08:
+        return "Fault"
+    return "NotReadyToSwitchOn"
+
 
 # The states a device climbs through, from the bottom. BOOT is not on it, because BOOT is
 # reachable only from INIT.
@@ -258,6 +308,40 @@ class MotionMasterClient:
         elif r.status_code != 409:
             r.raise_for_status()
 
+    def read_value(self, position, obj):
+        """Read one object of a device and return its value, decoded by the server.
+
+        `obj` is (index, subindex), for example STATUSWORD. The server takes the value from the
+        process data when the device exchanges it, and reads it over SDO otherwise. It decodes the
+        value with the data type from the object dictionary, so the caller needs no type.
+        """
+        index, subindex = obj
+        path = {"slavePosition": position, "index": index, "subindex": subindex}
+        return self.call("readParameter", path=path).json()["value"]
+
+    def wait_for_value(self, position, obj, predicate, timeout=1.0, interval=0.05):
+        """Read an object until `predicate(value)` is true, and return that value.
+
+        `obj` is (index, subindex), for example STATUSWORD. Each read is read_value(), so a
+        PDO-mapped object of an exchanging device costs no bus transfer.
+
+            client.wait_for_value(1, STATUSWORD, lambda sw: sw & 0x0400)  # target reached
+
+        Raises TimeoutError with the last value when the predicate is still false after `timeout`
+        seconds.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            value = self.read_value(position, obj)
+            if predicate(value):
+                return value
+            if time.monotonic() >= deadline:
+                index, subindex = obj
+                raise TimeoutError(
+                    f"device {position} 0x{index:04x}:{subindex:02x} is {value} after {timeout} s"
+                )
+            time.sleep(interval)
+
     def ensure_scanned(self):
         """Scan when the last scan is missing or wrong, and move no device.
 
@@ -407,3 +491,146 @@ class MotionMasterClient:
         for msg in self._subscribe(topic):
             if msg.get("type") == "monitoring" and msg.get("topic") == topic:
                 yield msg["data"]
+
+    def monitoring(self, parameters, interval_ms=50, topic=None, name=None):
+        """Return a Monitoring that records the rows of the parameters while a with block runs.
+
+        `parameters` is a list of (devicePosition, index, subindex). Create it after the devices
+        are in SAFE-OP or OP, because the server decides once, at creation, whether each object
+        comes from the process data or from SDO reads. Without `topic`, a unique one is chosen.
+
+            with client.monitoring([(1, 0x606C, 0)]) as m:
+                ...  # the move
+            velocity = m.column(1, 0x606C, 0)
+        """
+        topic = topic or f"py-{uuid.uuid4().hex[:12]}"
+        return Monitoring(self, parameters, interval_ms, topic, name)
+
+
+class Monitoring:
+    """A monitoring on the server, and every row it sent while the with block ran.
+
+    Entering the block creates the monitoring, subscribes to its topic, and returns when the first
+    row arrives, so nothing the block does is missed. Leaving the block waits for the rows of the
+    last flush, closes the WebSocket and deletes the monitoring, also when the block raised. The
+    rows stay readable after the block. An error of the thread that reads the WebSocket is raised
+    when the block ends.
+    """
+
+    # How long entering waits for the first row, and leaving for the last flush.
+    _FIRST_ROW_TIMEOUT = 5.0
+    _LAST_FLUSH_TIMEOUT = 2.0
+
+    def __init__(self, client, parameters, interval_ms, topic, name):
+        self._client = client
+        self._request = [[p, i, s] for p, i, s in parameters]
+        self._interval_ms = interval_ms
+        self.topic = topic
+        self._name = name
+        # The parameters as the server answered them, each with its source: "pdo" or "sdo".
+        self.parameters = []
+        # Every row, [timestampUs, v0, v1, ...] in the order of self.parameters.
+        self.rows = []
+        self._lock = threading.Lock()
+        self._batches = 0
+        self._arrived = threading.Condition(self._lock)
+        self._ws = None
+        self._thread = None
+        self._error = None
+
+    @property
+    def sources(self):
+        """The source of each parameter, in order: "pdo" or "sdo"."""
+        return [p["source"] for p in self.parameters]
+
+    def column(self, position, index, subindex):
+        """Return [(timestampUs, value), ...] of one parameter, in the order the cycles ran."""
+        for i, p in enumerate(self.parameters):
+            if (p["devicePosition"], p["index"], p["subindex"]) == (position, index, subindex):
+                with self._lock:
+                    return [(row[0], row[i + 1]) for row in self.rows]
+        raise KeyError(f"device {position} 0x{index:04x}:{subindex:02x} is not in this monitoring")
+
+    def __enter__(self):
+        body = {"topic": self.topic, "interval": self._interval_ms, "parameters": self._request}
+        if self._name is not None:
+            body["name"] = self._name
+        r = self._client.call("createMonitoring", body=body, check=False)
+        if r.status_code != 201:
+            try:
+                reason = r.json()["error"]
+            except (ValueError, KeyError):
+                reason = r.text
+            raise RuntimeError(
+                f"cannot create monitoring {self.topic}: {reason} (HTTP {r.status_code})"
+            )
+        self.parameters = r.json()["parameters"]
+        try:
+            self._start()
+        except BaseException:
+            self._stop()
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if self._thread is not None and self._thread.is_alive():
+                # A row is in a batch only after the next flush, so wait for two more batches.
+                with self._lock:
+                    target = self._batches + 2
+                    self._arrived.wait_for(
+                        lambda: self._batches >= target or self._error is not None,
+                        timeout=self._LAST_FLUSH_TIMEOUT,
+                    )
+        finally:
+            self._stop()
+        if self._error is not None and exc_type is None:
+            raise RuntimeError(f"monitoring {self.topic}: {self._error!r}") from self._error
+        return False
+
+    def _start(self):
+        if not self._client.ws_url:
+            raise RuntimeError("no ws_url configured on this client")
+        # Lazy import so HTTP-only usage doesn't require the websockets package.
+        from websockets.sync.client import connect
+
+        self._ws = connect(self._client.ws_url, ssl=self._client._ssl_context())
+        self._ws.send(json.dumps({"subscribe": self.topic}))
+        self._thread = threading.Thread(
+            target=self._read, name=f"monitoring-{self.topic}", daemon=True
+        )
+        self._thread.start()
+        with self._lock:
+            arrived = self._arrived.wait_for(
+                lambda: self.rows or self._error is not None, timeout=self._FIRST_ROW_TIMEOUT
+            )
+        if self._error is not None:
+            raise RuntimeError(f"monitoring {self.topic}: {self._error!r}") from self._error
+        if not arrived:
+            raise TimeoutError(f"monitoring {self.topic}: no row after {self._FIRST_ROW_TIMEOUT} s")
+
+    def _read(self):
+        from websockets.exceptions import ConnectionClosedOK
+
+        try:
+            for message in self._ws:
+                msg = json.loads(message)
+                if msg.get("type") == "monitoring" and msg.get("topic") == self.topic:
+                    with self._lock:
+                        self.rows.extend(msg["data"])
+                        self._batches += 1
+                        self._arrived.notify_all()
+        except ConnectionClosedOK:
+            pass
+        except Exception as error:
+            with self._lock:
+                self._error = error
+                self._arrived.notify_all()
+
+    def _stop(self):
+        # Closing the socket from this thread ends the loop of the reading thread.
+        if self._ws is not None:
+            self._ws.close()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        self._client.call("deleteMonitoring", path={"topic": self.topic}, check=False)

@@ -23,6 +23,15 @@ class BenchDevice:
     product_name: str
     folder: Path
 
+    @property
+    def path(self) -> dict[str, int]:
+        """The path parameters that address this device in the API.
+
+        For client.call() with an operation that has no client method, for example
+        client.call("readSii", path=device.path).
+        """
+        return {"slavePosition": self.position}
+
     def file(self, name: str) -> Path:
         """Return the path of a file of the device, by the name it has on the device."""
         return self.folder / name

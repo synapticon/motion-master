@@ -13,7 +13,6 @@ import time
 import pytest
 from motion_master_client import (
     INIT,
-    MODES_OF_OPERATION_DISPLAY,
     OP,
     PRE_OP,
     PROFILE_ACCELERATION,
@@ -85,12 +84,6 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
             assert monitoring.sources == ["pdo"] * len(parameters), monitoring.parameters
 
             client.set_operation_mode(integro.position, PROFILE_VELOCITY)
-            # The drive takes a new mode some cycles after the write.
-            client.wait_for_value(
-                integro.position,
-                MODES_OF_OPERATION_DISPLAY,
-                lambda active: active == PROFILE_VELOCITY,
-            )
             # A stale target velocity would start the motor at the enable.
             client.set_target(integro.position, "velocity", 0)
             client.enable(integro.position)

@@ -2030,16 +2030,20 @@ paths:
     post:
       summary: Set a device's CiA402 operation mode
       description: >
-        Writes the requested operation mode to 0x6060 and returns the resulting control snapshot.
-        The drive reflects the accepted mode in 0x6061 (the modeOfOperation of the response) once
-        it takes effect.
+        Writes the requested operation mode to 0x6060, waits until the drive shows it in 0x6061,
+        and returns the control snapshot. A 200 means the drive runs in the mode: the
+        modeOfOperation of the response is the requested mode. A drive takes a new mode some
+        cycles after the write, so the server reads 0x6061 again until it shows the mode, for up to
+        200 ms. A drive that does not take the mode in that time is answered with 409, which names
+        the mode 0x6061 shows and the drive's error code from 0x603F when it has one. Mode 0 asks
+        for no mode, so there is nothing to wait for, and it returns after the write.
 
 
         Any value object 0x6060 can hold is accepted, standard or manufacturer-specific — the
         negative half of that range belongs to the vendor, so a SOMANET's diagnostics (-2) or
         system identification (-4) go through here like any other. Whether a given drive has the
-        mode is the drive's answer, seen in the modeOfOperation of the response;
-        GET /api/devices/{slavePosition}/operation-modes is what lists them beforehand.
+        mode is the drive's answer: a 409 when it does not take it.
+        GET /api/devices/{slavePosition}/operation-modes is what lists the modes beforehand.
       operationId: setCia402OperationMode
       parameters:
         - name: slavePosition
@@ -2079,7 +2083,9 @@ paths:
         "404":
           description: No device at that slavePosition
         "409":
-          description: The device is not a CiA402 drive, or the write failed
+          description: >-
+            The device is not a CiA402 drive, the write failed, or the drive did not show the
+            mode in 0x6061 within 200 ms
   /api/devices/{slavePosition}/cia402/state:
     post:
       summary: Bring a drive to a CiA402 state

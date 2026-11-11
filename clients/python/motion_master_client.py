@@ -435,8 +435,9 @@ class MotionMasterClient:
     def set_operation_mode(self, position, mode):
         """Write the CiA402 operation mode (0x6060) of a drive (setCia402OperationMode).
 
-        Returns the CiA402 snapshot after the write. The drive takes the mode some cycles later;
-        0x6061 shows when.
+        The server waits until 0x6061 shows the mode, so the drive runs in it when this returns.
+        Returns the CiA402 snapshot. Raises requests.HTTPError, 409, when the drive does not take
+        the mode.
         """
         body = {"mode": mode}
         return self.call("setCia402OperationMode", path=_path(position), body=body).json()

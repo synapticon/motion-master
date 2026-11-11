@@ -13,6 +13,7 @@ from motion_master_client import (
     INIT,
     MODES_OF_OPERATION_DISPLAY,
     OP,
+    PRE_OP,
     PROFILE_ACCELERATION,
     QUICK_STOP_DECELERATION,
     QUICK_STOP_OPTION_CODE,
@@ -53,10 +54,12 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     client = bench.client
 
     # Every drive in INIT first. A test before may have left a drive in OP, and the server does not
-    # command an AL state when it resets.
+    # command an AL state when it resets. Then every drive to PRE-OP, because the map of the process
+    # data reads the PDO mapping of every slave, and a slave in INIT does not answer (#208).
     bench.reset()
     client.init()
     client.ensure_state(INIT, exact=True)
+    client.ensure_state(PRE_OP, exact=True)
     client.ensure_state(OP, positions=[integro.position])
 
     acceleration = client.read_value(integro.position, PROFILE_ACCELERATION)

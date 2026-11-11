@@ -38,8 +38,8 @@ before left in OP is still in OP until a test moves it.
 `tests/test_motion.py` turns the motor of a device in Profile Velocity, the operation mode in which
 the drive ramps to a target velocity. Each test there is for one device, because devices differ in
 their inputs and in what to expect. Today it holds the test of the Integro, which it finds in
-`bench.toml` by its folder, `integro`. The test brings every drive to INIT, then only the Integro to
-OP, enables it, holds 1000 rpm for 3 s, and sends a quick stop. A monitoring records the velocity actual value
+`bench.toml` by its folder, `integro`. The test brings every drive to INIT, then every drive to
+PRE-OP, then only the Integro to OP, enables it, holds 1000 rpm for 3 s, and sends a quick stop. A monitoring records the velocity actual value
 (`0x606C`), the target velocity (`0x60FF`) and the statusword (`0x6041`) in every cycle. The test
 then checks the recorded rows:
 

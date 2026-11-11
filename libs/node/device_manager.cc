@@ -129,7 +129,10 @@ std::vector<EtherCatState> alSteps(EtherCatState current, EtherCatState target) 
     }
     return steps;
   }
-  steps.insert(steps.end(), std::next(from), std::next(to));
+  // A loop, not a range insert: GCC 14 at -O2 reports a false -Warray-bounds on the insert.
+  for (auto state = std::next(from); state != std::next(to); ++state) {
+    steps.push_back(*state);
+  }
   return steps;
 }
 

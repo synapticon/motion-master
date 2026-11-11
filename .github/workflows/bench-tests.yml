@@ -2,27 +2,23 @@ name: Bench Tests
 
 on:
   workflow_dispatch:
+    # The Actions tab shows each description in full above its field, so they stay short. The
+    # README of hil/bench describes each input in full.
     inputs:
+      # Empty builds the Docker image from the selected branch, about 20 s when no C++ changed. A
+      # version that is not on Docker Hub fails the run before any test runs.
       version:
-        description: >-
-          Server version. Empty: build the Docker image from the branch selected above, about
-          20 s when no C++ changed. A version such as 6.0.0-alpha.95: pull
-          synapticon/motion-master:<version> from Docker Hub and test that image. A version that
-          is not on Docker Hub fails the run before any test runs.
+        description: "Server version from Docker Hub, e.g. 6.0.0-alpha.95. Empty: build the branch."
         required: false
         default: ""
+      # An expression that matches no test fails the run.
       tests:
-        description: >-
-          Tests to run, as a pytest -k expression. Empty: run every test. "scan": run the tests
-          with scan in their name. "scan and not power": leave out the power-cycle test. An
-          expression that matches no test fails the run.
+        description: "pytest -k expression, e.g. \"scan and not power\". Empty: every test."
         required: false
         default: ""
+      # A dump of the motion test is about 1.7 MB, so this is for a failing test only.
       process-data-dumps:
-        description: >-
-          Save a process-data dump of each test that asks for one, and upload it with the report.
-          Turn it on to look at the motion data of a failing test. A dump of the motion test is
-          about 1.7 MB.
+        description: "Upload a process-data dump of each motion test."
         type: boolean
         required: false
         default: false

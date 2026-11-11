@@ -8,7 +8,7 @@ import pytest
 from motion_master_client import PRE_OP
 
 from bench import Bench
-from report import append_to_job_summary, test_results_markdown, write_device_report
+from report import append_to_job_summary, test_results_markdown, write_bench_report
 
 # (test, outcome, message) for each test, in the order they ran.
 _results: list[tuple[str, str, str]] = []
@@ -21,7 +21,7 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
     The cold start resets the server, cycles the power of the drives, opens the driver, and waits
     until every device is on the wire. The P 1535 cannot report whether its output is on, so only
     a power cycle gives the same start on every run. Before the first test, the fixture writes the
-    device report to the test-suite properties of report.xml and to the job summary. After the
+    bench report to the test-suite properties of report.xml and to the job summary. After the
     last test, passed or failed, it switches the drives off.
     """
     record = record_testsuite_property
@@ -37,24 +37,20 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
         bench.wait_for_devices_on_wire()
         record("setup.seconds", _seconds_since(start))
         start = time.monotonic()
-        _report(bench, record)
+        # The report describes the run, and the tests decide its result. So a report that fails
+        # is logged and named in report.xml and the job summary, and the tests still run. The
+        # report brings every device to PRE-OP first, because its reads go over the mailbox.
+        try:
+            bench.client.ensure_state(PRE_OP, exact=True)
+            write_bench_report(bench, record)
+        except Exception as error:
+            logging.getLogger(__name__).exception("the bench report failed")
+            record("report.error", repr(error))
+            append_to_job_summary(f"The bench report failed: `{error!r}`\n\n")
         record("report.seconds", _seconds_since(start))
         yield bench
     finally:
         bench.psu.switch(False)
-
-
-def _report(bench: Bench, record: Callable[[str, object], None]) -> None:
-    # The report describes the run, and the tests decide its result. So a report that fails is
-    # logged and named in report.xml and the job summary, and the tests still run. The report
-    # brings every device to PRE-OP first, because its reads go over the mailbox.
-    try:
-        bench.client.ensure_state(PRE_OP, exact=True)
-        write_device_report(bench, record)
-    except Exception as error:
-        logging.getLogger(__name__).exception("the device report failed")
-        record("report.error", repr(error))
-        append_to_job_summary(f"The device report failed: `{error!r}`\n\n")
 
 
 def _seconds_since(start: float) -> float:

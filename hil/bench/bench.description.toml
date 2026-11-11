@@ -2,7 +2,7 @@
 #
 # Every value here must match the hardware. A change to this file does not change the bench. When
 # the hardware changes, change this file with it. bench.py loads the file as bench.description, and
-# the device report of each run compares the live devices with it.
+# the bench report of each run compares the live devices with it.
 
 # The network interface of the runner that the EtherCAT bus is connected to.
 adapter = "enp2s0"

@@ -62,12 +62,12 @@ The message of the test gives the acceleration and the quick stop deceleration r
 the ramp time, the mean, the minimum and the maximum velocity, and the stop time. When the test
 ends, passed or not, it disables the drive and brings it to INIT.
 
-## The device report
+## The bench report
 
-Before the first test, the run brings every device to PRE-OP and reads what it says it is: the
-product code, the revision, the firmware version from object `0x100A`, and the build descriptor and
-the serial number from the hardware description. In GitHub Actions the run writes this as a table
-to the job summary.
+Before the first test, the run reads the version of the server. Then it brings every device to
+PRE-OP and reads what the device says it is: the product code, the revision, the firmware version
+from object `0x100A`, and the build descriptor and the serial number from the hardware description.
+In GitHub Actions the run writes this as a table to the job summary.
 
 Where a device does not match its folder, the report names the difference. The run does not fail
 for it. The report compares the product name, and the id, the version and the serial number in
@@ -79,14 +79,14 @@ With `--junitxml=report.xml`, pytest writes a JUnit XML report. JUnit XML is the
 that most CI tools read. A passed test case carries a `message` property with what the test saw. A
 failed one carries the failure and its traceback, as JUnit XML always does.
 
-The device report goes into the same file, as properties of the test suite, so that one file holds
+The bench report goes into the same file, as properties of the test suite, so that one file holds
 everything about a run:
 
 | Property | Value |
 | --- | --- |
 | `server.version` | The version of the server under test |
 | `setup.seconds` | How long the start of the run took: the wait for the server, the reset, the power cycle, the init and the wait for the devices on the wire. JUnit counts this time in the time of the first test |
-| `report.seconds` | How long the device report took, with the transition to PRE-OP that its reads need. JUnit counts this time in the time of the first test too |
+| `report.seconds` | How long the bench report took, with the transition to PRE-OP that its reads need. JUnit counts this time in the time of the first test too |
 | `device.<position>.folder` | The folder of the device in `devices/` |
 | `device.<position>.productName` | The product name that `GET /api/devices` reports |
 | `device.<position>.productCode` | The product code, in hexadecimal |
@@ -96,7 +96,7 @@ everything about a run:
 | `device.<position>.serialNumber` | The serial number from the hardware description |
 | `device.<position>.differences` | Where the device differs from its folder, separated by `;` |
 | `device.<position>.failedReads` | The reads that failed, separated by `;` |
-| `report.error` | Only when the device report failed: why |
+| `report.error` | Only when the bench report failed: why |
 
 A field that the device did not give is empty. Every device has every property, so a reader can
 rely on the keys.
@@ -157,7 +157,7 @@ summary names the server that ran. The workflow starts the server with the capab
 needs. When the tests end, it uploads two files: `report.xml`, the report file, and `server.log`,
 the log of the server.
 
-The run page shows two tables below the job graph, in the job summary: the device report, and one
+The run page shows two tables below the job graph, in the job summary: the bench report, and one
 row for each test with its result and its message.
 
 Only one run uses the bench at a time. A second run waits.

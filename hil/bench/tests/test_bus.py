@@ -7,10 +7,6 @@ from motion_master_client import PRE_OP
 from bench import Bench
 
 
-def product_names(bench: Bench) -> list[str]:
-    return [d["productName"] for d in bench.client.call("getDevices").json()]
-
-
 def _found(names: list[str]) -> str:
     return f"found {len(names)} devices: {', '.join(names)}"
 
@@ -34,7 +30,7 @@ def test_scan_finds_the_devices_in_bus_order(bench: Bench, record_property):
     found = bench.client.call("scan").json()["slaves"]
 
     assert found == len(bench.description.product_names)
-    names = product_names(bench)
+    names = [d["productName"] for d in bench.client.devices()]
     assert names == bench.description.product_names
     record_property("message", _found(names))
 
@@ -52,7 +48,7 @@ def test_scan_after_a_power_cycle_finds_the_devices_again(bench: Bench, record_p
 
     assert status["required"], status
     assert found == len(bench.description.product_names)
-    names = product_names(bench)
+    names = [d["productName"] for d in bench.client.devices()]
     assert names == bench.description.product_names
     record_property("message", f"the server asked for a new scan; {_found(names)}")
 

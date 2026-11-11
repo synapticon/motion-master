@@ -31,8 +31,9 @@ end, so a script can check the rows afterwards. read_value() reads one object,
 decoded by the server, and wait_for_value() reads it until a condition holds.
 Constants such as STATUSWORD name the CiA402 objects as (index, subindex), and
 cia402_state() names the state a statusword reports.
-restart() restarts devices through INIT up to an AL state, and set_operation_mode(),
-set_target(), enable(), disable() and quick_stop() drive one CiA402 drive.
+devices() lists the scanned devices. restart() restarts devices through INIT up to
+an AL state, and set_operation_mode(), set_target(), enable(), disable() and
+quick_stop() drive one CiA402 drive.
 run(main) calls a script's main() and turns an error a user can act on, such as
 a server that is not running, into one line on stderr.
 """
@@ -321,6 +322,14 @@ class MotionMasterClient:
             log.info("opened the %s driver", body.get("driver", "soem"))
         elif r.status_code != 409:
             r.raise_for_status()
+
+    def devices(self):
+        """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).
+
+        Each is a dict with slavePosition, productName, productCode and the other fields of that
+        response. The list is empty before the first scan.
+        """
+        return self.call("getDevices").json()
 
     def read_value(self, position, obj):
         """Read one object of a device and return its value, decoded by the server.

@@ -36,7 +36,7 @@ def write_device_report(bench: Bench, record: Callable[[str, object], None]) -> 
     record is pytest's record_testsuite_property, which puts each property into report.xml.
     """
     server_version = bench.client.call("getVersion").json()["version"]
-    live_devices = bench.client.call("getDevices").json()
+    live_devices = bench.client.devices()
     rows = []
     for device in bench.description.devices:
         live = live_devices[device.position - 1] if device.position <= len(live_devices) else None

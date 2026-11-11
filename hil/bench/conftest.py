@@ -16,12 +16,13 @@ _results: list[tuple[str, str, str]] = []
 
 @pytest.fixture(scope="session")
 def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[Bench]:
-    """The bench, after one power cycle, so that a run starts from drives that just booted.
+    """The bench after a cold start, so that every run starts from drives that just booted.
 
-    The power supply has no read of its output state, so a power cycle is the only start that
-    is the same on every run. The device report is written here, before the first test, to the
-    test-suite properties of report.xml and to the job summary. When the last test ends, passed
-    or not, the drives are switched off.
+    The cold start resets the server, cycles the power of the drives, opens the driver, and waits
+    until every device is on the wire. The P 1535 cannot report whether its output is on, so only
+    a power cycle gives the same start on every run. Before the first test, the fixture writes the
+    device report to the test-suite properties of report.xml and to the job summary. After the
+    last test, passed or failed, it switches the drives off.
     """
     record = record_testsuite_property
     # JUnit counts the setup and the report in the time of the first test, so each one is also

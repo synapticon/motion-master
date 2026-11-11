@@ -66,7 +66,8 @@ class BenchDescription:
 class Psu:
     """The output of the P 1535, switched by the ESP32 firmware in hil/p1535.
 
-    It touches only the power of the drives. The server does not learn of it.
+    It sends requests to the ESP32 only, never to the server. After a power cycle, the drives
+    restart with no station address, so a test scans again or calls init before it uses them.
     """
 
     def __init__(self, host: str, off_seconds: float):

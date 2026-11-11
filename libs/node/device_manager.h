@@ -57,6 +57,19 @@ struct RestartOutcome {
   std::vector<DeviceStateInfo> states;
 };
 
+/// @brief Why @c DeviceManager::changeState refused or failed. The HTTP route branches on @c kind.
+struct StateChangeError {
+  enum class Kind : uint8_t {
+    /// The AL state machine does not allow the transition for a targeted device. Nothing was
+    /// commanded.
+    kIllegalTransition,
+    /// Anything else: no driver, no devices, a read of the states, or the re-map failed.
+    kFailed,
+  };
+  Kind kind = Kind::kFailed;
+  std::string message;
+};
+
 /// @brief Whether the devices of the last scan still match the bus.
 struct ScanStatus {
   /// True when a device does not answer at its address, or the device count changed.
@@ -634,6 +647,31 @@ class DeviceManager {
   /// (e.g. SPoE). Runs on the (non-RT) caller's thread.
   std::vector<SlaveConfigInfo> busConfig() const;
 
+  /// @brief Commands one AL transition of a set of devices to @p targetState, blocking until all
+  ///        arrive or @p timeout elapses, and reports the final state of each.
+  ///
+  /// Refuses a transition the AL state machine does not allow for any targeted device, before any
+  /// device is commanded: a climb of more than one state, or BOOT entered or left other than
+  /// through INIT. This is not only a rule of the standard. Entering SAFE-OP or OP re-maps the
+  /// process image, and a device in BOOT that reaches the PDO mapper crashes SOEM. A transition to
+  /// the state a device is in is allowed, and acknowledges an AL error it holds. @c
+  /// transitionToState and @c restartToState are walks of this step.
+  ///
+  /// If @p positions is empty, all discovered devices are targeted. A device reached the target
+  /// when its returned snapshot has @c error clear and @c alState equal to @p targetState;
+  /// otherwise @c alStatusCode explains why. A device that does not answer is not validated, and
+  /// the read-back reports it. Must be called after both @c init() and @c scan().
+  ///
+  /// @param positions    1-based slave positions to transition; empty = all devices.
+  /// @param targetState  Desired EtherCAT AL state.
+  /// @param timeout      Maximum time to wait for all devices.
+  /// @return The final state snapshot of each targeted device (in the order targeted), or a
+  ///         @c StateChangeError: @c kIllegalTransition when the AL state machine does not allow
+  ///         the transition, @c kFailed for anything else.
+  std::expected<std::vector<DeviceStateInfo>, StateChangeError> changeState(
+      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+      std::chrono::steady_clock::duration timeout);
+
   /// @brief Brings a set of devices to @p targetState, one legal AL transition at a time, and
   ///        reports the final state of each.
   ///
@@ -651,8 +689,8 @@ class DeviceManager {
   /// which acknowledges an error it holds. A device that does not answer is commanded once, with
   /// @p targetState, and reported.
   ///
-  /// Each step is a separate bus operation, as in @c restartToState. Must be called after both
-  /// @c init() and @c scan().
+  /// Each step is a call of @c changeState, and a separate bus operation, as in
+  /// @c restartToState. Must be called after both @c init() and @c scan().
   ///
   /// @param positions    1-based slave positions to transition; empty = all devices.
   /// @param targetState  Desired EtherCAT AL state.
@@ -669,7 +707,7 @@ class DeviceManager {
   ///
   /// The steps are INIT, PRE-OP, SAFE-OP and OP, as far as @p targetState. A target of BOOT is
   /// INIT and then BOOT, and a target of INIT is INIT alone. Each step is a call of
-  /// @c transitionOneStep, so the re-map and the check of the AL transition stay in one place. The
+  /// @c changeState, so the re-map and the check of the AL transition stay in one place. The
   /// walk stops at the first step a device does not reach, and the outcome names that step and the
   /// state of every device after it.
   ///
@@ -1025,18 +1063,6 @@ class DeviceManager {
   ///         string naming the first position that is not a discovered device.
   std::expected<std::vector<uint16_t>, std::string> resolveTargets(
       const std::vector<uint16_t>& positions) const;
-
-  /// @brief One legal AL transition of a set of devices to @p targetState, with the re-map or
-  ///        teardown of the process image it needs. The step that @c transitionToState and
-  ///        @c restartToState walk.
-  ///
-  /// Refuses a transition the AL state machine does not allow, before any device is commanded,
-  /// because a device in BOOT that reaches the PDO mapper crashes SOEM.
-  ///
-  /// @return The state of every targeted device after the step, in the order targeted.
-  std::expected<std::vector<DeviceStateInfo>, std::string> transitionOneStep(
-      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
-      std::chrono::steady_clock::duration timeout);
 
   /// @brief Sums each non-errored device's working-counter contribution, counting a device in
   ///        @p transitioning for the *lower* of where it is and the @p target it is being

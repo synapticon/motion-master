@@ -458,6 +458,37 @@ TEST(DeviceManagerStateWalk, StopsAtTheFirstStepADeviceDoesNotReach) {
   EXPECT_EQ((*result)[0].alState, static_cast<uint16_t>(EtherCatState::PreOp));
 }
 
+TEST(DeviceManagerChangeState, CommandsOneLegalTransition) {
+  auto [dm, driver] = busInStates({EtherCatState::Init});
+
+  const auto result = dm->changeState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error().message;
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::PreOp}}));
+}
+
+TEST(DeviceManagerChangeState, RefusesAnIllegalTransitionAndCommandsNothing) {
+  // One device that cannot take the step refuses the whole request, so no device moves.
+  auto [dm, driver] = busInStates({EtherCatState::PreOp, EtherCatState::Init});
+
+  const auto result = dm->changeState({}, EtherCatState::SafeOp, std::chrono::seconds(1));
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().kind, mm::node::StateChangeError::Kind::kIllegalTransition);
+  EXPECT_TRUE(driver->commanded.empty());
+}
+
+TEST(DeviceManagerChangeState, NeverTakesADeviceInBootToAnExchangeState) {
+  auto [dm, driver] = busInStates({EtherCatState::Boot});
+
+  for (const auto target : {EtherCatState::PreOp, EtherCatState::SafeOp, EtherCatState::Op}) {
+    const auto result = dm->changeState({}, target, std::chrono::seconds(1));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().kind, mm::node::StateChangeError::Kind::kIllegalTransition);
+  }
+  EXPECT_TRUE(driver->commanded.empty());
+}
+
 // Scans a bus of @p slaves devices, all in PRE-OP, with as many on the wire.
 std::pair<std::unique_ptr<DeviceManager>, FakeDriver*> scannedBus(int slaves) {
   auto driver = std::make_unique<FakeDriver>(true, slaves);

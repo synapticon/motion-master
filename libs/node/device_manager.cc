@@ -101,6 +101,10 @@ bool isValidStateTransition(EtherCatState currentState, EtherCatState targetStat
   return allowed != kValidStateTransitions.end() && allowed->second.contains(targetState);
 }
 
+StateChangeError stateChangeError(StateChangeError::Kind kind, std::string message) {
+  return StateChangeError{.kind = kind, .message = std::move(message)};
+}
+
 // The steps from @p current to @p target, each one transition the AL state machine allows: a climb
 // is one step per state, a drop is one step, and BOOT is entered and left only through INIT. An
 // unknown current state, such as a device that does not answer, gets the target as its one step.
@@ -995,10 +999,10 @@ std::expected<RestartOutcome, std::string> DeviceManager::restartToState(
   std::ranges::copy(alSteps(EtherCatState::Init, targetState), std::back_inserter(steps));
   RestartOutcome outcome;
   for (const EtherCatState step : steps) {
-    auto states = transitionOneStep(positions, step, timeout);
+    auto states = changeState(positions, step, timeout);
     if (!states) {
-      return std::unexpected(
-          std::format("restart stopped at {}: {}", mm::comm::toString(step), states.error()));
+      return std::unexpected(std::format("restart stopped at {}: {}", mm::comm::toString(step),
+                                         states.error().message));
     }
     outcome.step = step;
     outcome.states = std::move(*states);
@@ -1123,9 +1127,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
       break;
     }
     for (const auto& [step, group] : stepGroups) {
-      auto states = transitionOneStep(group, step, timeout);
+      auto states = changeState(group, step, timeout);
       if (!states) {
-        return std::unexpected(states.error());
+        return std::unexpected(states.error().message);
       }
       const bool allReached = std::ranges::all_of(*states, [step](const DeviceStateInfo& info) {
         return info.reachability != mm::comm::Reachability::Answering ||
@@ -1141,7 +1145,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   return deviceStates(targets);
 }
 
-std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionOneStep(
+std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::changeState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
   // busOperationMutex_ only, and this is the operation the split exists for. Driving AL state
@@ -1154,17 +1158,19 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   const std::lock_guard busOperationLock(busOperationMutex_);
   const std::shared_ptr<DeviceSet> set = deviceSet();
   if (!set->driver) {
-    return std::unexpected("no driver — call init() first");
+    return std::unexpected(
+        stateChangeError(StateChangeError::Kind::kFailed, "no driver — call init() first"));
   }
   if (set->devices.empty()) {
-    return std::unexpected("no devices — call scan() first");
+    return std::unexpected(
+        stateChangeError(StateChangeError::Kind::kFailed, "no devices — call scan() first"));
   }
   if (auto refusal = set->driver->stateChangeRefusal(); refusal) {
-    return std::unexpected(std::move(*refusal));
+    return std::unexpected(stateChangeError(StateChangeError::Kind::kFailed, std::move(*refusal)));
   }
   auto resolved = resolveTargets(positions);
   if (!resolved) {
-    return std::unexpected(resolved.error());
+    return std::unexpected(stateChangeError(StateChangeError::Kind::kFailed, resolved.error()));
   }
   std::vector<uint16_t> targets = std::move(*resolved);
 
@@ -1175,7 +1181,8 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   // valid in any state) rather than trusting the cache, since this guards a crash.
   auto currentStates = set->driver->readStates(targets);
   if (!currentStates) {
-    return std::unexpected(currentStates.error());
+    return std::unexpected(
+        stateChangeError(StateChangeError::Kind::kFailed, currentStates.error()));
   }
   // A device that does not answer has no known state to validate. The driver decides whether it
   // can command such a device, and the read-back below reports it either way.
@@ -1187,10 +1194,12 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
     const auto currentState = mm::comm::alState((*currentStates)[i].alStatus);
     if (!isValidStateTransition(currentState, targetState)) {
-      return std::unexpected(std::format(
-          "illegal AL transition for device {}: {} -> {} (allowed: single-step climb "
-          "INIT -> PRE-OP -> SAFE-OP -> OP, any drop, or BOOT only from/to INIT)",
-          targets[i], mm::comm::toString(currentState), mm::comm::toString(targetState)));
+      return std::unexpected(stateChangeError(
+          StateChangeError::Kind::kIllegalTransition,
+          std::format("illegal AL transition for device {}: {} -> {} (allowed: single-step climb "
+                      "INIT -> PRE-OP -> SAFE-OP -> OP, any drop, or BOOT only from/to INIT)",
+                      targets[i], mm::comm::toString(currentState),
+                      mm::comm::toString(targetState))));
     }
   }
 
@@ -1245,7 +1254,8 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
       // Already holding busOperationMutex_ — call the mapping primitive directly, not the public
       // configureProcessData (which would re-acquire the non-recursive lock and deadlock).
       if (auto r = remapProcessImage(); !r) {
-        return std::unexpected("auto-configure process data failed: " + r.error());
+        return std::unexpected(stateChangeError(
+            StateChangeError::Kind::kFailed, "auto-configure process data failed: " + r.error()));
       }
 
       // Restore the staying devices to OP. The freshly published image already describes them, so
@@ -1277,7 +1287,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
   }
 
-  spdlog::debug("transitionOneStep -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),
+  spdlog::debug("changeState -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),
                 targets.size());
   // A drop that leaves other devices exchanging keeps the image published, so the RT loop runs
   // throughout the seconds this call takes. Bring the expectation down first: the targets stop
@@ -1289,7 +1299,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   // Callers derive "reached the target" as (!error && alState == targetState) per device.
   auto raw = set->driver->readStates(targets);
   if (!raw) {
-    return std::unexpected(raw.error());
+    return std::unexpected(stateChangeError(StateChangeError::Kind::kFailed, raw.error()));
   }
   // readStates() refreshed the driver's cached AL status of every target that answered, so
   // Device::mailboxActive() / exchangesProcessData() now read through to the fresh state — no

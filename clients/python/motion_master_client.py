@@ -117,7 +117,7 @@ def cia402_state(statusword):
 
 
 # The states a device climbs through, from the bottom. BOOT is not on it, because BOOT is
-# reachable only from INIT.
+# reachable only from INIT. _satisfied() orders the states with it.
 _LADDER = [INIT, PRE_OP, SAFE_OP, OP]
 
 
@@ -143,19 +143,6 @@ class StateError(Exception):
 
 class ProcedureError(Exception):
     """The server refuses to start a procedure. The message is the server's reason."""
-
-
-def _next_step(current, target):
-    """Return the next state on the way from current to target.
-
-    The server refuses an illegal transition. A device may go down any number of states in one
-    step, but it goes up one state at a time, and it enters and leaves BOOT only through INIT.
-    """
-    if current == BOOT or target == BOOT:
-        return INIT if current != INIT else BOOT
-    if _LADDER.index(target) < _LADDER.index(current):
-        return target
-    return _LADDER[_LADDER.index(current) + 1]
 
 
 def _satisfied(current, target, exact):
@@ -403,37 +390,28 @@ class MotionMasterClient:
     def ensure_state(self, state, positions=None, exact=False):
         """Bring the devices to the AL state a script needs.
 
-        Scans when the last scan is missing or wrong, then moves each device to `state` one legal
-        step at a time. A device already above `state` stays where it is, because SAFE-OP and OP
-        keep the mailbox of PRE-OP. Pass exact=True when the script needs that one state. A target
-        of BOOT is always exact. Call init() first.
+        Scans when the last scan is missing or wrong, then asks the server to walk each device to
+        `state` (transitionToState), one legal transition at a time. A device already above
+        `state` stays where it is, because SAFE-OP and OP keep the mailbox of PRE-OP. Pass
+        exact=True when the script needs that one state. A target of BOOT is always exact. Call
+        init() first.
 
-        Raises StateError when a device does not answer or does not reach a step.
+        Raises StateError when a device does not answer or does not reach `state`.
         """
         self.ensure_scanned()
 
         query = {"positions": ",".join(map(str, positions))} if positions else None
-        while True:
-            devices = self.call("getDeviceStates", query=query).json()
-            for d in devices:
-                if d["reachability"] != "answering":
-                    raise StateError(f"device {d['slavePosition']} is {d['reachability']}")
-
-            # Devices on different states can need different steps, so one request goes to each
-            # group.
-            steps = {}
-            for d in devices:
-                if not _satisfied(d["alState"], state, exact):
-                    steps.setdefault(_next_step(d["alState"], state), []).append(d["slavePosition"])
-            if not steps:
-                return
-
-            for step, group in steps.items():
-                log.info("device(s) %s -> %s", group, STATE_NAMES[step])
-                body = {"state": step, "positions": group}
-                result = self.call("transitionToState", body=body).json()
-                if not result["ok"]:
-                    raise StateError(_not_reached(result, step))
+        devices = self.call("getDeviceStates", query=query).json()
+        for d in devices:
+            if d["reachability"] != "answering":
+                raise StateError(f"device {d['slavePosition']} is {d['reachability']}")
+        group = [d["slavePosition"] for d in devices if not _satisfied(d["alState"], state, exact)]
+        if not group:
+            return
+        log.info("device(s) %s -> %s", group, STATE_NAMES[state])
+        result = self.call("transitionToState", body={"state": state, "positions": group}).json()
+        if not result["ok"]:
+            raise StateError(_not_reached(result, state))
 
     def restart(self, target, positions=None):
         """Restart devices through INIT, then walk them up to the AL state `target`.

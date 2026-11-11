@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Move the devices to an EtherCAT AL state (POST /api/devices/state).
+"""Move the devices to an EtherCAT AL state.
 
-Opens the fieldbus driver and scans first when needed. The server accepts a
-step up of one state at a time, and BOOT only from INIT, so the client walks
-through every state between. A device that does not reach a state stops the
-script with its AL status code.
+Opens the fieldbus driver and scans first when needed. The server walks each
+device through every state between, one legal transition at a time
+(POST /api/devices/state/transition). A device that does not reach the state
+stops the script with its AL status code.
 
     python transition-state.py --state op
     python transition-state.py --state pre-op --slave 2

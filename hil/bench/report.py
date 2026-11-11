@@ -10,8 +10,17 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from typing import TypeVar
+
+import requests
 
 from bench import Bench, BenchDevice
+
+T = TypeVar("T")
+
+# Object 0x100A, the manufacturer software version, which a SOMANET device fills with its firmware
+# version.
+_FIRMWARE_VERSION = (0x100A, 0)
 
 # The fields of a hardware description that name one physical product.
 _IDENTITY = ("id", "version", "serialNumber")
@@ -92,7 +101,6 @@ def _row(bench: Bench, device: BenchDevice, live: dict | None) -> dict:
         row["differences"].append("no device at this position")
         return row
 
-    path = {"slavePosition": device.position}
     row.update(
         productName=live["productName"],
         productCode=f"0x{live['productCode']:08x}",
@@ -104,13 +112,13 @@ def _row(bench: Bench, device: BenchDevice, live: dict | None) -> dict:
             f" bench.description.toml says {device.product_name!r}"
         )
 
-    firmware, error = _read(bench, "readParameter", {**path, "index": 0x100A, "subindex": 0})
+    firmware, error = _attempt(lambda: bench.client.read_value(device.position, _FIRMWARE_VERSION))
     if error:
         row["failedReads"].append(f"firmware version: {error}")
     else:
-        row["firmwareVersion"] = firmware["value"]
+        row["firmwareVersion"] = firmware
 
-    hardware, error = _read(bench, "getDeviceHardwareDescription", path)
+    hardware, error = _attempt(lambda: bench.client.hardware_description(device.position))
     if error:
         row["failedReads"].append(f"hardware description: {error}")
         return row
@@ -127,17 +135,16 @@ def _row(bench: Bench, device: BenchDevice, live: dict | None) -> dict:
     return row
 
 
-def _read(bench: Bench, operation: str, path: dict) -> tuple[dict, str]:
-    """Return the answer of one read and "", or {} and a line that says why there is no answer."""
-    # An older server, such as a pulled image, can lack the operation. The report then says so,
-    # and the tests still run.
+def _attempt(read: Callable[[], T]) -> tuple[T | None, str]:
+    """Return the result of one read and "", or None and a line that says why there is none."""
     try:
-        response = bench.client.call(operation, path=path, check=False)
-    except KeyError:
-        return {}, f"the server has no operation {operation}"
-    if not response.ok:
-        return {}, f"HTTP {response.status_code}, {response.text.strip()}"
-    return response.json(), ""
+        return read(), ""
+    except KeyError as error:
+        # An older server, such as a pulled image, can lack the operation. The report then says
+        # so, and the tests still run.
+        return None, str(error.args[0])
+    except requests.HTTPError as error:
+        return None, f"HTTP {error.response.status_code}, {error.response.text.strip()}"
 
 
 def _identity_differences(stored: dict, live: dict) -> list[str]:

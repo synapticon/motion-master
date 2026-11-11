@@ -40,4 +40,4 @@ productName = "SOMANET Node"
 
 [[devices]]
 folder = "ngc"
-productName = "PLACEHOLDER"
+productName = "SOMANET Circulo CiA402 Drive"

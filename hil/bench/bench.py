@@ -47,13 +47,6 @@ class BenchDescription:
     boot_timeout_seconds: float
     devices: list[BenchDevice]
 
-    def device(self, folder: str) -> BenchDevice:
-        """Return the device whose files are in devices/<folder>, for example "integro"."""
-        for d in self.devices:
-            if d.folder.name == folder:
-                return d
-        raise KeyError(f"bench.description.toml has no device with folder {folder!r}")
-
     @classmethod
     def load(cls) -> BenchDescription:
         with open(_HERE / "bench.description.toml", "rb") as f:
@@ -108,7 +101,10 @@ class Bench:
 
     def device(self, folder: str) -> BenchDevice:
         """Return the device whose files are in devices/<folder>, for example "integro"."""
-        return self.description.device(folder)
+        for d in self.description.devices:
+            if d.folder.name == folder:
+                return d
+        raise KeyError(f"bench.description.toml has no device with folder {folder!r}")
 
     def reset(self) -> None:
         """Close the driver and forget every device, so that the next step starts from nothing."""

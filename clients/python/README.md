@@ -206,6 +206,8 @@ Other methods:
   returns the values of one object with their timestamps.
 - `notifications()` streams the notifications from the WebSocket.
 - `devices()` returns the scanned devices in bus order, as `GET /api/devices` gives them.
+- `parameters(position)` returns every parameter of a device, with its value and metadata.
+- `hardware_description(position)` returns the parsed `.hardware_description` of a device.
 - `read_value(position, obj)` reads one object and returns the value that the server decoded with
   the data type from the object dictionary.
 - `wait_for_value(position, obj, predicate)` reads one object until the predicate is true, and

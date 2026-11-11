@@ -31,9 +31,10 @@ end, so a script can check the rows afterwards. read_value() reads one object,
 decoded by the server, and wait_for_value() reads it until a condition holds.
 Constants such as STATUSWORD name the CiA402 objects as (index, subindex), and
 cia402_state() names the state a statusword reports.
-devices() lists the scanned devices. restart() restarts devices through INIT up to
-an AL state, and set_operation_mode(), set_target(), enable(), disable() and
-quick_stop() drive one CiA402 drive.
+devices() lists the scanned devices, and parameters() and hardware_description()
+read one device. restart() restarts devices through INIT up to an AL state, and
+set_operation_mode(), set_target(), enable(), disable() and quick_stop() drive
+one CiA402 drive.
 run(main) calls a script's main() and turns an error a user can act on, such as
 a server that is not running, into one line on stderr.
 """
@@ -330,6 +331,18 @@ class MotionMasterClient:
         response. The list is empty before the first scan.
         """
         return self.call("getDevices").json()
+
+    def parameters(self, position):
+        """Return every parameter of a device, each with its value and metadata.
+
+        The list is the object dictionary as the server enumerated it (getDeviceParameters).
+        """
+        return self.call("getDeviceParameters", path={"slavePosition": position}).json()
+
+    def hardware_description(self, position):
+        """Return the .hardware_description of a device, parsed (getDeviceHardwareDescription)."""
+        path = {"slavePosition": position}
+        return self.call("getDeviceHardwareDescription", path=path).json()
 
     def read_value(self, position, obj):
         """Read one object of a device and return its value, decoded by the server.

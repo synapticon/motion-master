@@ -64,8 +64,7 @@ def test_pre_op_reads_the_object_dictionary_of_every_device(bench: Bench, record
     assert [d["alState"] for d in states] == [PRE_OP] * len(bench.description.devices)
     counts = []
     for device in bench.description.devices:
-        path = {"slavePosition": device.position}
-        parameters = bench.client.call("getDeviceParameters", path=path).json()
+        parameters = bench.client.parameters(device.position)
         assert parameters, f"device {device.position} has no parameters"
         counts.append(f"{device.position}: {len(parameters)}")
     record_property("message", f"{len(states)} devices in PRE-OP; parameters {', '.join(counts)}")

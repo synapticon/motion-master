@@ -96,8 +96,8 @@ rely on the keys.
 
 ## Run the tests
 
-A run starts with one power cycle. Every test then starts with the driver closed. A test does not
-leave the bus as it found it. When the last test ends, passed or not, the run switches the drives
+A run starts with one power cycle. Each test then brings the bench to the start it needs. A test
+does not leave the bus as it found it. When the last test ends, passed or not, the run switches the drives
 off.
 
 1. Start the server, and connect the bench to it.
@@ -105,10 +105,13 @@ off.
 
    ```bash
    cd hil/bench
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
+   source setup.sh
    ```
+
+   `setup.sh` creates a virtual environment in `.venv`, activates it, and installs
+   `requirements.txt` into it. Source the script, so that the activation stays in your shell. On
+   Debian and Ubuntu, Python's `venv` module is in the package `python3-venv`, which
+   `tools/install-deps.sh` installs.
 
 3. Run all tests.
 

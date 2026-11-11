@@ -1241,8 +1241,7 @@ Each folder in `hil/bench/devices/` holds the known-good files of one drive, wit
 have on the drive (`.hardware_description`, `config.csv`, …).
 
 ```bash
-cd hil/bench && python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+cd hil/bench && source setup.sh   # creates, activates and fills .venv
 pytest                         # MM_HTTP_URL and MM_WS_URL pick the server
 pytest -k "scan and not power" # some tests only
 ```
@@ -1350,6 +1349,7 @@ Traps that have already cost time. Each is load-bearing.
 - **`tools/code-stats.sh` embeds a single-quoted `awk` program**, so an apostrophe inside those
   comments terminates the string. SC1112 there is real, not a nit.
 - **Two shellcheck suppressions are deliberate and should stay**: SC2034 in `rt/vm/common.sh`
-  (a sourced config file) and SC1112 source=/dev/null in `clients/python/setup.sh`.
+  (a sourced config file) and SC1112 source=/dev/null in `clients/python/setup.sh` and
+  `hil/bench/setup.sh`.
 - **The running server instance is shared with the user's Console session.** Ask before
   mutating its state.

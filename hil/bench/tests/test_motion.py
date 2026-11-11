@@ -37,10 +37,10 @@ WINDOW_US = 1_000_000
 # The recording continues this long after the quick stop, so that it holds the whole stop.
 AFTER_STOP_SECONDS = 1.0
 
-MEAN_TOLERANCE = 0.02
-SAMPLE_TOLERANCE = 0.10
+MEAN_TOLERANCE = 0.01
+SAMPLE_TOLERANCE = 0.02
 STOPPED_RPM = 20
-STOP_DEADLINE_US = 500_000
+STOP_DEADLINE_US = 300_000
 
 # The state a drive ends in after a quick stop, per quick stop option code. The other codes do not
 # stop on the quick stop ramp of 0x6085: 0 lets the motor coast, 9 shorts the phases.

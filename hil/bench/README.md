@@ -43,9 +43,9 @@ PRE-OP, then only the Integro to OP, enables it, holds 1000 rpm for 3 s, and sen
 (`0x606C`), the target velocity (`0x60FF`) and the statusword (`0x6041`) in every cycle. The test
 then checks the recorded rows:
 
-- The mean velocity in the last second before the quick stop is within 2 % of the target, and every
-  sample is within 10 %.
-- The velocity falls below 20 rpm within 500 ms after the quick stop.
+- The mean velocity in the last second before the quick stop is within 1 % of the target, and every
+  sample is within 2 %.
+- The velocity falls below 20 rpm within 300 ms after the quick stop.
 - The drive ends in the state that the quick stop option code (`0x605A`) names: Switch On Disabled
   for 2, Quick Stop Active for 6. Other codes fail the test before the motor turns.
 - The drive is never in Fault, and every cycle has a value.

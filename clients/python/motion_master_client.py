@@ -47,6 +47,7 @@ import time
 import tomllib
 import urllib.parse
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 
 import requests
@@ -534,6 +535,8 @@ class Monitoring:
         self._lock = threading.Lock()
         self._batches = 0
         self._arrived = threading.Condition(self._lock)
+        # Holds the WebSocket connection, entered as a context manager, until _stop() closes it.
+        self._connection = ExitStack()
         self._ws = None
         self._thread = None
         self._error = None
@@ -594,7 +597,9 @@ class Monitoring:
         # Lazy import so HTTP-only usage doesn't require the websockets package.
         from websockets.sync.client import connect
 
-        self._ws = connect(self._client.ws_url, ssl=self._client._ssl_context())
+        self._ws = self._connection.enter_context(
+            connect(self._client.ws_url, ssl=self._client._ssl_context())
+        )
         self._ws.send(json.dumps({"subscribe": self.topic}))
         self._thread = threading.Thread(
             target=self._read, name=f"monitoring-{self.topic}", daemon=True
@@ -629,8 +634,7 @@ class Monitoring:
 
     def _stop(self):
         # Closing the socket from this thread ends the loop of the reading thread.
-        if self._ws is not None:
-            self._ws.close()
+        self._connection.close()
         if self._thread is not None:
             self._thread.join(timeout=5)
         self._client.call("deleteMonitoring", path={"topic": self.topic}, check=False)

@@ -30,11 +30,7 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
     start = time.monotonic()
     bench = Bench.from_environment()
     try:
-        # A cold start: the server forgets every device, the drives restart, and the driver opens.
-        bench.reset()
-        bench.psu.cycle()
-        bench.client.init()
-        bench.wait_for_devices_on_wire()
+        bench.cold_start()
         record("setup.seconds", _seconds_since(start))
         start = time.monotonic()
         # The report describes the run, and the tests decide its result. So a report that fails

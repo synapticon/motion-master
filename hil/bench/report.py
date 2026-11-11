@@ -1,8 +1,9 @@
 """The bench report: the server version, and what each device of the bench says it is.
 
-The report is read live at the start of a run. It goes to report.xml as test-suite properties, and to the job summary when the run is in
-GitHub Actions. Where the device does not match the files of its folder, the report says so, and the
-run continues: a swapped drive is a fact the reader needs, and the tests decide what fails.
+The report is read live at the start of a run. It goes to report.xml as test-suite properties, and
+to the job summary when the run is in GitHub Actions. Where a device does not match the files of
+its folder, the report says so, and the run continues: a swapped drive is a fact the reader needs,
+and the tests decide what fails.
 """
 
 from __future__ import annotations

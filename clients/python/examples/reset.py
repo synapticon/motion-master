@@ -20,7 +20,7 @@ from motion_master_client import MotionMasterClient, run  # noqa: E402
 
 def main():
     client = MotionMasterClient.from_config()
-    client.call("reset")
+    client.reset()
     print("reset: the fieldbus driver is closed and the device list is empty")
 
 

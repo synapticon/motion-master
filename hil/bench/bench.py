@@ -117,9 +117,16 @@ class Bench:
                 return d
         raise KeyError(f"bench.description.toml has no device with folder {folder!r}")
 
-    def reset(self) -> None:
-        """Close the driver and forget every device, so that the next step starts from nothing."""
-        self.client.call("reset")
+    def cold_start(self) -> None:
+        """Reset the server, cycle the power of the drives, open the driver, and wait for them.
+
+        The server forgets every device, and every drive boots again, so the start is the same on
+        every run. Nothing is scanned.
+        """
+        self.client.reset()
+        self.psu.cycle()
+        self.client.init()
+        self.wait_for_devices_on_wire()
 
     def wait_for_devices_on_wire(self) -> None:
         """Wait until the bus counts as many devices as bench.description.toml lists.

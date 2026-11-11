@@ -21,8 +21,7 @@ def main():
     client = MotionMasterClient.from_config()
     client.init()
 
-    found = client.call("scan").json()["slaves"]
-    print(f"found {found} device(s)")
+    found = client.scan()
     if found == 0:
         return
 

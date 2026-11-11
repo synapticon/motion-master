@@ -14,7 +14,7 @@ def _found(names: list[str]) -> str:
 
 
 def test_init_opens_the_driver_once(bench: Bench, record_property):
-    bench.reset()
+    bench.client.reset()
     body = {"driver": "soem", "adapter": bench.description.adapter}
 
     first = bench.client.call("init", body=body, check=False)
@@ -26,10 +26,10 @@ def test_init_opens_the_driver_once(bench: Bench, record_property):
 
 
 def test_scan_finds_the_devices_in_bus_order(bench: Bench, record_property):
-    bench.reset()
+    bench.client.reset()
     bench.client.init()
 
-    found = bench.client.call("scan").json()["slaves"]
+    found = bench.client.scan()
 
     assert found == len(bench.description.devices)
     names = [d["productName"] for d in bench.client.devices()]
@@ -38,15 +38,15 @@ def test_scan_finds_the_devices_in_bus_order(bench: Bench, record_property):
 
 
 def test_scan_after_a_power_cycle_finds_the_devices_again(bench: Bench, record_property):
-    bench.reset()
+    bench.client.reset()
     bench.client.init()
-    bench.client.call("scan")
+    bench.client.scan()
 
     bench.psu.cycle()
     # The drives restart with no station address, so the last scan is wrong until a new one.
     bench.wait_for_devices_on_wire()
     status = bench.client.call("getScanStatus").json()
-    found = bench.client.call("scan").json()["slaves"]
+    found = bench.client.scan()
 
     assert status["required"], status
     assert found == len(bench.description.devices)
@@ -56,7 +56,7 @@ def test_scan_after_a_power_cycle_finds_the_devices_again(bench: Bench, record_p
 
 
 def test_pre_op_reads_the_object_dictionary_of_every_device(bench: Bench, record_property):
-    bench.reset()
+    bench.client.reset()
     bench.client.init()
 
     # Through INIT, because a step down to PRE-OP is not the transition this test is about.
@@ -77,7 +77,7 @@ def _al_states(bench: Bench) -> list[int]:
 
 
 def test_transition_walks_every_device_from_init_to_safe_op(bench: Bench, record_property):
-    bench.reset()
+    bench.client.reset()
     bench.client.init()
     bench.client.restart(INIT)
 
@@ -94,7 +94,7 @@ def test_transition_walks_every_device_from_init_to_safe_op(bench: Bench, record
 
 
 def test_a_single_step_refuses_an_illegal_transition(bench: Bench, record_property):
-    bench.reset()
+    bench.client.reset()
     bench.client.init()
     bench.client.restart(INIT)
 

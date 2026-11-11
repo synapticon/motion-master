@@ -316,6 +316,25 @@ class MotionMasterClient:
         elif r.status_code != 409:
             r.raise_for_status()
 
+    def reset(self):
+        """Close the fieldbus driver and forget every device (reset).
+
+        The server commands no AL state, so the devices stay in the state they are in. A reset with
+        no driver open also succeeds. Call init() before the next step that needs the bus.
+        """
+        self.call("reset")
+        log.info("closed the driver and forgot every device")
+
+    def scan(self):
+        """Scan the bus and return the number of devices found (scan).
+
+        The devices stay in INIT. Call init() first. Unlike ensure_scanned(), this scans every time
+        and returns 0 rather than raising when the bus is empty.
+        """
+        found = self.call("scan").json()["slaves"]
+        log.info("found %d device(s)", found)
+        return found
+
     def devices(self):
         """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).
 
@@ -382,9 +401,7 @@ class MotionMasterClient:
         scan = self.call("getScanStatus").json()
         if scan["required"] or scan["devicesScanned"] == 0:
             log.info("scanning the bus")
-            found = self.call("scan").json()["slaves"]
-            log.info("found %d device(s)", found)
-            if found == 0:
+            if self.scan() == 0:
                 raise StateError("no devices on the bus")
 
     def ensure_state(self, state, positions=None, exact=False):

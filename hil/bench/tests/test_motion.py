@@ -57,7 +57,7 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     # A test before may have left a drive in OP, so every drive restarts. Every drive goes to
     # PRE-OP, because the map of the process data reads the PDO mapping of every slave, and a slave
     # in INIT does not answer (#208).
-    bench.reset()
+    bench.client.reset()
     client.init()
     client.restart(PRE_OP)
     client.restart(OP, positions=[integro.position])

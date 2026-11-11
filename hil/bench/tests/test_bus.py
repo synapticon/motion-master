@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from motion_master_client import INIT, PRE_OP
+from motion_master_client import PRE_OP
 
 from bench import Bench
 
@@ -58,12 +58,11 @@ def test_scan_after_a_power_cycle_finds_the_devices_again(bench: Bench, record_p
 
 
 def test_pre_op_reads_the_object_dictionary_of_every_device(bench: Bench, record_property):
-    # From INIT, because a step down to PRE-OP is not the transition this test is about.
     bench.reset()
     bench.client.init()
-    bench.client.ensure_state(INIT, exact=True)
 
-    bench.client.ensure_state(PRE_OP, exact=True)
+    # Through INIT, because a step down to PRE-OP is not the transition this test is about.
+    bench.client.restart(PRE_OP)
 
     states = bench.client.call("getDeviceStates").json()
     assert [d["alState"] for d in states] == [PRE_OP] * len(bench.description.product_names)

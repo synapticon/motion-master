@@ -209,15 +209,19 @@ Other methods:
   the data type from the object dictionary.
 - `wait_for_value(position, obj, predicate)` reads one object until the predicate is true, and
   raises `TimeoutError` with the last value when the time runs out.
+- `restart(target, positions)` restarts devices through INIT and walks them up to an AL state. The
+  server does the walk.
+- `set_operation_mode()`, `set_target()`, `enable()`, `disable()` and `quick_stop()` drive the
+  CiA402 state machine and the targets of one drive, by its position.
+- `run(main)` calls `main` and prints an error that a user can correct as one line instead of a
+  traceback. An example is a server that is not running. Set `MM_TRACEBACK=1` to get the
+  traceback.
 
 The module also has CiA402 helpers. Constants such as `STATUSWORD` and `VELOCITY_ACTUAL_VALUE` give
 an object as `(index, subindex)`, so `read_value(1, STATUSWORD)` and the monitoring parameter
 `(1, *STATUSWORD)` name it the same way. `cia402_state(statusword)` returns the state that a
 statusword reports, by the name that `GET /api/devices/{slavePosition}/cia402` uses. It is meant for
 recorded rows, where the server sends the raw statusword.
-- `run(main)` calls `main` and prints an error that a user can correct as one line instead of a
-  traceback. An example is a server that is not running. Set `MM_TRACEBACK=1` to get the
-  traceback.
 
 ## TLS
 

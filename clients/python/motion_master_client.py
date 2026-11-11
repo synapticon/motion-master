@@ -31,6 +31,8 @@ end, so a script can check the rows afterwards. read_value() reads one object,
 decoded by the server, and wait_for_value() reads it until a condition holds.
 Constants such as STATUSWORD name the CiA402 objects as (index, subindex), and
 cia402_state() names the state a statusword reports.
+restart() restarts devices through INIT up to an AL state, and set_operation_mode(),
+set_target(), enable(), disable() and quick_stop() drive one CiA402 drive.
 run(main) calls a script's main() and turns an error a user can act on, such as
 a server that is not running, into one line on stderr.
 """
@@ -115,6 +117,17 @@ def cia402_state(statusword):
 # The states a device climbs through, from the bottom. BOOT is not on it, because BOOT is
 # reachable only from INIT.
 _LADDER = [INIT, PRE_OP, SAFE_OP, OP]
+
+
+def _not_reached(result, step):
+    """Say which devices of a state change did not reach `step`, and why."""
+    failed = ", ".join(
+        f"device {d['slavePosition']} in {STATE_NAMES.get(d['alState'], d['alState'])}"
+        f" with alStatusCode 0x{d['alStatusCode']:04x}"
+        for d in result["devices"]
+        if not d["reached"]
+    )
+    return f"not every device reached {STATE_NAMES.get(step, step)}: {failed}"
 
 
 class StateError(Exception):
@@ -394,13 +407,68 @@ class MotionMasterClient:
                 body = {"state": step, "positions": group}
                 result = self.call("transitionToState", body=body).json()
                 if not result["ok"]:
-                    failed = ", ".join(
-                        f"device {d['slavePosition']} in {STATE_NAMES.get(d['alState'], d['alState'])}"
-                        f" with alStatusCode 0x{d['alStatusCode']:04x}"
-                        for d in result["devices"]
-                        if not d["reached"]
-                    )
-                    raise StateError(f"not every device reached {STATE_NAMES[step]}: {failed}")
+                    raise StateError(_not_reached(result, step))
+
+    def restart(self, target, positions=None):
+        """Restart devices through INIT, then walk them up to the AL state `target`.
+
+        The server does the walk (restartDevices), one state at a time. Without `positions`, every
+        scanned device restarts. Scans first when the last scan is missing or wrong. Call init()
+        first. A restart drops each device out of process data exchange, so a drive that was
+        enabled is disabled.
+
+        Raises StateError when a device does not reach a step.
+        """
+        self.ensure_scanned()
+        body = {"target": target}
+        if positions:
+            body["positions"] = list(positions)
+        log.info("restart device(s) %s -> %s", positions or "all", STATE_NAMES[target])
+        result = self.call("restartDevices", body=body).json()
+        if not result["ok"]:
+            raise StateError(_not_reached(result, result["step"]))
+
+    def set_operation_mode(self, position, mode):
+        """Write the CiA402 operation mode (0x6060) of a drive (setCia402OperationMode).
+
+        Returns the CiA402 snapshot after the write. The drive takes the mode some cycles later;
+        0x6061 shows when.
+        """
+        path = {"slavePosition": position}
+        return self.call("setCia402OperationMode", path=path, body={"mode": mode}).json()
+
+    def set_target(self, position, kind, value):
+        """Write the target of one kind, "position", "velocity" or "torque" (setCia402Target).
+
+        The value is in the units of the object: 0x607A, 0x60FF or 0x6071.
+        """
+        body = {"target": kind, "value": value}
+        self.call("setCia402Target", path={"slavePosition": position}, body=body)
+
+    def enable(self, position):
+        """Bring a drive to Operation Enabled, and return its CiA402 snapshot.
+
+        The server walks the CiA402 state machine (transitionToCia402State), and it leaves a quick
+        stop. The device must exchange process data.
+        """
+        return self._to_cia402_state(position, "OperationEnabled")
+
+    def disable(self, position):
+        """Bring a drive to Switch On Disabled, and return its CiA402 snapshot."""
+        return self._to_cia402_state(position, "SwitchOnDisabled")
+
+    def quick_stop(self, position):
+        """Send a quick stop to a drive (runCia402Command), and return its CiA402 snapshot.
+
+        It returns at once. The drive stops on its quick stop ramp, and 0x605A says the state it
+        ends in.
+        """
+        path = {"slavePosition": position}
+        return self.call("runCia402Command", path=path, body={"command": "quickStop"}).json()
+
+    def _to_cia402_state(self, position, state):
+        path = {"slavePosition": position}
+        return self.call("transitionToCia402State", path=path, body={"state": state}).json()
 
     def run_procedure(self, position, name, params=None, poll_interval=0.5):
         """Start a procedure on a device and yield its snapshot at every poll until the run ends.

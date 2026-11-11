@@ -6,6 +6,7 @@ and times.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 
@@ -54,14 +55,13 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     integro = bench.device("integro")
     client = bench.client
 
-    # Every drive in INIT first. A test before may have left a drive in OP, and the server does not
-    # command an AL state when it resets. Then every drive to PRE-OP, because the map of the process
-    # data reads the PDO mapping of every slave, and a slave in INIT does not answer (#208).
+    # A test before may have left a drive in OP, so every drive restarts. Every drive goes to
+    # PRE-OP, because the map of the process data reads the PDO mapping of every slave, and a slave
+    # in INIT does not answer (#208).
     bench.reset()
     client.init()
-    client.ensure_state(INIT, exact=True)
-    client.ensure_state(PRE_OP, exact=True)
-    client.ensure_state(OP, positions=[integro.position])
+    client.restart(PRE_OP)
+    client.restart(OP, positions=[integro.position])
 
     acceleration = client.read_value(integro.position, PROFILE_ACCELERATION)
     deceleration = client.read_value(integro.position, QUICK_STOP_DECELERATION)
@@ -84,8 +84,7 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
             # An object that is not in the process data gives one value per flush, not per cycle.
             assert monitoring.sources == ["pdo"] * len(parameters), monitoring.parameters
 
-            mode = {"mode": PROFILE_VELOCITY}
-            client.call("setCia402OperationMode", path=integro.path, body=mode)
+            client.set_operation_mode(integro.position, PROFILE_VELOCITY)
             # The drive takes a new mode some cycles after the write.
             client.wait_for_value(
                 integro.position,
@@ -93,21 +92,18 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
                 lambda active: active == PROFILE_VELOCITY,
             )
             # A stale target velocity would start the motor at the enable.
-            stand_still = {"target": "velocity", "value": 0}
-            client.call("setCia402Target", path=integro.path, body=stand_still)
-            enabled = {"state": "OperationEnabled"}
-            client.call("transitionToCia402State", path=integro.path, body=enabled)
-            target_velocity = {"target": "velocity", "value": TARGET_RPM}
-            client.call("setCia402Target", path=integro.path, body=target_velocity)
+            client.set_target(integro.position, "velocity", 0)
+            client.enable(integro.position)
+            client.set_target(integro.position, "velocity", TARGET_RPM)
             time.sleep(HOLD_SECONDS)
-            client.call("runCia402Command", path=integro.path, body={"command": "quickStop"})
+            client.quick_stop(integro.position)
             time.sleep(AFTER_STOP_SECONDS)
     finally:
-        # check=False, so that a failed step here does not hide the error of the test.
-        client.call("runCia402Command", path=integro.path, body={"command": "disable"}, check=False)
-        client.call(
-            "transitionToState", body={"state": INIT, "positions": [integro.position]}, check=False
-        )
+        # A failed step here must not hide the error of the test.
+        with contextlib.suppress(Exception):
+            client.disable(integro.position)
+        with contextlib.suppress(Exception):
+            client.restart(INIT, positions=[integro.position])
 
     velocity = monitoring.column(integro.position, *VELOCITY_ACTUAL_VALUE)
     target = monitoring.column(integro.position, *TARGET_VELOCITY)

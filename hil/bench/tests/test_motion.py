@@ -105,35 +105,40 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
         with contextlib.suppress(Exception):
             client.restart(INIT, positions=[integro.position])
 
-    velocity = monitoring.column(integro.position, *VELOCITY_ACTUAL_VALUE)
-    target = monitoring.column(integro.position, *TARGET_VELOCITY)
-    statusword = monitoring.column(integro.position, *STATUSWORD)
+    m = monitoring
+    position = integro.position
+
+    def is_fault(sw):
+        return cia402_state(sw) == "Fault"
+
+    def left_operation_enabled(sw):
+        return cia402_state(sw) != "OperationEnabled"
+
+    def near_target(v):
+        return abs(v - TARGET_RPM) <= TARGET_RPM * MEAN_TOLERANCE
+
+    def stopped(v):
+        return abs(v) < STOPPED_RPM
 
     # 1. The drive exchanged process data in every recorded cycle.
-    assert all(None not in row[1:] for row in monitoring.rows), "a row has no value"
+    assert all(None not in row[1:] for row in m.rows), "a row has no value"
 
-    states = [(t, cia402_state(sw)) for t, sw in statusword]
-    faults = [t for t, state in states if state == "Fault"]
     # 2. No fault in the whole recording.
+    faults = [sw for sw in m.values(position, STATUSWORD) if is_fault(sw)]
     assert not faults, f"the drive was in Fault in {len(faults)} cycle(s)"
 
-    t_target = next((t for t, value in target if value == TARGET_RPM), None)
+    t_target = m.first(position, TARGET_VELOCITY, lambda v: v == TARGET_RPM)
     assert t_target is not None, f"0x60FF never read {TARGET_RPM}"
-    t_stop = next(
-        (t for t, state in states if t > t_target and state != "OperationEnabled"), None
-    )
+    t_stop = m.first(position, STATUSWORD, left_operation_enabled, after=t_target)
     assert t_stop is not None, "the drive never left Operation Enabled after the target"
     assert t_stop - t_target >= WINDOW_US, (
         f"the quick stop came {(t_stop - t_target) / 1000:.0f} ms after the target"
     )
 
-    tolerance = TARGET_RPM * MEAN_TOLERANCE
-    reached = next(
-        (t for t, v in velocity if t >= t_target and abs(v - TARGET_RPM) <= tolerance), None
-    )
-    ramp = f"{(reached - t_target) / 1000:.0f} ms" if reached is not None else "never"
+    t_reached = m.first(position, VELOCITY_ACTUAL_VALUE, near_target, after=t_target)
+    ramp = f"{(t_reached - t_target) / 1000:.0f} ms" if t_reached is not None else "never"
 
-    window = [v for t, v in velocity if t_stop - WINDOW_US <= t < t_stop]
+    window = m.values(position, VELOCITY_ACTUAL_VALUE, start=t_stop - WINDOW_US, end=t_stop)
     assert window, "no sample in the window before the quick stop"
     mean = sum(window) / len(window)
     summary = (
@@ -143,20 +148,20 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     log.info("%s", summary)
 
     # 3. The mean of the window is at the target.
-    assert abs(mean - TARGET_RPM) <= tolerance, summary
+    assert near_target(mean), summary
     # 4. Every sample of the window is near the target.
     outside = [v for v in window if abs(v - TARGET_RPM) > TARGET_RPM * SAMPLE_TOLERANCE]
     assert not outside, f"{len(outside)} sample(s) outside ±{SAMPLE_TOLERANCE:.0%}; {summary}"
 
     # 5. The quick stop brings the motor to a stop in time.
-    t_stopped = next((t for t, v in velocity if t >= t_stop and abs(v) < STOPPED_RPM), None)
+    t_stopped = m.first(position, VELOCITY_ACTUAL_VALUE, stopped, after=t_stop)
     assert t_stopped is not None, f"the velocity never fell below {STOPPED_RPM} rpm; {summary}"
     stop_time_us = t_stopped - t_stop
     summary += f"; stopped in {stop_time_us / 1000:.0f} ms"
     assert stop_time_us <= STOP_DEADLINE_US, summary
 
     # 6. The drive ends in the state that 0x605A names.
-    last_state = states[-1][1]
+    last_state = cia402_state(m.values(position, STATUSWORD)[-1])
     assert last_state == end_state, f"the drive ended in {last_state}, not {end_state}; {summary}"
 
     record_property("message", summary)

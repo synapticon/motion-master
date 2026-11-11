@@ -202,8 +202,9 @@ Other methods:
 - `run_procedure()` runs a procedure to its end.
 - `monitor(topic)` streams the batches of a monitoring from the WebSocket.
 - `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,
-  keeps every row while the block runs, and deletes the monitoring at the end. `column()` then
-  returns the values of one object with their timestamps.
+  keeps every row while the block runs, and deletes the monitoring at the end. Then `column()`
+  returns the values of one object with their timestamps, `values()` returns the values in a time
+  window, and `first()` returns the time of the first value that meets a condition.
 - `notifications()` streams the notifications from the WebSocket.
 - `devices()` returns the scanned devices in bus order, as `GET /api/devices` gives them.
 - `parameters(position)` returns every parameter of a device, with its value and metadata.

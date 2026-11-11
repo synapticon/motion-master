@@ -594,9 +594,9 @@ class MotionMasterClient:
         are in SAFE-OP or OP, because the server decides once, at creation, whether each object
         comes from the process data or from SDO reads. Without `topic`, a unique one is chosen.
 
-            with client.monitoring([(1, 0x606C, 0)]) as m:
+            with client.monitoring([(1, *VELOCITY_ACTUAL_VALUE)]) as m:
                 ...  # the move
-            velocity = m.column(1, 0x606C, 0)
+            velocity = m.column(1, VELOCITY_ACTUAL_VALUE)
         """
         topic = topic or f"py-{uuid.uuid4().hex[:12]}"
         return Monitoring(self, parameters, interval_ms, topic, name)
@@ -640,13 +640,39 @@ class Monitoring:
         """The source of each parameter, in order: "pdo" or "sdo"."""
         return [p["source"] for p in self.parameters]
 
-    def column(self, position, index, subindex):
-        """Return [(timestampUs, value), ...] of one parameter, in the order the cycles ran."""
+    def column(self, position, obj):
+        """Return [(timestampUs, value), ...] of one object, in the order the cycles ran.
+
+        `obj` is (index, subindex), for example STATUSWORD.
+        """
+        index, subindex = obj
         for i, p in enumerate(self.parameters):
             if (p["devicePosition"], p["index"], p["subindex"]) == (position, index, subindex):
                 with self._lock:
                     return [(row[0], row[i + 1]) for row in self.rows]
         raise KeyError(f"device {position} 0x{index:04x}:{subindex:02x} is not in this monitoring")
+
+    def values(self, position, obj, start=None, end=None):
+        """Return the values of one object from the cycles with start <= timestampUs < end.
+
+        Without `start` or `end`, the window is open on that side, so values(position, obj) gives
+        every value.
+        """
+        return [
+            v
+            for t, v in self.column(position, obj)
+            if (start is None or t >= start) and (end is None or t < end)
+        ]
+
+    def first(self, position, obj, predicate, after=None):
+        """Return the timestampUs of the first cycle where predicate(value) is true, or None.
+
+        With `after`, only the cycles with timestampUs >= after count.
+        """
+        for t, v in self.column(position, obj):
+            if (after is None or t >= after) and predicate(v):
+                return t
+        return None
 
     def __enter__(self):
         body = {"topic": self.topic, "interval": self._interval_ms, "parameters": self._request}

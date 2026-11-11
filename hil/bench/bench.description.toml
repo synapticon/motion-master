@@ -1,19 +1,31 @@
-# The bench of the self-hosted runner ci-belgrade-linux.
+# The description of the bench of the self-hosted runner ci-belgrade-linux.
+#
+# Every value here must match the hardware. A change to this file does not change the bench. When
+# the hardware changes, change this file with it. bench.py loads the file as bench.description, and
+# the device report of each run compares the live devices with it.
 
-# The network interface that the EtherCAT bus is connected to.
+# The network interface of the runner that the EtherCAT bus is connected to.
 adapter = "enp2s0"
 
-# The PeakTech P 1535 that supplies the drives. hil/p1535 switches its output over HTTP.
+# The PeakTech P 1535 that supplies the drives. The ESP32 firmware in hil/p1535 switches its output
+# over HTTP.
 [psu]
+# The address of the ESP32 on the network of the runner.
 host = "10.10.1.250"
-# How long the output stays off in a power cycle, so that every drive loses power.
+# How long the output stays off in a power cycle. It must be long enough for every drive to lose
+# power, so that the cycle restarts every drive.
 off_seconds = 5
-# How long the drives get after power-on until every one of them answers on the wire.
+# How long the drives get after the output is on, until every one of them answers on the wire. A run
+# fails when a drive needs longer.
 boot_timeout_seconds = 60
 
-# The devices in bus order. The order gives each device its position in the chain, from 1. folder
-# names a folder in devices/, which holds the files of the device with the names they have on the
-# device, and a test finds a device by it. productName is the value that GET /api/devices reports.
+# The devices, in the order of the chain. The order gives each device its position, from 1, so the
+# first entry is the device nearest to the adapter.
+#
+# folder: the name of the device's folder in devices/. A test finds a device by this name, so it
+#   must be unique. The folder holds the files of the device, with the names they have on the
+#   device.
+# productName: the value that GET /api/devices reports for the device.
 [[devices]]
 folder = "integro"
 productName = "SOMANET Integro"

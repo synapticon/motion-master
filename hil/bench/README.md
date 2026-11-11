@@ -12,7 +12,7 @@ also checks that client.
 
 This folder describes one bench: the bench of the self-hosted runner `ci-belgrade-linux`.
 
-`bench.description.toml` holds the settings of the bench:
+`bench.description.toml` describes the bench. Every value must match the hardware:
 
 - `adapter` is the network interface of the EtherCAT bus.
 - `[psu]` gives the address of the P 1535, the time the output stays off in a power cycle, and the

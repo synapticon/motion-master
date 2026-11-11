@@ -18,6 +18,14 @@ on:
           expression that matches no test fails the run.
         required: false
         default: ""
+      process-data-dumps:
+        description: >-
+          Save a process-data dump of each test that asks for one, and upload it with the report.
+          Turn it on to look at the motion data of a failing test. A dump of the motion test is
+          about 1.7 MB.
+        type: boolean
+        required: false
+        default: false
 
 # One bench, one run. A second run waits until the first one ends.
 concurrency:
@@ -96,10 +104,14 @@ jobs:
         working-directory: hil/bench
         env:
           TESTS: ${{ inputs.tests }}
+          DUMPS: ${{ inputs.process-data-dumps }}
         run: |
           args=(--junitxml=report.xml)
           if [[ -n "$TESTS" ]]; then
             args+=(-k "$TESTS")
+          fi
+          if [[ "$DUMPS" == "true" ]]; then
+            args+=(--process-data-dumps)
           fi
           pytest "${args[@]}"
 

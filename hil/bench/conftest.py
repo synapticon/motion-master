@@ -20,6 +20,14 @@ DUMPS = Path(__file__).resolve().parent / "dumps"
 log = logging.getLogger(__name__)
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--process-data-dumps",
+        action="store_true",
+        help="save a process-data dump of each test that asks for one, in dumps/",
+    )
+
+
 @pytest.fixture(scope="session")
 def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[Bench]:
     """The bench after a cold start, so that every run starts from drives that just booted.
@@ -59,13 +67,16 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
 def process_data_dump(bench: Bench, request: pytest.FixtureRequest) -> Iterator[None]:
     """Save the recorder ring of the server to dumps/<test>.mmpd when the test ends.
 
-    A test that asks for this fixture gets the file also when it fails. The teardown runs after
-    the finally of the test, so the dump holds the steps that end the test too. The test resets the
-    server first, which frees the ring, so the dump holds that test only. A test that exchanged no
-    process data gets no file, because the server answers 409. A failed fetch is logged and does not
-    change the result of the test.
+    Only with --process-data-dumps, because a dump is large and is needed only to look at a
+    failure. A test that asks for this fixture then gets the file also when it fails. The teardown
+    runs after the finally of the test, so the dump holds the steps that end the test too. The test
+    resets the server first, which frees the ring, so the dump holds that test only. A test that
+    exchanged no process data gets no file, because the server answers 409. A failed fetch is
+    logged and does not change the result of the test.
     """
     yield
+    if not request.config.getoption("--process-data-dumps"):
+        return
     name = request.node.name
     try:
         response = bench.client.call("streamProcessDataDump", check=False)

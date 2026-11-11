@@ -65,9 +65,11 @@ ends, passed or not, it disables the drive and brings it to INIT.
 
 ## Process-data dumps
 
-The server records the process data of every cycle in its recorder ring. A test marked with
-`@pytest.mark.usefixtures("process_data_dump")` gets that ring as a file when it ends, also when
-it fails: `dumps/<test name>.mmpd`. A `.mmpd` file holds the raw input and output images of every cycle,
+The server records the process data of every cycle in its recorder ring. With
+`pytest --process-data-dumps`, a test marked with `@pytest.mark.usefixtures("process_data_dump")`
+gets that ring as a file when it ends, also when it fails: `dumps/<test name>.mmpd`. The option is
+off by default, because a dump is large and is needed only to look at the motion data of a failing
+test. A `.mmpd` file holds the raw input and output images of every cycle,
 with a timestamp, and the layout of the process image, so every PDO object of every exchanging
 device can be read from it. Open it in the Recorder page of the Console.
 
@@ -75,8 +77,8 @@ Each test resets the server first, and a reset frees the ring, so a dump holds o
 test that exchanged no process data gets no file. A re-map that changes the layout of the process
 image starts a new ring, so a dump holds only the cycles after the last such re-map.
 
-The motion test asks for a dump. In GitHub Actions, the workflow uploads every dump with
-`report.xml`.
+The motion test asks for a dump. In GitHub Actions, the input `process-data-dumps` of the workflow
+turns the option on, and the workflow uploads every dump with `report.xml`.
 
 ## The bench report
 
@@ -161,17 +163,18 @@ somebody else uses.
 ## Run the tests in GitHub Actions
 
 The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the tests on
-`ci-belgrade-linux`. Start it by hand from the Actions tab. It has two inputs:
+`ci-belgrade-linux`. Start it by hand from the Actions tab. It has three inputs:
 
 | Input | Empty | Set |
 | --- | --- | --- |
 | `version` | Build the Docker image of the server from the selected branch. | Pull `synapticon/motion-master:<version>` from Docker Hub and test that image. A version that is not on Docker Hub fails the run before any test runs. |
 | `tests` | Run every test. | Run the tests that a pytest `-k` expression selects, for example `scan and not power`. |
+| `process-data-dumps` | Off, the default: save no dump. | On: save a process-data dump of each test that asks for one, and upload it. |
 
 The tests always come from the selected branch, also when the server is a pulled image. The job
 summary names the server that ran. The workflow starts the server with the capabilities that SOEM
 needs. When the tests end, it uploads `report.xml`, the report file, `server.log`, the log of the
-server, and the process-data dumps.
+server, and the process-data dumps when the input `process-data-dumps` is on.
 
 The run page shows two tables below the job graph, in the job summary: the bench report, and one
 row for each test with its result and its message.

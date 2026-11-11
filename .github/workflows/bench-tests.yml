@@ -18,7 +18,7 @@ on:
         default: ""
       # A dump of the motion test is about 1.7 MB, so this is for a failing test only.
       process-data-dumps:
-        description: "Upload a process-data dump (.mmpd) of each motion test."
+        description: "Upload a process-data dump (.mmpd) of each test that uses the process_data_dump fixture."
         type: boolean
         required: false
         default: false

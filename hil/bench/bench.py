@@ -64,14 +64,24 @@ class BenchDescription:
 
 
 class Psu:
-    """The output of the P 1535, switched by the ESP32 firmware in hil/p1535."""
+    """The output of the P 1535, switched by the ESP32 firmware in hil/p1535.
 
-    def __init__(self, host: str):
+    It touches only the power of the drives. The server does not learn of it.
+    """
+
+    def __init__(self, host: str, off_seconds: float):
         self._url = f"http://{host}"
+        self._off_seconds = off_seconds
 
     def switch(self, on: bool) -> None:
         response = requests.get(f"{self._url}/output-{'on' if on else 'off'}", timeout=5)
         response.raise_for_status()
+
+    def cycle(self) -> None:
+        """Switch the output off for long enough that every drive loses power, then on again."""
+        self.switch(False)
+        time.sleep(self._off_seconds)
+        self.switch(True)
 
 
 class Bench:
@@ -79,7 +89,7 @@ class Bench:
 
     def __init__(self, description: BenchDescription, http_url: str, ws_url: str):
         self.description = description
-        self.psu = Psu(description.psu_host)
+        self.psu = Psu(description.psu_host, description.psu_off_seconds)
         self.client = MotionMasterClient(
             http_url,
             ws_url=ws_url,
@@ -110,22 +120,6 @@ class Bench:
         """Close the driver and forget every device, so that the next step starts from nothing."""
         self.client.call("reset")
 
-    def power_cycle(self) -> None:
-        """Switch the drives off and on, and return when every one of them answers on the wire.
-
-        The driver is closed first and is open when this returns, with no device scanned.
-        """
-        self.reset()
-        self.switch_off_and_on()
-        self.client.init()
-        self.wait_for_devices_on_wire()
-
-    def switch_off_and_on(self) -> None:
-        """Switch the drives off for long enough that every one loses power, then on again."""
-        self.psu.switch(False)
-        time.sleep(self.description.psu_off_seconds)
-        self.psu.switch(True)
-
     def wait_for_devices_on_wire(self) -> None:
         """Wait until the wire carries as many devices as the description names. Open the driver first."""
         expected = len(self.description.devices)
@@ -144,7 +138,8 @@ class Bench:
 
 def switch_off() -> None:
     """Switch the drives off, with no server. The workflow calls this as its last step."""
-    Psu(BenchDescription.load().psu_host).switch(False)
+    description = BenchDescription.load()
+    Psu(description.psu_host, description.psu_off_seconds).switch(False)
 
 
 def _wait_for_server(url: str, timeout: float) -> None:

@@ -42,7 +42,7 @@ def test_scan_after_a_power_cycle_finds_the_devices_again(bench: Bench, record_p
     bench.client.init()
     bench.client.call("scan")
 
-    bench.switch_off_and_on()
+    bench.psu.cycle()
     # The drives restart with no station address, so the last scan is wrong until a new one.
     bench.wait_for_devices_on_wire()
     status = bench.client.call("getScanStatus").json()

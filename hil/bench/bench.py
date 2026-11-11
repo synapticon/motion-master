@@ -86,7 +86,7 @@ class Psu:
 
 
 class Bench:
-    """The server under test, connected to the bench."""
+    """The bench under test: its description, its power supply, and a client of its server."""
 
     def __init__(self, description: BenchDescription, http_url: str, ws_url: str):
         self.description = description
@@ -122,7 +122,12 @@ class Bench:
         self.client.call("reset")
 
     def wait_for_devices_on_wire(self) -> None:
-        """Wait until the wire carries as many devices as the description names. Open the driver first."""
+        """Wait until the bus counts as many devices as bench.description.toml lists.
+
+        The count is the broadcast read of getScanStatus, so a drive that restarted and has no
+        station address yet counts too. The read needs an open driver, so call client.init()
+        first. Raise TimeoutError when boot_timeout_seconds pass before the count matches.
+        """
         expected = len(self.description.devices)
         deadline = time.monotonic() + self.description.boot_timeout_seconds
         on_wire = None
@@ -138,7 +143,11 @@ class Bench:
 
 
 def switch_off() -> None:
-    """Switch the drives off, with no server. The workflow calls this as its last step."""
+    """Switch the drives off, with no server.
+
+    The workflow calls this after it stops the server, so that a run that was cancelled or stopped
+    before the tests also ends with the drives off.
+    """
     description = BenchDescription.load()
     Psu(description.psu_host, description.psu_off_seconds).switch(False)
 

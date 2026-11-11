@@ -1,7 +1,7 @@
 """Turn the motor of a drive in Profile Velocity, quick stop it, and check the recorded velocity.
 
-The file has one test per device, because each device needs its own target velocity, limits
-and times.
+Each device needs its own target velocity, limits and times, so each device gets its own test.
+Only the Integro has one.
 """
 
 from __future__ import annotations

@@ -44,8 +44,8 @@ requests it.
 ## The motion test
 
 `tests/test_motion.py` turns the motor of a device in Profile Velocity, the operation mode in which
-the drive ramps to a target velocity. The file has one test per device, because each device needs
-its own target velocity, limits and times. The test of the Integro finds it in
+the drive ramps to a target velocity. Each device needs its own target velocity, limits and times,
+so each device gets its own test. Only the Integro has one. The test of the Integro finds it in
 `bench.description.toml` by its folder, `integro`. The test restarts every drive to PRE-OP, then
 restarts only the Integro to OP, enables it, holds 1000 rpm for 3 s, and sends a quick stop. A
 monitoring records the velocity actual value (`0x606C`), the target velocity (`0x60FF`) and the
@@ -85,7 +85,7 @@ everything about a run:
 | Property | Value |
 | --- | --- |
 | `server.version` | The version of the server under test |
-| `setup.seconds` | How long the start of the run took: the wait for the server, the power cycle and the init. JUnit counts this time in the time of the first test |
+| `setup.seconds` | How long the start of the run took: the wait for the server, the reset, the power cycle, the init and the wait for the devices on the wire. JUnit counts this time in the time of the first test |
 | `report.seconds` | How long the device report took, with the transition to PRE-OP that its reads need. JUnit counts this time in the time of the first test too |
 | `device.<position>.folder` | The folder of the device in `devices/` |
 | `device.<position>.productName` | The product name that `GET /api/devices` reports |

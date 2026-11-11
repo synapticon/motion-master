@@ -46,8 +46,8 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
 
 def _report(bench: Bench, record: Callable[[str, object], None]) -> None:
     # The report describes the run, and the tests decide its result. So a report that fails is
-    # logged and named in report.xml and the job summary, and the tests still run. PRE-OP is part
-    # of the report, because its reads go over the mailbox.
+    # logged and named in report.xml and the job summary, and the tests still run. The report
+    # brings every device to PRE-OP first, because its reads go over the mailbox.
     try:
         bench.client.ensure_state(PRE_OP, exact=True)
         write_device_report(bench, record)

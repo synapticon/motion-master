@@ -37,3 +37,7 @@ productName = "SOMANET Circulo SMM"
 [[devices]]
 folder = "node"
 productName = "SOMANET Node"
+
+[[devices]]
+folder = "ngc"
+productName = "PLACEHOLDER"

@@ -2971,13 +2971,10 @@ export class Api<
   ) =>
     this.request<
       Blob,
-      | {
-          error: string;
-        }
-      | {
-          /** Human-readable reason the dump could not be produced */
-          error: string;
-        }
+      {
+        /** Human-readable reason the dump could not be produced */
+        error: string;
+      }
     >({
       path: `/api/process-data/dump`,
       method: "GET",
@@ -3024,6 +3021,7 @@ export class Api<
         incompleteStart: boolean;
       },
       | {
+          /** Human-readable reason the dump could not be produced */
           error: string;
         }
       | {

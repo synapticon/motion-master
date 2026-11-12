@@ -419,14 +419,10 @@ function CaptureSection() {
       setNow(Date.now())
     },
     onError: (err, n) => {
-      if (!isNotImplemented(err)) {
-        setError(apiError(err))
-      } else if (n > TIMED_CAPTURE_MAX_SECONDS) {
-        setError(
-          `This server cannot stop a capture early, so it records for a fixed time of at most ${TIMED_CAPTURE_MAX_SECONDS} s. Choose fewer seconds.`,
-        )
+      if (isNotImplemented(err)) {
+        run.mutate(Math.min(n, TIMED_CAPTURE_MAX_SECONDS))
       } else {
-        run.mutate(n)
+        setError(apiError(err))
       }
     },
   })
@@ -500,7 +496,7 @@ function CaptureSection() {
           boundary and Motion Master. Late frames here put the delay on the wire or in the device.
           A clean capture beside &ldquo;got no frame back&rdquo; warnings in the server log puts it
           inside the PC. A server on Windows cannot stop a capture early, so there the capture
-          records for the seconds you choose, at most {TIMED_CAPTURE_MAX_SECONDS}. A pcap from
+          records for a fixed time: the seconds you choose, at most {TIMED_CAPTURE_MAX_SECONDS}. A pcap from
           tcpdump on another PC gets the same summary: pick the file.
         </p>
         <div className="flex flex-wrap items-center gap-3">
@@ -531,7 +527,11 @@ function CaptureSection() {
               disabled={!canStart}
               className={`${btnOutline} min-w-[8rem]`}
             >
-              {run.isPending ? `Recording ${n} s…` : start.isPending ? 'Starting…' : 'Start'}
+              {run.isPending
+                ? `Recording ${run.variables} s…`
+                : start.isPending
+                  ? 'Starting…'
+                  : 'Start'}
             </button>
           )}
           <FilePickerButton
@@ -550,7 +550,9 @@ function CaptureSection() {
         {error && <p className="text-xs text-status-bad font-mono">{error}</p>}
         {(run.isPending || upload.isPending) && !error && (
           <p className="text-xs text-grey-600">
-            {run.isPending ? 'Recording. The summary appears when the time is up.' : 'Reading the file…'}
+            {run.isPending
+              ? `This server cannot stop a capture early, so it records for a fixed time: ${run.variables} s. The summary appears when the time is up.`
+              : 'Reading the file…'}
           </p>
         )}
         {result && (

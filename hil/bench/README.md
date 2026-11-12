@@ -11,9 +11,9 @@ also checks that client.
 The recording below shows a run by hand on the computer of the bench. It clones the repository,
 builds Motion Master in Docker and starts it, prepares the Python environment with
 `source setup.sh`, shows the adapter and the devices of the bench, and runs `pytest`. The steps are in
-[Run the tests](#run-the-tests). A run with the Bench Tests workflow
-([Run the tests in GitHub Actions](#run-the-tests-in-github-actions)) does all of this itself, so
-you do not need these steps for it.
+[Run the tests](#run-the-tests). To run the tests from GitHub Actions instead, see
+[Run the tests in GitHub Actions](#run-the-tests-in-github-actions). The workflow does these steps
+itself.
 
 ![A run of the bench tests](demo.gif)
 

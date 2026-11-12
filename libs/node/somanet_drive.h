@@ -17,6 +17,7 @@
 #include "node/cia402_drive.h"
 #include "node/config_file.h"
 #include "node/firmware_package.h"
+#include "node/somanet_drive_objects.h"
 
 namespace mm::node {
 
@@ -24,46 +25,14 @@ namespace mm::node {
 // A caller of readPlantModel includes that header; this one only names the type.
 struct PlantModel;
 
-/// @brief Pure SOMANET (Synapticon manufacturer-specific) vocabulary — object indices, sub-entry
-///        numbers and enumerations, with no dependency on @c Device.
+/// @brief Pure SOMANET (Synapticon manufacturer-specific) vocabulary — enumerations and the
+///        encoder configuration addresses, with no dependency on @c Device. The object addresses
+///        are generated, in @c somanet_drive_objects.h.
 ///
 /// The vendor counterpart of @c mm::node::cia402, and nested rather than flat for one concrete
 /// reason: SOMANET extends 0x6060 with modes CiA402 does not define, so @c somanet::OperationMode
 /// has to sit beside @c cia402::OperationMode without colliding with it.
 namespace somanet {
-
-/// @brief Manufacturer-specific object indices (the 0x2000-0x5FFF vendor range).
-enum Object : uint16_t {
-  kCommutationAngleOffset = 0x2001,  ///< INTEGER16 — the offset command 5 measures and writes.
-  kMotorSpecificSettings = 0x2003,   ///< RECORD — motor configuration; :05 is the phase order.
-  kBrakeOptions = 0x2004,            ///< RECORD — brake voltages, timing, release strategy, status.
-  kCommutationOffsetDetection = 0x2009,  ///< RECORD — how commutation offset (5) is measured.
-  kTorqueController = 0x2010,            ///< RECORD — :0C names the encoder commutation uses.
-  kVelocityController = 0x2011,          ///< RECORD — :05 names the encoder velocity control uses.
-  kPositionController = 0x2012,          ///< RECORD — :09 names the encoder position control uses.
-  kErrorReport = 0x203F,                 ///< RECORD — :01 describes the drive's most recent fault.
-  kEncoder1Configuration = 0x2110,       ///< RECORD — the encoder the firmware calls encoder 1.
-  kEncoder2Configuration = 0x2112,       ///< RECORD — the encoder the firmware calls encoder 2.
-};
-
-/// @brief The sub-entry of each controller record that names its encoder. The enum value @b is the
-///        subindex, and the three differ because each record grew on its own.
-enum ControllerEncoderSource : uint8_t {
-  kTorqueControllerEncoderSource = 12,   ///< UNSIGNED8 — 0x2010:0C; see EncoderOrdinal, 0 for none.
-  kVelocityControllerEncoderSource = 5,  ///< UNSIGNED8 — 0x2011:05.
-  kPositionControllerEncoderSource = 9,  ///< UNSIGNED8 — 0x2012:09.
-};
-
-/// @brief Sub-entries of 0x2110 and 0x2112 (encoder configuration). The enum value @b is the
-///        subindex, the same in both records.
-enum EncoderConfigurationEntry : uint8_t {
-  kEncoderSensorPort = 1,       ///< UNSIGNED8 — 0 for none, else the port the encoder is wired to.
-  kEncoderType = 2,             ///< UNSIGNED8 — see EncoderType.
-  kEncoderResolution = 3,       ///< UNSIGNED32 — counts per revolution.
-  kEncoderPolarity = 5,         ///< UNSIGNED8 — 0 normal, 1 inverted.
-  kEncoderMultiturnBits = 10,   ///< UNSIGNED8 — bits of the turn counter in the frame.
-  kEncoderSingleturnBits = 12,  ///< UNSIGNED8 — bits of the position within a turn in the frame.
-};
 
 /// @brief The kind of encoder a configuration record describes (0x2110:02, 0x2112:02).
 enum class EncoderType : uint8_t {
@@ -99,57 +68,6 @@ constexpr std::string_view toString(EncoderType type) {
   }
   return "unknown";
 }
-
-/// @brief Sub-entries of 0x203F (error report). The enum value @b is the subindex.
-enum ErrorReportEntry : uint8_t {
-  kErrorReportDescription = 1,  ///< STRING — what the drive says about its most recent fault.
-};
-
-/// @brief Sub-entries of 0x2003 (motor specific settings). The enum value @b is the subindex.
-///
-/// Types are the drive's own, read off a SOMANET Integro's object dictionary rather than assumed.
-/// Worth knowing that **this is where the motor measurements belong**: pole pair detection (7),
-/// phase resistance (8), phase inductance (9) and torque constant measurement (10) report a value
-/// without storing it, and :01, :02, :03 and :04 are the entries it goes in.
-enum MotorSetting : uint8_t {
-  kMotorPolePairs = 1,  ///< UNSIGNED8 — where a pole pair count (command 7) belongs.
-
-  /// INTEGER32 — where a torque constant (command 10) belongs, **in µNm/A_rms**, which is not the
-  /// unit the command reports. The drive's own description of this entry names the unit; the
-  /// command answers in mNm/A_rms, a factor of 1000 coarser. See @c TorqueConstantResult.
-  kMotorTorqueConstant = 2,
-  /// INTEGER32 — where a phase resistance (command 8) belongs, **in µΩ**, which is not the unit the
-  /// command reports either: it answers in mΩ, so this is the second of the three that needs
-  /// multiplying by 1000 before it is stored. The firmware reads this object into a variable it
-  /// calls @c phase_resistance_uOhm, which is what settles it.
-  kMotorPhaseResistance = 3,
-
-  /// INTEGER32 — where a phase inductance (command 9) belongs, in µH. **The one that matches its
-  /// command**, which also reports µH, so a measurement is stored as it comes. The firmware's
-  /// variable is @c phase_inductance_uH.
-  kMotorPhaseInductance = 4,
-  kMotorPhasesInverted = 5,  ///< BOOLEAN — the phase order motor phase order detection (4) writes.
-};
-
-/// @brief Sub-entries of 0x2009 (commutation offset detection). The enum value @b is the subindex.
-///
-/// Types and names are the drive's own, read off a SOMANET Integro rather than assumed — and none
-/// of them is what a reader would guess. The method is **signed** (INTEGER8), the state and torque
-/// percentage are INTEGER16 rather than byte-sized, and the three gains are REAL32 floats.
-enum CommutationOffsetSetting : uint8_t {
-  kCommutationOffsetState = 1,  ///< INTEGER16 — set to OFFSET_VALID by a successful command 5.
-
-  /// INTEGER16, 0-100, default 100 — how hard the measurement drives the motor. The drive names
-  /// this entry "Applied percent of rated torque", which is the name used here, but its own
-  /// description and the published documentation both call it a percentage of rated **current**.
-  /// The two disagree in the source data, so do not read the name as settling the quantity.
-  kCommutationOffsetAppliedTorquePercent = 2,
-
-  kCommutationOffsetMethod = 3,  ///< INTEGER8 — which method runs; see CommutationOffsetMethod.
-  kCommutationOffsetKp = 4,      ///< REAL32 — phasing controller Kp; method 1 only.
-  kCommutationOffsetKi = 5,      ///< REAL32 — phasing controller Ki; method 1 only.
-  kCommutationOffsetKd = 6,      ///< REAL32 — phasing controller Kd; method 1 only.
-};
 
 /// @brief How commutation offset measurement (command 5) is performed (0x2009:03).
 ///
@@ -234,6 +152,35 @@ enum class EncoderOrdinal : uint8_t {
   kEncoder1 = 1,  ///< The encoder configured in 0x2110.
   kEncoder2 = 2,  ///< The encoder configured in 0x2112.
 };
+
+/// @brief The entries of one encoder configuration record that the master reads.
+///
+/// Encoder 1 (0x2110) and encoder 2 (0x2112) have the same layout, so code that handles either
+/// picks the addresses of one with @c encoderConfiguration().
+struct EncoderConfigurationAddresses {
+  ObjectAddress<uint8_t> sensorPort;
+  ObjectAddress<uint8_t> type;
+  ObjectAddress<uint32_t> resolution;
+  ObjectAddress<uint8_t> polarity;
+  ObjectAddress<uint8_t> multiturnBits;
+  ObjectAddress<uint8_t> singleturnBits;
+};
+
+/// @brief The addresses of the configuration record of @p encoder.
+constexpr EncoderConfigurationAddresses encoderConfiguration(EncoderOrdinal encoder) {
+  if (encoder == EncoderOrdinal::kEncoder1) {
+    return {objects::kEncoder1ConfigurationSensorPort,
+            objects::kEncoder1ConfigurationType,
+            objects::kEncoder1ConfigurationResolution,
+            objects::kEncoder1ConfigurationPolarity,
+            objects::kEncoder1ConfigurationMultiturnBits,
+            objects::kEncoder1ConfigurationSingleturnBits};
+  }
+  return {
+      objects::kEncoder2ConfigurationSensorPort,    objects::kEncoder2ConfigurationType,
+      objects::kEncoder2ConfigurationResolution,    objects::kEncoder2ConfigurationPolarity,
+      objects::kEncoder2ConfigurationMultiturnBits, objects::kEncoder2ConfigurationSingleturnBits};
+}
 
 /// @brief Name of an encoder ordinal, as a message should render it. Never returns @c nullptr.
 constexpr std::string_view toString(EncoderOrdinal encoder) {
@@ -835,26 +782,6 @@ constexpr std::string_view describe(HrdStreamFault fault) {
   }
   return "unknown fault";
 }
-
-/// @brief Sub-entries of 0x2004 (brake options). The enum value @b is the subindex.
-enum BrakeOption : uint8_t {
-  kBrakePullVoltage = 1,      ///< UNSIGNED32, mV — voltage that disengages the brake.
-  kBrakeHoldVoltage = 2,      ///< UNSIGNED32, mV — lower voltage that keeps it disengaged.
-  kBrakePullTime = 3,         ///< UNSIGNED16, ms — how long the pull voltage is applied.
-  kBrakeReleaseStrategy = 4,  ///< UNSIGNED8 — how the brake is driven; see BrakeReleaseStrategy.
-  kBrakeControllerDisableDelay = 5,  ///< UNSIGNED16, ms — engage-to-controller-off delay.
-  kBrakeDcBusVoltage = 6,            ///< UNSIGNED16 — deprecated; the drive still lists it.
-  kBrakeStatus = 7,  ///< UNSIGNED8 — reports *and* commands the brake; see BrakeStatus.
-  kBrakeMinimumDisplacement = 8,  ///< UNSIGNED32 — pin-brake release travel threshold.
-
-  /// UNSIGNED16 — "Percentage of Rated Current": the current ceiling a pin-brake release works up
-  /// to. A percentage of rated current, *not* a torque in mNm.
-  kBrakePinCurrentPercent = 9,
-
-  kBrakeOutputVoltage = 10,        ///< UNSIGNED16, mV — phase-D voltage in manual mode.
-  kBrakeSwitchingFrequency = 11,   ///< UNSIGNED8 — phase-D PWM rate (0: 16, 1: 32, 2: 64 kHz).
-  kBrakePinInitialDirection = 12,  ///< INTEGER8 — which way a pin-brake release moves first.
-};
 
 /// @brief How the brake is driven (0x2004:04).
 ///
@@ -1623,7 +1550,7 @@ void to_json(nlohmann::json& j, const PolePairResult& result);
 /// **Not the unit 0x2003:03 stores**, which is µΩ — so keeping a measurement means multiplying by
 /// 1000, exactly as for the torque constant. Two of the three winding objects differ from their
 /// command's unit this way and the third does not, which is why each says so on itself rather than
-/// relying on a rule; see @c somanet::kMotorPhaseResistance.
+/// relying on a rule; see @c objects::kMotorSpecificSettingsPhaseResistance.
 struct PhaseResistanceResult {
   uint32_t milliohms = 0;  ///< Phase resistance in mΩ, exactly as the drive reported it.
 
@@ -1660,7 +1587,8 @@ void to_json(nlohmann::json& j, const PhaseInductanceResult& result);
 ///
 /// The unit is the drive's own, as with @c PhaseResistanceResult: **mNm per A_rms**, named in the
 /// member rather than converted. Note it is *not* the unit 0x2003:02 stores (µNm/A_rms), so
-/// keeping a measurement means multiplying by 1000 — see @c somanet::kMotorTorqueConstant.
+/// keeping a measurement means multiplying by 1000 — see @c
+/// objects::kMotorSpecificSettingsTorqueConstant.
 struct TorqueConstantResult {
   int32_t milliNewtonMetresPerAmpere = 0;  ///< Torque constant in mNm/A_rms, as the drive reported.
 

@@ -17,11 +17,11 @@ struct ObjectAddressGeneratorSummary {
 
 /// @brief Builds the C++ identifier for one dictionary entry.
 ///
-/// @c k + PascalCase(object name), plus PascalCase(entry name) when a subindex names something
-/// different from its object. Subindex 0 of a composite is the entry-count field rather than a
-/// value, so it becomes @c k<Object>Count — without that, the safety objects whose subindex 1
-/// repeats the object's own name would collide with their own count field, which is six of the
-/// SOMANET dictionary's 826 rows.
+/// @c k + PascalCase(object name) for subindex 0, so a record's subindex 0 carries the record's
+/// name and @c objects::kPositionRangeLimit.index names the whole record. Every other subindex adds
+/// PascalCase(entry name), like a member of a struct. That holds also where the firmware gives an
+/// entry the object's own name: the six safety objects that do so get a doubled name, such as
+/// @c kSTOInputSTOInput, which shows the naming as the firmware has it.
 ///
 /// Punctuation and spaces are dropped, and a leading digit is prefixed, so the result is always a
 /// valid identifier.
@@ -29,9 +29,8 @@ struct ObjectAddressGeneratorSummary {
 /// @param objectName  The object's name.
 /// @param entryName   This subindex's name.
 /// @param subindex    CoE subindex.
-/// @param composite   Whether the object has subindices beyond 0 (ARRAY or RECORD).
 std::string objectIdentifier(std::string_view objectName, std::string_view entryName,
-                             uint8_t subindex, bool composite);
+                             uint8_t subindex);
 
 /// @brief Builds the name the Python and TypeScript clients use from a C++ identifier.
 ///

@@ -13,6 +13,8 @@
 
 namespace {
 
+namespace cia402 = mm::node::cia402;
+
 using mm::node::ObjectAddress;
 
 // Including all three headers is most of what this file is for: 826 generated declarations either
@@ -40,12 +42,12 @@ TEST(ObjectAddressesTest, DriveTemperatureCarriesItsRealIndexAndType) {
 // one of them is wrong.
 TEST(ObjectAddressesTest, Cia402AddressesAgreeWithTheHandWrittenConstants) {
   namespace objects = mm::node::cia402::objects;
-  EXPECT_EQ(objects::kControlword.index, mm::node::cia402::kControlword);
-  EXPECT_EQ(objects::kStatusword.index, mm::node::cia402::kStatusword);
-  EXPECT_EQ(objects::kTargetVelocity.index, mm::node::cia402::kTargetVelocity);
-  EXPECT_EQ(objects::kTargetPosition.index, mm::node::cia402::kTargetPosition);
-  EXPECT_EQ(objects::kModesOfOperation.index, mm::node::cia402::kModeOfOperation);
-  EXPECT_EQ(objects::kErrorCode.index, mm::node::cia402::kErrorCode);
+  EXPECT_EQ(objects::kControlword.index, cia402::objects::kControlword.index);
+  EXPECT_EQ(objects::kStatusword.index, cia402::objects::kStatusword.index);
+  EXPECT_EQ(objects::kTargetVelocity.index, cia402::objects::kTargetVelocity.index);
+  EXPECT_EQ(objects::kTargetPosition.index, cia402::objects::kTargetPosition.index);
+  EXPECT_EQ(objects::kModesOfOperation.index, cia402::objects::kModesOfOperation.index);
+  EXPECT_EQ(objects::kErrorCode.index, cia402::objects::kErrorCode.index);
 
   // And the types the profile mandates.
   static_assert(std::is_same_v<decltype(objects::kControlword), const ObjectAddress<uint16_t>>);
@@ -75,13 +77,17 @@ TEST(ObjectAddressesTest, StringObjectsAreTypedAsStrings) {
   EXPECT_EQ(mm::node::profile::objects::kManufacturerDeviceName.index, 0x1008);
 }
 
-// Subindex 0 of a composite is the entry-count field, not a value, and is named for it. Without
-// that rule it would collide with whichever subindex repeats the object's own name.
-TEST(ObjectAddressesTest, CompositeSubindexZeroIsNamedAsACount) {
-  constexpr auto kCount = mm::node::somanet::objects::kDriveTemperatureCount;
-  EXPECT_EQ(kCount.index, 0x2031);
-  EXPECT_EQ(kCount.subindex, 0x00);
-  static_assert(std::is_same_v<decltype(kCount), const ObjectAddress<uint8_t>>);
+// Subindex 0 of a record takes the record's name, so the record's name gives its index. Every
+// other subindex adds the entry's name, also where the firmware repeats the record's name.
+TEST(ObjectAddressesTest, SubindexZeroTakesTheRecordsName) {
+  constexpr auto kRecord = mm::node::somanet::objects::kDriveTemperature;
+  EXPECT_EQ(kRecord.index, 0x2031);
+  EXPECT_EQ(kRecord.subindex, 0x00);
+  static_assert(std::is_same_v<decltype(kRecord), const ObjectAddress<uint8_t>>);
+
+  constexpr auto kDoubled = mm::node::somanet::objects::kEncoderSourceTypeEncoderSourceType;
+  EXPECT_EQ(kDoubled.index, 0x2630);
+  EXPECT_EQ(kDoubled.subindex, 0x01);
 }
 
 }  // namespace

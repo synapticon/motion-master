@@ -131,8 +131,21 @@ class MonitoringManager {
   void keepFresh(uint16_t devicePosition, uint16_t index, uint8_t subindex,
                  std::chrono::milliseconds period);
 
+  /// @brief @c keepFresh() addressed by an @c ObjectAddress.
+  template <typename T>
+  void keepFresh(uint16_t devicePosition, ObjectAddress<T> address,
+                 std::chrono::milliseconds period) {
+    keepFresh(devicePosition, address.index, address.subindex, period);
+  }
+
   /// @brief Drops a reference taken by @c keepFresh. Polling stops when the last one is released.
   void stopKeepingFresh(uint16_t devicePosition, uint16_t index, uint8_t subindex);
+
+  /// @brief @c stopKeepingFresh() addressed by an @c ObjectAddress.
+  template <typename T>
+  void stopKeepingFresh(uint16_t devicePosition, ObjectAddress<T> address) {
+    stopKeepingFresh(devicePosition, address.index, address.subindex);
+  }
 
   /// @brief Flushes every monitoring once: delivers each one's recorded cycles since its last
   ///        flush. The deterministic core the scheduler thread drives; exposed for tests.

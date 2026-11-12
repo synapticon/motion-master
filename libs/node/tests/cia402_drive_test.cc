@@ -16,9 +16,12 @@
 #include "comm/fieldbus_driver.h"
 #include "comm/object_data_types.h"
 #include "node/cia402.h"
+#include "node/cia402_drive_objects.h"
 #include "node/device.h"
 
 namespace {
+
+namespace cia402 = mm::node::cia402;
 
 using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
@@ -29,7 +32,6 @@ using mm::comm::SlaveInfo;
 using mm::node::Cia402Drive;
 using mm::node::createCia402Drive;
 using mm::node::Device;
-using mm::node::cia402::Object;
 using mm::node::cia402::OperationMode;
 using mm::node::cia402::State;
 
@@ -108,8 +110,19 @@ class Cia402FakeDriver : public FieldbusDriver {
   int completeAccessAttempts = 0;        ///< readSdoComplete calls, successful or not.
   int sdoReads = 0;                      ///< Per-subindex readSdo calls.
 
+  template <typename T>
+  static uint32_t key(mm::node::ObjectAddress<T> address) {
+    return key(address.index, address.subindex);
+  }
+
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
+  }
+
+  template <typename T>
+  void programObject(mm::node::ObjectAddress<T> address, ObjectDataType type,
+                     std::vector<uint8_t> initial, uint16_t objectCode = 0x0007) {
+    programObject(address.index, address.subindex, type, std::move(initial), objectCode);
   }
 
   // OTYPE_VAR (0x0007): a single value. CA-eligible objects are programmed with OTYPE_ARRAY /
@@ -141,16 +154,16 @@ class Cia402FakeDriver : public FieldbusDriver {
 
   // Seeds the standard CiA402 objects and parks the machine at SwitchOnDisabled.
   void programCia402Objects() {
-    programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, u16le(0));
-    programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16,
+    programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, u16le(0));
+    programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16,
                   u16le(statuswordFor(State::kSwitchOnDisabled)));
-    programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
-    programObject(Object::kModeOfOperationDisplay, 0, ObjectDataType::INTEGER8, {0});
-    programObject(Object::kTargetPosition, 0, ObjectDataType::INTEGER32, i32le(0));
-    programObject(Object::kTargetVelocity, 0, ObjectDataType::INTEGER32, i32le(0));
-    programObject(Object::kTargetTorque, 0, ObjectDataType::INTEGER16, u16le(0));
-    programObject(Object::kPositionActualValue, 0, ObjectDataType::INTEGER32, i32le(0));
-    programObject(Object::kVelocityActualValue, 0, ObjectDataType::INTEGER32, i32le(0));
+    programObject(cia402::objects::kModesOfOperation, ObjectDataType::INTEGER8, {0});
+    programObject(cia402::objects::kModesOfOperationDisplay, ObjectDataType::INTEGER8, {0});
+    programObject(cia402::objects::kTargetPosition, ObjectDataType::INTEGER32, i32le(0));
+    programObject(cia402::objects::kTargetVelocity, ObjectDataType::INTEGER32, i32le(0));
+    programObject(cia402::objects::kTargetTorque, ObjectDataType::INTEGER16, u16le(0));
+    programObject(cia402::objects::kPositionActualValue, ObjectDataType::INTEGER32, i32le(0));
+    programObject(cia402::objects::kVelocityActualValue, ObjectDataType::INTEGER32, i32le(0));
   }
 
   // Applies one controlword edge to the modelled state machine.
@@ -192,7 +205,7 @@ class Cia402FakeDriver : public FieldbusDriver {
         machineState = State::kOperationEnabled;
       }
     }
-    store[key(Object::kStatusword, 0)] = u16le(statuswordFor(machineState));
+    store[key(cia402::objects::kStatusword)] = u16le(statuswordFor(machineState));
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
@@ -200,11 +213,12 @@ class Cia402FakeDriver : public FieldbusDriver {
     ++sdoReads;
     // A latched fault reset takes effect on the drive's own cycles, which a statusword read is the
     // observable proxy for here.
-    if (index == Object::kStatusword && pendingFaultReset && --faultResetDelay <= 0) {
+    if (index == cia402::objects::kStatusword.index && pendingFaultReset &&
+        --faultResetDelay <= 0) {
       pendingFaultReset = false;
       if (!faultPersists) {
         machineState = State::kSwitchOnDisabled;
-        store[key(Object::kStatusword, 0)] = u16le(statuswordFor(machineState));
+        store[key(cia402::objects::kStatusword)] = u16le(statuswordFor(machineState));
       }
     }
     auto it = store.find(key(index, subindex));
@@ -242,15 +256,15 @@ class Cia402FakeDriver : public FieldbusDriver {
     std::vector<uint8_t> bytes(data.begin(), data.end());
     writes.push_back({index, subindex, bytes});
     store[key(index, subindex)] = bytes;
-    if (index == Object::kControlword && bytes.size() >= 2) {
+    if (index == cia402::objects::kControlword.index && bytes.size() >= 2) {
       advance(static_cast<uint16_t>(bytes[0] | (bytes[1] << 8)));
     }
     // A real drive mirrors an accepted mode from 0x6060 into 0x6061 a cycle later, and simply does
     // not mirror one it refuses.
-    if (index == Object::kModeOfOperation && !bytes.empty()) {
+    if (index == cia402::objects::kModesOfOperation.index && !bytes.empty()) {
       const auto requested = static_cast<int8_t>(bytes[0]);
       if (std::ranges::find(refusedModes, requested) == refusedModes.end()) {
-        store[key(Object::kModeOfOperationDisplay, 0)] = {bytes[0]};
+        store[key(cia402::objects::kModesOfOperationDisplay)] = {bytes[0]};
       }
     }
     return {};
@@ -344,14 +358,14 @@ TEST(Cia402Drive, TransitionPreservesNonCommandBits) {
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
   // Seed the controlword with a mode-specific bit (4) and the halt bit (8) set.
-  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x0110);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kControlword)] = u16le(0x0110);
   Cia402Drive drive(device);
 
   ASSERT_TRUE(drive.shutdown().has_value());
 
   ASSERT_FALSE(driver.writes.empty());
   const auto& w = driver.writes.back();
-  EXPECT_EQ(w.index, static_cast<uint16_t>(Object::kControlword));
+  EXPECT_EQ(w.index, cia402::objects::kControlword.index);
   // Command bits become Shutdown (0x06); bits 4 and 8 are preserved → 0x0116.
   EXPECT_EQ(w.data, u16le(0x0116));
 }
@@ -368,7 +382,7 @@ TEST(Cia402Drive, EnableWalksToOperationEnabled) {
   // The walk issued the three expected command words in order: Shutdown, SwitchOn, EnableOp.
   std::vector<uint16_t> commandWords;
   for (const auto& w : driver.writes) {
-    if (w.index == Object::kControlword && w.data.size() >= 2) {
+    if (w.index == cia402::objects::kControlword.index && w.data.size() >= 2) {
       commandWords.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)) &
                              mm::node::cia402::kCommandMask);
     }
@@ -383,7 +397,8 @@ TEST(Cia402Drive, FaultResetClearsFaultThenEnables) {
   Cia402FakeDriver driver;
   driver.machineState = State::kFault;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
+      u16le(statuswordFor(State::kFault));
   Cia402Drive drive(device);
 
   auto result = drive.enable(std::chrono::milliseconds(500));
@@ -395,7 +410,8 @@ TEST(Cia402Drive, FaultResetAssertsRisingEdgeWithoutClearing) {
   Cia402FakeDriver driver;
   driver.machineState = State::kFault;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
+      u16le(statuswordFor(State::kFault));
   Cia402Drive drive(device);
 
   ASSERT_TRUE(drive.faultReset().has_value());
@@ -406,7 +422,7 @@ TEST(Cia402Drive, FaultResetAssertsRisingEdgeWithoutClearing) {
   // drive would never see the edge. Bit 7 is re-cleared by the next state-machine command instead.
   std::vector<uint16_t> controlwords;
   for (const auto& w : driver.writes) {
-    if (w.index == Object::kControlword && w.data.size() >= 2) {
+    if (w.index == cia402::objects::kControlword.index && w.data.size() >= 2) {
       controlwords.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)));
     }
   }
@@ -421,9 +437,10 @@ TEST(Cia402DriveFaultReset, ReassertsTheEdgeWhenBitSevenIsAlreadyHigh) {
   Cia402FakeDriver driver;
   driver.machineState = State::kFault;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
+      u16le(statuswordFor(State::kFault));
   // Bit 7 left high by a previous attempt, and nothing else set.
-  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x0080);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kControlword)] = u16le(0x0080);
   Cia402Drive drive(device);
   driver.writes.clear();
 
@@ -431,7 +448,7 @@ TEST(Cia402DriveFaultReset, ReassertsTheEdgeWhenBitSevenIsAlreadyHigh) {
 
   std::vector<uint16_t> controlwords;
   for (const auto& w : driver.writes) {
-    if (w.index == Object::kControlword && w.data.size() >= 2) {
+    if (w.index == cia402::objects::kControlword.index && w.data.size() >= 2) {
       controlwords.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)));
     }
   }
@@ -447,8 +464,9 @@ TEST(Cia402DriveFaultReset, IsOneWriteWhenBitSevenIsAlreadyLow) {
   Cia402FakeDriver driver;
   driver.machineState = State::kFault;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
-  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
+      u16le(statuswordFor(State::kFault));
+  driver.store[Cia402FakeDriver::key(cia402::objects::kControlword)] = u16le(0x000F);
   Cia402Drive drive(device);
   driver.writes.clear();
 
@@ -456,7 +474,7 @@ TEST(Cia402DriveFaultReset, IsOneWriteWhenBitSevenIsAlreadyLow) {
 
   std::vector<uint16_t> controlwords;
   for (const auto& w : driver.writes) {
-    if (w.index == Object::kControlword && w.data.size() >= 2) {
+    if (w.index == cia402::objects::kControlword.index && w.data.size() >= 2) {
       controlwords.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)));
     }
   }
@@ -474,7 +492,8 @@ TEST(Cia402DriveTransitionToState, GivesAFaultResetTimeBeforeCallingItUnclearabl
   driver.machineState = State::kFault;
   driver.faultResetDelay = 3;  // clears, but only after a few polls
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
+      u16le(statuswordFor(State::kFault));
   Cia402Drive drive(device);
 
   auto result = drive.transitionToState(State::kSwitchOnDisabled, std::chrono::milliseconds(500));
@@ -488,7 +507,7 @@ TEST(Cia402Drive, EnableRefusesToOverrideAQuickStop) {
   Cia402FakeDriver driver;
   driver.machineState = State::kQuickStopActive;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
       u16le(statuswordFor(State::kQuickStopActive));
   Cia402Drive drive(device);
 
@@ -511,7 +530,7 @@ TEST(Cia402DriveTransitionToState, ClimbsAndStopsAtTheTargetWithoutOvershooting)
 
   std::vector<uint16_t> commands;
   for (const auto& w : driver.writes) {
-    if (w.index == Object::kControlword && w.data.size() >= 2) {
+    if (w.index == cia402::objects::kControlword.index && w.data.size() >= 2) {
       commands.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)) &
                          mm::node::cia402::kCommandMask);
     }
@@ -537,7 +556,7 @@ TEST(Cia402DriveTransitionToState, LeavesAQuickStopUpwardOnlyWhenAllowed) {
   Cia402FakeDriver driver;
   driver.machineState = State::kQuickStopActive;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
       u16le(statuswordFor(State::kQuickStopActive));
   Cia402Drive drive(device);
 
@@ -558,7 +577,7 @@ TEST(Cia402DriveTransitionToState, LeavesAQuickStopDownwardWithoutTheOverride) {
   Cia402FakeDriver driver;
   driver.machineState = State::kQuickStopActive;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
       u16le(statuswordFor(State::kQuickStopActive));
   Cia402Drive drive(device);
 
@@ -575,7 +594,7 @@ TEST(Cia402DriveTransitionToState, AQuickStopThatPassesThroughArrivesInSwitchOnD
   // loops until the timeout. Verified against a SOMANET Integro, which is configured this way.
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
-  driver.programObject(Object::kQuickStopOptionCode, 0, ObjectDataType::INTEGER16, u16le(2));
+  driver.programObject(cia402::objects::kQuickStopOptionCode, ObjectDataType::INTEGER16, u16le(2));
   ASSERT_TRUE(device.initializeParameters().has_value());
   driver.quickStopPassesThrough = true;
   Cia402Drive drive(device);
@@ -590,7 +609,7 @@ TEST(Cia402DriveTransitionToState, AQuickStopThatHoldsStaysWhereItIs) {
   // Option code 6: same ramp, but the drive stays. Nothing may be accepted early here.
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
-  driver.programObject(Object::kQuickStopOptionCode, 0, ObjectDataType::INTEGER16, u16le(6));
+  driver.programObject(cia402::objects::kQuickStopOptionCode, ObjectDataType::INTEGER16, u16le(6));
   ASSERT_TRUE(device.initializeParameters().has_value());
   Cia402Drive drive(device);
   ASSERT_TRUE(drive.enable(std::chrono::milliseconds(500)).has_value());
@@ -605,7 +624,7 @@ TEST(Cia402DriveTransitionToState, StartingInSwitchOnDisabledStillPerformsTheQui
   // asking for one must climb and perform it, not report the state it was already in as success.
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
-  driver.programObject(Object::kQuickStopOptionCode, 0, ObjectDataType::INTEGER16, u16le(2));
+  driver.programObject(cia402::objects::kQuickStopOptionCode, ObjectDataType::INTEGER16, u16le(2));
   ASSERT_TRUE(device.initializeParameters().has_value());
   driver.quickStopPassesThrough = true;
   Cia402Drive drive(device);
@@ -615,7 +634,7 @@ TEST(Cia402DriveTransitionToState, StartingInSwitchOnDisabledStillPerformsTheQui
       drive.transitionToState(State::kQuickStopActive, std::chrono::milliseconds(500)).has_value());
   // It climbed to Operation Enabled and quick-stopped from there, rather than returning at once.
   EXPECT_TRUE(std::ranges::any_of(driver.writes, [](const Cia402FakeDriver::Write& w) {
-    return w.index == Object::kControlword && w.data.size() >= 2 &&
+    return w.index == cia402::objects::kControlword.index && w.data.size() >= 2 &&
            (static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)) & mm::node::cia402::kCommandMask) ==
                0x0002;
   })) << "no quick stop command was issued";
@@ -664,7 +683,7 @@ TEST(Cia402DriveTransitionToState, SaysNothingAboutTheServiceWhenNoCommandWasIss
   Cia402FakeDriver driver;
   driver.machineState = State::kFaultReactionActive;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
       u16le(statuswordFor(State::kFaultReactionActive));
   Cia402Drive drive(device);
 
@@ -695,8 +714,9 @@ TEST(Cia402DriveTransitionToState, AFaultThatWillNotClearSaysSoRatherThanTimingO
   driver.machineState = State::kFault;
   driver.faultPersists = true;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
-  driver.programObject(Object::kErrorCode, 0, ObjectDataType::UNSIGNED16, u16le(0x3220));
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
+      u16le(statuswordFor(State::kFault));
+  driver.programObject(cia402::objects::kErrorCode, ObjectDataType::UNSIGNED16, u16le(0x3220));
   ASSERT_TRUE(device.initializeParameters().has_value());
   Cia402Drive drive(device);
 
@@ -722,7 +742,7 @@ TEST(Cia402DriveApplyOperationMode, ReportsAModeTheDriveDeclined) {
   Cia402FakeDriver driver;
   driver.refusedModes = {-4};
   Device device = makeCia402Device(driver);
-  driver.programObject(Object::kErrorCode, 0, ObjectDataType::UNSIGNED16, u16le(0x6320));
+  driver.programObject(cia402::objects::kErrorCode, ObjectDataType::UNSIGNED16, u16le(0x6320));
   ASSERT_TRUE(device.initializeParameters().has_value());
   Cia402Drive drive(device);
   ASSERT_TRUE(drive.applyOperationMode(8, std::chrono::milliseconds(200)).has_value());
@@ -763,11 +783,11 @@ TEST(Cia402Drive, SetOperationModeAndSetpoints) {
   bool sawMode = false;
   bool sawTarget = false;
   for (const auto& w : driver.writes) {
-    if (w.index == Object::kModeOfOperation) {
+    if (w.index == cia402::objects::kModesOfOperation.index) {
       EXPECT_EQ(w.data, std::vector<uint8_t>{8});
       sawMode = true;
     }
-    if (w.index == Object::kTargetPosition) {
+    if (w.index == cia402::objects::kTargetPosition.index) {
       EXPECT_EQ(w.data, i32le(0x00405060));
       sawTarget = true;
     }
@@ -785,7 +805,7 @@ TEST(Cia402Drive, SetTargetTorqueAcceptsNegative) {
   ASSERT_TRUE(drive.setTargetTorque(-1000).has_value());
   ASSERT_FALSE(driver.writes.empty());
   const auto& w = driver.writes.back();
-  EXPECT_EQ(w.index, static_cast<uint16_t>(Object::kTargetTorque));
+  EXPECT_EQ(w.index, cia402::objects::kTargetTorque.index);
   EXPECT_EQ(w.data, u16le(static_cast<uint16_t>(static_cast<int16_t>(-1000))));
 }
 
@@ -793,16 +813,16 @@ TEST(Cia402Drive, ReadStatusReportsAllFields) {
   Cia402FakeDriver driver;
   // Torque actual (0x6077) is INTEGER16; the status widens it to int32 with its sign. Programmed
   // before the device enumerates, so the object is in its dictionary.
-  driver.programObject(Object::kTorqueActualValue, 0, ObjectDataType::INTEGER16,
+  driver.programObject(cia402::objects::kTorqueActualValue, ObjectDataType::INTEGER16,
                        u16le(static_cast<uint16_t>(static_cast<int16_t>(-150))));
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
       u16le(statuswordFor(State::kOperationEnabled));
-  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
-  driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {9};  // CSV
-  driver.store[Cia402FakeDriver::key(Object::kTargetVelocity, 0)] = i32le(250000);
-  driver.store[Cia402FakeDriver::key(Object::kPositionActualValue, 0)] = i32le(-123456);
-  driver.store[Cia402FakeDriver::key(Object::kVelocityActualValue, 0)] = i32le(249000);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kControlword)] = u16le(0x000F);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kModesOfOperationDisplay)] = {9};  // CSV
+  driver.store[Cia402FakeDriver::key(cia402::objects::kTargetVelocity)] = i32le(250000);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kPositionActualValue)] = i32le(-123456);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kVelocityActualValue)] = i32le(249000);
   Cia402Drive drive(device);
 
   auto status = drive.readStatus();
@@ -840,19 +860,20 @@ TEST(Cia402Drive, ReadStatusLeavesAMissingActualValueEmpty) {
 TEST(Cia402Drive, ReadStatusReadsEveryTargetWhateverTheMode) {
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+  driver.store[Cia402FakeDriver::key(cia402::objects::kStatusword)] =
       u16le(statuswordFor(State::kOperationEnabled));
-  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kControlword)] = u16le(0x000F);
   // All three targets are reported in every mode, so a client never has to ask the server which
   // one the mode acts on. Target torque is INTEGER16 and is widened with its sign.
-  driver.store[Cia402FakeDriver::key(Object::kTargetPosition, 0)] = i32le(111);
-  driver.store[Cia402FakeDriver::key(Object::kTargetVelocity, 0)] = i32le(222);
-  driver.store[Cia402FakeDriver::key(Object::kTargetTorque, 0)] = u16le(static_cast<uint16_t>(-33));
+  driver.store[Cia402FakeDriver::key(cia402::objects::kTargetPosition)] = i32le(111);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kTargetVelocity)] = i32le(222);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kTargetTorque)] =
+      u16le(static_cast<uint16_t>(-33));
   Cia402Drive drive(device);
 
   for (const uint8_t mode :
        {uint8_t{0}, uint8_t{1}, uint8_t{6}, uint8_t{8}, uint8_t{9}, uint8_t{10}}) {
-    driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {mode};
+    driver.store[Cia402FakeDriver::key(cia402::objects::kModesOfOperationDisplay)] = {mode};
     auto s = drive.readStatus();
     ASSERT_TRUE(s.has_value()) << s.error();
     EXPECT_EQ(s->targetPosition, 111) << "mode " << static_cast<int>(mode);
@@ -880,24 +901,24 @@ TEST(Cia402Drive, TargetKindForModeNamesTheObjectEachModeActsOn) {
 
 TEST(Cia402Drive, SetTargetToActualCopiesTheActualIntoTheTarget) {
   Cia402FakeDriver driver;
-  driver.programObject(Object::kTorqueActualValue, 0, ObjectDataType::INTEGER16,
+  driver.programObject(cia402::objects::kTorqueActualValue, ObjectDataType::INTEGER16,
                        u16le(static_cast<uint16_t>(static_cast<int16_t>(-77))));
   Device device = makeCia402Device(driver);
-  driver.store[Cia402FakeDriver::key(Object::kPositionActualValue, 0)] = i32le(-4242);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kPositionActualValue)] = i32le(-4242);
   Cia402Drive drive(device);
 
   auto position = drive.setTargetToActual(mm::node::Cia402TargetKind::kPosition);
   ASSERT_TRUE(position.has_value()) << position.error();
   EXPECT_EQ(*position, -4242);
   ASSERT_FALSE(driver.writes.empty());
-  EXPECT_EQ(driver.writes.back().index, static_cast<uint16_t>(Object::kTargetPosition));
+  EXPECT_EQ(driver.writes.back().index, cia402::objects::kTargetPosition.index);
   EXPECT_EQ(driver.writes.back().data, i32le(-4242));
 
   // Torque is INTEGER16 on both sides; the value is reported widened with its sign.
   auto torque = drive.setTargetToActual(mm::node::Cia402TargetKind::kTorque);
   ASSERT_TRUE(torque.has_value()) << torque.error();
   EXPECT_EQ(*torque, -77);
-  EXPECT_EQ(driver.writes.back().index, static_cast<uint16_t>(Object::kTargetTorque));
+  EXPECT_EQ(driver.writes.back().index, cia402::objects::kTargetTorque.index);
   EXPECT_EQ(driver.writes.back().data, u16le(static_cast<uint16_t>(static_cast<int16_t>(-77))));
 }
 
@@ -923,9 +944,9 @@ TEST(Cia402Drive, ProfileObjectRoundTrip) {
   // Representative rw profile objects of each width: the setter writes the exact wire bytes and
   // the (live) getter reads them back.
   Cia402FakeDriver driver;
-  driver.programObject(Object::kMaxTorque, 0, ObjectDataType::UNSIGNED16, u16le(0));
-  driver.programObject(Object::kProfileVelocity, 0, ObjectDataType::UNSIGNED32, u32le(0));
-  driver.programObject(Object::kHomingMethod, 0, ObjectDataType::INTEGER8, {0});
+  driver.programObject(cia402::objects::kMaxTorque, ObjectDataType::UNSIGNED16, u16le(0));
+  driver.programObject(cia402::objects::kProfileVelocity, ObjectDataType::UNSIGNED32, u32le(0));
+  driver.programObject(cia402::objects::kHomingMethod, ObjectDataType::INTEGER8, {0});
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
@@ -942,12 +963,13 @@ TEST(Cia402Drive, VolatileGetterRereadsTheDevice) {
   // Error code (0x603F) is read-only but volatile: every call must reach the device, never serve
   // a cached first reading.
   Cia402FakeDriver driver;
-  driver.programObject(Object::kErrorCode, 0, ObjectDataType::UNSIGNED16, u16le(0));
+  driver.programObject(cia402::objects::kErrorCode, ObjectDataType::UNSIGNED16, u16le(0));
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
   EXPECT_EQ(drive.errorCode().value_or(1), 0);
-  driver.store[Cia402FakeDriver::key(Object::kErrorCode, 0)] = u16le(0x7500);  // fault appears
+  driver.store[Cia402FakeDriver::key(cia402::objects::kErrorCode)] =
+      u16le(0x7500);  // fault appears
   EXPECT_EQ(drive.errorCode().value_or(0), 0x7500);
 }
 
@@ -955,19 +977,22 @@ TEST(Cia402Drive, SupportedDriveModesIsCached) {
   // Supported drive modes (0x6502) is a constant capability field: the first read is served from
   // the device, subsequent reads from the cache — a store change must not show through.
   Cia402FakeDriver driver;
-  driver.programObject(Object::kSupportedDriveModes, 0, ObjectDataType::UNSIGNED32, u32le(0x03ED));
+  driver.programObject(cia402::objects::kSupportedDriveModes, ObjectDataType::UNSIGNED32,
+                       u32le(0x03ED));
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
   EXPECT_EQ(drive.supportedDriveModes().value_or(0), 0x03EDu);
-  driver.store[Cia402FakeDriver::key(Object::kSupportedDriveModes, 0)] = u32le(0);
+  driver.store[Cia402FakeDriver::key(cia402::objects::kSupportedDriveModes)] = u32le(0);
   EXPECT_EQ(drive.supportedDriveModes().value_or(0), 0x03EDu);
 }
 
 TEST(Cia402Drive, StructGetterReadsBothSubEntries) {
   Cia402FakeDriver driver;
-  driver.programObject(Object::kSoftwarePositionLimit, 1, ObjectDataType::INTEGER32, i32le(-1000));
-  driver.programObject(Object::kSoftwarePositionLimit, 2, ObjectDataType::INTEGER32, i32le(5000));
+  driver.programObject(cia402::objects::kSoftwarePositionLimitSubIndex001,
+                       ObjectDataType::INTEGER32, i32le(-1000));
+  driver.programObject(cia402::objects::kSoftwarePositionLimitSubIndex002,
+                       ObjectDataType::INTEGER32, i32le(5000));
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
@@ -983,7 +1008,8 @@ TEST(Cia402Drive, StructGetterReadsBothSubEntries) {
 TEST(Cia402Drive, StructGetterUsesCompleteAccess) {
   Cia402FakeDriver driver;
   driver.completeAccessSupported = true;
-  driver.programArrayObject(Object::kGearRatio, ObjectDataType::UNSIGNED32, {u32le(30), u32le(1)});
+  driver.programArrayObject(cia402::objects::kGearRatio.index, ObjectDataType::UNSIGNED32,
+                            {u32le(30), u32le(1)});
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
@@ -1001,7 +1027,8 @@ TEST(Cia402Drive, StructGetterUsesCompleteAccess) {
 TEST(Cia402Drive, CompleteAccessUnsupportedFallsBackAndIsRemembered) {
   Cia402FakeDriver driver;
   driver.completeAccessSupported = false;
-  driver.programArrayObject(Object::kGearRatio, ObjectDataType::UNSIGNED32, {u32le(30), u32le(1)});
+  driver.programArrayObject(cia402::objects::kGearRatio.index, ObjectDataType::UNSIGNED32,
+                            {u32le(30), u32le(1)});
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
@@ -1019,8 +1046,9 @@ TEST(Cia402Drive, CompleteAccessUnsupportedFallsBackAndIsRemembered) {
 TEST(Cia402Drive, CompleteAccessSupportSharedAcrossObjects) {
   Cia402FakeDriver driver;
   driver.completeAccessSupported = true;
-  driver.programArrayObject(Object::kGearRatio, ObjectDataType::UNSIGNED32, {u32le(30), u32le(1)});
-  driver.programArrayObject(Object::kHomingSpeeds, ObjectDataType::UNSIGNED32,
+  driver.programArrayObject(cia402::objects::kGearRatio.index, ObjectDataType::UNSIGNED32,
+                            {u32le(30), u32le(1)});
+  driver.programArrayObject(cia402::objects::kHomingSpeeds.index, ObjectDataType::UNSIGNED32,
                             {u32le(500), u32le(50)});
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
@@ -1040,15 +1068,17 @@ TEST(Cia402Drive, CompleteAccessSupportSharedAcrossObjects) {
 
 TEST(Cia402Drive, StructSetterWritesSubOneThenSubTwo) {
   Cia402FakeDriver driver;
-  driver.programObject(Object::kGearRatio, 1, ObjectDataType::UNSIGNED32, u32le(1));
-  driver.programObject(Object::kGearRatio, 2, ObjectDataType::UNSIGNED32, u32le(1));
+  driver.programObject(cia402::objects::kGearRatioSubIndex001, ObjectDataType::UNSIGNED32,
+                       u32le(1));
+  driver.programObject(cia402::objects::kGearRatioSubIndex002, ObjectDataType::UNSIGNED32,
+                       u32le(1));
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
   ASSERT_TRUE(drive.setGearRatio({30, 1}).has_value());
 
   ASSERT_EQ(driver.writes.size(), 2u);
-  EXPECT_EQ(driver.writes[0].index, static_cast<uint16_t>(Object::kGearRatio));
+  EXPECT_EQ(driver.writes[0].index, cia402::objects::kGearRatio.index);
   EXPECT_EQ(driver.writes[0].subindex, 1);
   EXPECT_EQ(driver.writes[0].data, u32le(30));
   EXPECT_EQ(driver.writes[1].subindex, 2);
@@ -1057,8 +1087,10 @@ TEST(Cia402Drive, StructSetterWritesSubOneThenSubTwo) {
 
 TEST(Cia402Drive, SetDigitalOutputsWritesLevelsBeforeMask) {
   Cia402FakeDriver driver;
-  driver.programObject(Object::kDigitalOutputs, 1, ObjectDataType::UNSIGNED32, u32le(0));
-  driver.programObject(Object::kDigitalOutputs, 2, ObjectDataType::UNSIGNED32, u32le(0));
+  driver.programObject(cia402::objects::kDigitalOutputsSubIndex001, ObjectDataType::UNSIGNED32,
+                       u32le(0));
+  driver.programObject(cia402::objects::kDigitalOutputsSubIndex002, ObjectDataType::UNSIGNED32,
+                       u32le(0));
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 
@@ -1068,7 +1100,7 @@ TEST(Cia402Drive, SetDigitalOutputsWritesLevelsBeforeMask) {
   // a newly enabled output comes up with its commanded level instead of briefly driving a stale
   // one. Mask-first would glitch the output.
   ASSERT_EQ(driver.writes.size(), 2u);
-  EXPECT_EQ(driver.writes[0].index, static_cast<uint16_t>(Object::kDigitalOutputs));
+  EXPECT_EQ(driver.writes[0].index, cia402::objects::kDigitalOutputs.index);
   EXPECT_EQ(driver.writes[0].subindex, 1);
   EXPECT_EQ(driver.writes[0].data, u32le(0x5));
   EXPECT_EQ(driver.writes[1].subindex, 2);
@@ -1079,7 +1111,8 @@ TEST(Cia402Drive, StructSetterAbortsOnFirstFailure) {
   // Only sub 2 of the position range limit exists — the sub-1 write fails (unknown parameter)
   // and the setter must not go on to write sub 2.
   Cia402FakeDriver driver;
-  driver.programObject(Object::kPositionRangeLimit, 2, ObjectDataType::INTEGER32, i32le(0));
+  driver.programObject(cia402::objects::kPositionRangeLimitSubIndex002, ObjectDataType::INTEGER32,
+                       i32le(0));
   Device device = makeCia402Device(driver);
   Cia402Drive drive(device);
 

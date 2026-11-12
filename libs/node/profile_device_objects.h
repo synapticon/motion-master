@@ -8,8 +8,8 @@
 // Each constant carries an object's index, subindex and the C++ type its declared
 // ETG.1020 type maps to, so a call site cannot disagree with the object it names:
 //
-//     device.value(objects::kStatusword)        // std::optional<uint16_t>
-//     device.readValue(objects::kDeviceName)    // std::expected<std::string, ...>
+//     device.value(objects::kStatusword)                    // std::optional<uint16_t>
+//     device.readValue(objects::kManufacturerDeviceName)    // std::expected<std::string, ...>
 //
 // The union of every device in the ESI is emitted: which module is fitted is unknowable
 // offline, so an address that does not apply to the drive in front of you simply fails
@@ -64,13 +64,13 @@ inline constexpr ObjectAddress<uint16_t> kGuardTime{0x100C, 0x00};
 inline constexpr ObjectAddress<uint8_t> kLifeTimeFactor{0x100D, 0x00};
 
 /// Store parameters / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kStoreParametersCount{0x1010, 0x00};
+inline constexpr ObjectAddress<uint8_t> kStoreParameters{0x1010, 0x00};
 
 /// Store parameters / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kStoreParametersSubIndex001{0x1010, 0x01};
 
 /// Restore default parameters / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kRestoreDefaultParametersCount{0x1011, 0x00};
+inline constexpr ObjectAddress<uint8_t> kRestoreDefaultParameters{0x1011, 0x00};
 
 /// Restore default parameters / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kRestoreDefaultParametersSubIndex001{0x1011, 0x01};
@@ -85,7 +85,7 @@ inline constexpr ObjectAddress<uint32_t> kRestoreDefaultParametersSubIndex003{0x
 inline constexpr ObjectAddress<uint32_t> kRestoreDefaultParametersSubIndex004{0x1011, 0x04};
 
 /// Consumer heartbeat time / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kConsumerHeartbeatTimeCount{0x1016, 0x00};
+inline constexpr ObjectAddress<uint8_t> kConsumerHeartbeatTime{0x1016, 0x00};
 
 /// Consumer heartbeat time / SubIndex 001 — rw
 inline constexpr ObjectAddress<int32_t> kConsumerHeartbeatTimeSubIndex001{0x1016, 0x01};
@@ -94,7 +94,7 @@ inline constexpr ObjectAddress<int32_t> kConsumerHeartbeatTimeSubIndex001{0x1016
 inline constexpr ObjectAddress<uint16_t> kProducerHeartbeatTime{0x1017, 0x00};
 
 /// Identity object / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kIdentityObjectCount{0x1018, 0x00};
+inline constexpr ObjectAddress<uint8_t> kIdentityObject{0x1018, 0x00};
 
 /// Identity object / Vendor ID — ro
 inline constexpr ObjectAddress<uint32_t> kIdentityObjectVendorID{0x1018, 0x01};
@@ -112,7 +112,7 @@ inline constexpr ObjectAddress<uint32_t> kIdentityObjectSerialNumber{0x1018, 0x0
 inline constexpr ObjectAddress<uint8_t> kSynchronousCounterOverflowValue{0x1019, 0x00};
 
 /// OS command / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kOSCommandCount{0x1023, 0x00};
+inline constexpr ObjectAddress<uint8_t> kOSCommand{0x1023, 0x00};
 
 /// OS command / Command — rw
 inline constexpr ObjectAddress<std::vector<uint8_t>> kOSCommandCommand{0x1023, 0x01};
@@ -127,7 +127,7 @@ inline constexpr ObjectAddress<std::vector<uint8_t>> kOSCommandResponse{0x1023, 
 inline constexpr ObjectAddress<uint8_t> kOSCommandMode{0x1024, 0x00};
 
 /// Receive PDO1 parameter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kReceivePDO1ParameterCount{0x1400, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO1Parameter{0x1400, 0x00};
 
 /// Receive PDO1 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kReceivePDO1ParameterCOBIDUsedByPDO{0x1400, 0x01};
@@ -139,7 +139,7 @@ inline constexpr ObjectAddress<uint8_t> kReceivePDO1ParameterTransmissionType{0x
 inline constexpr ObjectAddress<uint16_t> kReceivePDO1ParameterInhibitTime{0x1400, 0x03};
 
 /// Receive PDO2 parameter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kReceivePDO2ParameterCount{0x1401, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO2Parameter{0x1401, 0x00};
 
 /// Receive PDO2 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kReceivePDO2ParameterCOBIDUsedByPDO{0x1401, 0x01};
@@ -151,7 +151,7 @@ inline constexpr ObjectAddress<uint8_t> kReceivePDO2ParameterTransmissionType{0x
 inline constexpr ObjectAddress<uint16_t> kReceivePDO2ParameterInhibitTime{0x1401, 0x03};
 
 /// Receive PDO3 parameter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kReceivePDO3ParameterCount{0x1402, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO3Parameter{0x1402, 0x00};
 
 /// Receive PDO3 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kReceivePDO3ParameterCOBIDUsedByPDO{0x1402, 0x01};
@@ -163,7 +163,7 @@ inline constexpr ObjectAddress<uint8_t> kReceivePDO3ParameterTransmissionType{0x
 inline constexpr ObjectAddress<uint16_t> kReceivePDO3ParameterInhibitTime{0x1402, 0x03};
 
 /// Receive PDO4 parameter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kReceivePDO4ParameterCount{0x1403, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO4Parameter{0x1403, 0x00};
 
 /// Receive PDO4 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kReceivePDO4ParameterCOBIDUsedByPDO{0x1403, 0x01};
@@ -175,7 +175,7 @@ inline constexpr ObjectAddress<uint8_t> kReceivePDO4ParameterTransmissionType{0x
 inline constexpr ObjectAddress<uint16_t> kReceivePDO4ParameterInhibitTime{0x1403, 0x03};
 
 /// Receive PDO1 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kReceivePDO1MappingCount{0x1600, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO1Mapping{0x1600, 0x00};
 
 /// Receive PDO1 mapping / Controlword — rw
 inline constexpr ObjectAddress<uint32_t> kReceivePDO1MappingControlword{0x1600, 0x01};
@@ -199,7 +199,7 @@ inline constexpr ObjectAddress<uint32_t> kReceivePDO1MappingTorqueOffset{0x1600,
 inline constexpr ObjectAddress<uint32_t> kReceivePDO1MappingTuningCommand{0x1600, 0x07};
 
 /// Receive PDO2 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kReceivePDO2MappingCount{0x1601, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO2Mapping{0x1601, 0x00};
 
 /// Receive PDO2 mapping / Physical outputs — rw
 inline constexpr ObjectAddress<uint32_t> kReceivePDO2MappingPhysicalOutputs{0x1601, 0x01};
@@ -208,7 +208,7 @@ inline constexpr ObjectAddress<uint32_t> kReceivePDO2MappingPhysicalOutputs{0x16
 inline constexpr ObjectAddress<uint32_t> kReceivePDO2MappingBitMask{0x1601, 0x02};
 
 /// Receive PDO3 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kReceivePDO3MappingCount{0x1602, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO3Mapping{0x1602, 0x00};
 
 /// Receive PDO3 mapping / User MOSI — rw
 inline constexpr ObjectAddress<uint32_t> kReceivePDO3MappingUserMOSI{0x1602, 0x01};
@@ -217,10 +217,10 @@ inline constexpr ObjectAddress<uint32_t> kReceivePDO3MappingUserMOSI{0x1602, 0x0
 inline constexpr ObjectAddress<uint32_t> kReceivePDO3MappingVelocityOffset{0x1602, 0x02};
 
 /// Receive PDO4 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kReceivePDO4MappingCount{0x1603, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceivePDO4Mapping{0x1603, 0x00};
 
 /// Receive safe PDO1 mapping / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kReceiveSafePDO1MappingCount{0x1700, 0x00};
+inline constexpr ObjectAddress<uint8_t> kReceiveSafePDO1Mapping{0x1700, 0x00};
 
 /// Receive safe PDO1 mapping / FSoE Command — ro
 inline constexpr ObjectAddress<uint32_t> kReceiveSafePDO1MappingFSoECommand{0x1700, 0x01};
@@ -310,7 +310,7 @@ inline constexpr ObjectAddress<uint32_t> kReceiveSafePDO1MappingFSoECRC1{0x1700,
 inline constexpr ObjectAddress<uint32_t> kReceiveSafePDO1MappingFSoEConnectionID{0x1700, 0x1D};
 
 /// Transmit PDO1 parameter / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO1ParameterCount{0x1800, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO1Parameter{0x1800, 0x00};
 
 /// Transmit PDO1 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO1ParameterCOBIDUsedByPDO{0x1800, 0x01};
@@ -328,7 +328,7 @@ inline constexpr ObjectAddress<uint8_t> kTransmitPDO1ParameterReserved{0x1800, 0
 inline constexpr ObjectAddress<uint16_t> kTransmitPDO1ParameterEventTimer{0x1800, 0x05};
 
 /// Transmit PDO2 parameter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO2ParameterCount{0x1801, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO2Parameter{0x1801, 0x00};
 
 /// Transmit PDO2 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO2ParameterCOBIDUsedByPDO{0x1801, 0x01};
@@ -346,7 +346,7 @@ inline constexpr ObjectAddress<uint8_t> kTransmitPDO2ParameterReserved{0x1801, 0
 inline constexpr ObjectAddress<uint16_t> kTransmitPDO2ParameterEventTimer{0x1801, 0x05};
 
 /// Transmit PDO3 parameter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO3ParameterCount{0x1802, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO3Parameter{0x1802, 0x00};
 
 /// Transmit PDO3 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO3ParameterCOBIDUsedByPDO{0x1802, 0x01};
@@ -364,7 +364,7 @@ inline constexpr ObjectAddress<uint8_t> kTransmitPDO3ParameterReserved{0x1802, 0
 inline constexpr ObjectAddress<uint16_t> kTransmitPDO3ParameterEventTimer{0x1802, 0x05};
 
 /// Transmit PDO4 parameter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO4ParameterCount{0x1803, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO4Parameter{0x1803, 0x00};
 
 /// Transmit PDO4 parameter / COB-ID used by PDO — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO4ParameterCOBIDUsedByPDO{0x1803, 0x01};
@@ -382,7 +382,7 @@ inline constexpr ObjectAddress<uint8_t> kTransmitPDO4ParameterReserved{0x1803, 0
 inline constexpr ObjectAddress<uint16_t> kTransmitPDO4ParameterEventTimer{0x1803, 0x05};
 
 /// Transmit PDO1 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO1MappingCount{0x1A00, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO1Mapping{0x1A00, 0x00};
 
 /// Transmit PDO1 mapping / Statusword — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO1MappingStatusword{0x1A00, 0x01};
@@ -400,7 +400,7 @@ inline constexpr ObjectAddress<uint32_t> kTransmitPDO1MappingVelocityActualValue
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO1MappingTorqueActualValue{0x1A00, 0x05};
 
 /// Transmit PDO2 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO2MappingCount{0x1A01, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO2Mapping{0x1A01, 0x00};
 
 /// Transmit PDO2 mapping / Analog input 1 — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO2MappingAnalogInput1{0x1A01, 0x01};
@@ -418,13 +418,13 @@ inline constexpr ObjectAddress<uint32_t> kTransmitPDO2MappingAnalogInput4{0x1A01
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO2MappingTuningStatus{0x1A01, 0x05};
 
 /// Transmit PDO3 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO3MappingCount{0x1A02, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO3Mapping{0x1A02, 0x00};
 
 /// Transmit PDO3 mapping / Digital inputs — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO3MappingDigitalInputs{0x1A02, 0x01};
 
 /// Transmit PDO4 mapping / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kTransmitPDO4MappingCount{0x1A03, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitPDO4Mapping{0x1A03, 0x00};
 
 /// Transmit PDO4 mapping / User MISO — rw
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO4MappingUserMISO{0x1A03, 0x01};
@@ -443,7 +443,7 @@ inline constexpr ObjectAddress<uint32_t> kTransmitPDO4MappingVelocityDemandValue
 inline constexpr ObjectAddress<uint32_t> kTransmitPDO4MappingTorqueDemand{0x1A03, 0x05};
 
 /// Transmit safe PDO1 mapping / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTransmitSafePDO1MappingCount{0x1B00, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTransmitSafePDO1Mapping{0x1B00, 0x00};
 
 /// Transmit safe PDO1 mapping / FSoE Command — ro
 inline constexpr ObjectAddress<uint32_t> kTransmitSafePDO1MappingFSoECommand{0x1B00, 0x01};
@@ -597,7 +597,7 @@ inline constexpr ObjectAddress<uint32_t> kTransmitSafePDO1MappingFSoECRC7{0x1B00
 inline constexpr ObjectAddress<uint32_t> kTransmitSafePDO1MappingFSoEConnectionID{0x1B00, 0x30};
 
 /// Sync manager type / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSyncManagerTypeCount{0x1C00, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSyncManagerType{0x1C00, 0x00};
 
 /// Sync manager type / SubIndex 001 — ro
 inline constexpr ObjectAddress<uint8_t> kSyncManagerTypeSubIndex001{0x1C00, 0x01};
@@ -612,13 +612,13 @@ inline constexpr ObjectAddress<uint8_t> kSyncManagerTypeSubIndex003{0x1C00, 0x03
 inline constexpr ObjectAddress<uint8_t> kSyncManagerTypeSubIndex004{0x1C00, 0x04};
 
 /// SM 0 Assignment / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSM0AssignmentCount{0x1C10, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSM0Assignment{0x1C10, 0x00};
 
 /// SM 1 Assignment / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSM1AssignmentCount{0x1C11, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSM1Assignment{0x1C11, 0x00};
 
 /// SM 2 Assignment / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kSM2AssignmentCount{0x1C12, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSM2Assignment{0x1C12, 0x00};
 
 /// SM 2 Assignment / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint16_t> kSM2AssignmentSubIndex001{0x1C12, 0x01};
@@ -636,7 +636,7 @@ inline constexpr ObjectAddress<uint16_t> kSM2AssignmentSubIndex004{0x1C12, 0x04}
 inline constexpr ObjectAddress<uint16_t> kSM2AssignmentSubIndex005{0x1C12, 0x05};
 
 /// SM 3 Assignment / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kSM3AssignmentCount{0x1C13, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSM3Assignment{0x1C13, 0x00};
 
 /// SM 3 Assignment / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint16_t> kSM3AssignmentSubIndex001{0x1C13, 0x01};
@@ -657,7 +657,7 @@ inline constexpr ObjectAddress<uint16_t> kSM3AssignmentSubIndex005{0x1C13, 0x05}
 inline constexpr ObjectAddress<uint16_t> kSM3AssignmentSubIndex006{0x1C13, 0x06};
 
 /// Output SyncManager Parameter / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kOutputSyncManagerParameterCount{0x1C32, 0x00};
+inline constexpr ObjectAddress<uint8_t> kOutputSyncManagerParameter{0x1C32, 0x00};
 
 /// Output SyncManager Parameter / Synchronization Type — ro
 inline constexpr ObjectAddress<uint16_t> kOutputSyncManagerParameterSynchronizationType{0x1C32,
@@ -674,7 +674,7 @@ inline constexpr ObjectAddress<uint16_t> kOutputSyncManagerParameterSynchronizat
     0x1C32, 0x04};
 
 /// Input SyncManager Parameter / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kInputSyncManagerParameterCount{0x1C33, 0x00};
+inline constexpr ObjectAddress<uint8_t> kInputSyncManagerParameter{0x1C33, 0x00};
 
 /// Input SyncManager Parameter / Synchronization Type — ro
 inline constexpr ObjectAddress<uint16_t> kInputSyncManagerParameterSynchronizationType{0x1C33,
@@ -691,7 +691,7 @@ inline constexpr ObjectAddress<uint16_t> kInputSyncManagerParameterSynchronizati
     0x1C33, 0x04};
 
 /// Modular Device Profile / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kModularDeviceProfileCount{0xF000, 0x00};
+inline constexpr ObjectAddress<uint8_t> kModularDeviceProfile{0xF000, 0x00};
 
 /// Modular Device Profile / Index distance — rw
 inline constexpr ObjectAddress<uint16_t> kModularDeviceProfileIndexDistance{0xF000, 0x01};
@@ -700,7 +700,7 @@ inline constexpr ObjectAddress<uint16_t> kModularDeviceProfileIndexDistance{0xF0
 inline constexpr ObjectAddress<uint16_t> kModularDeviceProfileMaximumNumberOfModules{0xF000, 0x02};
 
 /// Configured module ident list / SubIndex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kConfiguredModuleIdentListCount{0xF030, 0x00};
+inline constexpr ObjectAddress<uint8_t> kConfiguredModuleIdentList{0xF030, 0x00};
 
 /// Configured module ident list / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kConfiguredModuleIdentListSubIndex001{0xF030, 0x01};
@@ -709,7 +709,7 @@ inline constexpr ObjectAddress<uint32_t> kConfiguredModuleIdentListSubIndex001{0
 inline constexpr ObjectAddress<uint32_t> kConfiguredModuleIdentListSubIndex002{0xF030, 0x02};
 
 /// Detected module ident list / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kDetectedModuleIdentListCount{0xF050, 0x00};
+inline constexpr ObjectAddress<uint8_t> kDetectedModuleIdentList{0xF050, 0x00};
 
 /// Detected module ident list / SubIndex 001 — ro
 inline constexpr ObjectAddress<uint32_t> kDetectedModuleIdentListSubIndex001{0xF050, 0x01};

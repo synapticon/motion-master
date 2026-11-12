@@ -18,8 +18,11 @@
 #include "comm/object_data_types.h"
 #include "node/device.h"
 #include "node/procedure.h"
+#include "node/profile_device_objects.h"
 
 namespace {
+
+namespace profile = mm::node::profile;
 
 using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
@@ -47,10 +50,6 @@ constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 // bodies take a config at all.
 constexpr auto kNoDelay = std::chrono::milliseconds(0);
 
-constexpr uint16_t kDeviceType = 0x1000;
-constexpr uint16_t kStoreParameters = 0x1010;
-constexpr uint16_t kRestoreDefaultParameters = 0x1011;
-
 constexpr uint32_t kSaveSignature = 0x65766173;  // ASCII "save", little-endian
 constexpr uint32_t kLoadSignature = 0x64616F6C;  // ASCII "load", little-endian
 
@@ -66,7 +65,7 @@ class CommandFakeDriver : public FieldbusDriver {
   std::map<uint32_t, std::vector<uint8_t>> store;
   std::vector<OdEntry> ods;
 
-  uint16_t cmdIndex = kStoreParameters;
+  uint16_t cmdIndex = profile::objects::kStoreParameters.index;
   uint8_t cmdSubindex = 1;
 
   int writes = 0;              ///< Signature writes to the command sub-entry.
@@ -75,6 +74,12 @@ class CommandFakeDriver : public FieldbusDriver {
 
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
+  }
+
+  template <typename T>
+  void programObject(mm::node::ObjectAddress<T> address, ObjectDataType type,
+                     std::vector<uint8_t> initial) {
+    programObject(address.index, address.subindex, type, std::move(initial));
   }
 
   void programObject(uint16_t index, uint8_t subindex, ObjectDataType type,
@@ -94,7 +99,8 @@ class CommandFakeDriver : public FieldbusDriver {
   void programCommandObject(uint16_t index, uint8_t subindex) {
     cmdIndex = index;
     cmdSubindex = subindex;
-    programObject(kDeviceType, 0, ObjectDataType::UNSIGNED32, u32le(0x00020192));  // 402 profile
+    programObject(profile::objects::kDeviceType, ObjectDataType::UNSIGNED32,
+                  u32le(0x00020192));  // 402 profile
     programObject(index, subindex, ObjectDataType::UNSIGNED32, u32le(0));
   }
 
@@ -175,6 +181,11 @@ Device makeDevice(CommandFakeDriver& driver, uint16_t index, uint8_t subindex) {
   return device;
 }
 
+template <typename T>
+Device makeDevice(CommandFakeDriver& driver, mm::node::ObjectAddress<T> address) {
+  return makeDevice(driver, address.index, address.subindex);
+}
+
 StoreParametersConfig instantStore() {
   StoreParametersConfig config;
   config.settle = kNoDelay;
@@ -199,7 +210,7 @@ TEST(StoreParametersSteps, DeclaresOneStep) {
 
 TEST(RunStoreParametersProcedure, WritesTheSaveSignatureAndSucceedsOnConfirmation) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   ProgressReporter reporter(storeParametersSteps());
 
   auto result = runStoreParametersProcedure(device, reporter, std::stop_token{}, instantStore());
@@ -211,7 +222,7 @@ TEST(RunStoreParametersProcedure, WritesTheSaveSignatureAndSucceedsOnConfirmatio
 
 TEST(RunStoreParametersProcedure, FailsTheStepWhenTheDeviceNeverConfirms) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   driver.neverConfirm = true;
   ProgressReporter reporter(storeParametersSteps());
 
@@ -227,7 +238,7 @@ TEST(RunStoreParametersProcedure, CancellingAbandonsTheWaitButTheCommandWasAlrea
   // The distinction the procedure has to report honestly: by the time a run can be cancelled the
   // signature is already out, so the device may store anyway. A cancel stops the master waiting.
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   driver.neverConfirm = true;
   ProgressReporter reporter(storeParametersSteps());
 
@@ -301,7 +312,7 @@ TEST(RestoreDefaultParametersParameters, DescribeTheGroupChoiceTheParserAccepts)
 TEST(RunRestoreDefaultParametersProcedure, WritesLoadToTheSubEntryTheGroupSelects) {
   // The group enum value is the 0x1011 sub-entry, so "application" must reach :03 and no other.
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kRestoreDefaultParameters, 3);
+  Device device = makeDevice(driver, profile::objects::kRestoreDefaultParametersSubIndex003);
   ProgressReporter reporter(restoreDefaultParametersSteps());
 
   auto result = runRestoreDefaultParametersProcedure(
@@ -315,7 +326,7 @@ TEST(RunRestoreDefaultParametersProcedure, WritesLoadToTheSubEntryTheGroupSelect
 TEST(RunRestoreDefaultParametersProcedure, RecordsWhichGroupWasRestored) {
   // A snapshot read afterwards has to say what was restored; "restore succeeded" alone would not.
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kRestoreDefaultParameters, 2);
+  Device device = makeDevice(driver, profile::objects::kRestoreDefaultParametersSubIndex002);
   ProgressReporter reporter(restoreDefaultParametersSteps());
 
   auto result = runRestoreDefaultParametersProcedure(

@@ -15,8 +15,11 @@
 #include "comm/fieldbus_driver.h"
 #include "comm/object_data_types.h"
 #include "node/device.h"
+#include "node/profile_device_objects.h"
 
 namespace {
+
+namespace profile = mm::node::profile;
 
 using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
@@ -33,11 +36,6 @@ constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
 // Zero settle + retry delay so the tests exercise the retry/confirm logic without real waiting.
 constexpr auto kNoDelay = std::chrono::milliseconds(0);
-
-// Generic device-profile object indices used by the tests.
-constexpr uint16_t kDeviceType = 0x1000;
-constexpr uint16_t kStoreParameters = 0x1010;
-constexpr uint16_t kRestoreDefaultParameters = 0x1011;
 
 // ASCII (little-endian) signatures the command objects accept.
 constexpr uint32_t kSaveSignature = 0x65766173;  // "save" → 0x1010:01
@@ -59,7 +57,7 @@ class CommandFakeDriver : public FieldbusDriver {
   uint16_t alStatus = kPreOp;
 
   // The command object under test (set by programCommandObject).
-  uint16_t cmdIndex = kStoreParameters;
+  uint16_t cmdIndex = profile::objects::kStoreParameters.index;
   uint8_t cmdSubindex = 1;
 
   // --- command behaviour ---------------------------------------------------
@@ -73,6 +71,12 @@ class CommandFakeDriver : public FieldbusDriver {
 
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
+  }
+
+  template <typename T>
+  void programObject(mm::node::ObjectAddress<T> address, ObjectDataType type,
+                     std::vector<uint8_t> initial) {
+    programObject(address.index, address.subindex, type, std::move(initial));
   }
 
   // OTYPE_VAR object with an initial value, readable + writable in every AL state.
@@ -93,7 +97,8 @@ class CommandFakeDriver : public FieldbusDriver {
   void programCommandObject(uint16_t index, uint8_t subindex) {
     cmdIndex = index;
     cmdSubindex = subindex;
-    programObject(kDeviceType, 0, ObjectDataType::UNSIGNED32, u32le(0x00020192));  // 402 profile
+    programObject(profile::objects::kDeviceType, ObjectDataType::UNSIGNED32,
+                  u32le(0x00020192));  // 402 profile
     programObject(index, subindex, ObjectDataType::UNSIGNED32, u32le(0));
   }
 
@@ -185,6 +190,11 @@ Device makeDevice(CommandFakeDriver& driver, uint16_t index, uint8_t subindex) {
   return device;
 }
 
+template <typename T>
+Device makeDevice(CommandFakeDriver& driver, mm::node::ObjectAddress<T> address) {
+  return makeDevice(driver, address.index, address.subindex);
+}
+
 TEST(CreateProfileDevice, RejectsDeviceWithoutGenericArea) {
   CommandFakeDriver driver;
   Device device(1, driver);  // no parameters enumerated — 0x1000 absent
@@ -194,7 +204,7 @@ TEST(CreateProfileDevice, RejectsDeviceWithoutGenericArea) {
 
 TEST(CreateProfileDevice, BindsDeviceWithGenericArea) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   auto profile = createProfileDevice(device);
   ASSERT_TRUE(profile.has_value()) << profile.error();
 }
@@ -203,7 +213,7 @@ TEST(CreateProfileDevice, BindsDeviceWithGenericArea) {
 
 TEST(RunStoreParameters, WritesSaveSignatureAndConfirms) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   auto profile = createProfileDevice(device);
   ASSERT_TRUE(profile.has_value()) << profile.error();
 
@@ -218,7 +228,7 @@ TEST(RunStoreParameters, WritesSaveSignatureAndConfirms) {
 
 TEST(RunStoreParameters, RetriesUntilConfirmed) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   auto profile = createProfileDevice(device);
   ASSERT_TRUE(profile.has_value()) << profile.error();
 
@@ -231,7 +241,7 @@ TEST(RunStoreParameters, RetriesUntilConfirmed) {
 
 TEST(RunStoreParameters, RetriesThroughTransientReadErrors) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   auto profile = createProfileDevice(device);
   ASSERT_TRUE(profile.has_value()) << profile.error();
 
@@ -246,7 +256,7 @@ TEST(RunStoreParameters, RetriesThroughTransientReadErrors) {
 
 TEST(RunStoreParameters, TimesOutWhenNeverConfirmed) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   auto profile = createProfileDevice(device);
   ASSERT_TRUE(profile.has_value()) << profile.error();
 
@@ -260,7 +270,7 @@ TEST(RunStoreParameters, TimesOutWhenNeverConfirmed) {
 
 TEST(RunStoreParameters, FailsWhenStoreCommandWriteFails) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kStoreParameters, 1);
+  Device device = makeDevice(driver, profile::objects::kStoreParametersSubIndex001);
   auto profile = createProfileDevice(device);
   ASSERT_TRUE(profile.has_value()) << profile.error();
 
@@ -281,7 +291,8 @@ TEST(RunStoreParameters, FailsWhenStoreCommandWriteFails) {
 
 TEST(RunRestoreDefaultParameters, WritesLoadSignatureAndConfirms) {
   CommandFakeDriver driver;
-  Device device = makeDevice(driver, kRestoreDefaultParameters, 1);  // 0x1011:01 = all
+  Device device = makeDevice(
+      driver, profile::objects::kRestoreDefaultParametersSubIndex001);  // 0x1011:01 = all
   auto profile = createProfileDevice(device);
   ASSERT_TRUE(profile.has_value()) << profile.error();
 
@@ -304,7 +315,8 @@ TEST(RunRestoreDefaultParameters, TargetsTheSelectedGroupSubindex) {
   for (const Case c : {Case{RestoreGroup::kAll, 1}, Case{RestoreGroup::kCommunication, 2},
                        Case{RestoreGroup::kApplication, 3}, Case{RestoreGroup::kManufacturer, 4}}) {
     CommandFakeDriver driver;
-    Device device = makeDevice(driver, kRestoreDefaultParameters, c.subindex);
+    Device device =
+        makeDevice(driver, profile::objects::kRestoreDefaultParameters.index, c.subindex);
     auto profile = createProfileDevice(device);
     ASSERT_TRUE(profile.has_value()) << profile.error();
 

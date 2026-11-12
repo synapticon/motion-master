@@ -464,6 +464,12 @@ class Device {
   /// @return A copy of the parameter, or @c nullopt if the parameter is unknown.
   std::optional<DeviceParameter> parameter(uint16_t index, uint8_t subindex) const;
 
+  /// @brief @c parameter() addressed by an @c ObjectAddress.
+  template <typename T>
+  std::optional<DeviceParameter> parameter(ObjectAddress<T> address) const {
+    return parameter(address.index, address.subindex);
+  }
+
   /// @brief Returns a copy of a parameter's last known value. No bus access.
   ///
   /// **The control-plane read, and the name says which one it is.** It serves every data type,
@@ -669,6 +675,12 @@ class Device {
     return readValue<T>(index, subindex);  // never read: fetch once — readValue marks it Synced.
   }
 
+  /// @brief @c readCachedValue<T>() addressed by an @c ObjectAddress, which gives the type.
+  template <typename T>
+  std::expected<T, std::string> readCachedValue(ObjectAddress<T> address) {
+    return readCachedValue<T>(address.index, address.subindex);
+  }
+
   /// @brief Parameter lookup by @c (index, subindex). O(1); @c nullptr if absent. Takes no lock.
   ///
   /// The pointer form, for a caller that works with an entry rather than a copy of it — a cyclic
@@ -687,6 +699,18 @@ class Device {
 
   /// @brief Const overload of @c findParameter. Same contract.
   const DeviceParameter* findParameter(uint16_t index, uint8_t subindex) const;
+
+  /// @brief @c findParameter() addressed by an @c ObjectAddress. Same contract.
+  template <typename T>
+  DeviceParameter* findParameter(ObjectAddress<T> address) {
+    return findParameter(address.index, address.subindex);
+  }
+
+  /// @brief Const overload of the addressed @c findParameter. Same contract.
+  template <typename T>
+  const DeviceParameter* findParameter(ObjectAddress<T> address) const {
+    return findParameter(address.index, address.subindex);
+  }
 
   /// @brief Reads a scalar parameter's current value as @p T. Lock-free, non-allocating.
   ///

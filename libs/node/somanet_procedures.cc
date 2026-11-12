@@ -43,6 +43,7 @@
 #ifdef MM_HAVE_MU_3SL
 #include "node/ic_mu_calibration_engine.h"
 #endif
+#include "node/profile_device_objects.h"
 #include "node/somanet_control.h"
 #include "node/somanet_drive_objects.h"
 
@@ -1434,8 +1435,8 @@ std::optional<std::string> ringFromResolutionWarning(const EncoderConfiguration&
   return std::format(
       "0x{:04X}:0C holds no ring size, so the {} singleturn bits come from the resolution {}",
       static_cast<uint16_t>(encoder.encoderOrdinal == somanet::EncoderOrdinal::kEncoder1
-                                ? somanet::kEncoder1Configuration
-                                : somanet::kEncoder2Configuration),
+                                ? somanet::objects::kEncoder1Configuration.index
+                                : somanet::objects::kEncoder2Configuration.index),
       encoder.singleturnBits, encoder.resolution);
 }
 
@@ -1510,10 +1511,7 @@ std::expected<IcMuPlan, std::string> planIcMuConfiguration(
   if (auto warning = somanet::icMuMultiturnBitsWarning(configuration.path, found->multiturnBits)) {
     plan.warnings.push_back(std::move(*warning));
   }
-  configuration.safeMotion = device
-                                 .parameter(somanet::objects::kEncoderSourceTypeCount.index,
-                                            somanet::objects::kEncoderSourceTypeCount.subindex)
-                                 .has_value();
+  configuration.safeMotion = device.parameter(somanet::objects::kEncoderSourceType).has_value();
 
   if (configuration.path == somanet::IcMuPath::kSingleturn) {
     if (request.batteryMode) {
@@ -2581,9 +2579,8 @@ std::expected<IcMuCalibrationPlan, std::string> planIcMuCalibration(
   }
 
   // A safety module that monitors an encoder trips a safe state when the encoder changes.
-  if (device.parameter(somanet::objects::kEncoderSourceType.index,
-                       somanet::objects::kEncoderSourceType.subindex)) {
-    auto source = device.readValue(somanet::objects::kEncoderSourceType);
+  if (device.parameter(somanet::objects::kEncoderSourceTypeEncoderSourceType)) {
+    auto source = device.readValue(somanet::objects::kEncoderSourceTypeEncoderSourceType);
     if (!source) {
       return std::unexpected(source.error());
     }
@@ -5735,7 +5732,7 @@ std::expected<TuningDriveConfiguration, std::string> readTuningDriveConfiguratio
               configuration.velocityFeedForwardCutoffHz);
   reader.read(objects::kTorqueControllerSettlingTime, configuration.torqueSettlingTimeUs);
   reader.read(objects::kTorqueControllerDampingRatio, configuration.torqueDampingRatioPermil);
-  if (device.parameter(objects::kNotchFilterDepth.index, objects::kNotchFilterDepth.subindex)) {
+  if (device.parameter(objects::kNotchFilterDepth)) {
     uint16_t depth = 0;
     reader.read(objects::kNotchFilterDepth, depth);
     configuration.notchDepthDb = depth;
@@ -6633,7 +6630,8 @@ std::expected<void, std::string> runConfigFileCompareProcedure(
                    {"differsBetween", row.differsBetween},
                    {"differsFromLive", row.differsFromLive}});
   }
-  auto version = device.readParameter(0x100A, 0);
+  constexpr auto kVersion = profile::objects::kManufacturerSoftwareVersion;
+  auto version = device.readParameter(kVersion.index, kVersion.subindex);
   const auto* driveVersion = version ? std::get_if<std::string>(&*version) : nullptr;
   const auto describe = [](const ConfigFile& config, std::string_view source) {
     nlohmann::json problems = nlohmann::json::array();

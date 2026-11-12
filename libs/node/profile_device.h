@@ -13,28 +13,6 @@
 
 namespace mm::node {
 
-/// @brief Generic CANopen device-profile (CiA301) object indices — present on **any** CoE device,
-///        independent of the CiA402 drive profile. Simple VAR objects are addressed at subindex 0;
-///        RECORD objects (0x1010, 0x1011, 0x1016, 0x1018, 0x1023) at their documented sub-entries.
-enum GenericObject : uint16_t {
-  kDeviceType = 0x1000,     ///< UNSIGNED32, ro — mandatory; the device profile it speaks.
-  kErrorRegister = 0x1001,  ///< UNSIGNED8, ro (volatile) — active error class bit field.
-  kCobIdSync = 0x1005,      ///< INTEGER32, rw — COB-ID of the SYNC message.
-  kCommunicationCyclePeriod = 0x1006,     ///< INTEGER32, rw — communication cycle period in µs.
-  kManufacturerDeviceName = 0x1008,       ///< VISIBLE_STRING, ro — human-readable device name.
-  kManufacturerSoftwareVersion = 0x100A,  ///< VISIBLE_STRING, ro — firmware/software version.
-  kGuardTime = 0x100C,                    ///< UNSIGNED16, rw — node guarding guard time in ms.
-  kLifeTimeFactor = 0x100D,               ///< UNSIGNED8, rw — node guarding life time factor.
-  kStoreParameters = 0x1010,              ///< RECORD, rw — save parameters to non-volatile storage.
-  kRestoreDefaultParameters = 0x1011,     ///< RECORD, rw — restore default parameters.
-  kConsumerHeartbeatTime = 0x1016,        ///< RECORD, rw — consumer heartbeat time in ms.
-  kProducerHeartbeatTime = 0x1017,        ///< UNSIGNED16, rw — producer heartbeat time in ms.
-  kIdentity = 0x1018,                     ///< IDENTITY record, ro — vendor/product/revision/serial.
-  kSynchronousCounterOverflowValue = 0x1019,  ///< UNSIGNED8, rw — SYNC counter overflow value.
-  kOsCommand = 0x1023,      ///< RECORD — command (rw) / status + response (ro, volatile).
-  kOsCommandMode = 0x1024,  ///< UNSIGNED8, wo — write-only, not readable; setter only.
-};
-
 /// @brief The CANopen identity object (0x1018) — the four UNSIGNED32 sub-entries that uniquely
 ///        identify a device on the bus.
 struct Identity {
@@ -278,13 +256,16 @@ class ProfileDevice {
   std::expected<void, std::string> runRestoreDefaultParameters(
       RestoreGroup group, const RestoreDefaultParametersConfig& config = {});
 
-  /// @brief Reads the consumer heartbeat time (0x1016:01, UNSIGNED32, ms — node ID in bits 16-23).
+  /// @brief Reads the consumer heartbeat time (0x1016:01, ms — node ID in bits 16-23).
   ///        Writable, so every call re-reads the device.
-  std::expected<uint32_t, std::string> consumerHeartbeatTime() const;
+  ///
+  /// INTEGER32, because SOMANET firmware declares it so in its ESI and its dictionary. CiA 301
+  /// declares UNSIGNED32. The two read the same below 2^31. See FIRMWARE_DEFECTS.md.
+  std::expected<int32_t, std::string> consumerHeartbeatTime() const;
 
-  /// @brief Writes the consumer heartbeat time (0x1016:01, UNSIGNED32, ms — node ID in bits
-  ///        16-23).
-  std::expected<void, std::string> setConsumerHeartbeatTime(uint32_t value);
+  /// @brief Writes the consumer heartbeat time (0x1016:01, ms — node ID in bits 16-23).
+  ///        INTEGER32, as @c consumerHeartbeatTime says.
+  std::expected<void, std::string> setConsumerHeartbeatTime(int32_t value);
 
   /// @brief Reads the producer heartbeat time (0x1017, UNSIGNED16, ms). Writable, so every call
   ///        re-reads the device.

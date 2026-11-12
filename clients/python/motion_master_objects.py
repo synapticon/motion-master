@@ -53,13 +53,13 @@ class Profile:
     LIFE_TIME_FACTOR: ObjectAddress[int] = ObjectAddress(0x100D, 0x00)
 
     # Store parameters / SubIndex 000 — ro
-    STORE_PARAMETERS_COUNT: ObjectAddress[int] = ObjectAddress(0x1010, 0x00)
+    STORE_PARAMETERS: ObjectAddress[int] = ObjectAddress(0x1010, 0x00)
 
     # Store parameters / SubIndex 001 — rw
     STORE_PARAMETERS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x1010, 0x01)
 
     # Restore default parameters / SubIndex 000 — ro
-    RESTORE_DEFAULT_PARAMETERS_COUNT: ObjectAddress[int] = ObjectAddress(0x1011, 0x00)
+    RESTORE_DEFAULT_PARAMETERS: ObjectAddress[int] = ObjectAddress(0x1011, 0x00)
 
     # Restore default parameters / SubIndex 001 — rw
     RESTORE_DEFAULT_PARAMETERS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x1011, 0x01)
@@ -74,7 +74,7 @@ class Profile:
     RESTORE_DEFAULT_PARAMETERS_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x1011, 0x04)
 
     # Consumer heartbeat time / SubIndex 000 — ro
-    CONSUMER_HEARTBEAT_TIME_COUNT: ObjectAddress[int] = ObjectAddress(0x1016, 0x00)
+    CONSUMER_HEARTBEAT_TIME: ObjectAddress[int] = ObjectAddress(0x1016, 0x00)
 
     # Consumer heartbeat time / SubIndex 001 — rw
     CONSUMER_HEARTBEAT_TIME_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x1016, 0x01)
@@ -83,7 +83,7 @@ class Profile:
     PRODUCER_HEARTBEAT_TIME: ObjectAddress[int] = ObjectAddress(0x1017, 0x00)
 
     # Identity object / SubIndex 000 — ro
-    IDENTITY_OBJECT_COUNT: ObjectAddress[int] = ObjectAddress(0x1018, 0x00)
+    IDENTITY_OBJECT: ObjectAddress[int] = ObjectAddress(0x1018, 0x00)
 
     # Identity object / Vendor ID — ro
     IDENTITY_OBJECT_VENDOR_ID: ObjectAddress[int] = ObjectAddress(0x1018, 0x01)
@@ -101,7 +101,7 @@ class Profile:
     SYNCHRONOUS_COUNTER_OVERFLOW_VALUE: ObjectAddress[int] = ObjectAddress(0x1019, 0x00)
 
     # OS command / SubIndex 000 — ro
-    OS_COMMAND_COUNT: ObjectAddress[int] = ObjectAddress(0x1023, 0x00)
+    OS_COMMAND: ObjectAddress[int] = ObjectAddress(0x1023, 0x00)
 
     # OS command / Command — rw
     OS_COMMAND_COMMAND: ObjectAddress[list[int]] = ObjectAddress(0x1023, 0x01)
@@ -116,7 +116,7 @@ class Profile:
     OS_COMMAND_MODE: ObjectAddress[int] = ObjectAddress(0x1024, 0x00)
 
     # Receive PDO1 parameter / Subindex 000 — ro
-    RECEIVE_PDO_1_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1400, 0x00)
+    RECEIVE_PDO_1_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1400, 0x00)
 
     # Receive PDO1 parameter / COB-ID used by PDO — rw
     RECEIVE_PDO_1_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1400, 0x01)
@@ -128,7 +128,7 @@ class Profile:
     RECEIVE_PDO_1_PARAMETER_INHIBIT_TIME: ObjectAddress[int] = ObjectAddress(0x1400, 0x03)
 
     # Receive PDO2 parameter / Subindex 000 — ro
-    RECEIVE_PDO_2_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1401, 0x00)
+    RECEIVE_PDO_2_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1401, 0x00)
 
     # Receive PDO2 parameter / COB-ID used by PDO — rw
     RECEIVE_PDO_2_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1401, 0x01)
@@ -140,7 +140,7 @@ class Profile:
     RECEIVE_PDO_2_PARAMETER_INHIBIT_TIME: ObjectAddress[int] = ObjectAddress(0x1401, 0x03)
 
     # Receive PDO3 parameter / Subindex 000 — ro
-    RECEIVE_PDO_3_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1402, 0x00)
+    RECEIVE_PDO_3_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1402, 0x00)
 
     # Receive PDO3 parameter / COB-ID used by PDO — rw
     RECEIVE_PDO_3_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1402, 0x01)
@@ -152,7 +152,7 @@ class Profile:
     RECEIVE_PDO_3_PARAMETER_INHIBIT_TIME: ObjectAddress[int] = ObjectAddress(0x1402, 0x03)
 
     # Receive PDO4 parameter / Subindex 000 — ro
-    RECEIVE_PDO_4_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1403, 0x00)
+    RECEIVE_PDO_4_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1403, 0x00)
 
     # Receive PDO4 parameter / COB-ID used by PDO — rw
     RECEIVE_PDO_4_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1403, 0x01)
@@ -164,7 +164,7 @@ class Profile:
     RECEIVE_PDO_4_PARAMETER_INHIBIT_TIME: ObjectAddress[int] = ObjectAddress(0x1403, 0x03)
 
     # Receive PDO1 mapping / SubIndex 000 — rw
-    RECEIVE_PDO_1_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1600, 0x00)
+    RECEIVE_PDO_1_MAPPING: ObjectAddress[int] = ObjectAddress(0x1600, 0x00)
 
     # Receive PDO1 mapping / Controlword — rw
     RECEIVE_PDO_1_MAPPING_CONTROLWORD: ObjectAddress[int] = ObjectAddress(0x1600, 0x01)
@@ -188,7 +188,7 @@ class Profile:
     RECEIVE_PDO_1_MAPPING_TUNING_COMMAND: ObjectAddress[int] = ObjectAddress(0x1600, 0x07)
 
     # Receive PDO2 mapping / SubIndex 000 — rw
-    RECEIVE_PDO_2_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1601, 0x00)
+    RECEIVE_PDO_2_MAPPING: ObjectAddress[int] = ObjectAddress(0x1601, 0x00)
 
     # Receive PDO2 mapping / Physical outputs — rw
     RECEIVE_PDO_2_MAPPING_PHYSICAL_OUTPUTS: ObjectAddress[int] = ObjectAddress(0x1601, 0x01)
@@ -197,7 +197,7 @@ class Profile:
     RECEIVE_PDO_2_MAPPING_BIT_MASK: ObjectAddress[int] = ObjectAddress(0x1601, 0x02)
 
     # Receive PDO3 mapping / SubIndex 000 — rw
-    RECEIVE_PDO_3_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1602, 0x00)
+    RECEIVE_PDO_3_MAPPING: ObjectAddress[int] = ObjectAddress(0x1602, 0x00)
 
     # Receive PDO3 mapping / User MOSI — rw
     RECEIVE_PDO_3_MAPPING_USER_MOSI: ObjectAddress[int] = ObjectAddress(0x1602, 0x01)
@@ -206,10 +206,10 @@ class Profile:
     RECEIVE_PDO_3_MAPPING_VELOCITY_OFFSET: ObjectAddress[int] = ObjectAddress(0x1602, 0x02)
 
     # Receive PDO4 mapping / SubIndex 000 — rw
-    RECEIVE_PDO_4_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1603, 0x00)
+    RECEIVE_PDO_4_MAPPING: ObjectAddress[int] = ObjectAddress(0x1603, 0x00)
 
     # Receive safe PDO1 mapping / SubIndex 000 — ro
-    RECEIVE_SAFE_PDO_1_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1700, 0x00)
+    RECEIVE_SAFE_PDO_1_MAPPING: ObjectAddress[int] = ObjectAddress(0x1700, 0x00)
 
     # Receive safe PDO1 mapping / FSoE Command — ro
     RECEIVE_SAFE_PDO_1_MAPPING_F_SO_E_COMMAND: ObjectAddress[int] = ObjectAddress(0x1700, 0x01)
@@ -299,7 +299,7 @@ class Profile:
     RECEIVE_SAFE_PDO_1_MAPPING_F_SO_E_CONNECTION_ID: ObjectAddress[int] = ObjectAddress(0x1700, 0x1D)
 
     # Transmit PDO1 parameter / SubIndex 000 — ro
-    TRANSMIT_PDO_1_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1800, 0x00)
+    TRANSMIT_PDO_1_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1800, 0x00)
 
     # Transmit PDO1 parameter / COB-ID used by PDO — rw
     TRANSMIT_PDO_1_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1800, 0x01)
@@ -317,7 +317,7 @@ class Profile:
     TRANSMIT_PDO_1_PARAMETER_EVENT_TIMER: ObjectAddress[int] = ObjectAddress(0x1800, 0x05)
 
     # Transmit PDO2 parameter / Subindex 000 — ro
-    TRANSMIT_PDO_2_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1801, 0x00)
+    TRANSMIT_PDO_2_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1801, 0x00)
 
     # Transmit PDO2 parameter / COB-ID used by PDO — rw
     TRANSMIT_PDO_2_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1801, 0x01)
@@ -335,7 +335,7 @@ class Profile:
     TRANSMIT_PDO_2_PARAMETER_EVENT_TIMER: ObjectAddress[int] = ObjectAddress(0x1801, 0x05)
 
     # Transmit PDO3 parameter / Subindex 000 — ro
-    TRANSMIT_PDO_3_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1802, 0x00)
+    TRANSMIT_PDO_3_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1802, 0x00)
 
     # Transmit PDO3 parameter / COB-ID used by PDO — rw
     TRANSMIT_PDO_3_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1802, 0x01)
@@ -353,7 +353,7 @@ class Profile:
     TRANSMIT_PDO_3_PARAMETER_EVENT_TIMER: ObjectAddress[int] = ObjectAddress(0x1802, 0x05)
 
     # Transmit PDO4 parameter / Subindex 000 — ro
-    TRANSMIT_PDO_4_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1803, 0x00)
+    TRANSMIT_PDO_4_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1803, 0x00)
 
     # Transmit PDO4 parameter / COB-ID used by PDO — rw
     TRANSMIT_PDO_4_PARAMETER_COBID_USED_BY_PDO: ObjectAddress[int] = ObjectAddress(0x1803, 0x01)
@@ -371,7 +371,7 @@ class Profile:
     TRANSMIT_PDO_4_PARAMETER_EVENT_TIMER: ObjectAddress[int] = ObjectAddress(0x1803, 0x05)
 
     # Transmit PDO1 mapping / SubIndex 000 — rw
-    TRANSMIT_PDO_1_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1A00, 0x00)
+    TRANSMIT_PDO_1_MAPPING: ObjectAddress[int] = ObjectAddress(0x1A00, 0x00)
 
     # Transmit PDO1 mapping / Statusword — rw
     TRANSMIT_PDO_1_MAPPING_STATUSWORD: ObjectAddress[int] = ObjectAddress(0x1A00, 0x01)
@@ -389,7 +389,7 @@ class Profile:
     TRANSMIT_PDO_1_MAPPING_TORQUE_ACTUAL_VALUE: ObjectAddress[int] = ObjectAddress(0x1A00, 0x05)
 
     # Transmit PDO2 mapping / SubIndex 000 — rw
-    TRANSMIT_PDO_2_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1A01, 0x00)
+    TRANSMIT_PDO_2_MAPPING: ObjectAddress[int] = ObjectAddress(0x1A01, 0x00)
 
     # Transmit PDO2 mapping / Analog input 1 — rw
     TRANSMIT_PDO_2_MAPPING_ANALOG_INPUT_1: ObjectAddress[int] = ObjectAddress(0x1A01, 0x01)
@@ -407,13 +407,13 @@ class Profile:
     TRANSMIT_PDO_2_MAPPING_TUNING_STATUS: ObjectAddress[int] = ObjectAddress(0x1A01, 0x05)
 
     # Transmit PDO3 mapping / SubIndex 000 — rw
-    TRANSMIT_PDO_3_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1A02, 0x00)
+    TRANSMIT_PDO_3_MAPPING: ObjectAddress[int] = ObjectAddress(0x1A02, 0x00)
 
     # Transmit PDO3 mapping / Digital inputs — rw
     TRANSMIT_PDO_3_MAPPING_DIGITAL_INPUTS: ObjectAddress[int] = ObjectAddress(0x1A02, 0x01)
 
     # Transmit PDO4 mapping / SubIndex 000 — rw
-    TRANSMIT_PDO_4_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1A03, 0x00)
+    TRANSMIT_PDO_4_MAPPING: ObjectAddress[int] = ObjectAddress(0x1A03, 0x00)
 
     # Transmit PDO4 mapping / User MISO — rw
     TRANSMIT_PDO_4_MAPPING_USER_MISO: ObjectAddress[int] = ObjectAddress(0x1A03, 0x01)
@@ -431,7 +431,7 @@ class Profile:
     TRANSMIT_PDO_4_MAPPING_TORQUE_DEMAND: ObjectAddress[int] = ObjectAddress(0x1A03, 0x05)
 
     # Transmit safe PDO1 mapping / SubIndex 000 — ro
-    TRANSMIT_SAFE_PDO_1_MAPPING_COUNT: ObjectAddress[int] = ObjectAddress(0x1B00, 0x00)
+    TRANSMIT_SAFE_PDO_1_MAPPING: ObjectAddress[int] = ObjectAddress(0x1B00, 0x00)
 
     # Transmit safe PDO1 mapping / FSoE Command — ro
     TRANSMIT_SAFE_PDO_1_MAPPING_F_SO_E_COMMAND: ObjectAddress[int] = ObjectAddress(0x1B00, 0x01)
@@ -578,7 +578,7 @@ class Profile:
     TRANSMIT_SAFE_PDO_1_MAPPING_F_SO_E_CONNECTION_ID: ObjectAddress[int] = ObjectAddress(0x1B00, 0x30)
 
     # Sync manager type / SubIndex 000 — ro
-    SYNC_MANAGER_TYPE_COUNT: ObjectAddress[int] = ObjectAddress(0x1C00, 0x00)
+    SYNC_MANAGER_TYPE: ObjectAddress[int] = ObjectAddress(0x1C00, 0x00)
 
     # Sync manager type / SubIndex 001 — ro
     SYNC_MANAGER_TYPE_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x1C00, 0x01)
@@ -593,13 +593,13 @@ class Profile:
     SYNC_MANAGER_TYPE_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x1C00, 0x04)
 
     # SM 0 Assignment / SubIndex 000 — ro
-    SM_0_ASSIGNMENT_COUNT: ObjectAddress[int] = ObjectAddress(0x1C10, 0x00)
+    SM_0_ASSIGNMENT: ObjectAddress[int] = ObjectAddress(0x1C10, 0x00)
 
     # SM 1 Assignment / SubIndex 000 — ro
-    SM_1_ASSIGNMENT_COUNT: ObjectAddress[int] = ObjectAddress(0x1C11, 0x00)
+    SM_1_ASSIGNMENT: ObjectAddress[int] = ObjectAddress(0x1C11, 0x00)
 
     # SM 2 Assignment / SubIndex 000 — rw
-    SM_2_ASSIGNMENT_COUNT: ObjectAddress[int] = ObjectAddress(0x1C12, 0x00)
+    SM_2_ASSIGNMENT: ObjectAddress[int] = ObjectAddress(0x1C12, 0x00)
 
     # SM 2 Assignment / SubIndex 001 — rw
     SM_2_ASSIGNMENT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x1C12, 0x01)
@@ -617,7 +617,7 @@ class Profile:
     SM_2_ASSIGNMENT_SUB_INDEX_005: ObjectAddress[int] = ObjectAddress(0x1C12, 0x05)
 
     # SM 3 Assignment / SubIndex 000 — rw
-    SM_3_ASSIGNMENT_COUNT: ObjectAddress[int] = ObjectAddress(0x1C13, 0x00)
+    SM_3_ASSIGNMENT: ObjectAddress[int] = ObjectAddress(0x1C13, 0x00)
 
     # SM 3 Assignment / SubIndex 001 — rw
     SM_3_ASSIGNMENT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x1C13, 0x01)
@@ -638,7 +638,7 @@ class Profile:
     SM_3_ASSIGNMENT_SUB_INDEX_006: ObjectAddress[int] = ObjectAddress(0x1C13, 0x06)
 
     # Output SyncManager Parameter / SubIndex 000 — ro
-    OUTPUT_SYNC_MANAGER_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1C32, 0x00)
+    OUTPUT_SYNC_MANAGER_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1C32, 0x00)
 
     # Output SyncManager Parameter / Synchronization Type — ro
     OUTPUT_SYNC_MANAGER_PARAMETER_SYNCHRONIZATION_TYPE: ObjectAddress[int] = ObjectAddress(0x1C32, 0x01)
@@ -653,7 +653,7 @@ class Profile:
     OUTPUT_SYNC_MANAGER_PARAMETER_SYNCHRONIZATION_TYPES_SUPPORTED: ObjectAddress[int] = ObjectAddress(0x1C32, 0x04)
 
     # Input SyncManager Parameter / SubIndex 000 — ro
-    INPUT_SYNC_MANAGER_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x1C33, 0x00)
+    INPUT_SYNC_MANAGER_PARAMETER: ObjectAddress[int] = ObjectAddress(0x1C33, 0x00)
 
     # Input SyncManager Parameter / Synchronization Type — ro
     INPUT_SYNC_MANAGER_PARAMETER_SYNCHRONIZATION_TYPE: ObjectAddress[int] = ObjectAddress(0x1C33, 0x01)
@@ -668,7 +668,7 @@ class Profile:
     INPUT_SYNC_MANAGER_PARAMETER_SYNCHRONIZATION_TYPES_SUPPORTED: ObjectAddress[int] = ObjectAddress(0x1C33, 0x04)
 
     # Modular Device Profile / Subindex 000 — ro
-    MODULAR_DEVICE_PROFILE_COUNT: ObjectAddress[int] = ObjectAddress(0xF000, 0x00)
+    MODULAR_DEVICE_PROFILE: ObjectAddress[int] = ObjectAddress(0xF000, 0x00)
 
     # Modular Device Profile / Index distance — rw
     MODULAR_DEVICE_PROFILE_INDEX_DISTANCE: ObjectAddress[int] = ObjectAddress(0xF000, 0x01)
@@ -677,7 +677,7 @@ class Profile:
     MODULAR_DEVICE_PROFILE_MAXIMUM_NUMBER_OF_MODULES: ObjectAddress[int] = ObjectAddress(0xF000, 0x02)
 
     # Configured module ident list / SubIndex 000 — rw
-    CONFIGURED_MODULE_IDENT_LIST_COUNT: ObjectAddress[int] = ObjectAddress(0xF030, 0x00)
+    CONFIGURED_MODULE_IDENT_LIST: ObjectAddress[int] = ObjectAddress(0xF030, 0x00)
 
     # Configured module ident list / SubIndex 001 — rw
     CONFIGURED_MODULE_IDENT_LIST_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0xF030, 0x01)
@@ -686,7 +686,7 @@ class Profile:
     CONFIGURED_MODULE_IDENT_LIST_SUB_INDEX_002: ObjectAddress[int] = ObjectAddress(0xF030, 0x02)
 
     # Detected module ident list / SubIndex 000 — ro
-    DETECTED_MODULE_IDENT_LIST_COUNT: ObjectAddress[int] = ObjectAddress(0xF050, 0x00)
+    DETECTED_MODULE_IDENT_LIST: ObjectAddress[int] = ObjectAddress(0xF050, 0x00)
 
     # Detected module ident list / SubIndex 001 — ro
     DETECTED_MODULE_IDENT_LIST_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0xF050, 0x01)
@@ -780,7 +780,7 @@ class Cia402:
     TARGET_POSITION: ObjectAddress[int] = ObjectAddress(0x607A, 0x00)
 
     # Position range limit / SubIndex 000 — ro
-    POSITION_RANGE_LIMIT_COUNT: ObjectAddress[int] = ObjectAddress(0x607B, 0x00)
+    POSITION_RANGE_LIMIT: ObjectAddress[int] = ObjectAddress(0x607B, 0x00)
 
     # Position range limit / SubIndex 001 — rw, Inc
     POSITION_RANGE_LIMIT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x607B, 0x01)
@@ -792,7 +792,7 @@ class Cia402:
     HOME_OFFSET: ObjectAddress[int] = ObjectAddress(0x607C, 0x00)
 
     # Software position limit / SubIndex 000 — ro
-    SOFTWARE_POSITION_LIMIT_COUNT: ObjectAddress[int] = ObjectAddress(0x607D, 0x00)
+    SOFTWARE_POSITION_LIMIT: ObjectAddress[int] = ObjectAddress(0x607D, 0x00)
 
     # Software position limit / SubIndex 001 — rw, Inc
     SOFTWARE_POSITION_LIMIT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x607D, 0x01)
@@ -828,7 +828,7 @@ class Cia402:
     TORQUE_PROFILE_TYPE: ObjectAddress[int] = ObjectAddress(0x6088, 0x00)
 
     # Gear ratio / SubIndex 000 — ro
-    GEAR_RATIO_COUNT: ObjectAddress[int] = ObjectAddress(0x6091, 0x00)
+    GEAR_RATIO: ObjectAddress[int] = ObjectAddress(0x6091, 0x00)
 
     # Gear ratio / SubIndex 001 — rw
     GEAR_RATIO_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6091, 0x01)
@@ -837,7 +837,7 @@ class Cia402:
     GEAR_RATIO_SUB_INDEX_002: ObjectAddress[int] = ObjectAddress(0x6091, 0x02)
 
     # Feed constant / SubIndex 000 — ro
-    FEED_CONSTANT_COUNT: ObjectAddress[int] = ObjectAddress(0x6092, 0x00)
+    FEED_CONSTANT: ObjectAddress[int] = ObjectAddress(0x6092, 0x00)
 
     # Feed constant / SubIndex 001 — rw
     FEED_CONSTANT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6092, 0x01)
@@ -849,7 +849,7 @@ class Cia402:
     HOMING_METHOD: ObjectAddress[int] = ObjectAddress(0x6098, 0x00)
 
     # Homing speeds / SubIndex 000 — ro
-    HOMING_SPEEDS_COUNT: ObjectAddress[int] = ObjectAddress(0x6099, 0x00)
+    HOMING_SPEEDS: ObjectAddress[int] = ObjectAddress(0x6099, 0x00)
 
     # Homing speeds / SubIndex 001 — rw, rpm
     HOMING_SPEEDS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6099, 0x01)
@@ -903,7 +903,7 @@ class Cia402:
     DIGITAL_INPUTS: ObjectAddress[int] = ObjectAddress(0x60FD, 0x00)
 
     # Digital outputs / SubIndex 000 — ro
-    DIGITAL_OUTPUTS_COUNT: ObjectAddress[int] = ObjectAddress(0x60FE, 0x00)
+    DIGITAL_OUTPUTS: ObjectAddress[int] = ObjectAddress(0x60FE, 0x00)
 
     # Digital outputs / SubIndex 001 — rw
     DIGITAL_OUTPUTS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x60FE, 0x01)
@@ -927,7 +927,7 @@ class Cia402:
     SAFE_TORQUE_ACTUAL_VALUE: ObjectAddress[int] = ObjectAddress(0x6616, 0x00)
 
     # Safety statusword / SubIndex 000 — ro
-    SAFETY_STATUSWORD_COUNT: ObjectAddress[int] = ObjectAddress(0x6621, 0x00)
+    SAFETY_STATUSWORD: ObjectAddress[int] = ObjectAddress(0x6621, 0x00)
 
     # Safety statusword / SubIndex 001 — ro
     SAFETY_STATUSWORD_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6621, 0x01)
@@ -954,37 +954,37 @@ class Cia402:
     STO_RESTART: ObjectAddress[int] = ObjectAddress(0x6641, 0x00)
 
     # SS1 command / SubIndex 000 — ro
-    SS_1_COMMAND_COUNT: ObjectAddress[int] = ObjectAddress(0x6650, 0x00)
+    SS_1_COMMAND: ObjectAddress[int] = ObjectAddress(0x6650, 0x00)
 
     # SS1 command / SubIndex 001 — rw
     SS_1_COMMAND_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6650, 0x01)
 
     # t_SS1 / SubIndex 000 — ro
-    TSS_1_COUNT: ObjectAddress[int] = ObjectAddress(0x6651, 0x00)
+    TSS_1: ObjectAddress[int] = ObjectAddress(0x6651, 0x00)
 
     # t_SS1 / SubIndex 001 — rw, ms
     TSS_1_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6651, 0x01)
 
     # n_Zero_SS1 / SubIndex 000 — ro
-    N_ZERO_SS_1_COUNT: ObjectAddress[int] = ObjectAddress(0x6653, 0x00)
+    N_ZERO_SS_1: ObjectAddress[int] = ObjectAddress(0x6653, 0x00)
 
     # n_Zero_SS1 / SubIndex 001 — rw, c/min
     N_ZERO_SS_1_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6653, 0x01)
 
     # t_L_SS1 / SubIndex 000 — ro
-    TLSS_1_COUNT: ObjectAddress[int] = ObjectAddress(0x6654, 0x00)
+    TLSS_1: ObjectAddress[int] = ObjectAddress(0x6654, 0x00)
 
     # t_L_SS1 / SubIndex 001 — rw, ms
     TLSS_1_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6654, 0x01)
 
     # a_SS1 / SubIndex 000 — ro
-    ASS_1_COUNT: ObjectAddress[int] = ObjectAddress(0x6656, 0x00)
+    ASS_1: ObjectAddress[int] = ObjectAddress(0x6656, 0x00)
 
     # a_SS1 / SubIndex 001 — rw
     ASS_1_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6656, 0x01)
 
     # t_D_SS1 / SubIndex 000 — ro
-    TDSS_1_COUNT: ObjectAddress[int] = ObjectAddress(0x6657, 0x00)
+    TDSS_1: ObjectAddress[int] = ObjectAddress(0x6657, 0x00)
 
     # t_D_SS1 / SubIndex 001 — rw, ms
     TDSS_1_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6657, 0x01)
@@ -996,67 +996,67 @@ class Cia402:
     BRAKE_TIME_DELAY: ObjectAddress[int] = ObjectAddress(0x6661, 0x00)
 
     # SOS command / SubIndex 000 — ro
-    SOS_COMMAND_COUNT: ObjectAddress[int] = ObjectAddress(0x6668, 0x00)
+    SOS_COMMAND: ObjectAddress[int] = ObjectAddress(0x6668, 0x00)
 
     # SOS command / SubIndex 001 — rw
     SOS_COMMAND_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6668, 0x01)
 
     # s_Zero_SOS / SubIndex 000 — ro
-    S_ZERO_SOS_COUNT: ObjectAddress[int] = ObjectAddress(0x666A, 0x00)
+    S_ZERO_SOS: ObjectAddress[int] = ObjectAddress(0x666A, 0x00)
 
     # s_Zero_SOS / SubIndex 001 — rw
     S_ZERO_SOS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x666A, 0x01)
 
     # n_Zero_SOS / SubIndex 000 — ro
-    N_ZERO_SOS_COUNT: ObjectAddress[int] = ObjectAddress(0x666C, 0x00)
+    N_ZERO_SOS: ObjectAddress[int] = ObjectAddress(0x666C, 0x00)
 
     # n_Zero_SOS / SubIndex 001 — rw
     N_ZERO_SOS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x666C, 0x01)
 
     # SS2 command / SubIndex 000 — ro
-    SS_2_COMMAND_COUNT: ObjectAddress[int] = ObjectAddress(0x6670, 0x00)
+    SS_2_COMMAND: ObjectAddress[int] = ObjectAddress(0x6670, 0x00)
 
     # SS2 command / SubIndex 001 — rw
     SS_2_COMMAND_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6670, 0x01)
 
     # t_SS2 / SubIndex 000 — ro
-    TSS_2_COUNT: ObjectAddress[int] = ObjectAddress(0x6671, 0x00)
+    TSS_2: ObjectAddress[int] = ObjectAddress(0x6671, 0x00)
 
     # t_SS2 / SubIndex 001 — rw, ms
     TSS_2_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6671, 0x01)
 
     # t_L_SS2 / SubIndex 000 — ro
-    TLSS_2_COUNT: ObjectAddress[int] = ObjectAddress(0x6672, 0x00)
+    TLSS_2: ObjectAddress[int] = ObjectAddress(0x6672, 0x00)
 
     # t_L_SS2 / SubIndex 001 — rw, ms
     TLSS_2_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6672, 0x01)
 
     # a_SS2 / SubIndex 000 — ro
-    ASS_2_COUNT: ObjectAddress[int] = ObjectAddress(0x6674, 0x00)
+    ASS_2: ObjectAddress[int] = ObjectAddress(0x6674, 0x00)
 
     # a_SS2 / SubIndex 001 — rw
     ASS_2_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6674, 0x01)
 
     # t_D_SS2 / SubIndex 000 — ro
-    TDSS_2_COUNT: ObjectAddress[int] = ObjectAddress(0x6675, 0x00)
+    TDSS_2: ObjectAddress[int] = ObjectAddress(0x6675, 0x00)
 
     # t_D_SS2 / SubIndex 001 — rw, ms
     TDSS_2_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6675, 0x01)
 
     # SOS restart / SubIndex 000 — ro
-    SOS_RESTART_COUNT: ObjectAddress[int] = ObjectAddress(0x6676, 0x00)
+    SOS_RESTART: ObjectAddress[int] = ObjectAddress(0x6676, 0x00)
 
     # SOS restart / SubIndex 001 — rw
     SOS_RESTART_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6676, 0x01)
 
     # SS2 limit violation reaction / SubIndex 000 — ro
-    SS_2_LIMIT_VIOLATION_REACTION_COUNT: ObjectAddress[int] = ObjectAddress(0x6677, 0x00)
+    SS_2_LIMIT_VIOLATION_REACTION: ObjectAddress[int] = ObjectAddress(0x6677, 0x00)
 
     # SS2 limit violation reaction / SubIndex 001 — rw
     SS_2_LIMIT_VIOLATION_REACTION_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6677, 0x01)
 
     # SLS command / SubIndex 000 — ro
-    SLS_COMMAND_COUNT: ObjectAddress[int] = ObjectAddress(0x6690, 0x00)
+    SLS_COMMAND: ObjectAddress[int] = ObjectAddress(0x6690, 0x00)
 
     # SLS command / SubIndex 001 — rw
     SLS_COMMAND_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6690, 0x01)
@@ -1071,7 +1071,7 @@ class Cia402:
     SLS_COMMAND_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x6690, 0x04)
 
     # t_SLS / SubIndex 000 — ro
-    TSLS_COUNT: ObjectAddress[int] = ObjectAddress(0x6691, 0x00)
+    TSLS: ObjectAddress[int] = ObjectAddress(0x6691, 0x00)
 
     # t_SLS / SubIndex 001 — rw
     TSLS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6691, 0x01)
@@ -1086,7 +1086,7 @@ class Cia402:
     TSLS_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x6691, 0x04)
 
     # n_SLS / SubIndex 000 — ro
-    NSLS_COUNT: ObjectAddress[int] = ObjectAddress(0x6692, 0x00)
+    NSLS: ObjectAddress[int] = ObjectAddress(0x6692, 0x00)
 
     # n_SLS / SubIndex 001 — rw
     NSLS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6692, 0x01)
@@ -1101,7 +1101,7 @@ class Cia402:
     NSLS_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x6692, 0x04)
 
     # t_L_SLS / SubIndex 000 — ro
-    TLSLS_COUNT: ObjectAddress[int] = ObjectAddress(0x6694, 0x00)
+    TLSLS: ObjectAddress[int] = ObjectAddress(0x6694, 0x00)
 
     # t_L_SLS / SubIndex 001 — rw
     TLSLS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6694, 0x01)
@@ -1116,7 +1116,7 @@ class Cia402:
     TLSLS_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x6694, 0x04)
 
     # t_D_SLS / SubIndex 000 — ro
-    TDSLS_COUNT: ObjectAddress[int] = ObjectAddress(0x6695, 0x00)
+    TDSLS: ObjectAddress[int] = ObjectAddress(0x6695, 0x00)
 
     # t_D_SLS / SubIndex 001 — rw, ms
     TDSLS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6695, 0x01)
@@ -1131,7 +1131,7 @@ class Cia402:
     TDSLS_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x6695, 0x04)
 
     # a_SLS / SubIndex 000 — ro
-    ASLS_COUNT: ObjectAddress[int] = ObjectAddress(0x6696, 0x00)
+    ASLS: ObjectAddress[int] = ObjectAddress(0x6696, 0x00)
 
     # a_SLS / SubIndex 001 — rw
     ASLS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6696, 0x01)
@@ -1146,7 +1146,7 @@ class Cia402:
     ASLS_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x6696, 0x04)
 
     # SLS Limit violation reaction / SubIndex 000 — ro
-    SLS_LIMIT_VIOLATION_REACTION_COUNT: ObjectAddress[int] = ObjectAddress(0x6698, 0x00)
+    SLS_LIMIT_VIOLATION_REACTION: ObjectAddress[int] = ObjectAddress(0x6698, 0x00)
 
     # SLS Limit violation reaction / SubIndex 001 — rw
     SLS_LIMIT_VIOLATION_REACTION_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x6698, 0x01)
@@ -1170,31 +1170,31 @@ class Cia402:
     SMS_LIMIT_VIOLATION_REACTION: ObjectAddress[int] = ObjectAddress(0x66AD, 0x00)
 
     # SLT command / SubIndex 000 — ro
-    SLT_COMMAND_COUNT: ObjectAddress[int] = ObjectAddress(0x66B0, 0x00)
+    SLT_COMMAND: ObjectAddress[int] = ObjectAddress(0x66B0, 0x00)
 
     # SLT command / SubIndex 001 — rw
     SLT_COMMAND_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x66B0, 0x01)
 
     # f_PosLim_SLT / SubIndex 000 — ro
-    F_POS_LIM_SLT_COUNT: ObjectAddress[int] = ObjectAddress(0x66B1, 0x00)
+    F_POS_LIM_SLT: ObjectAddress[int] = ObjectAddress(0x66B1, 0x00)
 
     # f_PosLim_SLT / SubIndex 001 — rw, mNm
     F_POS_LIM_SLT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x66B1, 0x01)
 
     # f_NegLim_SLT / SubIndex 000 — ro
-    F_NEG_LIM_SLT_COUNT: ObjectAddress[int] = ObjectAddress(0x66B2, 0x00)
+    F_NEG_LIM_SLT: ObjectAddress[int] = ObjectAddress(0x66B2, 0x00)
 
     # f_NegLim_SLT / SubIndex 001 — rw, mNm
     F_NEG_LIM_SLT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x66B2, 0x01)
 
     # SLT limit violation reaction / SubIndex 000 — ro
-    SLT_LIMIT_VIOLATION_REACTION_COUNT: ObjectAddress[int] = ObjectAddress(0x66B3, 0x00)
+    SLT_LIMIT_VIOLATION_REACTION: ObjectAddress[int] = ObjectAddress(0x66B3, 0x00)
 
     # SLT limit violation reaction / SubIndex 001 — rw
     SLT_LIMIT_VIOLATION_REACTION_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x66B3, 0x01)
 
     # FSoE Master Frame Elements / Subindex 000 — rw
-    F_SO_E_MASTER_FRAME_ELEMENTS_COUNT: ObjectAddress[int] = ObjectAddress(0x6760, 0x00)
+    F_SO_E_MASTER_FRAME_ELEMENTS: ObjectAddress[int] = ObjectAddress(0x6760, 0x00)
 
     # FSoE Master Frame Elements / FSoE Command — rw
     F_SO_E_MASTER_FRAME_ELEMENTS_F_SO_E_COMMAND: ObjectAddress[int] = ObjectAddress(0x6760, 0x01)
@@ -1227,7 +1227,7 @@ class Cia402:
     F_SO_E_MASTER_FRAME_ELEMENTS_F_SO_ECRC_7: ObjectAddress[int] = ObjectAddress(0x6760, 0x0A)
 
     # FSoE Slave Frame Elements / Subindex 000 — rw
-    F_SO_E_SLAVE_FRAME_ELEMENTS_COUNT: ObjectAddress[int] = ObjectAddress(0x6770, 0x00)
+    F_SO_E_SLAVE_FRAME_ELEMENTS: ObjectAddress[int] = ObjectAddress(0x6770, 0x00)
 
     # FSoE Slave Frame Elements / FSoE Command — rw
     F_SO_E_SLAVE_FRAME_ELEMENTS_F_SO_E_COMMAND: ObjectAddress[int] = ObjectAddress(0x6770, 0x01)
@@ -1255,7 +1255,7 @@ class Somanet:
     POSITION_CONTROL_STRATEGY: ObjectAddress[int] = ObjectAddress(0x2002, 0x00)
 
     # Motor specific settings / SubIndex 000 — ro
-    MOTOR_SPECIFIC_SETTINGS_COUNT: ObjectAddress[int] = ObjectAddress(0x2003, 0x00)
+    MOTOR_SPECIFIC_SETTINGS: ObjectAddress[int] = ObjectAddress(0x2003, 0x00)
 
     # Motor specific settings / Pole pairs — rw
     MOTOR_SPECIFIC_SETTINGS_POLE_PAIRS: ObjectAddress[int] = ObjectAddress(0x2003, 0x01)
@@ -1276,7 +1276,7 @@ class Somanet:
     MOTOR_SPECIFIC_SETTINGS_DIFFERENCE_OF_LD_AND_LQ_INDUCTANCE: ObjectAddress[int] = ObjectAddress(0x2003, 0x06)
 
     # Brake options / SubIndex 000 — ro
-    BRAKE_OPTIONS_COUNT: ObjectAddress[int] = ObjectAddress(0x2004, 0x00)
+    BRAKE_OPTIONS: ObjectAddress[int] = ObjectAddress(0x2004, 0x00)
 
     # Brake options / Pull voltage — rw, mV
     BRAKE_OPTIONS_PULL_VOLTAGE: ObjectAddress[int] = ObjectAddress(0x2004, 0x01)
@@ -1315,7 +1315,7 @@ class Somanet:
     BRAKE_OPTIONS_INITIAL_MOVEMENT_DIRECTION_PIN_BRAKE: ObjectAddress[int] = ObjectAddress(0x2004, 0x0C)
 
     # Homing Options / SubIndex 000 — ro
-    HOMING_OPTIONS_COUNT: ObjectAddress[int] = ObjectAddress(0x2005, 0x00)
+    HOMING_OPTIONS: ObjectAddress[int] = ObjectAddress(0x2005, 0x00)
 
     # Homing Options / Home Position — ro, Inc
     HOMING_OPTIONS_HOME_POSITION: ObjectAddress[int] = ObjectAddress(0x2005, 0x01)
@@ -1330,7 +1330,7 @@ class Somanet:
     HOMING_OPTIONS_OFFSET_FROM_ENDSTOP: ObjectAddress[int] = ObjectAddress(0x2005, 0x04)
 
     # Protection / SubIndex 000 — ro
-    PROTECTION_COUNT: ObjectAddress[int] = ObjectAddress(0x2006, 0x00)
+    PROTECTION: ObjectAddress[int] = ObjectAddress(0x2006, 0x00)
 
     # Protection / Undervoltage setpoint — rw, V
     PROTECTION_UNDERVOLTAGE_SETPOINT: ObjectAddress[int] = ObjectAddress(0x2006, 0x01)
@@ -1342,7 +1342,7 @@ class Somanet:
     PROTECTION_OVERCURRENT_SETPOINT: ObjectAddress[int] = ObjectAddress(0x2006, 0x03)
 
     # Cogging torque compensation / SubIndex 000 — ro
-    COGGING_TORQUE_COMPENSATION_COUNT: ObjectAddress[int] = ObjectAddress(0x2008, 0x00)
+    COGGING_TORQUE_COMPENSATION: ObjectAddress[int] = ObjectAddress(0x2008, 0x00)
 
     # Cogging torque compensation / State — ro
     COGGING_TORQUE_COMPENSATION_STATE: ObjectAddress[int] = ObjectAddress(0x2008, 0x01)
@@ -1351,7 +1351,7 @@ class Somanet:
     COGGING_TORQUE_COMPENSATION_ENABLED: ObjectAddress[int] = ObjectAddress(0x2008, 0x02)
 
     # Commutation offset / SubIndex 000 — ro
-    COMMUTATION_OFFSET_COUNT: ObjectAddress[int] = ObjectAddress(0x2009, 0x00)
+    COMMUTATION_OFFSET: ObjectAddress[int] = ObjectAddress(0x2009, 0x00)
 
     # Commutation offset / State — rw
     COMMUTATION_OFFSET_STATE: ObjectAddress[int] = ObjectAddress(0x2009, 0x01)
@@ -1372,7 +1372,7 @@ class Somanet:
     COMMUTATION_OFFSET_PHASING_CONTROLLER_KD: ObjectAddress[float] = ObjectAddress(0x2009, 0x06)
 
     # I2t and Stall protection / SubIndex 000 — ro
-    I_2T_AND_STALL_PROTECTION_COUNT: ObjectAddress[int] = ObjectAddress(0x200A, 0x00)
+    I_2T_AND_STALL_PROTECTION: ObjectAddress[int] = ObjectAddress(0x200A, 0x00)
 
     # I2t and Stall protection / Enabled — rw
     I_2T_AND_STALL_PROTECTION_ENABLED: ObjectAddress[int] = ObjectAddress(0x200A, 0x01)
@@ -1399,13 +1399,13 @@ class Somanet:
     SYSTEM_POLARITY: ObjectAddress[int] = ObjectAddress(0x200D, 0x00)
 
     # Logging / SubIndex 000 — ro
-    LOGGING_COUNT: ObjectAddress[int] = ObjectAddress(0x200E, 0x00)
+    LOGGING: ObjectAddress[int] = ObjectAddress(0x200E, 0x00)
 
     # Logging / State — rw
     LOGGING_STATE: ObjectAddress[int] = ObjectAddress(0x200E, 0x01)
 
     # Torque controller / SubIndex 000 — ro
-    TORQUE_CONTROLLER_COUNT: ObjectAddress[int] = ObjectAddress(0x2010, 0x00)
+    TORQUE_CONTROLLER: ObjectAddress[int] = ObjectAddress(0x2010, 0x00)
 
     # Torque controller / Controller Kp (disabled) — rw
     TORQUE_CONTROLLER_CONTROLLER_KP_DISABLED: ObjectAddress[float] = ObjectAddress(0x2010, 0x01)
@@ -1462,7 +1462,7 @@ class Somanet:
     TORQUE_CONTROLLER_ACTIVE_SHORT_CIRCUIT_DURATION_TIME: ObjectAddress[int] = ObjectAddress(0x2010, 0x12)
 
     # Velocity controller / SubIndex 000 — ro
-    VELOCITY_CONTROLLER_COUNT: ObjectAddress[int] = ObjectAddress(0x2011, 0x00)
+    VELOCITY_CONTROLLER: ObjectAddress[int] = ObjectAddress(0x2011, 0x00)
 
     # Velocity controller / Controller Kp — rw
     VELOCITY_CONTROLLER_CONTROLLER_KP: ObjectAddress[float] = ObjectAddress(0x2011, 0x01)
@@ -1480,7 +1480,7 @@ class Somanet:
     VELOCITY_CONTROLLER_ENCODER_SOURCE: ObjectAddress[int] = ObjectAddress(0x2011, 0x05)
 
     # Position controller / SubIndex 000 — ro
-    POSITION_CONTROLLER_COUNT: ObjectAddress[int] = ObjectAddress(0x2012, 0x00)
+    POSITION_CONTROLLER: ObjectAddress[int] = ObjectAddress(0x2012, 0x00)
 
     # Position controller / Position loop Kp — rw
     POSITION_CONTROLLER_POSITION_LOOP_KP: ObjectAddress[float] = ObjectAddress(0x2012, 0x01)
@@ -1510,7 +1510,7 @@ class Somanet:
     POSITION_CONTROLLER_ENCODER_SOURCE: ObjectAddress[int] = ObjectAddress(0x2012, 0x09)
 
     # Gain scheduling / SubIndex 000 — ro
-    GAIN_SCHEDULING_COUNT: ObjectAddress[int] = ObjectAddress(0x2013, 0x00)
+    GAIN_SCHEDULING: ObjectAddress[int] = ObjectAddress(0x2013, 0x00)
 
     # Gain scheduling / Enabled — rw
     GAIN_SCHEDULING_ENABLED: ObjectAddress[int] = ObjectAddress(0x2013, 0x01)
@@ -1570,7 +1570,7 @@ class Somanet:
     GAIN_SCHEDULING_VELOCITY_LOOP_INTEGRAL_LIMIT_1: ObjectAddress[int] = ObjectAddress(0x2013, 0x13)
 
     # Torque window / Subindex 000 — ro
-    TORQUE_WINDOW_COUNT: ObjectAddress[int] = ObjectAddress(0x2014, 0x00)
+    TORQUE_WINDOW: ObjectAddress[int] = ObjectAddress(0x2014, 0x00)
 
     # Torque window / Value — rw
     TORQUE_WINDOW_VALUE: ObjectAddress[int] = ObjectAddress(0x2014, 0x01)
@@ -1579,7 +1579,7 @@ class Somanet:
     TORQUE_WINDOW_TIME: ObjectAddress[int] = ObjectAddress(0x2014, 0x02)
 
     # Velocity feed forward / Subindex 000 — ro
-    VELOCITY_FEED_FORWARD_COUNT: ObjectAddress[int] = ObjectAddress(0x2015, 0x00)
+    VELOCITY_FEED_FORWARD: ObjectAddress[int] = ObjectAddress(0x2015, 0x00)
 
     # Velocity feed forward / Gain — rw
     VELOCITY_FEED_FORWARD_GAIN: ObjectAddress[int] = ObjectAddress(0x2015, 0x01)
@@ -1588,7 +1588,7 @@ class Somanet:
     VELOCITY_FEED_FORWARD_CUTOFF_FREQUENCY: ObjectAddress[int] = ObjectAddress(0x2015, 0x02)
 
     # Following error option codes / SubIndex 000 — ro
-    FOLLOWING_ERROR_OPTION_CODES_COUNT: ObjectAddress[int] = ObjectAddress(0x2017, 0x00)
+    FOLLOWING_ERROR_OPTION_CODES: ObjectAddress[int] = ObjectAddress(0x2017, 0x00)
 
     # Following error option codes / Position following error option code — rw
     FOLLOWING_ERROR_OPTION_CODES_POSITION_FOLLOWING_ERROR_OPTION_CODE: ObjectAddress[int] = ObjectAddress(0x2017, 0x01)
@@ -1597,7 +1597,7 @@ class Somanet:
     FOLLOWING_ERROR_OPTION_CODES_VELOCITY_FOLLOWING_ERROR_OPTION_CODE: ObjectAddress[int] = ObjectAddress(0x2017, 0x02)
 
     # Velocity following error / SubIndex 000 — ro
-    VELOCITY_FOLLOWING_ERROR_COUNT: ObjectAddress[int] = ObjectAddress(0x2018, 0x00)
+    VELOCITY_FOLLOWING_ERROR: ObjectAddress[int] = ObjectAddress(0x2018, 0x00)
 
     # Velocity following error / Window — rw, rpm
     VELOCITY_FOLLOWING_ERROR_WINDOW: ObjectAddress[int] = ObjectAddress(0x2018, 0x01)
@@ -1612,7 +1612,7 @@ class Somanet:
     TOTAL_MOTOR_CURRENT: ObjectAddress[int] = ObjectAddress(0x2019, 0x00)
 
     # Velocity feedback filter / SubIndex 000 — ro
-    VELOCITY_FEEDBACK_FILTER_COUNT: ObjectAddress[int] = ObjectAddress(0x2021, 0x00)
+    VELOCITY_FEEDBACK_FILTER: ObjectAddress[int] = ObjectAddress(0x2021, 0x00)
 
     # Velocity feedback filter / Type — rw
     VELOCITY_FEEDBACK_FILTER_TYPE: ObjectAddress[int] = ObjectAddress(0x2021, 0x01)
@@ -1621,7 +1621,7 @@ class Somanet:
     VELOCITY_FEEDBACK_FILTER_CUTOFF_FREQUENCY: ObjectAddress[int] = ObjectAddress(0x2021, 0x02)
 
     # Position feedback filter / Subindex 000 — ro
-    POSITION_FEEDBACK_FILTER_COUNT: ObjectAddress[int] = ObjectAddress(0x2022, 0x00)
+    POSITION_FEEDBACK_FILTER: ObjectAddress[int] = ObjectAddress(0x2022, 0x00)
 
     # Position feedback filter / Type — rw
     POSITION_FEEDBACK_FILTER_TYPE: ObjectAddress[int] = ObjectAddress(0x2022, 0x01)
@@ -1630,7 +1630,7 @@ class Somanet:
     POSITION_FEEDBACK_FILTER_CUTOFF_FREQUENCY: ObjectAddress[int] = ObjectAddress(0x2022, 0x02)
 
     # Notch filter / Subindex 000 — ro
-    NOTCH_FILTER_COUNT: ObjectAddress[int] = ObjectAddress(0x2023, 0x00)
+    NOTCH_FILTER: ObjectAddress[int] = ObjectAddress(0x2023, 0x00)
 
     # Notch filter / Enabled — rw
     NOTCH_FILTER_ENABLED: ObjectAddress[int] = ObjectAddress(0x2023, 0x01)
@@ -1645,7 +1645,7 @@ class Somanet:
     NOTCH_FILTER_DEPTH: ObjectAddress[int] = ObjectAddress(0x2023, 0x04)
 
     # Control input FIR filter / SubIndex 000 — ro
-    CONTROL_INPUT_FIR_FILTER_COUNT: ObjectAddress[int] = ObjectAddress(0x2027, 0x00)
+    CONTROL_INPUT_FIR_FILTER: ObjectAddress[int] = ObjectAddress(0x2027, 0x00)
 
     # Control input FIR filter / Enabled — rw
     CONTROL_INPUT_FIR_FILTER_ENABLED: ObjectAddress[int] = ObjectAddress(0x2027, 0x01)
@@ -1654,19 +1654,19 @@ class Somanet:
     CONTROL_INPUT_FIR_FILTER_ORDER: ObjectAddress[int] = ObjectAddress(0x2027, 0x02)
 
     # Core temperature / Subindex 000 — ro
-    CORE_TEMPERATURE_COUNT: ObjectAddress[int] = ObjectAddress(0x2030, 0x00)
+    CORE_TEMPERATURE: ObjectAddress[int] = ObjectAddress(0x2030, 0x00)
 
     # Core temperature / Measured temperature — ro, m°C
     CORE_TEMPERATURE_MEASURED_TEMPERATURE: ObjectAddress[int] = ObjectAddress(0x2030, 0x01)
 
     # Drive temperature / Subindex 000 — ro
-    DRIVE_TEMPERATURE_COUNT: ObjectAddress[int] = ObjectAddress(0x2031, 0x00)
+    DRIVE_TEMPERATURE: ObjectAddress[int] = ObjectAddress(0x2031, 0x00)
 
     # Drive temperature / Measured temperature — ro, m°C
     DRIVE_TEMPERATURE_MEASURED_TEMPERATURE: ObjectAddress[int] = ObjectAddress(0x2031, 0x01)
 
     # External scaled measurement / Subindex 000 — ro
-    EXTERNAL_SCALED_MEASUREMENT_COUNT: ObjectAddress[int] = ObjectAddress(0x2038, 0x00)
+    EXTERNAL_SCALED_MEASUREMENT: ObjectAddress[int] = ObjectAddress(0x2038, 0x00)
 
     # External scaled measurement / Scaled measurement value — ro
     EXTERNAL_SCALED_MEASUREMENT_SCALED_MEASUREMENT_VALUE: ObjectAddress[float] = ObjectAddress(0x2038, 0x01)
@@ -1705,7 +1705,7 @@ class Somanet:
     EXTERNAL_SCALED_MEASUREMENT_LOWER_ERROR_THRESHOLD: ObjectAddress[float] = ObjectAddress(0x2038, 0x0C)
 
     # Error report / SubIndex 000 — ro
-    ERROR_REPORT_COUNT: ObjectAddress[int] = ObjectAddress(0x203F, 0x00)
+    ERROR_REPORT: ObjectAddress[int] = ObjectAddress(0x203F, 0x00)
 
     # Error report / Description — ro
     ERROR_REPORT_DESCRIPTION: ObjectAddress[str] = ObjectAddress(0x203F, 0x01)
@@ -1714,7 +1714,7 @@ class Somanet:
     INPUT_COUNTER: ObjectAddress[int] = ObjectAddress(0x2040, 0x00)
 
     # Motor current / SubIndex 000 — ro
-    MOTOR_CURRENT_COUNT: ObjectAddress[int] = ObjectAddress(0x2041, 0x00)
+    MOTOR_CURRENT: ObjectAddress[int] = ObjectAddress(0x2041, 0x00)
 
     # Motor current / Vector amplitude — ro, mA
     MOTOR_CURRENT_VECTOR_AMPLITUDE: ObjectAddress[int] = ObjectAddress(0x2041, 0x01)
@@ -1723,7 +1723,7 @@ class Somanet:
     MOTOR_CURRENT_PHASE_ADVANCE_ANGLE: ObjectAddress[int] = ObjectAddress(0x2041, 0x02)
 
     # Joint torque controller / SubIndex 000 — ro
-    JOINT_TORQUE_CONTROLLER_COUNT: ObjectAddress[int] = ObjectAddress(0x2050, 0x00)
+    JOINT_TORQUE_CONTROLLER: ObjectAddress[int] = ObjectAddress(0x2050, 0x00)
 
     # Joint torque controller / Controller Kp — rw
     JOINT_TORQUE_CONTROLLER_CONTROLLER_KP: ObjectAddress[float] = ObjectAddress(0x2050, 0x01)
@@ -1750,7 +1750,7 @@ class Somanet:
     MAX_JOINT_TORQUE: ObjectAddress[int] = ObjectAddress(0x2054, 0x00)
 
     # Impedance controller / SubIndex 000 — ro
-    IMPEDANCE_CONTROLLER_COUNT: ObjectAddress[int] = ObjectAddress(0x2060, 0x00)
+    IMPEDANCE_CONTROLLER: ObjectAddress[int] = ObjectAddress(0x2060, 0x00)
 
     # Impedance controller / Stiffness — rw, mNm/rad
     IMPEDANCE_CONTROLLER_STIFFNESS: ObjectAddress[int] = ObjectAddress(0x2060, 0x01)
@@ -1771,7 +1771,7 @@ class Somanet:
     IMPEDANCE_CONTROLLER_JOINT_TORQUE_CONTROLLER_INTEGRAL_LIMIT: ObjectAddress[int] = ObjectAddress(0x2060, 0x06)
 
     # High resolution data / SubIndex 000 — ro
-    HIGH_RESOLUTION_DATA_COUNT: ObjectAddress[int] = ObjectAddress(0x20E1, 0x00)
+    HIGH_RESOLUTION_DATA: ObjectAddress[int] = ObjectAddress(0x20E1, 0x00)
 
     # High resolution data / SubIndex 001 — ro
     HIGH_RESOLUTION_DATA_SUB_INDEX_001: ObjectAddress[list[int]] = ObjectAddress(0x20E1, 0x01)
@@ -1792,7 +1792,7 @@ class Somanet:
     ASSIGNED_NAME: ObjectAddress[str] = ObjectAddress(0x20F2, 0x00)
 
     # Encoder 1 configuration / SubIndex 000 — ro
-    ENCODER_1_CONFIGURATION_COUNT: ObjectAddress[int] = ObjectAddress(0x2110, 0x00)
+    ENCODER_1_CONFIGURATION: ObjectAddress[int] = ObjectAddress(0x2110, 0x00)
 
     # Encoder 1 configuration / Sensor port — rw
     ENCODER_1_CONFIGURATION_SENSOR_PORT: ObjectAddress[int] = ObjectAddress(0x2110, 0x01)
@@ -1879,7 +1879,7 @@ class Somanet:
     ENCODER_1_CONFIGURATION_SAMPLING_FREQUENCY: ObjectAddress[int] = ObjectAddress(0x2110, 0x1C)
 
     # Encoder 1 feedback / SubIndex 000 — ro
-    ENCODER_1_FEEDBACK_COUNT: ObjectAddress[int] = ObjectAddress(0x2111, 0x00)
+    ENCODER_1_FEEDBACK: ObjectAddress[int] = ObjectAddress(0x2111, 0x00)
 
     # Encoder 1 feedback / Raw position — ro, Inc
     ENCODER_1_FEEDBACK_RAW_POSITION: ObjectAddress[int] = ObjectAddress(0x2111, 0x01)
@@ -1894,7 +1894,7 @@ class Somanet:
     ENCODER_1_FEEDBACK_ENCODER_STATUS: ObjectAddress[int] = ObjectAddress(0x2111, 0x04)
 
     # Encoder 2 configuration / SubIndex 000 — ro
-    ENCODER_2_CONFIGURATION_COUNT: ObjectAddress[int] = ObjectAddress(0x2112, 0x00)
+    ENCODER_2_CONFIGURATION: ObjectAddress[int] = ObjectAddress(0x2112, 0x00)
 
     # Encoder 2 configuration / Sensor port — rw
     ENCODER_2_CONFIGURATION_SENSOR_PORT: ObjectAddress[int] = ObjectAddress(0x2112, 0x01)
@@ -1981,7 +1981,7 @@ class Somanet:
     ENCODER_2_CONFIGURATION_SAMPLING_FREQUENCY: ObjectAddress[int] = ObjectAddress(0x2112, 0x1C)
 
     # Encoder 2 feedback / SubIndex 000 — ro
-    ENCODER_2_FEEDBACK_COUNT: ObjectAddress[int] = ObjectAddress(0x2113, 0x00)
+    ENCODER_2_FEEDBACK: ObjectAddress[int] = ObjectAddress(0x2113, 0x00)
 
     # Encoder 2 feedback / Raw position — ro, Inc
     ENCODER_2_FEEDBACK_RAW_POSITION: ObjectAddress[int] = ObjectAddress(0x2113, 0x01)
@@ -1996,7 +1996,7 @@ class Somanet:
     ENCODER_2_FEEDBACK_ENCODER_STATUS: ObjectAddress[int] = ObjectAddress(0x2113, 0x04)
 
     # Torque sensor configuration / SubIndex 000 — ro
-    TORQUE_SENSOR_CONFIGURATION_COUNT: ObjectAddress[int] = ObjectAddress(0x2150, 0x00)
+    TORQUE_SENSOR_CONFIGURATION: ObjectAddress[int] = ObjectAddress(0x2150, 0x00)
 
     # Torque sensor configuration / Type — rw
     TORQUE_SENSOR_CONFIGURATION_TYPE: ObjectAddress[int] = ObjectAddress(0x2150, 0x01)
@@ -2032,7 +2032,7 @@ class Somanet:
     TORQUE_SENSOR_VALUE: ObjectAddress[int] = ObjectAddress(0x2151, 0x00)
 
     # Torque sensor feedback filter / SubIndex 000 — ro
-    TORQUE_SENSOR_FEEDBACK_FILTER_COUNT: ObjectAddress[int] = ObjectAddress(0x2152, 0x00)
+    TORQUE_SENSOR_FEEDBACK_FILTER: ObjectAddress[int] = ObjectAddress(0x2152, 0x00)
 
     # Torque sensor feedback filter / Type — rw
     TORQUE_SENSOR_FEEDBACK_FILTER_TYPE: ObjectAddress[int] = ObjectAddress(0x2152, 0x01)
@@ -2041,7 +2041,7 @@ class Somanet:
     TORQUE_SENSOR_FEEDBACK_FILTER_CUTOFF_FREQUENCY: ObjectAddress[int] = ObjectAddress(0x2152, 0x02)
 
     # GPIO pin configuration / SubIndex 000 — ro
-    GPIO_PIN_CONFIGURATION_COUNT: ObjectAddress[int] = ObjectAddress(0x2210, 0x00)
+    GPIO_PIN_CONFIGURATION: ObjectAddress[int] = ObjectAddress(0x2210, 0x00)
 
     # GPIO pin configuration / Digital IO 1 — rw
     GPIO_PIN_CONFIGURATION_DIGITAL_IO_1: ObjectAddress[int] = ObjectAddress(0x2210, 0x01)
@@ -2065,19 +2065,19 @@ class Somanet:
     GPIO_PIN_CONFIGURATION_DIGITAL_IO_7: ObjectAddress[int] = ObjectAddress(0x2210, 0x07)
 
     # GPIO output events / Subindex 000 — ro
-    GPIO_OUTPUT_EVENTS_COUNT: ObjectAddress[int] = ObjectAddress(0x2211, 0x00)
+    GPIO_OUTPUT_EVENTS: ObjectAddress[int] = ObjectAddress(0x2211, 0x00)
 
     # GPIO output events / Timestamp setpoint — rw
     GPIO_OUTPUT_EVENTS_TIMESTAMP_SETPOINT: ObjectAddress[int] = ObjectAddress(0x2211, 0x01)
 
     # GPIO input actions / Subindex 000 — ro
-    GPIO_INPUT_ACTIONS_COUNT: ObjectAddress[int] = ObjectAddress(0x2212, 0x00)
+    GPIO_INPUT_ACTIONS: ObjectAddress[int] = ObjectAddress(0x2212, 0x00)
 
     # GPIO input actions / Timestamp on rising edge — ro
     GPIO_INPUT_ACTIONS_TIMESTAMP_ON_RISING_EDGE: ObjectAddress[int] = ObjectAddress(0x2212, 0x01)
 
     # GPIO position trigger / SubIndex 000 — ro
-    GPIO_POSITION_TRIGGER_COUNT: ObjectAddress[int] = ObjectAddress(0x2213, 0x00)
+    GPIO_POSITION_TRIGGER: ObjectAddress[int] = ObjectAddress(0x2213, 0x00)
 
     # GPIO position trigger / Position setpoint — rw, Inc
     GPIO_POSITION_TRIGGER_POSITION_SETPOINT: ObjectAddress[int] = ObjectAddress(0x2213, 0x01)
@@ -2089,13 +2089,13 @@ class Somanet:
     GPIO_POSITION_TRIGGER_PULSE_WIDTH: ObjectAddress[int] = ObjectAddress(0x2213, 0x03)
 
     # GPIO global options / Subindex 000 — ro
-    GPIO_GLOBAL_OPTIONS_COUNT: ObjectAddress[int] = ObjectAddress(0x2214, 0x00)
+    GPIO_GLOBAL_OPTIONS: ObjectAddress[int] = ObjectAddress(0x2214, 0x00)
 
     # GPIO global options / Voltage level — rw
     GPIO_GLOBAL_OPTIONS_VOLTAGE_LEVEL: ObjectAddress[int] = ObjectAddress(0x2214, 0x01)
 
     # GPIO addressable LED control / SubIndex 000 — ro
-    GPIO_ADDRESSABLE_LED_CONTROL_COUNT: ObjectAddress[int] = ObjectAddress(0x2215, 0x00)
+    GPIO_ADDRESSABLE_LED_CONTROL: ObjectAddress[int] = ObjectAddress(0x2215, 0x00)
 
     # GPIO addressable LED control / LED color — rw
     GPIO_ADDRESSABLE_LED_CONTROL_LED_COLOR: ObjectAddress[int] = ObjectAddress(0x2215, 0x01)
@@ -2125,7 +2125,7 @@ class Somanet:
     SAFE_SPEED_VALID: ObjectAddress[int] = ObjectAddress(0x2602, 0x00)
 
     # Safe input / SubIndex 000 — ro
-    SAFE_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2603, 0x00)
+    SAFE_INPUT: ObjectAddress[int] = ObjectAddress(0x2603, 0x00)
 
     # Safe input / SubIndex 001 — ro
     SAFE_INPUT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x2603, 0x01)
@@ -2140,7 +2140,7 @@ class Somanet:
     SAFE_INPUT_SUB_INDEX_004: ObjectAddress[int] = ObjectAddress(0x2603, 0x04)
 
     # Safe output monitor / SubIndex 000 — ro
-    SAFE_OUTPUT_MONITOR_COUNT: ObjectAddress[int] = ObjectAddress(0x2604, 0x00)
+    SAFE_OUTPUT_MONITOR: ObjectAddress[int] = ObjectAddress(0x2604, 0x00)
 
     # Safe output monitor / SubIndex 001 — ro
     SAFE_OUTPUT_MONITOR_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x2604, 0x01)
@@ -2149,7 +2149,7 @@ class Somanet:
     SAFE_OUTPUT_MONITOR_SUB_INDEX_002: ObjectAddress[int] = ObjectAddress(0x2604, 0x02)
 
     # Analog input / SubIndex 000 — ro
-    ANALOG_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2605, 0x00)
+    ANALOG_INPUT: ObjectAddress[int] = ObjectAddress(0x2605, 0x00)
 
     # Analog input / Analog diagnostic active — rw
     ANALOG_INPUT_ANALOG_DIAGNOSTIC_ACTIVE: ObjectAddress[int] = ObjectAddress(0x2605, 0x01)
@@ -2161,7 +2161,7 @@ class Somanet:
     ANALOG_INPUT_SAFE_ANALOG_VALUE_SCALED: ObjectAddress[int] = ObjectAddress(0x2605, 0x03)
 
     # Manufacturing parameters / Subindex 000 — ro
-    MANUFACTURING_PARAMETERS_COUNT: ObjectAddress[int] = ObjectAddress(0x2610, 0x00)
+    MANUFACTURING_PARAMETERS: ObjectAddress[int] = ObjectAddress(0x2610, 0x00)
 
     # Manufacturing parameters / Vendor ID — ro
     MANUFACTURING_PARAMETERS_VENDOR_ID: ObjectAddress[int] = ObjectAddress(0x2610, 0x01)
@@ -2176,7 +2176,7 @@ class Somanet:
     MANUFACTURING_PARAMETERS_SERIAL_NUMBER: ObjectAddress[str] = ObjectAddress(0x2610, 0x04)
 
     # Safety Module input diagnostics / SubIndex 000 — ro
-    SAFETY_MODULE_INPUT_DIAGNOSTICS_COUNT: ObjectAddress[int] = ObjectAddress(0x2611, 0x00)
+    SAFETY_MODULE_INPUT_DIAGNOSTICS: ObjectAddress[int] = ObjectAddress(0x2611, 0x00)
 
     # Safety Module input diagnostics / SubIndex 001 — ro
     SAFETY_MODULE_INPUT_DIAGNOSTICS_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x2611, 0x01)
@@ -2185,7 +2185,7 @@ class Somanet:
     SAFETY_MODULE_INPUT_DIAGNOSTICS_SUB_INDEX_002: ObjectAddress[int] = ObjectAddress(0x2611, 0x02)
 
     # General / Subindex 000 — ro
-    GENERAL_COUNT: ObjectAddress[int] = ObjectAddress(0x2620, 0x00)
+    GENERAL: ObjectAddress[int] = ObjectAddress(0x2620, 0x00)
 
     # General / Drive safety name — rw
     GENERAL_DRIVE_SAFETY_NAME: ObjectAddress[str] = ObjectAddress(0x2620, 0x01)
@@ -2200,7 +2200,7 @@ class Somanet:
     GENERAL_F_SO_E_DOWNLOAD: ObjectAddress[int] = ObjectAddress(0x2620, 0x04)
 
     # Safety digital IO / Subindex 000 — ro
-    SAFETY_DIGITAL_IO_COUNT: ObjectAddress[int] = ObjectAddress(0x2621, 0x00)
+    SAFETY_DIGITAL_IO: ObjectAddress[int] = ObjectAddress(0x2621, 0x00)
 
     # Safety digital IO / Acknowledge via drive — rw
     SAFETY_DIGITAL_IO_ACKNOWLEDGE_VIA_DRIVE: ObjectAddress[int] = ObjectAddress(0x2621, 0x01)
@@ -2227,7 +2227,7 @@ class Somanet:
     SAFETY_DIGITAL_IO_OUTPUT_2_FUNCTION: ObjectAddress[int] = ObjectAddress(0x2621, 0x08)
 
     # Safety IO analog input / Subindex 000 — ro
-    SAFETY_IO_ANALOG_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2625, 0x00)
+    SAFETY_IO_ANALOG_INPUT: ObjectAddress[int] = ObjectAddress(0x2625, 0x00)
 
     # Safety IO analog input / Analog input1 Gain — rw, nNm/Inc
     SAFETY_IO_ANALOG_INPUT_ANALOG_INPUT_1_GAIN: ObjectAddress[int] = ObjectAddress(0x2625, 0x01)
@@ -2254,10 +2254,10 @@ class Somanet:
     SAFETY_IO_ANALOG_INPUT_SAFE_ANALOG_IN_CHANNEL_B: ObjectAddress[int] = ObjectAddress(0x2625, 0x08)
 
     # Encoder source type / Subindex 000 — ro
-    ENCODER_SOURCE_TYPE_COUNT: ObjectAddress[int] = ObjectAddress(0x2630, 0x00)
+    ENCODER_SOURCE_TYPE: ObjectAddress[int] = ObjectAddress(0x2630, 0x00)
 
     # Encoder source type — rw
-    ENCODER_SOURCE_TYPE: ObjectAddress[int] = ObjectAddress(0x2630, 0x01)
+    ENCODER_SOURCE_TYPE_ENCODER_SOURCE_TYPE: ObjectAddress[int] = ObjectAddress(0x2630, 0x01)
 
     # Encoder source type / Encoder resolution — rw, Inc
     ENCODER_SOURCE_TYPE_ENCODER_RESOLUTION: ObjectAddress[int] = ObjectAddress(0x2630, 0x02)
@@ -2275,7 +2275,7 @@ class Somanet:
     ENCODER_SOURCE_TYPE_MULTITURN_COUNTING_BY_SMM: ObjectAddress[int] = ObjectAddress(0x2630, 0x06)
 
     # Encoder verification / Subindex 000 — ro
-    ENCODER_VERIFICATION_COUNT: ObjectAddress[int] = ObjectAddress(0x2631, 0x00)
+    ENCODER_VERIFICATION: ObjectAddress[int] = ObjectAddress(0x2631, 0x00)
 
     # Encoder verification / Verification sensor source type — rw
     ENCODER_VERIFICATION_VERIFICATION_SENSOR_SOURCE_TYPE: ObjectAddress[int] = ObjectAddress(0x2631, 0x01)
@@ -2287,7 +2287,7 @@ class Somanet:
     ENCODER_VERIFICATION_VERIFICATION_SENSOR_MULTITURN_BITS: ObjectAddress[int] = ObjectAddress(0x2631, 0x03)
 
     # Encoder selection / Subindex 000 — ro
-    ENCODER_SELECTION_COUNT: ObjectAddress[int] = ObjectAddress(0x2635, 0x00)
+    ENCODER_SELECTION: ObjectAddress[int] = ObjectAddress(0x2635, 0x00)
 
     # Encoder selection / Speed window — rw, ms
     ENCODER_SELECTION_SPEED_WINDOW: ObjectAddress[int] = ObjectAddress(0x2635, 0x01)
@@ -2326,40 +2326,40 @@ class Somanet:
     ENCODER_SELECTION_MAX_POSITION_DISCREPANCY: ObjectAddress[int] = ObjectAddress(0x2635, 0x0C)
 
     # STO input / Subindex 000 — ro
-    STO_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2641, 0x00)
+    STO_INPUT: ObjectAddress[int] = ObjectAddress(0x2641, 0x00)
 
     # STO input — rw
-    STO_INPUT: ObjectAddress[int] = ObjectAddress(0x2641, 0x01)
+    STO_INPUT_STO_INPUT: ObjectAddress[int] = ObjectAddress(0x2641, 0x01)
 
     # STO input / SBC — rw
     STO_INPUT_SBC: ObjectAddress[int] = ObjectAddress(0x2641, 0x02)
 
     # SS1 input / Subindex 000 — ro
-    SS_1_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2650, 0x00)
+    SS_1_INPUT: ObjectAddress[int] = ObjectAddress(0x2650, 0x00)
 
     # SS1 input — rw
-    SS_1_INPUT: ObjectAddress[int] = ObjectAddress(0x2650, 0x01)
+    SS_1_INPUT_SS_1_INPUT: ObjectAddress[int] = ObjectAddress(0x2650, 0x01)
 
     # SS1 input / SS1: Deceleration monitoring — rw
     SS_1_INPUT_SS_1_DECELERATION_MONITORING: ObjectAddress[int] = ObjectAddress(0x2650, 0x02)
 
     # SOS input / Subindex 000 — ro
-    SOS_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2668, 0x00)
+    SOS_INPUT: ObjectAddress[int] = ObjectAddress(0x2668, 0x00)
 
     # SOS input — rw
-    SOS_INPUT: ObjectAddress[int] = ObjectAddress(0x2668, 0x01)
+    SOS_INPUT_SOS_INPUT: ObjectAddress[int] = ObjectAddress(0x2668, 0x01)
 
     # SOS input / t_D_SOS — rw, ms
     SOS_INPUT_TDSOS: ObjectAddress[int] = ObjectAddress(0x2668, 0x02)
 
     # SS2 input / Subindex 000 — ro
-    SS_2_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2670, 0x00)
+    SS_2_INPUT: ObjectAddress[int] = ObjectAddress(0x2670, 0x00)
 
     # SS2 input — rw
-    SS_2_INPUT: ObjectAddress[int] = ObjectAddress(0x2670, 0x01)
+    SS_2_INPUT_SS_2_INPUT: ObjectAddress[int] = ObjectAddress(0x2670, 0x01)
 
     # SLS input / Subindex 000 — ro
-    SLS_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x2690, 0x00)
+    SLS_INPUT: ObjectAddress[int] = ObjectAddress(0x2690, 0x00)
 
     # SLS input / SLS1 input — rw
     SLS_INPUT_SLS_1_INPUT: ObjectAddress[int] = ObjectAddress(0x2690, 0x01)
@@ -2377,7 +2377,7 @@ class Somanet:
     RESET_POSITION: ObjectAddress[int] = ObjectAddress(0x26A0, 0x00)
 
     # Safe torque / SubIndex 000 — ro
-    SAFE_TORQUE_COUNT: ObjectAddress[int] = ObjectAddress(0x26B0, 0x00)
+    SAFE_TORQUE: ObjectAddress[int] = ObjectAddress(0x26B0, 0x00)
 
     # Safe torque / SubIndex 001 — rw
     SAFE_TORQUE_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x26B0, 0x01)
@@ -2386,7 +2386,7 @@ class Somanet:
     SAFE_TORQUE_SUB_INDEX_002: ObjectAddress[int] = ObjectAddress(0x26B0, 0x02)
 
     # Safe torque parameter / SubIndex 000 — ro
-    SAFE_TORQUE_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0x26B1, 0x00)
+    SAFE_TORQUE_PARAMETER: ObjectAddress[int] = ObjectAddress(0x26B1, 0x00)
 
     # Safe torque parameter / Torque constant (safety) — rw, μNm/A
     SAFE_TORQUE_PARAMETER_TORQUE_CONSTANT_SAFETY: ObjectAddress[int] = ObjectAddress(0x26B1, 0x01)
@@ -2401,16 +2401,16 @@ class Somanet:
     SAFE_TORQUE_PARAMETER_COMMUTATION_ANGLE_OFFSET_SAFETY: ObjectAddress[int] = ObjectAddress(0x26B1, 0x04)
 
     # SLT input / SubIndex 000 — ro
-    SLT_INPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x26B2, 0x00)
+    SLT_INPUT: ObjectAddress[int] = ObjectAddress(0x26B2, 0x00)
 
     # SLT input — rw
-    SLT_INPUT: ObjectAddress[int] = ObjectAddress(0x26B2, 0x01)
+    SLT_INPUT_SLT_INPUT: ObjectAddress[int] = ObjectAddress(0x26B2, 0x01)
 
     # SLT input / SLT source — rw
     SLT_INPUT_SLT_SOURCE: ObjectAddress[int] = ObjectAddress(0x26B2, 0x02)
 
     # Safe output / SubIndex 000 — ro
-    SAFE_OUTPUT_COUNT: ObjectAddress[int] = ObjectAddress(0x26F0, 0x00)
+    SAFE_OUTPUT: ObjectAddress[int] = ObjectAddress(0x26F0, 0x00)
 
     # Safe output / SubIndex 001 — rw
     SAFE_OUTPUT_SUB_INDEX_001: ObjectAddress[int] = ObjectAddress(0x26F0, 0x01)
@@ -2419,7 +2419,7 @@ class Somanet:
     SAFE_OUTPUT_SUB_INDEX_002: ObjectAddress[int] = ObjectAddress(0x26F0, 0x02)
 
     # Firmware / SubIndex 000 — ro
-    FIRMWARE_COUNT: ObjectAddress[int] = ObjectAddress(0x2700, 0x00)
+    FIRMWARE: ObjectAddress[int] = ObjectAddress(0x2700, 0x00)
 
     # Firmware / Core version — ro
     FIRMWARE_CORE_VERSION: ObjectAddress[str] = ObjectAddress(0x2700, 0x01)
@@ -2440,7 +2440,7 @@ class Somanet:
     SETUP_WIZARD_COMPLETED: ObjectAddress[int] = ObjectAddress(0x2705, 0x00)
 
     # TCP/IP Configuration / SubIndex 000 — ro
-    TCPIP_CONFIGURATION_COUNT: ObjectAddress[int] = ObjectAddress(0x2E00, 0x00)
+    TCPIP_CONFIGURATION: ObjectAddress[int] = ObjectAddress(0x2E00, 0x00)
 
     # TCP/IP Configuration / IP address — rw
     TCPIP_CONFIGURATION_IP_ADDRESS: ObjectAddress[int] = ObjectAddress(0x2E00, 0x01)
@@ -2464,7 +2464,7 @@ class Somanet:
     TCPIP_CONFIGURATION_HOST_NAME: ObjectAddress[str] = ObjectAddress(0x2E00, 0x07)
 
     # Internal usage only / SubIndex 000 — ro
-    INTERNAL_USAGE_ONLY_COUNT: ObjectAddress[int] = ObjectAddress(0x2FFF, 0x00)
+    INTERNAL_USAGE_ONLY: ObjectAddress[int] = ObjectAddress(0x2FFF, 0x00)
 
     # Internal usage only / TCTM3 — ro
     INTERNAL_USAGE_ONLY_TCTM_3: ObjectAddress[int] = ObjectAddress(0x2FFF, 0x01)
@@ -2479,7 +2479,7 @@ class Somanet:
     INTERNAL_USAGE_ONLY_BKC: ObjectAddress[int] = ObjectAddress(0x2FFF, 0x04)
 
     # FSoE Communication Parameter / Number of Subindex — ro
-    F_SO_E_COMMUNICATION_PARAMETER_COUNT: ObjectAddress[int] = ObjectAddress(0xE901, 0x00)
+    F_SO_E_COMMUNICATION_PARAMETER: ObjectAddress[int] = ObjectAddress(0xE901, 0x00)
 
     # FSoE Communication Parameter / Version — ro
     F_SO_E_COMMUNICATION_PARAMETER_VERSION: ObjectAddress[str] = ObjectAddress(0xE901, 0x01)
@@ -2509,7 +2509,7 @@ class Somanet:
     F_SO_E_COMMUNICATION_PARAMETER_SRACRC: ObjectAddress[int] = ObjectAddress(0xE901, 0x09)
 
     # Device Safety Address / Subindex 000 — ro
-    DEVICE_SAFETY_ADDRESS_COUNT: ObjectAddress[int] = ObjectAddress(0xF980, 0x00)
+    DEVICE_SAFETY_ADDRESS: ObjectAddress[int] = ObjectAddress(0xF980, 0x00)
 
     # Device Safety Address / FSoE Address — ro
     DEVICE_SAFETY_ADDRESS_F_SO_E_ADDRESS: ObjectAddress[int] = ObjectAddress(0xF980, 0x01)

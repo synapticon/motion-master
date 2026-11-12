@@ -26,6 +26,7 @@
 #include "node/ic_mu_encoder.h"
 #include "node/kuebler_registers.h"
 #include "node/plant_identification.h"
+#include "node/somanet_drive_objects.h"
 #include "node/synapticon.h"
 
 namespace mm::node {
@@ -865,18 +866,18 @@ void to_json(nlohmann::json& j, const BrakeState& state) {
 }
 
 std::expected<std::string, std::string> SomanetDrive::errorReport() const {
-  return device_.readValue<std::string>(somanet::kErrorReport, somanet::kErrorReportDescription);
+  return device_.readValue(somanet::objects::kErrorReportDescription);
 }
 
 bool SomanetDrive::hasBrakeObject() const {
-  return device_.parameter(somanet::kBrakeOptions, somanet::kBrakeStatus).has_value();
+  return device_.parameter(somanet::objects::kBrakeOptionsBrakeStatus).has_value();
 }
 
 std::expected<somanet::BrakeStatus, std::string> SomanetDrive::brakeStatus() const {
   if (!hasBrakeObject()) {
     return somanet::BrakeStatus::kNotConfigured;
   }
-  auto raw = device_.readValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeStatus);
+  auto raw = device_.readValue(somanet::objects::kBrakeOptionsBrakeStatus);
   if (!raw) {
     return std::unexpected(raw.error());
   }
@@ -887,8 +888,8 @@ std::expected<void, std::string> SomanetDrive::setBrakeStatus(somanet::BrakeStat
   if (!hasBrakeObject()) {
     return {};
   }
-  return device_.writeValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeStatus,
-                                     static_cast<uint8_t>(status));
+  return device_.writeValue(somanet::objects::kBrakeOptionsBrakeStatus,
+                            static_cast<uint8_t>(status));
 }
 
 void to_json(nlohmann::json& j, const EncoderConfiguration& encoder) {
@@ -918,42 +919,42 @@ void to_json(nlohmann::json& j, const Encoders& encoders) {
 
 std::expected<Encoders, std::string> SomanetDrive::encoders() const {
   Encoders result;
-  for (const auto& [ordinal, index] :
-       {std::pair{somanet::EncoderOrdinal::kEncoder1, somanet::kEncoder1Configuration},
-        std::pair{somanet::EncoderOrdinal::kEncoder2, somanet::kEncoder2Configuration}}) {
+  for (const auto ordinal :
+       {somanet::EncoderOrdinal::kEncoder1, somanet::EncoderOrdinal::kEncoder2}) {
+    const auto addresses = somanet::encoderConfiguration(ordinal);
     EncoderConfiguration encoder;
     encoder.encoderOrdinal = ordinal;
-    auto port = device_.readValue<uint8_t>(index, somanet::kEncoderSensorPort);
+    auto port = device_.readValue(addresses.sensorPort);
     if (!port) {
       return std::unexpected(port.error());
     }
     encoder.sensorPort = *port;
-    auto type = device_.readValue<uint8_t>(index, somanet::kEncoderType);
+    auto type = device_.readValue(addresses.type);
     if (!type) {
       return std::unexpected(type.error());
     }
     encoder.type = static_cast<somanet::EncoderType>(*type);
-    auto resolution = device_.readValue<uint32_t>(index, somanet::kEncoderResolution);
+    auto resolution = device_.readValue(addresses.resolution);
     if (!resolution) {
       return std::unexpected(resolution.error());
     }
     encoder.resolution = *resolution;
-    auto polarity = device_.readValue<uint8_t>(index, somanet::kEncoderPolarity);
+    auto polarity = device_.readValue(addresses.polarity);
     if (!polarity) {
       return std::unexpected(polarity.error());
     }
     encoder.inverted = *polarity != 0;
     // Jasper firmware on an NGC board has neither :0A nor :0C. An encoder without :0A counts no
     // turns, and one without :0C reports 0 singleturn bits.
-    if (device_.parameter(index, somanet::kEncoderMultiturnBits)) {
-      auto multiturn = device_.readValue<uint8_t>(index, somanet::kEncoderMultiturnBits);
+    if (device_.parameter(addresses.multiturnBits)) {
+      auto multiturn = device_.readValue(addresses.multiturnBits);
       if (!multiturn) {
         return std::unexpected(multiturn.error());
       }
       encoder.multiturnBits = *multiturn;
     }
-    if (device_.parameter(index, somanet::kEncoderSingleturnBits)) {
-      auto singleturn = device_.readValue<uint8_t>(index, somanet::kEncoderSingleturnBits);
+    if (device_.parameter(addresses.singleturnBits)) {
+      auto singleturn = device_.readValue(addresses.singleturnBits);
       if (!singleturn) {
         return std::unexpected(singleturn.error());
       }
@@ -973,9 +974,9 @@ std::expected<Encoders, std::string> SomanetDrive::encoders() const {
 
   // A controller's source is 1 or 2, or 0 for no encoder. Anything else is a value this view does
   // not know, reported as no encoder rather than as an ordinal that names nothing.
-  auto source = [this](uint16_t index, uint8_t subindex)
+  auto source = [this](ObjectAddress<uint8_t> address)
       -> std::expected<std::optional<somanet::EncoderOrdinal>, std::string> {
-    auto value = device_.readValue<uint8_t>(index, subindex);
+    auto value = device_.readValue(address);
     if (!value) {
       return std::unexpected(value.error());
     }
@@ -984,17 +985,17 @@ std::expected<Encoders, std::string> SomanetDrive::encoders() const {
     }
     return std::nullopt;
   };
-  auto position = source(somanet::kPositionController, somanet::kPositionControllerEncoderSource);
+  auto position = source(somanet::objects::kPositionControllerEncoderSource);
   if (!position) {
     return std::unexpected(position.error());
   }
   result.position = *position;
-  auto velocity = source(somanet::kVelocityController, somanet::kVelocityControllerEncoderSource);
+  auto velocity = source(somanet::objects::kVelocityControllerEncoderSource);
   if (!velocity) {
     return std::unexpected(velocity.error());
   }
   result.velocity = *velocity;
-  auto commutation = source(somanet::kTorqueController, somanet::kTorqueControllerEncoderSource);
+  auto commutation = source(somanet::objects::kTorqueControllerEncoderSource);
   if (!commutation) {
     return std::unexpected(commutation.error());
   }
@@ -1015,28 +1016,25 @@ std::expected<BrakeState, std::string> SomanetDrive::brakeState() const {
   }
   state.status = *status;
 
-  auto strategy =
-      device_.readValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy);
+  auto strategy = device_.readValue(somanet::objects::kBrakeOptionsReleaseStrategy);
   if (!strategy) {
     return std::unexpected(strategy.error());
   }
   state.releaseStrategy = static_cast<somanet::BrakeReleaseStrategy>(*strategy);
 
-  auto pullTime = device_.readValue<uint16_t>(somanet::kBrakeOptions, somanet::kBrakePullTime);
+  auto pullTime = device_.readValue(somanet::objects::kBrakeOptionsPullTime);
   if (!pullTime) {
     return std::unexpected(pullTime.error());
   }
   state.pullTime = std::chrono::milliseconds(*pullTime);
 
-  auto pullVoltage =
-      device_.readValue<uint32_t>(somanet::kBrakeOptions, somanet::kBrakePullVoltage);
+  auto pullVoltage = device_.readValue(somanet::objects::kBrakeOptionsPullVoltage);
   if (!pullVoltage) {
     return std::unexpected(pullVoltage.error());
   }
   state.pullVoltageMv = *pullVoltage;
 
-  auto holdVoltage =
-      device_.readValue<uint32_t>(somanet::kBrakeOptions, somanet::kBrakeHoldVoltage);
+  auto holdVoltage = device_.readValue(somanet::objects::kBrakeOptionsHoldVoltage);
   if (!holdVoltage) {
     return std::unexpected(holdVoltage.error());
   }
@@ -1630,13 +1628,12 @@ void to_json(nlohmann::json& j, const CommutationOffsetResult& result) {
 std::expected<std::optional<somanet::CommutationOffsetMethod>, std::string>
 SomanetDrive::commutationOffsetMethod() const {
   if (device_.hasParameters() &&
-      !device_.parameter(somanet::kCommutationOffsetDetection, somanet::kCommutationOffsetMethod)) {
+      !device_.parameter(somanet::objects::kCommutationOffsetMeasurementMethod)) {
     return std::nullopt;
   }
   // INTEGER8, as the drive declares it, so a negative value reaches the range check below and is
   // not refused as a type mismatch.
-  auto raw = device_.readValue<int8_t>(somanet::kCommutationOffsetDetection,
-                                       somanet::kCommutationOffsetMethod);
+  auto raw = device_.readValue(somanet::objects::kCommutationOffsetMeasurementMethod);
   if (!raw) {
     return std::unexpected(raw.error());
   }

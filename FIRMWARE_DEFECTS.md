@@ -74,6 +74,7 @@ Motion Master works around each item below, and the changelogs record it. None o
 
 | Device | Behaviour | Motion Master 6 | Motion Master 5 |
 | --- | --- | --- | --- |
+| Circulo, Node, Integro | 0x1016:01, Consumer heartbeat time, is INTEGER32 in the ESI, in the EDS (`DataType=0x0004`) and in `co_dictionary.c`. CiA 301 declares it UNSIGNED32, with the node ID in bits 16 to 23. This was not checked against a copy of CiA 301. The two types read the same below 2^31. | No action needed, unreleased (#214): the master reads and writes it as INTEGER32, as the ESI declares. | Not checked. |
 | Integro | A read of a free PDO mapping slot gets no answer. A Node answers in under 1 ms. A read of every parameter took 36 s. | Workaround, alpha.83: ask once and remember the failure. | Not checked. |
 | Integro | A read of `0xF050:02`, an object it does not have, gets no answer instead of an abort. A Node aborts in about 150 ms. | Not checked. | Workaround, 5.7.0: read it only when the dictionary lists it. |
 | Integro | The netX serves `0x10F8` over CoE, but OS command 21 leaves it out of its output. | Workaround, alpha.83: the master leaves `0x10F8` out of the split. | Not checked. |

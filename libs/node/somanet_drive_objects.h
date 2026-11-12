@@ -8,8 +8,8 @@
 // Each constant carries an object's index, subindex and the C++ type its declared
 // ETG.1020 type maps to, so a call site cannot disagree with the object it names:
 //
-//     device.value(objects::kStatusword)        // std::optional<uint16_t>
-//     device.readValue(objects::kDeviceName)    // std::expected<std::string, ...>
+//     device.value(objects::kStatusword)                    // std::optional<uint16_t>
+//     device.readValue(objects::kManufacturerDeviceName)    // std::expected<std::string, ...>
 //
 // The union of every device in the ESI is emitted: which module is fitted is unknowable
 // offline, so an address that does not apply to the drive in front of you simply fails
@@ -49,7 +49,7 @@ inline constexpr ObjectAddress<int16_t> kCommutationAngleOffset{0x2001, 0x00};
 inline constexpr ObjectAddress<uint16_t> kPositionControlStrategy{0x2002, 0x00};
 
 /// Motor specific settings / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kMotorSpecificSettingsCount{0x2003, 0x00};
+inline constexpr ObjectAddress<uint8_t> kMotorSpecificSettings{0x2003, 0x00};
 
 /// Motor specific settings / Pole pairs — rw
 inline constexpr ObjectAddress<uint8_t> kMotorSpecificSettingsPolePairs{0x2003, 0x01};
@@ -71,7 +71,7 @@ inline constexpr ObjectAddress<uint32_t> kMotorSpecificSettingsDifferenceOfLdAnd
                                                                                              0x06};
 
 /// Brake options / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kBrakeOptionsCount{0x2004, 0x00};
+inline constexpr ObjectAddress<uint8_t> kBrakeOptions{0x2004, 0x00};
 
 /// Brake options / Pull voltage — rw, mV
 inline constexpr ObjectAddress<uint32_t> kBrakeOptionsPullVoltage{0x2004, 0x01};
@@ -111,7 +111,7 @@ inline constexpr ObjectAddress<uint8_t> kBrakeOptionsSwitchingFrequency{0x2004, 
 inline constexpr ObjectAddress<int8_t> kBrakeOptionsInitialMovementDirectionPinBrake{0x2004, 0x0C};
 
 /// Homing Options / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kHomingOptionsCount{0x2005, 0x00};
+inline constexpr ObjectAddress<uint8_t> kHomingOptions{0x2005, 0x00};
 
 /// Homing Options / Home Position — ro, Inc
 inline constexpr ObjectAddress<int32_t> kHomingOptionsHomePosition{0x2005, 0x01};
@@ -128,7 +128,7 @@ inline constexpr ObjectAddress<uint16_t> kHomingOptionsTorqueThresholdForHomingO
 inline constexpr ObjectAddress<uint16_t> kHomingOptionsOffsetFromEndstop{0x2005, 0x04};
 
 /// Protection / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kProtectionCount{0x2006, 0x00};
+inline constexpr ObjectAddress<uint8_t> kProtection{0x2006, 0x00};
 
 /// Protection / Undervoltage setpoint — rw, V
 inline constexpr ObjectAddress<int32_t> kProtectionUndervoltageSetpoint{0x2006, 0x01};
@@ -140,7 +140,7 @@ inline constexpr ObjectAddress<int32_t> kProtectionOvervoltageSetpoint{0x2006, 0
 inline constexpr ObjectAddress<int32_t> kProtectionOvercurrentSetpoint{0x2006, 0x03};
 
 /// Cogging torque compensation / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kCoggingTorqueCompensationCount{0x2008, 0x00};
+inline constexpr ObjectAddress<uint8_t> kCoggingTorqueCompensation{0x2008, 0x00};
 
 /// Cogging torque compensation / State — ro
 inline constexpr ObjectAddress<int16_t> kCoggingTorqueCompensationState{0x2008, 0x01};
@@ -149,7 +149,7 @@ inline constexpr ObjectAddress<int16_t> kCoggingTorqueCompensationState{0x2008, 
 inline constexpr ObjectAddress<int16_t> kCoggingTorqueCompensationEnabled{0x2008, 0x02};
 
 /// Commutation offset / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kCommutationOffsetCount{0x2009, 0x00};
+inline constexpr ObjectAddress<uint8_t> kCommutationOffset{0x2009, 0x00};
 
 /// Commutation offset / State — rw
 inline constexpr ObjectAddress<int16_t> kCommutationOffsetState{0x2009, 0x01};
@@ -170,7 +170,7 @@ inline constexpr ObjectAddress<float> kCommutationOffsetPhasingControllerKi{0x20
 inline constexpr ObjectAddress<float> kCommutationOffsetPhasingControllerKd{0x2009, 0x06};
 
 /// I2t and Stall protection / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kI2tAndStallProtectionCount{0x200A, 0x00};
+inline constexpr ObjectAddress<uint8_t> kI2tAndStallProtection{0x200A, 0x00};
 
 /// I2t and Stall protection / Enabled — rw
 inline constexpr ObjectAddress<uint8_t> kI2tAndStallProtectionEnabled{0x200A, 0x01};
@@ -197,13 +197,13 @@ inline constexpr ObjectAddress<uint8_t> kOverspeedProtectionLimit{0x200C, 0x00};
 inline constexpr ObjectAddress<uint8_t> kSystemPolarity{0x200D, 0x00};
 
 /// Logging / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kLoggingCount{0x200E, 0x00};
+inline constexpr ObjectAddress<uint8_t> kLogging{0x200E, 0x00};
 
 /// Logging / State — rw
 inline constexpr ObjectAddress<uint8_t> kLoggingState{0x200E, 0x01};
 
 /// Torque controller / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTorqueControllerCount{0x2010, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTorqueController{0x2010, 0x00};
 
 /// Torque controller / Controller Kp (disabled) — rw
 inline constexpr ObjectAddress<float> kTorqueControllerControllerKpDisabled{0x2010, 0x01};
@@ -266,7 +266,7 @@ inline constexpr ObjectAddress<uint32_t> kTorqueControllerActiveShortCircuitDura
                                                                                          0x12};
 
 /// Velocity controller / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kVelocityControllerCount{0x2011, 0x00};
+inline constexpr ObjectAddress<uint8_t> kVelocityController{0x2011, 0x00};
 
 /// Velocity controller / Controller Kp — rw
 inline constexpr ObjectAddress<float> kVelocityControllerControllerKp{0x2011, 0x01};
@@ -284,7 +284,7 @@ inline constexpr ObjectAddress<uint32_t> kVelocityControllerControllerIntegralLi
 inline constexpr ObjectAddress<uint8_t> kVelocityControllerEncoderSource{0x2011, 0x05};
 
 /// Position controller / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kPositionControllerCount{0x2012, 0x00};
+inline constexpr ObjectAddress<uint8_t> kPositionController{0x2012, 0x00};
 
 /// Position controller / Position loop Kp — rw
 inline constexpr ObjectAddress<float> kPositionControllerPositionLoopKp{0x2012, 0x01};
@@ -314,7 +314,7 @@ inline constexpr ObjectAddress<uint32_t> kPositionControllerVelocityLoopIntegral
 inline constexpr ObjectAddress<uint8_t> kPositionControllerEncoderSource{0x2012, 0x09};
 
 /// Gain scheduling / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGainSchedulingCount{0x2013, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGainScheduling{0x2013, 0x00};
 
 /// Gain scheduling / Enabled — rw
 inline constexpr ObjectAddress<uint8_t> kGainSchedulingEnabled{0x2013, 0x01};
@@ -374,7 +374,7 @@ inline constexpr ObjectAddress<float> kGainSchedulingVelocityLoopKd1{0x2013, 0x1
 inline constexpr ObjectAddress<uint32_t> kGainSchedulingVelocityLoopIntegralLimit1{0x2013, 0x13};
 
 /// Torque window / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTorqueWindowCount{0x2014, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTorqueWindow{0x2014, 0x00};
 
 /// Torque window / Value — rw
 inline constexpr ObjectAddress<uint16_t> kTorqueWindowValue{0x2014, 0x01};
@@ -383,7 +383,7 @@ inline constexpr ObjectAddress<uint16_t> kTorqueWindowValue{0x2014, 0x01};
 inline constexpr ObjectAddress<uint16_t> kTorqueWindowTime{0x2014, 0x02};
 
 /// Velocity feed forward / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kVelocityFeedForwardCount{0x2015, 0x00};
+inline constexpr ObjectAddress<uint8_t> kVelocityFeedForward{0x2015, 0x00};
 
 /// Velocity feed forward / Gain — rw
 inline constexpr ObjectAddress<int16_t> kVelocityFeedForwardGain{0x2015, 0x01};
@@ -392,7 +392,7 @@ inline constexpr ObjectAddress<int16_t> kVelocityFeedForwardGain{0x2015, 0x01};
 inline constexpr ObjectAddress<uint16_t> kVelocityFeedForwardCutoffFrequency{0x2015, 0x02};
 
 /// Following error option codes / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kFollowingErrorOptionCodesCount{0x2017, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFollowingErrorOptionCodes{0x2017, 0x00};
 
 /// Following error option codes / Position following error option code — rw
 inline constexpr ObjectAddress<uint8_t> kFollowingErrorOptionCodesPositionFollowingErrorOptionCode{
@@ -403,7 +403,7 @@ inline constexpr ObjectAddress<uint8_t> kFollowingErrorOptionCodesVelocityFollow
     0x2017, 0x02};
 
 /// Velocity following error / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kVelocityFollowingErrorCount{0x2018, 0x00};
+inline constexpr ObjectAddress<uint8_t> kVelocityFollowingError{0x2018, 0x00};
 
 /// Velocity following error / Window — rw, rpm
 inline constexpr ObjectAddress<uint16_t> kVelocityFollowingErrorWindow{0x2018, 0x01};
@@ -418,7 +418,7 @@ inline constexpr ObjectAddress<int32_t> kVelocityFollowingErrorActualValue{0x201
 inline constexpr ObjectAddress<int16_t> kTotalMotorCurrent{0x2019, 0x00};
 
 /// Velocity feedback filter / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kVelocityFeedbackFilterCount{0x2021, 0x00};
+inline constexpr ObjectAddress<uint8_t> kVelocityFeedbackFilter{0x2021, 0x00};
 
 /// Velocity feedback filter / Type — rw
 inline constexpr ObjectAddress<uint8_t> kVelocityFeedbackFilterType{0x2021, 0x01};
@@ -427,7 +427,7 @@ inline constexpr ObjectAddress<uint8_t> kVelocityFeedbackFilterType{0x2021, 0x01
 inline constexpr ObjectAddress<uint32_t> kVelocityFeedbackFilterCutoffFrequency{0x2021, 0x02};
 
 /// Position feedback filter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kPositionFeedbackFilterCount{0x2022, 0x00};
+inline constexpr ObjectAddress<uint8_t> kPositionFeedbackFilter{0x2022, 0x00};
 
 /// Position feedback filter / Type — rw
 inline constexpr ObjectAddress<uint8_t> kPositionFeedbackFilterType{0x2022, 0x01};
@@ -436,7 +436,7 @@ inline constexpr ObjectAddress<uint8_t> kPositionFeedbackFilterType{0x2022, 0x01
 inline constexpr ObjectAddress<uint32_t> kPositionFeedbackFilterCutoffFrequency{0x2022, 0x02};
 
 /// Notch filter / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kNotchFilterCount{0x2023, 0x00};
+inline constexpr ObjectAddress<uint8_t> kNotchFilter{0x2023, 0x00};
 
 /// Notch filter / Enabled — rw
 inline constexpr ObjectAddress<uint8_t> kNotchFilterEnabled{0x2023, 0x01};
@@ -451,7 +451,7 @@ inline constexpr ObjectAddress<uint16_t> kNotchFilterRejectionBand{0x2023, 0x03}
 inline constexpr ObjectAddress<uint16_t> kNotchFilterDepth{0x2023, 0x04};
 
 /// Control input FIR filter / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kControlInputFIRFilterCount{0x2027, 0x00};
+inline constexpr ObjectAddress<uint8_t> kControlInputFIRFilter{0x2027, 0x00};
 
 /// Control input FIR filter / Enabled — rw
 inline constexpr ObjectAddress<uint8_t> kControlInputFIRFilterEnabled{0x2027, 0x01};
@@ -460,19 +460,19 @@ inline constexpr ObjectAddress<uint8_t> kControlInputFIRFilterEnabled{0x2027, 0x
 inline constexpr ObjectAddress<uint16_t> kControlInputFIRFilterOrder{0x2027, 0x02};
 
 /// Core temperature / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kCoreTemperatureCount{0x2030, 0x00};
+inline constexpr ObjectAddress<uint8_t> kCoreTemperature{0x2030, 0x00};
 
 /// Core temperature / Measured temperature — ro, m°C
 inline constexpr ObjectAddress<int32_t> kCoreTemperatureMeasuredTemperature{0x2030, 0x01};
 
 /// Drive temperature / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kDriveTemperatureCount{0x2031, 0x00};
+inline constexpr ObjectAddress<uint8_t> kDriveTemperature{0x2031, 0x00};
 
 /// Drive temperature / Measured temperature — ro, m°C
 inline constexpr ObjectAddress<int32_t> kDriveTemperatureMeasuredTemperature{0x2031, 0x01};
 
 /// External scaled measurement / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kExternalScaledMeasurementCount{0x2038, 0x00};
+inline constexpr ObjectAddress<uint8_t> kExternalScaledMeasurement{0x2038, 0x00};
 
 /// External scaled measurement / Scaled measurement value — ro
 inline constexpr ObjectAddress<float> kExternalScaledMeasurementScaledMeasurementValue{0x2038,
@@ -512,7 +512,7 @@ inline constexpr ObjectAddress<float> kExternalScaledMeasurementUpperErrorThresh
 inline constexpr ObjectAddress<float> kExternalScaledMeasurementLowerErrorThreshold{0x2038, 0x0C};
 
 /// Error report / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kErrorReportCount{0x203F, 0x00};
+inline constexpr ObjectAddress<uint8_t> kErrorReport{0x203F, 0x00};
 
 /// Error report / Description — ro
 inline constexpr ObjectAddress<std::string> kErrorReportDescription{0x203F, 0x01};
@@ -521,7 +521,7 @@ inline constexpr ObjectAddress<std::string> kErrorReportDescription{0x203F, 0x01
 inline constexpr ObjectAddress<uint32_t> kInputCounter{0x2040, 0x00};
 
 /// Motor current / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kMotorCurrentCount{0x2041, 0x00};
+inline constexpr ObjectAddress<uint8_t> kMotorCurrent{0x2041, 0x00};
 
 /// Motor current / Vector amplitude — ro, mA
 inline constexpr ObjectAddress<int32_t> kMotorCurrentVectorAmplitude{0x2041, 0x01};
@@ -530,7 +530,7 @@ inline constexpr ObjectAddress<int32_t> kMotorCurrentVectorAmplitude{0x2041, 0x0
 inline constexpr ObjectAddress<int32_t> kMotorCurrentPhaseAdvanceAngle{0x2041, 0x02};
 
 /// Joint torque controller / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kJointTorqueControllerCount{0x2050, 0x00};
+inline constexpr ObjectAddress<uint8_t> kJointTorqueController{0x2050, 0x00};
 
 /// Joint torque controller / Controller Kp — rw
 inline constexpr ObjectAddress<float> kJointTorqueControllerControllerKp{0x2050, 0x01};
@@ -558,7 +558,7 @@ inline constexpr ObjectAddress<int32_t> kJointTorqueOffset{0x2053, 0x00};
 inline constexpr ObjectAddress<uint32_t> kMaxJointTorque{0x2054, 0x00};
 
 /// Impedance controller / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kImpedanceControllerCount{0x2060, 0x00};
+inline constexpr ObjectAddress<uint8_t> kImpedanceController{0x2060, 0x00};
 
 /// Impedance controller / Stiffness — rw, mNm/rad
 inline constexpr ObjectAddress<int32_t> kImpedanceControllerStiffness{0x2060, 0x01};
@@ -580,7 +580,7 @@ inline constexpr ObjectAddress<uint32_t> kImpedanceControllerJointTorqueControll
     0x2060, 0x06};
 
 /// High resolution data / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kHighResolutionDataCount{0x20E1, 0x00};
+inline constexpr ObjectAddress<uint8_t> kHighResolutionData{0x20E1, 0x00};
 
 /// High resolution data / SubIndex 001 — ro
 inline constexpr ObjectAddress<std::vector<uint8_t>> kHighResolutionDataSubIndex001{0x20E1, 0x01};
@@ -601,7 +601,7 @@ inline constexpr ObjectAddress<uint32_t> kTimestamp{0x20F0, 0x00};
 inline constexpr ObjectAddress<std::string> kAssignedName{0x20F2, 0x00};
 
 /// Encoder 1 configuration / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kEncoder1ConfigurationCount{0x2110, 0x00};
+inline constexpr ObjectAddress<uint8_t> kEncoder1Configuration{0x2110, 0x00};
 
 /// Encoder 1 configuration / Sensor port — rw
 inline constexpr ObjectAddress<uint8_t> kEncoder1ConfigurationSensorPort{0x2110, 0x01};
@@ -691,7 +691,7 @@ inline constexpr ObjectAddress<uint8_t> kEncoder1ConfigurationFilterDisabled{0x2
 inline constexpr ObjectAddress<uint8_t> kEncoder1ConfigurationSamplingFrequency{0x2110, 0x1C};
 
 /// Encoder 1 feedback / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kEncoder1FeedbackCount{0x2111, 0x00};
+inline constexpr ObjectAddress<uint8_t> kEncoder1Feedback{0x2111, 0x00};
 
 /// Encoder 1 feedback / Raw position — ro, Inc
 inline constexpr ObjectAddress<uint32_t> kEncoder1FeedbackRawPosition{0x2111, 0x01};
@@ -706,7 +706,7 @@ inline constexpr ObjectAddress<int32_t> kEncoder1FeedbackVelocity{0x2111, 0x03};
 inline constexpr ObjectAddress<uint32_t> kEncoder1FeedbackEncoderStatus{0x2111, 0x04};
 
 /// Encoder 2 configuration / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kEncoder2ConfigurationCount{0x2112, 0x00};
+inline constexpr ObjectAddress<uint8_t> kEncoder2Configuration{0x2112, 0x00};
 
 /// Encoder 2 configuration / Sensor port — rw
 inline constexpr ObjectAddress<uint8_t> kEncoder2ConfigurationSensorPort{0x2112, 0x01};
@@ -796,7 +796,7 @@ inline constexpr ObjectAddress<uint8_t> kEncoder2ConfigurationFilterDisabled{0x2
 inline constexpr ObjectAddress<uint8_t> kEncoder2ConfigurationSamplingFrequency{0x2112, 0x1C};
 
 /// Encoder 2 feedback / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kEncoder2FeedbackCount{0x2113, 0x00};
+inline constexpr ObjectAddress<uint8_t> kEncoder2Feedback{0x2113, 0x00};
 
 /// Encoder 2 feedback / Raw position — ro, Inc
 inline constexpr ObjectAddress<uint32_t> kEncoder2FeedbackRawPosition{0x2113, 0x01};
@@ -811,7 +811,7 @@ inline constexpr ObjectAddress<int32_t> kEncoder2FeedbackVelocity{0x2113, 0x03};
 inline constexpr ObjectAddress<uint32_t> kEncoder2FeedbackEncoderStatus{0x2113, 0x04};
 
 /// Torque sensor configuration / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTorqueSensorConfigurationCount{0x2150, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTorqueSensorConfiguration{0x2150, 0x00};
 
 /// Torque sensor configuration / Type — rw
 inline constexpr ObjectAddress<uint8_t> kTorqueSensorConfigurationType{0x2150, 0x01};
@@ -847,7 +847,7 @@ inline constexpr ObjectAddress<float> kTorqueSensorConfigurationCoefficientK5{0x
 inline constexpr ObjectAddress<int32_t> kTorqueSensorValue{0x2151, 0x00};
 
 /// Torque sensor feedback filter / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTorqueSensorFeedbackFilterCount{0x2152, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTorqueSensorFeedbackFilter{0x2152, 0x00};
 
 /// Torque sensor feedback filter / Type — rw
 inline constexpr ObjectAddress<uint8_t> kTorqueSensorFeedbackFilterType{0x2152, 0x01};
@@ -856,7 +856,7 @@ inline constexpr ObjectAddress<uint8_t> kTorqueSensorFeedbackFilterType{0x2152, 
 inline constexpr ObjectAddress<uint32_t> kTorqueSensorFeedbackFilterCutoffFrequency{0x2152, 0x02};
 
 /// GPIO pin configuration / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGPIOPinConfigurationCount{0x2210, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGPIOPinConfiguration{0x2210, 0x00};
 
 /// GPIO pin configuration / Digital IO 1 — rw
 inline constexpr ObjectAddress<uint8_t> kGPIOPinConfigurationDigitalIO1{0x2210, 0x01};
@@ -880,19 +880,19 @@ inline constexpr ObjectAddress<uint8_t> kGPIOPinConfigurationDigitalIO6{0x2210, 
 inline constexpr ObjectAddress<uint8_t> kGPIOPinConfigurationDigitalIO7{0x2210, 0x07};
 
 /// GPIO output events / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGPIOOutputEventsCount{0x2211, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGPIOOutputEvents{0x2211, 0x00};
 
 /// GPIO output events / Timestamp setpoint — rw
 inline constexpr ObjectAddress<uint32_t> kGPIOOutputEventsTimestampSetpoint{0x2211, 0x01};
 
 /// GPIO input actions / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGPIOInputActionsCount{0x2212, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGPIOInputActions{0x2212, 0x00};
 
 /// GPIO input actions / Timestamp on rising edge — ro
 inline constexpr ObjectAddress<uint32_t> kGPIOInputActionsTimestampOnRisingEdge{0x2212, 0x01};
 
 /// GPIO position trigger / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGPIOPositionTriggerCount{0x2213, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGPIOPositionTrigger{0x2213, 0x00};
 
 /// GPIO position trigger / Position setpoint — rw, Inc
 inline constexpr ObjectAddress<int32_t> kGPIOPositionTriggerPositionSetpoint{0x2213, 0x01};
@@ -904,13 +904,13 @@ inline constexpr ObjectAddress<uint8_t> kGPIOPositionTriggerTargetEncoder{0x2213
 inline constexpr ObjectAddress<uint8_t> kGPIOPositionTriggerPulseWidth{0x2213, 0x03};
 
 /// GPIO global options / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGPIOGlobalOptionsCount{0x2214, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGPIOGlobalOptions{0x2214, 0x00};
 
 /// GPIO global options / Voltage level — rw
 inline constexpr ObjectAddress<uint8_t> kGPIOGlobalOptionsVoltageLevel{0x2214, 0x01};
 
 /// GPIO addressable LED control / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGPIOAddressableLEDControlCount{0x2215, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGPIOAddressableLEDControl{0x2215, 0x00};
 
 /// GPIO addressable LED control / LED color — rw
 inline constexpr ObjectAddress<uint32_t> kGPIOAddressableLEDControlLEDColor{0x2215, 0x01};
@@ -940,7 +940,7 @@ inline constexpr ObjectAddress<uint8_t> kSafePositionValid{0x2601, 0x00};
 inline constexpr ObjectAddress<uint8_t> kSafeSpeedValid{0x2602, 0x00};
 
 /// Safe input / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafeInputCount{0x2603, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafeInput{0x2603, 0x00};
 
 /// Safe input / SubIndex 001 — ro
 inline constexpr ObjectAddress<uint8_t> kSafeInputSubIndex001{0x2603, 0x01};
@@ -955,7 +955,7 @@ inline constexpr ObjectAddress<uint8_t> kSafeInputSubIndex003{0x2603, 0x03};
 inline constexpr ObjectAddress<uint8_t> kSafeInputSubIndex004{0x2603, 0x04};
 
 /// Safe output monitor / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafeOutputMonitorCount{0x2604, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafeOutputMonitor{0x2604, 0x00};
 
 /// Safe output monitor / SubIndex 001 — ro
 inline constexpr ObjectAddress<uint8_t> kSafeOutputMonitorSubIndex001{0x2604, 0x01};
@@ -964,7 +964,7 @@ inline constexpr ObjectAddress<uint8_t> kSafeOutputMonitorSubIndex001{0x2604, 0x
 inline constexpr ObjectAddress<uint8_t> kSafeOutputMonitorSubIndex002{0x2604, 0x02};
 
 /// Analog input / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kAnalogInputCount{0x2605, 0x00};
+inline constexpr ObjectAddress<uint8_t> kAnalogInput{0x2605, 0x00};
 
 /// Analog input / Analog diagnostic active — rw
 inline constexpr ObjectAddress<uint8_t> kAnalogInputAnalogDiagnosticActive{0x2605, 0x01};
@@ -976,7 +976,7 @@ inline constexpr ObjectAddress<uint8_t> kAnalogInputAnalogValueValid{0x2605, 0x0
 inline constexpr ObjectAddress<int16_t> kAnalogInputSafeAnalogValueScaled{0x2605, 0x03};
 
 /// Manufacturing parameters / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kManufacturingParametersCount{0x2610, 0x00};
+inline constexpr ObjectAddress<uint8_t> kManufacturingParameters{0x2610, 0x00};
 
 /// Manufacturing parameters / Vendor ID — ro
 inline constexpr ObjectAddress<uint32_t> kManufacturingParametersVendorID{0x2610, 0x01};
@@ -991,7 +991,7 @@ inline constexpr ObjectAddress<std::string> kManufacturingParametersDeviceVersio
 inline constexpr ObjectAddress<std::string> kManufacturingParametersSerialNumber{0x2610, 0x04};
 
 /// Safety Module input diagnostics / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafetyModuleInputDiagnosticsCount{0x2611, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafetyModuleInputDiagnostics{0x2611, 0x00};
 
 /// Safety Module input diagnostics / SubIndex 001 — ro
 inline constexpr ObjectAddress<uint8_t> kSafetyModuleInputDiagnosticsSubIndex001{0x2611, 0x01};
@@ -1000,7 +1000,7 @@ inline constexpr ObjectAddress<uint8_t> kSafetyModuleInputDiagnosticsSubIndex001
 inline constexpr ObjectAddress<uint8_t> kSafetyModuleInputDiagnosticsSubIndex002{0x2611, 0x02};
 
 /// General / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGeneralCount{0x2620, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGeneral{0x2620, 0x00};
 
 /// General / Drive safety name — rw
 inline constexpr ObjectAddress<std::string> kGeneralDriveSafetyName{0x2620, 0x01};
@@ -1015,7 +1015,7 @@ inline constexpr ObjectAddress<uint16_t> kGeneralSafeAddress{0x2620, 0x03};
 inline constexpr ObjectAddress<uint8_t> kGeneralFSoEDownload{0x2620, 0x04};
 
 /// Safety digital IO / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafetyDigitalIOCount{0x2621, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafetyDigitalIO{0x2621, 0x00};
 
 /// Safety digital IO / Acknowledge via drive — rw
 inline constexpr ObjectAddress<uint8_t> kSafetyDigitalIOAcknowledgeViaDrive{0x2621, 0x01};
@@ -1042,7 +1042,7 @@ inline constexpr ObjectAddress<uint8_t> kSafetyDigitalIOOutput1Function{0x2621, 
 inline constexpr ObjectAddress<uint8_t> kSafetyDigitalIOOutput2Function{0x2621, 0x08};
 
 /// Safety IO analog input / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafetyIOAnalogInputCount{0x2625, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafetyIOAnalogInput{0x2625, 0x00};
 
 /// Safety IO analog input / Analog input1 Gain — rw, nNm/Inc
 inline constexpr ObjectAddress<int32_t> kSafetyIOAnalogInputAnalogInput1Gain{0x2625, 0x01};
@@ -1069,10 +1069,10 @@ inline constexpr ObjectAddress<int16_t> kSafetyIOAnalogInputSafeAnalogInChannelA
 inline constexpr ObjectAddress<int16_t> kSafetyIOAnalogInputSafeAnalogInChannelB{0x2625, 0x08};
 
 /// Encoder source type / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kEncoderSourceTypeCount{0x2630, 0x00};
+inline constexpr ObjectAddress<uint8_t> kEncoderSourceType{0x2630, 0x00};
 
 /// Encoder source type — rw
-inline constexpr ObjectAddress<uint8_t> kEncoderSourceType{0x2630, 0x01};
+inline constexpr ObjectAddress<uint8_t> kEncoderSourceTypeEncoderSourceType{0x2630, 0x01};
 
 /// Encoder source type / Encoder resolution — rw, Inc
 inline constexpr ObjectAddress<uint32_t> kEncoderSourceTypeEncoderResolution{0x2630, 0x02};
@@ -1090,7 +1090,7 @@ inline constexpr ObjectAddress<uint16_t> kEncoderSourceTypeEncoderTimeout{0x2630
 inline constexpr ObjectAddress<uint8_t> kEncoderSourceTypeMultiturnCountingBySMM{0x2630, 0x06};
 
 /// Encoder verification / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kEncoderVerificationCount{0x2631, 0x00};
+inline constexpr ObjectAddress<uint8_t> kEncoderVerification{0x2631, 0x00};
 
 /// Encoder verification / Verification sensor source type — rw
 inline constexpr ObjectAddress<uint8_t> kEncoderVerificationVerificationSensorSourceType{0x2631,
@@ -1105,7 +1105,7 @@ inline constexpr ObjectAddress<uint8_t> kEncoderVerificationVerificationSensorMu
                                                                                             0x03};
 
 /// Encoder selection / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kEncoderSelectionCount{0x2635, 0x00};
+inline constexpr ObjectAddress<uint8_t> kEncoderSelection{0x2635, 0x00};
 
 /// Encoder selection / Speed window — rw, ms
 inline constexpr ObjectAddress<uint8_t> kEncoderSelectionSpeedWindow{0x2635, 0x01};
@@ -1146,40 +1146,40 @@ inline constexpr ObjectAddress<uint8_t> kEncoderSelectionSystemPolaritySafety{0x
 inline constexpr ObjectAddress<uint32_t> kEncoderSelectionMaxPositionDiscrepancy{0x2635, 0x0C};
 
 /// STO input / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSTOInputCount{0x2641, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSTOInput{0x2641, 0x00};
 
 /// STO input — rw
-inline constexpr ObjectAddress<uint8_t> kSTOInput{0x2641, 0x01};
+inline constexpr ObjectAddress<uint8_t> kSTOInputSTOInput{0x2641, 0x01};
 
 /// STO input / SBC — rw
 inline constexpr ObjectAddress<uint8_t> kSTOInputSBC{0x2641, 0x02};
 
 /// SS1 input / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSS1InputCount{0x2650, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSS1Input{0x2650, 0x00};
 
 /// SS1 input — rw
-inline constexpr ObjectAddress<uint8_t> kSS1Input{0x2650, 0x01};
+inline constexpr ObjectAddress<uint8_t> kSS1InputSS1Input{0x2650, 0x01};
 
 /// SS1 input / SS1: Deceleration monitoring — rw
 inline constexpr ObjectAddress<uint8_t> kSS1InputSS1DecelerationMonitoring{0x2650, 0x02};
 
 /// SOS input / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSOSInputCount{0x2668, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSOSInput{0x2668, 0x00};
 
 /// SOS input — rw
-inline constexpr ObjectAddress<uint8_t> kSOSInput{0x2668, 0x01};
+inline constexpr ObjectAddress<uint8_t> kSOSInputSOSInput{0x2668, 0x01};
 
 /// SOS input / t_D_SOS — rw, ms
 inline constexpr ObjectAddress<uint16_t> kSOSInputTDSOS{0x2668, 0x02};
 
 /// SS2 input / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSS2InputCount{0x2670, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSS2Input{0x2670, 0x00};
 
 /// SS2 input — rw
-inline constexpr ObjectAddress<uint8_t> kSS2Input{0x2670, 0x01};
+inline constexpr ObjectAddress<uint8_t> kSS2InputSS2Input{0x2670, 0x01};
 
 /// SLS input / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSLSInputCount{0x2690, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSLSInput{0x2690, 0x00};
 
 /// SLS input / SLS1 input — rw
 inline constexpr ObjectAddress<uint8_t> kSLSInputSLS1Input{0x2690, 0x01};
@@ -1197,7 +1197,7 @@ inline constexpr ObjectAddress<uint8_t> kSLSInputSLS4Input{0x2690, 0x04};
 inline constexpr ObjectAddress<uint8_t> kResetPosition{0x26A0, 0x00};
 
 /// Safe torque / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafeTorqueCount{0x26B0, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafeTorque{0x26B0, 0x00};
 
 /// Safe torque / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSafeTorqueSubIndex001{0x26B0, 0x01};
@@ -1206,7 +1206,7 @@ inline constexpr ObjectAddress<uint8_t> kSafeTorqueSubIndex001{0x26B0, 0x01};
 inline constexpr ObjectAddress<uint8_t> kSafeTorqueSubIndex002{0x26B0, 0x02};
 
 /// Safe torque parameter / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafeTorqueParameterCount{0x26B1, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafeTorqueParameter{0x26B1, 0x00};
 
 /// Safe torque parameter / Torque constant (safety) — rw, μNm/A
 inline constexpr ObjectAddress<uint32_t> kSafeTorqueParameterTorqueConstantSafety{0x26B1, 0x01};
@@ -1222,16 +1222,16 @@ inline constexpr ObjectAddress<int16_t> kSafeTorqueParameterCommutationAngleOffs
                                                                                          0x04};
 
 /// SLT input / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSLTInputCount{0x26B2, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSLTInput{0x26B2, 0x00};
 
 /// SLT input — rw
-inline constexpr ObjectAddress<uint8_t> kSLTInput{0x26B2, 0x01};
+inline constexpr ObjectAddress<uint8_t> kSLTInputSLTInput{0x26B2, 0x01};
 
 /// SLT input / SLT source — rw
 inline constexpr ObjectAddress<uint8_t> kSLTInputSLTSource{0x26B2, 0x02};
 
 /// Safe output / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafeOutputCount{0x26F0, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafeOutput{0x26F0, 0x00};
 
 /// Safe output / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSafeOutputSubIndex001{0x26F0, 0x01};
@@ -1240,7 +1240,7 @@ inline constexpr ObjectAddress<uint8_t> kSafeOutputSubIndex001{0x26F0, 0x01};
 inline constexpr ObjectAddress<uint8_t> kSafeOutputSubIndex002{0x26F0, 0x02};
 
 /// Firmware / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kFirmwareCount{0x2700, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFirmware{0x2700, 0x00};
 
 /// Firmware / Core version — ro
 inline constexpr ObjectAddress<std::string> kFirmwareCoreVersion{0x2700, 0x01};
@@ -1261,7 +1261,7 @@ inline constexpr ObjectAddress<uint32_t> kUserMISO{0x2704, 0x00};
 inline constexpr ObjectAddress<uint8_t> kSetupWizardCompleted{0x2705, 0x00};
 
 /// TCP/IP Configuration / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTCPIPConfigurationCount{0x2E00, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTCPIPConfiguration{0x2E00, 0x00};
 
 /// TCP/IP Configuration / IP address — rw
 inline constexpr ObjectAddress<uint32_t> kTCPIPConfigurationIPAddress{0x2E00, 0x01};
@@ -1285,7 +1285,7 @@ inline constexpr ObjectAddress<std::string> kTCPIPConfigurationDomainName{0x2E00
 inline constexpr ObjectAddress<std::string> kTCPIPConfigurationHostName{0x2E00, 0x07};
 
 /// Internal usage only / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kInternalUsageOnlyCount{0x2FFF, 0x00};
+inline constexpr ObjectAddress<uint8_t> kInternalUsageOnly{0x2FFF, 0x00};
 
 /// Internal usage only / TCTM3 — ro
 inline constexpr ObjectAddress<int16_t> kInternalUsageOnlyTCTM3{0x2FFF, 0x01};
@@ -1300,7 +1300,7 @@ inline constexpr ObjectAddress<int16_t> kInternalUsageOnlyTCNM1{0x2FFF, 0x03};
 inline constexpr ObjectAddress<uint16_t> kInternalUsageOnlyBKC{0x2FFF, 0x04};
 
 /// FSoE Communication Parameter / Number of Subindex — ro
-inline constexpr ObjectAddress<uint8_t> kFSoECommunicationParameterCount{0xE901, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFSoECommunicationParameter{0xE901, 0x00};
 
 /// FSoE Communication Parameter / Version — ro
 inline constexpr ObjectAddress<std::string> kFSoECommunicationParameterVersion{0xE901, 0x01};
@@ -1333,7 +1333,7 @@ inline constexpr ObjectAddress<uint16_t> kFSoECommunicationParameterApplicationP
 inline constexpr ObjectAddress<uint32_t> kFSoECommunicationParameterSRACRC{0xE901, 0x09};
 
 /// Device Safety Address / Subindex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kDeviceSafetyAddressCount{0xF980, 0x00};
+inline constexpr ObjectAddress<uint8_t> kDeviceSafetyAddress{0xF980, 0x00};
 
 /// Device Safety Address / FSoE Address — ro
 inline constexpr ObjectAddress<uint16_t> kDeviceSafetyAddressFSoEAddress{0xF980, 0x01};

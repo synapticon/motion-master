@@ -17,12 +17,14 @@
 #include "comm/sii.h"
 #include "core/util.h"
 #include "node/cia402.h"
+#include "node/cia402_drive_objects.h"
 #include "node/device_parameter.h"
 #include "node/esi_cache.h"
 #include "node/firmware_version.h"
 #include "node/parameter_cache.h"
 #include "node/process_data.h"
 #include "node/process_image.h"
+#include "node/profile_device_objects.h"
 #include "node/synapticon.h"
 
 namespace mm::node {
@@ -82,8 +84,8 @@ bool Device::isCia402() const {
   // map is enough — no bus I/O. Both lookups under one lock: this is reached from to_json on an
   // HTTP worker while another worker may be re-enumerating the dictionary.
   std::lock_guard<std::mutex> lock(*parametersMutex_);
-  return findParameter(cia402::kControlword, 0) != nullptr &&
-         findParameter(cia402::kStatusword, 0) != nullptr;
+  return findParameter(cia402::objects::kControlword) != nullptr &&
+         findParameter(cia402::objects::kStatusword) != nullptr;
 }
 
 bool Device::mailboxActive() const {
@@ -213,7 +215,8 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
   std::optional<std::vector<DeviceParameter>> definitions;
   std::string firmwareVersion;
   if (useParameterCache || useEsiCache) {
-    if (auto version = readSdo(0x100A, 0); version) {
+    constexpr auto kVersion = profile::objects::kManufacturerSoftwareVersion;
+    if (auto version = readSdo(kVersion.index, kVersion.subindex); version) {
       firmwareVersion = trimFirmwareVersion(*version);
     } else {
       spdlog::debug("Device {}: no firmware version in 0x100A, so no cache applies: {}",
@@ -779,11 +782,11 @@ std::expected<std::vector<PdoMappingObject>, std::string> Device::readPdoAssignm
 
 std::expected<PdoMapping, std::string> Device::readPdoMapping() {
   PdoMapping mapping;
-  auto outputs = readPdoAssignment(0x1C12);
+  auto outputs = readPdoAssignment(profile::objects::kSM2Assignment.index);
   if (!outputs) {
     return std::unexpected(outputs.error());
   }
-  auto inputs = readPdoAssignment(0x1C13);
+  auto inputs = readPdoAssignment(profile::objects::kSM3Assignment.index);
   if (!inputs) {
     return std::unexpected(inputs.error());
   }
@@ -1068,10 +1071,13 @@ std::expected<void, std::string> Device::writePdoMapping(const PdoMapping& mappi
   std::string lastError;
   for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
     auto applied = [&]() -> std::expected<void, std::string> {
-      if (auto r = writePdoDirection(*this, 0x1C12, mapping.outputs); !r) {
+      if (auto r =
+              writePdoDirection(*this, profile::objects::kSM2Assignment.index, mapping.outputs);
+          !r) {
         return r;
       }
-      if (auto r = writePdoDirection(*this, 0x1C13, mapping.inputs); !r) {
+      if (auto r = writePdoDirection(*this, profile::objects::kSM3Assignment.index, mapping.inputs);
+          !r) {
         return r;
       }
       // Read back (this also refreshes flatPdoMapping()) and verify it matches the request.

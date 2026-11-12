@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "node/cia402.h"
+#include "node/cia402_drive_objects.h"
 #include "node/device.h"
 
 namespace mm::example {
@@ -24,7 +25,7 @@ constexpr cia402::OperationMode kMode = cia402::OperationMode::kCyclicSyncVeloci
 /// what we asked for last cycle, read back out of its own cell.
 void applyCommand(Device& drive, uint16_t controlword, uint16_t command) {
   const auto next = static_cast<uint16_t>((controlword & ~cia402::kCommandMask) | command);
-  drive.setValue<uint16_t>(cia402::kControlword, 0, next);
+  drive.setValue(cia402::objects::kControlword, next);
 }
 
 /// @brief The command bits that move @p state one step towards Operation Enabled.
@@ -76,12 +77,12 @@ void ExampleCyclicTask::execute(const mm::core::CycleContext& /*ctx*/) noexcept 
   // Rule 3 — read through the cell. This is the live statusword: the RT exchange decoded it into
   // the cell earlier in this same cycle. nullopt means the object dictionary is not
   // enumerated, or this is not a CiA402 drive — either way there is nothing to command.
-  const auto statusword = drive->value<uint16_t>(cia402::kStatusword, 0);
+  const auto statusword = drive->value(cia402::objects::kStatusword);
   if (!statusword) {
     return;
   }
   const cia402::State state = cia402::decodeState(*statusword);
-  const uint16_t controlword = drive->value<uint16_t>(cia402::kControlword, 0).value_or(0);
+  const uint16_t controlword = drive->value(cia402::objects::kControlword).value_or(0);
 
   // --- the interlock, before anything that could start motion ------------------------------
   //
@@ -109,12 +110,12 @@ void ExampleCyclicTask::execute(const mm::core::CycleContext& /*ctx*/) noexcept 
   // The mode first: enabling in the wrong mode only means the setpoint below is ignored. Ask for
   // CSV and come back next cycle — the drive reports the change in 0x6061 once it takes it, so
   // there is nothing to wait on here.
-  const auto mode = drive->value<int8_t>(cia402::kModeOfOperationDisplay, 0);
+  const auto mode = drive->value(cia402::objects::kModesOfOperationDisplay);
   if (!mode) {
     return;
   }
   if (cia402::toOperationMode(*mode) != kMode) {
-    drive->setValue<int8_t>(cia402::kModeOfOperation, 0, static_cast<int8_t>(kMode));
+    drive->setValue(cia402::objects::kModesOfOperation, static_cast<int8_t>(kMode));
     return;
   }
 
@@ -134,7 +135,7 @@ void ExampleCyclicTask::execute(const mm::core::CycleContext& /*ctx*/) noexcept 
   //
   // Stores into the cell; the RT loop composes it into the wire image and it goes out on the next
   // cycle. A read of 0x60FF now returns what was just set, not the last frame's value.
-  drive->setValue<int32_t>(cia402::kTargetVelocity, 0, config_.velocity);
+  drive->setValue(cia402::objects::kTargetVelocity, config_.velocity);
 }
 
 }  // namespace mm::example

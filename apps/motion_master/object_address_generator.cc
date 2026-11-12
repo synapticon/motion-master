@@ -235,7 +235,7 @@ std::string clientIdentifier(std::string_view cxxIdentifier) {
 }
 
 std::string objectIdentifier(std::string_view objectName, std::string_view entryName,
-                             uint8_t subindex, bool composite) {
+                             uint8_t subindex) {
   const auto pascal = [](std::string_view s) {
     std::string out;
     bool upper = true;
@@ -250,12 +250,11 @@ std::string objectIdentifier(std::string_view objectName, std::string_view entry
     return out;
   };
 
+  // Subindex 0 is the object. Every other subindex is an entry of it, like a member of a struct, so
+  // it takes the entry's name after the object's, also where the firmware repeats the object's
+  // name.
   std::string name = pascal(objectName);
-  if (composite && subindex == 0) {
-    // Subindex 0 of a composite is the entry count, not a value. Naming it after the object would
-    // collide with whichever subindex repeats the object's own name.
-    name += "Count";
-  } else if (subindex != 0 && entryName != objectName) {
+  if (subindex != 0) {
     name += pascal(entryName);
   }
   if (name.empty()) {
@@ -335,8 +334,7 @@ std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresse
     std::map<std::string, int> used;
     std::map<std::string, int> usedClient;
     for (const EsiEntry* entry : buckets[b].entries) {
-      std::string id = objectIdentifier(entry->objectName, entry->entryName, entry->subindex,
-                                        entry->objectCode != mm::etg::ObjectCode::Var);
+      std::string id = objectIdentifier(entry->objectName, entry->entryName, entry->subindex);
       if (const int seen = used[id]++; seen > 0) {
         // Should not happen with the naming rule above, but a duplicate would be a compile error in
         // the generated file, so disambiguate deterministically and say so.
@@ -392,8 +390,11 @@ std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresse
             "// Each constant carries an object's index, subindex and the C++ type its declared\n"
             "// ETG.1020 type maps to, so a call site cannot disagree with the object it names:\n"
             "//\n"
-            "//     device.value(objects::kStatusword)        // std::optional<uint16_t>\n"
-            "//     device.readValue(objects::kDeviceName)    // std::expected<std::string, ...>\n"
+            "//     device.value(objects::kStatusword)                    // "
+            "std::optional<uint16_t>\n"
+            "//     device.readValue(objects::kManufacturerDeviceName)    // "
+            "std::expected<std::string, "
+            "...>\n"
             "//\n"
             "// The union of every device in the ESI is emitted: which module is fitted is "
             "unknowable\n"

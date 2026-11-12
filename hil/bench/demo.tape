@@ -28,7 +28,7 @@ Hide
 Type "cd $(mktemp -d) && clear" Enter
 Show
 
-Type "git clone https://github.com/synapticon/motion-master.git" Sleep 500ms Enter
+Type "git clone --recurse-submodules https://github.com/synapticon/motion-master.git" Sleep 500ms Enter
 Hide
 Wait@300s
 Show

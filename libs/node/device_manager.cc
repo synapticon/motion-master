@@ -49,6 +49,18 @@ DeviceManager::~DeviceManager() = default;
 
 namespace {
 
+// The span a dump asked for, for its log line, in epoch microseconds as the API takes it. Empty for
+// a dump of the whole recorder.
+std::string describeDumpRange(const DumpRange& range, bool incompleteStart) {
+  if (!range.fromNs && !range.toNs) {
+    return {};
+  }
+  const std::string from = range.fromNs ? std::to_string(*range.fromNs / 1000) : "the oldest cycle";
+  const std::string to = range.toNs ? std::to_string(*range.toNs / 1000) : "now";
+  return std::format(" for the span from {} to {} us{}", from, to,
+                     incompleteStart ? ", from later than its start" : "");
+}
+
 /// How many times a re-map is tried before it is refused. A map reads every mapped object of every
 /// device over the mailbox, and one frame that comes back late or not at all fails it. The second
 /// and third attempts run only after a failure, so a bus that answers pays nothing for them.
@@ -909,9 +921,8 @@ std::expected<ProcessDataDumpFile, std::string> DeviceManager::dumpProcessData(
     fs::remove(tmp, ec);
     return std::unexpected("could not finalise dump file '" + path.string() + "': " + ec.message());
   }
-  spdlog::info("Dumped {} process-data cycles ([{}, {})) to {}{}", span->rows, span->startSeq,
-               span->endSeq, path.string(),
-               span->incompleteStart ? ", from later than the start of the span" : "");
+  spdlog::info("Dumped {} process-data cycles ([{}, {})){} to {}", span->rows, span->startSeq,
+               span->endSeq, describeDumpRange(range, span->incompleteStart), path.string());
   return ProcessDataDumpFile{
       .path = path.string(), .rows = span->rows, .incompleteStart = span->incompleteStart};
 }
@@ -923,9 +934,8 @@ std::expected<std::string, std::string> DeviceManager::dumpProcessDataBuffer(
   if (!span) {
     return std::unexpected(span.error());
   }
-  spdlog::info("Serialised {} process-data cycles ([{}, {})) for streaming{}", span->rows,
-               span->startSeq, span->endSeq,
-               span->incompleteStart ? ", from later than the start of the span" : "");
+  spdlog::info("Serialised {} process-data cycles ([{}, {})){} for streaming", span->rows,
+               span->startSeq, span->endSeq, describeDumpRange(range, span->incompleteStart));
   return std::move(out).str();
 }
 

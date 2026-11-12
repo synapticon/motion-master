@@ -171,6 +171,28 @@ The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the test
 | `tests` | Run every test. | Run the tests that a pytest `-k` expression selects, for example `scan and not power`. |
 | `process-data-dumps` | Off, the default: save no dump. | On: save a process-data dump of each test that asks for one, and upload it. |
 
+To start the workflow from a terminal, use the GitHub CLI. `--ref` selects the branch that the
+tests come from, and the image is built from that branch too when `version` is empty.
+
+```bash
+# Every test, with a server built from main
+gh workflow run bench-tests.yml --ref main
+
+# Some tests, against a released image, with the process-data dumps
+gh workflow run bench-tests.yml --ref main \
+  -f version=6.0.0-alpha.122 \
+  -f tests="scan and not power" \
+  -f process-data-dumps=true
+```
+
+Then follow the run, and download its files when it ends:
+
+```bash
+gh run list --workflow bench-tests.yml --limit 1   # the run and its ID
+gh run watch <run-id>                              # follow it until it ends
+gh run download <run-id>                           # report.xml, server.log and the dumps
+```
+
 The tests always come from the selected branch, also when the server is a pulled image. The job
 summary names the server that ran. The workflow starts the server with the capabilities that SOEM
 needs. When the tests end, it uploads `report.xml`, the report file, `server.log`, the log of the

@@ -204,6 +204,12 @@ Other methods:
 - `start_capture(adapter, seconds)` starts a capture of the EtherCAT frames that runs until
   `stop_capture()`, which returns the path of the pcap file in the user cache and the summary of
   late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
+- `process_data_mark()` returns the recorder clock of the server, in epoch microseconds.
+  `process_data_dump(from_us, to_us)` returns the `.mmpd` dump of the cycles between two marks as
+  bytes, or of the whole recorder without them. It returns `None` when the server has no cycle to
+  dump, and raises `ProcessDataDumpError` for any other refusal. `mmpd_flags()` of the result has
+  `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after the
+  start.
 - `run_procedure()` runs a procedure to its end.
 - `monitor(topic)` streams the batches of a monitoring from the WebSocket.
 - `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,

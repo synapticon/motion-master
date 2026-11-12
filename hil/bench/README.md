@@ -70,15 +70,20 @@ ends, passed or not, it disables the drive and brings it to INIT.
 
 The server records the process data of every cycle in its recorder ring. With
 `pytest --process-data-dumps`, a test marked with `@pytest.mark.usefixtures("process_data_dump")`
-gets that ring as a file when it ends, also when it fails: `dumps/<test name>.mmpd`. The option is
+gets the process data of that test as a file when it ends, also when it fails:
+`dumps/<test name>.mmpd`. The option is
 off by default, because a dump is large and is needed only to look at the motion data of a failing
 test. A `.mmpd` file holds the raw input and output images of every cycle,
 with a timestamp, and the layout of the process image, so every PDO object of every exchanging
 device can be read from it. Open it in the Recorder page of the Console.
 
-Each test resets the server first, and a reset frees the ring, so a dump holds one test only. A
-test that exchanged no process data gets no file. A re-map that changes the layout of the process
-image starts a new ring, so a dump holds only the cycles after the last such re-map.
+The fixture reads the clock of the server before the test starts, and when the test ends it asks
+for the cycles from that time to now. So a dump holds that test only, also when the test does not
+reset the server. A test that exchanged no process data gets no file. The server keeps the cycles
+of one layout of the process image: a re-map that changes the layout, a reset or a scan starts a
+new recording. So a dump holds only the cycles after the last of these in the test. The file then
+says that it starts later than the test, and the fixture logs it. That is the usual case for a test
+that resets the server in its first lines.
 
 The motion test asks for a dump. In GitHub Actions, the input `process-data-dumps` of the workflow
 turns the option on, and the workflow uploads every dump with `report.xml`.

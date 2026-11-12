@@ -95,6 +95,23 @@ DumpHeader makeHeader(uint32_t inputBytes, uint32_t outputBytes) {
   return h;
 }
 
+TEST(ProcessDataDumpTest, WritesTheFlagsOfTheHeader) {
+  ProcessDataRing ring;
+  ring.allocate(4, 4, 8);
+  writeSeq(ring, 0, 4, 4);
+  DumpHeader header = makeHeader(4, 4);
+  header.flags = mm::node::kDumpFlagIncompleteStart;
+  std::ostringstream out(std::ios::binary);
+  auto written = writeProcessDataDump(
+      out, header, 0, 1,
+      [&ring](uint64_t seq, ProcessDataRing::Record& rec) { return ring.readRecord(seq, rec); });
+  ASSERT_TRUE(written.has_value()) << written.error();
+  DumpReader r(out.str());
+  r.getBytes(4);
+  r.getLE<uint16_t>();  // formatVersion
+  EXPECT_EQ(r.getLE<uint16_t>(), mm::node::kDumpFlagIncompleteStart);
+}
+
 TEST(ProcessDataDumpTest, RoundTripsHeaderAndRows) {
   constexpr uint32_t kIn = 6, kOut = 4;
   ProcessDataRing ring;

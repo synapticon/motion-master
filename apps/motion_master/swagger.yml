@@ -4970,6 +4970,31 @@ paths:
           description: Invalid period (e.g. missing/zero `periodUs` or malformed body)
         "501":
           description: Game-loop control is not configured on this server
+  /api/process-data/mark:
+    get:
+      summary: Read the recorder clock, to mark the start or the end of a dump span
+      description: >-
+        Returns the time now on the clock the recorder stamps every cycle with. Pass it
+        as `from` or `to` of `GET` or `POST /api/process-data/dump` to dump only the
+        cycles of one part of a run, with no reset between the parts. The server reads
+        its own clock, so a client on another computer gets a mark that matches the
+        timestamps of the cycles. A step of the server clock, for example by NTP,
+        moves the cycles it stamps against the marks taken before it.
+      operationId: getProcessDataMark
+      responses:
+        "200":
+          description: The time now
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [timestampUs]
+                properties:
+                  timestampUs:
+                    type: integer
+                    format: int64
+                    description: Epoch microseconds of the server clock
+                    example: 1762952400123456
   /api/process-data/dump:
     get:
       summary: Stream the recorder ring as a binary .mmpd
@@ -4979,8 +5004,31 @@ paths:
         response body instead of writing a file — for the client SDK / browser,
         which parses the bytes offline. Request with `Accept:
         application/octet-stream`. Same span semantics as the POST; works in any
-        state.
+        state. When the recorder no longer held every cycle right after `from`, bit 0
+        of the `flags` field of the file is set.
       operationId: streamProcessDataDump
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: >-
+            The start of the span, in epoch microseconds of the server clock, included.
+            Take it from `GET /api/process-data/mark`. Without it, the span starts at
+            the oldest cycle the recorder holds.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: to
+          in: query
+          required: false
+          description: >-
+            The end of the span, in epoch microseconds of the server clock, included.
+            Without it, the span ends at the newest cycle at the instant of the call.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
       responses:
         "200":
           description: The .mmpd dump bytes
@@ -4989,10 +5037,21 @@ paths:
               schema:
                 type: string
                 format: binary
+        "400":
+          description: "`from` or `to` is not a time in epoch microseconds, or `from` is later than `to`"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable reason the dump could not be produced
         "409":
           description: >-
             Nothing to dump — no process image has ever been mapped, or the recorder
-            is empty (no cycles recorded yet).
+            holds no cycle in the span.
           content:
             application/json:
               schema:
@@ -5006,7 +5065,8 @@ paths:
       summary: Dump the recorder ring to a binary .mmpd file
       description: >-
         Serialises the process-data recorder's current span — every cycle from the
-        oldest still in the ring up to the newest at the instant of the call — to a
+        oldest still in the ring up to the newest at the instant of the call, or only
+        the cycles between `from` and `to` — to a
         `.mmpd` file and returns its path. Each cycle's full raw input and output
         images, sequence, and epoch-nanosecond timestamp are written, with the
         process image (per-device identity and PDO object layout, including object
@@ -5023,6 +5083,28 @@ paths:
         `recorder.dumpDir` outside the cache root opts out of that; the file is
         then only reachable from a shell on the server.)
       operationId: dumpProcessData
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: >-
+            The start of the span, in epoch microseconds of the server clock, included.
+            Take it from `GET /api/process-data/mark`. Without it, the span starts at
+            the oldest cycle the recorder holds.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: to
+          in: query
+          required: false
+          description: >-
+            The end of the span, in epoch microseconds of the server clock, included.
+            Without it, the span ends at the newest cycle at the instant of the call.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
       responses:
         "200":
           description: The dump was written
@@ -5030,16 +5112,38 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [path]
+                required: [path, rows, incompleteStart]
                 properties:
                   path:
                     type: string
                     description: Absolute path of the written .mmpd file
                     example: /tmp/motion-master/dump-20260610T141530Z-300123.mmpd
+                  rows:
+                    type: integer
+                    format: int64
+                    description: Number of cycles in the file
+                  incompleteStart:
+                    type: boolean
+                    description: >-
+                      The recorder no longer held every cycle right after `from`: a
+                      re-map, a reset or a scan discarded some, or the ring overwrote
+                      them. The file holds the cycles of the span it still had. Bit 0
+                      of the `flags` field of the file says the same.
+        "400":
+          description: "`from` or `to` is not a time in epoch microseconds, or `from` is later than `to`"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable reason the dump could not be produced
         "409":
           description: >-
             Nothing to dump — no process image has ever been mapped, or the recorder
-            is empty (no cycles recorded yet) — or the file could not be written.
+            holds no cycle in the span — or the file could not be written.
           content:
             application/json:
               schema:

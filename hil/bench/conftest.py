@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from motion_master_client import AlState
+from motion_master_client import MMPD_FLAG_INCOMPLETE_START, AlState, mmpd_flags
 
 from bench import Bench
 from report import append_to_job_summary, test_results_markdown, write_bench_report
@@ -71,39 +71,42 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
 
 @pytest.fixture
 def process_data_dump(bench: Bench, request: pytest.FixtureRequest) -> Iterator[None]:
-    """Save the recorder ring of the server to dumps/<test>.mmpd when the test ends.
+    """Save the process data of the test to dumps/<test>.mmpd when the test ends.
 
     Only with --process-data-dumps, because a dump is large and is needed only to look at a
-    failure. A test that asks for this fixture then gets the file also when it fails. The teardown
-    runs after the finally of the test, so the dump holds the steps that end the test too. The test
-    resets the server first, which frees the ring, so the dump holds that test only. A test that
-    exchanged no process data gets no file, because the server answers 409. A failed fetch is
-    logged and does not change the result of the test.
+    failure. A test that asks for this fixture then gets the file also when it fails. The fixture
+    takes a mark on the server clock before the test and dumps the cycles from that mark to now,
+    so the dump holds this test only, whatever the test does to the server. The teardown runs
+    after the finally of the test, so the dump holds the steps that end the test too. A test that
+    exchanged no process data gets no file, because the server answers 409. A failed mark or
+    fetch is logged and does not change the result of the test.
     """
-    yield
     if not request.config.getoption("--process-data-dumps"):
+        yield
         return
     name = request.node.name
     try:
-        response = bench.client.call("streamProcessDataDump", check=False)
+        mark = bench.client.process_data_mark()
+    except Exception:
+        log.exception("%s: the process-data mark failed, so there is no dump", name)
+        yield
+        return
+    yield
+    try:
+        data = bench.client.process_data_dump(from_us=mark)
     except Exception:
         log.exception("%s: the process-data dump failed", name)
         return
-    if response.status_code == 409:
-        log.info("%s: no process-data dump, %s", name, response.json().get("error", ""))
-        return
-    if not response.ok:
-        log.warning(
-            "%s: the process-data dump failed, HTTP %d %s",
-            name,
-            response.status_code,
-            response.text.strip(),
-        )
+    if data is None:
         return
     DUMPS.mkdir(exist_ok=True)
     path = DUMPS / f"{name}.mmpd"
-    path.write_bytes(response.content)
-    log.info("%s: saved %s, %d bytes", name, path.relative_to(DUMPS.parent), len(response.content))
+    path.write_bytes(data)
+    log.info("%s: saved %s, %d bytes", name, path.relative_to(DUMPS.parent), len(data))
+    if mmpd_flags(data) & MMPD_FLAG_INCOMPLETE_START:
+        # A reset at the start of the test discards the cycles of the test before it that came
+        # after the mark, so this is expected for a test that resets the server.
+        log.info("%s: the server no longer held every cycle from the start of the test", name)
 
 
 def _seconds_since(start: float) -> float:

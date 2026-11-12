@@ -502,10 +502,7 @@ void DeviceManager::exchangeProcessData() {
   // stale — readers gate on the working counter (processDataHealthy()), not here. The timestamp is
   // wall-clock epoch nanoseconds (reduced to microseconds at the JSON boundary; see
   // ProcessDataRing).
-  const uint64_t timestampNs =
-      static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                std::chrono::system_clock::now().time_since_epoch())
-                                .count());
+  const uint64_t timestampNs = recorderClockNs();
   // Note a cycle the bus did not fully answer, with when it happened. At most three stores, on a
   // path that just blocked on a frame round trip — and the only place the fault is visible, since
   // no other thread sees every cycle.
@@ -753,7 +750,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
 }
 
 std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump(
-    std::ostream& out) {
+    std::ostream& out, const DumpRange& range) {
   // Shared lock: serialise against the control-plane writers of the recorder storage and the
   // retained generations (a re-map re-allocates, scan/reset clear). The RT producer is never
   // blocked — it appends to the ring lock-free; we only read the ring. The device set comes from a
@@ -779,13 +776,47 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
   // Freeze the span at this instant. While exchanging, the producer keeps advancing head() during
   // the write; we only serialise this [start, end) snapshot and ignore later cycles. A record the
   // producer laps mid-read is skipped by readRecord and self-describes via its sequence.
-  const uint64_t startSeq = pd_->ring.oldestValidSeq();
-  const uint64_t endSeq = pd_->ring.head();
+  uint64_t startSeq = pd_->ring.oldestValidSeq();
+  uint64_t endSeq = pd_->ring.head();
+
+  // Narrow the snapshot to the range by binary search over the timestamps, which grow with the
+  // sequence. A record that does not read was lapped, so it sorts before every timestamp.
+  const ProcessDataRing& ring = pd_->ring;
+  auto firstWhere = [&ring](uint64_t lo, uint64_t hi, auto&& after) {
+    while (lo < hi) {
+      const uint64_t mid = lo + (hi - lo) / 2;
+      const auto ts = ring.timestampOf(mid);
+      if (ts && after(*ts)) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    return lo;
+  };
+  bool incompleteStart = false;
+  if (range.fromNs) {
+    const uint64_t from = *range.fromNs;
+    startSeq = firstWhere(startSeq, endSeq, [from](uint64_t ts) { return ts >= from; });
+    // Cycles after the start are gone when a re-map, a reset or a scan discarded a ring that held
+    // one, or when the cycle just before the first row was overwritten, so nothing proves that it
+    // was before the start.
+    incompleteStart = ring.discardedUntilNs() >= from ||
+                      (startSeq > 0 && startSeq < endSeq && !ring.timestampOf(startSeq - 1));
+  }
+  if (range.toNs) {
+    const uint64_t to = *range.toNs;
+    endSeq = firstWhere(startSeq, endSeq, [to](uint64_t ts) { return ts > to; });
+  }
+  if (startSeq >= endSeq) {
+    return std::unexpected("the recorder holds no cycle in the span");
+  }
 
   // Build the embedded header: every discovered device's identity, then its PDO objects (both
   // directions) resolved to name + data type from its parameter map (empty/0 if the OD was not
   // enumerated), in image order.
   DumpHeader header;
+  header.flags = incompleteStart ? kDumpFlagIncompleteStart : 0;
   header.inputBytes = image->inputBytes;
   header.outputBytes = image->outputBytes;
 
@@ -832,10 +863,12 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
   if (!written) {
     return std::unexpected(written.error());
   }
-  return DumpSpan{.rows = *written, .startSeq = startSeq, .endSeq = endSeq};
+  return DumpSpan{
+      .rows = *written, .startSeq = startSeq, .endSeq = endSeq, .incompleteStart = incompleteStart};
 }
 
-std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
+std::expected<ProcessDataDumpFile, std::string> DeviceManager::dumpProcessData(
+    const DumpRange& range) {
   // Resolve the output directory and create it. An empty setting means a "dumps" subdirectory of
   // the per-user cache — deliberately *not* the OS temp directory, which the platform reaps on a
   // timer (systemd-tmpfiles clears /tmp after days), silently deleting dumps a user meant to keep.
@@ -862,7 +895,7 @@ std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
     return std::unexpected("could not open dump file '" + tmp.string() + "' for writing");
   }
 
-  auto span = serializeDump(out);
+  auto span = serializeDump(out, range);
   out.close();
   if (!span) {
     fs::remove(tmp, ec);  // do not leave a truncated file behind
@@ -876,19 +909,23 @@ std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
     fs::remove(tmp, ec);
     return std::unexpected("could not finalise dump file '" + path.string() + "': " + ec.message());
   }
-  spdlog::info("Dumped {} process-data cycles ([{}, {})) to {}", span->rows, span->startSeq,
-               span->endSeq, path.string());
-  return path.string();
+  spdlog::info("Dumped {} process-data cycles ([{}, {})) to {}{}", span->rows, span->startSeq,
+               span->endSeq, path.string(),
+               span->incompleteStart ? ", from later than the start of the span" : "");
+  return ProcessDataDumpFile{
+      .path = path.string(), .rows = span->rows, .incompleteStart = span->incompleteStart};
 }
 
-std::expected<std::string, std::string> DeviceManager::dumpProcessDataBuffer() {
+std::expected<std::string, std::string> DeviceManager::dumpProcessDataBuffer(
+    const DumpRange& range) {
   std::ostringstream out(std::ios::binary);
-  auto span = serializeDump(out);
+  auto span = serializeDump(out, range);
   if (!span) {
     return std::unexpected(span.error());
   }
-  spdlog::info("Serialised {} process-data cycles ([{}, {})) for streaming", span->rows,
-               span->startSeq, span->endSeq);
+  spdlog::info("Serialised {} process-data cycles ([{}, {})) for streaming{}", span->rows,
+               span->startSeq, span->endSeq,
+               span->incompleteStart ? ", from later than the start of the span" : "");
   return std::move(out).str();
 }
 
@@ -1444,6 +1481,10 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::deviceSt
     result.push_back(decodeState(targets[i], (*raw)[i]));
   }
   return result;
+}
+
+void to_json(nlohmann::json& j, const ProcessDataDumpFile& file) {
+  j = {{"path", file.path}, {"rows", file.rows}, {"incompleteStart", file.incompleteStart}};
 }
 
 void to_json(nlohmann::json& j, const ScanStatus& status) {

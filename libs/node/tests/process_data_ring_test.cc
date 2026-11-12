@@ -104,6 +104,31 @@ TEST(ProcessDataRingTest, ReallocateRestartsRecording) {
   EXPECT_EQ(rec.inputs, (std::vector<uint8_t>{0xAA, 0xBB}));
 }
 
+TEST(ProcessDataRingTest, TimestampOfReadsOnlyTheRecordsInTheRing) {
+  ProcessDataRing ring;
+  ring.allocate(2, 2, /*capacityCycles=*/4);
+  for (uint64_t seq = 0; seq < 6; ++seq) {
+    writeSeq(ring, seq, 2, 2);
+  }
+  EXPECT_FALSE(ring.timestampOf(1).has_value());  // overwritten
+  ASSERT_TRUE(ring.timestampOf(2).has_value());
+  EXPECT_EQ(*ring.timestampOf(2), 2000u);
+  EXPECT_EQ(*ring.timestampOf(5), 5000u);
+  EXPECT_FALSE(ring.timestampOf(6).has_value());  // not written yet
+}
+
+TEST(ProcessDataRingTest, DiscardedUntilKeepsTheNewestDiscardedTimestamp) {
+  ProcessDataRing ring;
+  EXPECT_EQ(ring.discardedUntilNs(), 0u);
+  ring.allocate(2, 2, 4);
+  writeSeq(ring, 0, 2, 2);
+  writeSeq(ring, 1, 2, 2);
+  ring.allocate(2, 2, 4);  // a re-map that changes the layout
+  EXPECT_EQ(ring.discardedUntilNs(), 1000u);
+  ring.clear();  // nothing recorded since, so nothing newer is discarded
+  EXPECT_EQ(ring.discardedUntilNs(), 1000u);
+}
+
 TEST(ProcessDataRingTest, ClampsOversizedPayload) {
   ProcessDataRing ring;
   ring.allocate(/*inputCap=*/2, /*outputCap=*/2, /*capacityCycles=*/2);

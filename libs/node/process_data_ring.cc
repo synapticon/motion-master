@@ -1,6 +1,7 @@
 #include "node/process_data_ring.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -18,6 +19,12 @@ namespace {
 constexpr uint64_t kInvalidSeq = std::numeric_limits<uint64_t>::max();
 
 }  // namespace
+
+uint64_t recorderClockNs() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::system_clock::now().time_since_epoch())
+                                   .count());
+}
 
 ProcessDataRing::~ProcessDataRing() { clear(); }
 
@@ -51,6 +58,12 @@ void ProcessDataRing::allocate(uint32_t inputCap, uint32_t outputCap, size_t cap
 }
 
 void ProcessDataRing::clear() {
+  const uint64_t h = head_.load(std::memory_order_acquire);
+  if (h > 0) {
+    if (auto newest = timestampOf(h - 1)) {
+      discardedUntilNs_ = std::max(discardedUntilNs_, *newest);
+    }
+  }
 #if defined(__linux__) || defined(__APPLE__)
   if (locked_) {
     if (!buffer_.empty()) {
@@ -140,6 +153,24 @@ bool ProcessDataRing::readRecord(uint64_t seq, Record& out) const {
   // overwrote this slot mid-copy is detected as a mismatch.
   std::atomic_thread_fence(std::memory_order_acquire);
   return seqWords_[slot].load(std::memory_order_relaxed) == seq;
+}
+
+std::optional<uint64_t> ProcessDataRing::timestampOf(uint64_t seq) const {
+  if (capacity_ == 0) {
+    return std::nullopt;
+  }
+  const size_t slot = static_cast<size_t>(seq % capacity_);
+  if (seqWords_[slot].load(std::memory_order_acquire) != seq) {
+    return std::nullopt;
+  }
+  uint64_t ts = 0;
+  std::memcpy(&ts, buffer_.data() + slot * stride_, sizeof(ts));
+  // The same re-check as readRecord: a write that raced the copy changed the sequence word.
+  std::atomic_thread_fence(std::memory_order_acquire);
+  if (seqWords_[slot].load(std::memory_order_relaxed) != seq) {
+    return std::nullopt;
+  }
+  return ts;
 }
 
 }  // namespace mm::node

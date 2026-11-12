@@ -2922,32 +2922,92 @@ export class Api<
       ...params,
     });
   /**
-   * @description Streams the same `.mmpd` serialisation as the POST variant (the recorder's current span, with the process image embedded as a header) directly in the response body instead of writing a file — for the client SDK / browser, which parses the bytes offline. Request with `Accept: application/octet-stream`. Same span semantics as the POST; works in any state.
+   * @description Returns the time now on the clock the recorder stamps every cycle with. Pass it as `from` or `to` of `GET` or `POST /api/process-data/dump` to dump only the cycles of one part of a run, with no reset between the parts. The server reads its own clock, so a client on another computer gets a mark that matches the timestamps of the cycles. A step of the server clock, for example by NTP, moves the cycles it stamps against the marks taken before it.
+   *
+   * @name GetProcessDataMark
+   * @summary Read the recorder clock, to mark the start or the end of a dump span
+   * @request GET:/api/process-data/mark
+   */
+  getProcessDataMark = (params: RequestParams = {}) =>
+    this.request<
+      {
+        /**
+         * Epoch microseconds of the server clock
+         * @format int64
+         * @example 1762952400123456
+         */
+        timestampUs: number;
+      },
+      any
+    >({
+      path: `/api/process-data/mark`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Streams the same `.mmpd` serialisation as the POST variant (the recorder's current span, with the process image embedded as a header) directly in the response body instead of writing a file — for the client SDK / browser, which parses the bytes offline. Request with `Accept: application/octet-stream`. Same span semantics as the POST; works in any state. When the recorder no longer held every cycle right after `from`, bit 0 of the `flags` field of the file is set.
    *
    * @name StreamProcessDataDump
    * @summary Stream the recorder ring as a binary .mmpd
    * @request GET:/api/process-data/dump
    */
-  streamProcessDataDump = (params: RequestParams = {}) =>
+  streamProcessDataDump = (
+    query?: {
+      /**
+       * The start of the span, in epoch microseconds of the server clock, included. Take it from `GET /api/process-data/mark`. Without it, the span starts at the oldest cycle the recorder holds.
+       * @format int64
+       * @min 0
+       */
+      from?: number;
+      /**
+       * The end of the span, in epoch microseconds of the server clock, included. Without it, the span ends at the newest cycle at the instant of the call.
+       * @format int64
+       * @min 0
+       */
+      to?: number;
+    },
+    params: RequestParams = {},
+  ) =>
     this.request<
       Blob,
-      {
-        /** Human-readable reason the dump could not be produced */
-        error: string;
-      }
+      | {
+          error: string;
+        }
+      | {
+          /** Human-readable reason the dump could not be produced */
+          error: string;
+        }
     >({
       path: `/api/process-data/dump`,
       method: "GET",
+      query: query,
       ...params,
     });
   /**
-   * @description Serialises the process-data recorder's current span — every cycle from the oldest still in the ring up to the newest at the instant of the call — to a `.mmpd` file and returns its path. Each cycle's full raw input and output images, sequence, and epoch-nanosecond timestamp are written, with the process image (per-device identity and PDO object layout, including object names and data types where the object dictionary has been enumerated) embedded as a header, so the file decodes fully offline with no running Motion Master and no live bus. Works in any state: while devices are exchanging (SAFEOP/OP) it captures tail→head at that moment and ignores cycles recorded afterwards; after the bus has left the exchange states it uses the most recent retained image layout. The file is written under the configured `recorder.dumpDir`, created if absent; by default that is a `dumps` subdirectory of the user-cache root, so the written file is also reachable through the `/api/user-cache` endpoints — list it, download it, or delete it there. Only the path is returned here. (Setting an explicit `recorder.dumpDir` outside the cache root opts out of that; the file is then only reachable from a shell on the server.)
+   * @description Serialises the process-data recorder's current span — every cycle from the oldest still in the ring up to the newest at the instant of the call, or only the cycles between `from` and `to` — to a `.mmpd` file and returns its path. Each cycle's full raw input and output images, sequence, and epoch-nanosecond timestamp are written, with the process image (per-device identity and PDO object layout, including object names and data types where the object dictionary has been enumerated) embedded as a header, so the file decodes fully offline with no running Motion Master and no live bus. Works in any state: while devices are exchanging (SAFEOP/OP) it captures tail→head at that moment and ignores cycles recorded afterwards; after the bus has left the exchange states it uses the most recent retained image layout. The file is written under the configured `recorder.dumpDir`, created if absent; by default that is a `dumps` subdirectory of the user-cache root, so the written file is also reachable through the `/api/user-cache` endpoints — list it, download it, or delete it there. Only the path is returned here. (Setting an explicit `recorder.dumpDir` outside the cache root opts out of that; the file is then only reachable from a shell on the server.)
    *
    * @name DumpProcessData
    * @summary Dump the recorder ring to a binary .mmpd file
    * @request POST:/api/process-data/dump
    */
-  dumpProcessData = (params: RequestParams = {}) =>
+  dumpProcessData = (
+    query?: {
+      /**
+       * The start of the span, in epoch microseconds of the server clock, included. Take it from `GET /api/process-data/mark`. Without it, the span starts at the oldest cycle the recorder holds.
+       * @format int64
+       * @min 0
+       */
+      from?: number;
+      /**
+       * The end of the span, in epoch microseconds of the server clock, included. Without it, the span ends at the newest cycle at the instant of the call.
+       * @format int64
+       * @min 0
+       */
+      to?: number;
+    },
+    params: RequestParams = {},
+  ) =>
     this.request<
       {
         /**
@@ -2955,17 +3015,28 @@ export class Api<
          * @example "/tmp/motion-master/dump-20260610T141530Z-300123.mmpd"
          */
         path: string;
-      },
-      {
         /**
-         * Human-readable reason the dump could not be produced
-         * @example "the recorder is empty — no cycles have been recorded yet"
+         * Number of cycles in the file
+         * @format int64
          */
-        error: string;
-      }
+        rows: number;
+        /** The recorder no longer held every cycle right after `from`: a re-map, a reset or a scan discarded some, or the ring overwrote them. The file holds the cycles of the span it still had. Bit 0 of the `flags` field of the file says the same. */
+        incompleteStart: boolean;
+      },
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable reason the dump could not be produced
+           * @example "the recorder is empty — no cycles have been recorded yet"
+           */
+          error: string;
+        }
     >({
       path: `/api/process-data/dump`,
       method: "POST",
+      query: query,
       format: "json",
       ...params,
     });

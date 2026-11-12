@@ -165,6 +165,21 @@ class CaptureError(Exception):
     """The server refuses to start or stop a capture. The message is the server's reason."""
 
 
+class ProcessDataDumpError(Exception):
+    """The server could not produce a process-data dump. The message is the server's reason."""
+
+
+# A flag bit of a .mmpd file, at byte 6: the dump is of a span, and the server no longer held every
+# cycle right after its start. A re-map, a reset or a scan discarded some, or the ring overwrote
+# them. The rows are all in the span, but the first one is later than the span asked for.
+MMPD_FLAG_INCOMPLETE_START = 0x0001
+
+
+def mmpd_flags(data):
+    """Return the flags of a .mmpd file, the MMPD_FLAG_* bits."""
+    return int.from_bytes(data[6:8], "little")
+
+
 def _reason(response):
     """Return the server's reason for a refused request: the error of its JSON body, or its text."""
     try:
@@ -401,6 +416,41 @@ class MotionMasterClient:
         stopped = r.json()
         log.info("stopped the capture into %s", stopped["path"])
         return stopped
+
+    def process_data_mark(self):
+        """Return the recorder clock of the server now, in epoch microseconds (getProcessDataMark).
+
+        Pass it as `from_us` or `to_us` of process_data_dump() to dump one part of a run. It is the
+        server's clock, the one that stamps every recorded cycle, so it matches the cycles also
+        when this client runs on another computer.
+        """
+        return self.call("getProcessDataMark").json()["timestampUs"]
+
+    def process_data_dump(self, from_us=None, to_us=None):
+        """Return the .mmpd dump of the recorder ring as bytes (streamProcessDataDump).
+
+        `from_us` and `to_us` limit it to the cycles of a span, both included, in epoch
+        microseconds of the server clock: take them from process_data_mark(). Without them the
+        dump is the whole ring. When the server no longer held every cycle right after `from_us`,
+        mmpd_flags() of the result has MMPD_FLAG_INCOMPLETE_START set.
+
+        Returns None when the server has no cycle to dump: no process image was ever mapped, or no
+        cycle is in the span (409). Raises ProcessDataDumpError for every other refusal.
+        """
+        query = {}
+        if from_us is not None:
+            query["from"] = from_us
+        if to_us is not None:
+            query["to"] = to_us
+        r = self.call("streamProcessDataDump", query=query, check=False)
+        if r.status_code == 409:
+            log.info("no process-data dump: %s", _reason(r))
+            return None
+        if not r.ok:
+            raise ProcessDataDumpError(
+                f"the process-data dump failed: {_reason(r)} (HTTP {r.status_code})"
+            )
+        return r.content
 
     def devices(self):
         """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).

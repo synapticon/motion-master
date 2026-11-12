@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -23,7 +24,7 @@ namespace mm::node {
 ///   the rows are streamed):
 ///     0   char  magic[4]      = 'M','M','P','D'
 ///     4   u16   formatVersion = kDumpFormatVersion
-///     6   u16   flags         = 0 (reserved)
+///     6   u16   flags         (kDumpFlag* bits; the others are 0)
 ///     8   u64   startSequence (sequence of the first row; oldest cycle in the span)
 ///     16  u64   rowCount      (number of rows actually written)        <- patched at the end
 ///     24  u32   inputBytes    (per-row input region size)
@@ -51,6 +52,11 @@ inline constexpr std::array<char, 4> kDumpMagic = {'M', 'M', 'P', 'D'};
 /// @brief Current dump format version. A reader rejects an unknown major shape; bump on layout
 ///        changes so old files stay identifiable.
 inline constexpr uint16_t kDumpFormatVersion = 1;
+
+/// @brief A flag bit: the dump is of a span, and the ring no longer holds every cycle of that span
+///        right after its start. A re-map or a reset discarded some, or the ring overwrote them.
+///        The rows are still all in the span, but the first one is later than the span asked for.
+inline constexpr uint16_t kDumpFlagIncompleteStart = 0x0001;
 
 /// @brief Byte offset of the @c rowCount field within the fixed prefix. The writer streams rows
 ///        first, then seeks here to patch the final count — so the stream must be seekable.
@@ -80,9 +86,17 @@ struct DumpDevice {
 
 /// @brief The embedded process-image header: everything needed to decode the rows offline.
 struct DumpHeader {
+  uint16_t flags = 0;        ///< @c kDumpFlag* bits.
   uint32_t inputBytes = 0;   ///< Per-row input region size (the published image's input size).
   uint32_t outputBytes = 0;  ///< Per-row output region size.
   std::vector<DumpDevice> devices;
+};
+
+/// @brief The span of a dump, in epoch nanoseconds of @c recorderClockNs, both ends included. An
+///        end that is not set is open, so the default is the whole ring.
+struct DumpRange {
+  std::optional<uint64_t> fromNs;
+  std::optional<uint64_t> toNs;
 };
 
 /// @brief Reads the record for @p seq into @p out; returns @c false if it is no longer available

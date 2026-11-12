@@ -41,9 +41,15 @@ export interface MmpdDevice {
   entries: MmpdPdoEntry[]
 }
 
+/// A flag bit of `MmpdHeader.flags`: the dump is of a span, and the server no longer held every
+/// cycle right after its start. A re-map, a reset or a scan discarded some, or the ring overwrote
+/// them. The rows are all in the span, but the first one is later than the span asked for.
+export const MMPD_FLAG_INCOMPLETE_START = 0x0001
+
 /// The embedded process-image header — everything needed to decode the rows offline.
 export interface MmpdHeader {
   formatVersion: number
+  /// `MMPD_FLAG_*` bits.
   flags: number
   /// Sequence number of the first row (oldest cycle in the span).
   startSequence: bigint
@@ -298,14 +304,24 @@ function numericReader(dataType: number): ScalarReader | null {
 }
 
 /// Fetches the live recorder dump (`GET /api/process-data/dump`) and parses it. `baseUrl` is the
-/// HTTP API origin (e.g. `https://host:61447`). Throws on a non-OK response (the response body's
-/// `error` message when present). Pass `fetch` to inject an implementation (Node, request logging).
+/// HTTP API origin (e.g. `https://host:61447`). `from` and `to` limit the dump to a span, in epoch
+/// microseconds of the server clock, both included: take them from `GET /api/process-data/mark`.
+/// Throws on a non-OK response (the response body's `error` message when present). Pass `fetch`
+/// to inject an implementation (Node, request logging).
 export async function fetchProcessDataDump(
   baseUrl: string,
-  options: { fetch?: typeof fetch; signal?: AbortSignal } = {},
+  options: { fetch?: typeof fetch; signal?: AbortSignal; from?: number; to?: number } = {},
 ): Promise<MmpdFile> {
   const doFetch = options.fetch ?? fetch
-  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/process-data/dump`, {
+  const query = new URLSearchParams()
+  if (options.from !== undefined) {
+    query.set('from', String(options.from))
+  }
+  if (options.to !== undefined) {
+    query.set('to', String(options.to))
+  }
+  const search = query.toString() ? `?${query.toString()}` : ''
+  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/process-data/dump${search}`, {
     headers: { Accept: 'application/octet-stream' },
     signal: options.signal,
   })

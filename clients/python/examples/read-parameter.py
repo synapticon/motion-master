@@ -5,8 +5,8 @@ The server reads the value from the process image when the object is PDO-mapped 
 exchanges process data, and with an SDO read otherwise. --cache returns the value the server holds
 and touches no bus. read-sdo.py reads the raw bytes of an object instead, with no decoding.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. The server
-learns the parameters of a device when it reaches PRE-OP. A device in SAFE-OP or OP stays there.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. The server
+learns the parameters of a device when it reaches PREOP. A device in SAFEOP or OP stays there.
 
 The defaults read the Statusword, 0x6041:00.
 
@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def auto_int(text):
@@ -40,7 +40,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     p = client.call(
         "readParameter",

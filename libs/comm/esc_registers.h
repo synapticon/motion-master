@@ -57,7 +57,7 @@ inline constexpr auto kEscRegisters = std::to_array<EscRegister>({
 
     // ── Application Layer ───────────────────────────────────────────────────
     {0x0120, 2, "al_control",
-     "AL control: state request (1=Init, 2=Pre-Op, 4=Safe-Op, 8=Op) + error ack"},
+     "AL control: state request (1=INIT, 2=PREOP, 4=SAFEOP, 8=OP) + error ack"},
     {0x0130, 2, "al_status", "AL status: current EtherCAT state + error indicator"},
     {0x0132, 2, "dls_user_r5",
      "DL-user register R5: meaning defined by the application layer (unused by standard AL); "

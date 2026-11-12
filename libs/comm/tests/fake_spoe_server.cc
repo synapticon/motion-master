@@ -178,7 +178,7 @@ asio::awaitable<void> FakeSpoeServer::Impl::acceptLoop() {
         continue;
       }
       if (restarting) {
-        // The new firmware comes up in PRE-OP, as the firmware does outside EtherCAT.
+        // The new firmware comes up in PREOP, as the firmware does outside EtherCAT.
         restarting = false;
         state = kSpoeStatePreOp;
         pdoMode = kSpoePdoModeNone;

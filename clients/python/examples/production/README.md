@@ -100,7 +100,7 @@ the drive loads it from there.
 | Step | Integro | C021 |
 | --- | --- | --- |
 | Connect | Yes | Yes |
-| AL state PRE-OP | Yes | Yes |
+| AL state PREOP | Yes | Yes |
 | Hardware description | Yes | Yes |
 | Firmware | Yes | Yes |
 | Configuration | Yes | Yes |
@@ -122,21 +122,21 @@ missing or wrong. It moves no drive.
 
 ### AL state
 
-The script moves the drive to the AL state that the next steps need: PRE-OP before the first
+The script moves the drive to the AL state that the next steps need: PREOP before the first
 step, and OP before the first step that turns the motor, because the drive turns the motor only
 while it exchanges process data. A drive that does not reach that state stops the script.
 
 `common.py` has two functions for it:
 
 - `transition_to_state(s, state)` moves the drive to exactly that state, down as well as up. A
-  drive goes down to PRE-OP or SAFE-OP through INIT, because an Integro that steps down from
-  SAFE-OP or OP refuses every write that only PRE-OP allows (synapticon/somanet_software#5823).
+  drive goes down to PREOP or SAFEOP through INIT, because an Integro that steps down from
+  SAFEOP or OP refuses every write that only PREOP allows (synapticon/somanet_software#5823).
 - `ensure_state(s, state)` makes sure the drive is at least in that state. A drive above it stays
   there.
 
-The drive scripts use `transition_to_state`, so a step that needs no process data runs in PRE-OP.
+The drive scripts use `transition_to_state`, so a step that needs no process data runs in PREOP.
 
-A drive with no running firmware does not reach PRE-OP. The script logs why, and moves the drive
+A drive with no running firmware does not reach PREOP. The script logs why, and moves the drive
 to BOOT instead. In BOOT, the bootloader of the drive serves the files that the hardware
 description step reads, and the firmware installation writes the firmware there.
 
@@ -146,10 +146,10 @@ The script reads the `.hardware_description` file of the drive over FoE (File ac
 EtherCAT), and the firmware version from object 0x100A. It shows the device and the assembly,
 each with its name, build descriptor, serial number and components.
 
-The script reads 0x100A only when the drive is in PRE-OP, SAFE-OP or OP, because only then does
+The script reads 0x100A only when the drive is in PREOP, SAFEOP or OP, because only then does
 the firmware run. In BOOT, the record says that no firmware runs.
 
-After a power cycle, an Integro refuses FoE reads for about 2.5 s after it reaches PRE-OP
+After a power cycle, an Integro refuses FoE reads for about 2.5 s after it reaches PREOP
 ([#175](https://github.com/synapticon/motion-master/issues/175)). The script asks again every
 0.5 s for up to 10 s, and logs each refusal. After 10 s, the step fails with the message of the
 server.
@@ -166,8 +166,8 @@ that does not fit is installed only after a second confirmation, because the ins
 whatever it gets.
 
 The script uploads the package to the user cache of the server, and runs the
-`firmware-installation` procedure with the final state PRE-OP. The procedure moves the drive to
-BOOT, writes the firmware files over FoE, and moves the drive back to PRE-OP. The drive exchanges
+`firmware-installation` procedure with the final state PREOP. The procedure moves the drive to
+BOOT, writes the firmware files over FoE, and moves the drive back to PREOP. The drive exchanges
 no process data during the installation. The script shows each step of the procedure, then reads
 the firmware version again. The record gets the version before, the package, the verdict of the
 server and the version after.

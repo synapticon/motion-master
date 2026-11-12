@@ -84,7 +84,7 @@ export default function ToolsEniPage() {
           <p className="text-xs text-grey-600 leading-relaxed">
             Exporting reads every device's static configuration, SII and PDO assignment, and writes
             the document. It drives the bus — one EEPROM read and a burst of SDO uploads per device
-            — and needs the bus in SAFE-OP or OP. It changes nothing on any device. Loading a file
+            — and needs the bus in SAFEOP or OP. It changes nothing on any device. Loading a file
             needs no bus at all, and is the way to read a configuration produced by EC-Engineer,
             TwinCAT or anything else.
           </p>

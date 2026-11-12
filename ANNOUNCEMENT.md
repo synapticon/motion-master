@@ -94,7 +94,7 @@ Every architectural decision, including the ones we rejected, is written down in
 
 ### You control the fieldbus — it does not control you
 
-- **Manual AL state control.** You decide when a device goes INIT → PRE-OP → SAFE-OP → OP →
+- **Manual AL state control.** You decide when a device goes INIT → PREOP → SAFEOP → OP →
   BOOT. Illegal transitions are rejected up front with a reason, not attempted and crashed.
 - **Devices stay in memory until you reset.** If a drive powers off or drops off the bus,
   its last known identity, parameters, and diagnostics are still there to inspect. You can

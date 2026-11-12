@@ -32,7 +32,7 @@ export default function SiiExplainer() {
         <strong>How is it read?</strong> The master performs a small handshake on those control
         registers to fetch the EEPROM one word at a time, looping over the word addresses to read
         the whole image. This is a control-plane operation done off the real-time loop, and it is
-        most reliable while the device is in the <strong>INIT</strong> or <strong>PRE-OP</strong>{' '}
+        most reliable while the device is in the <strong>INIT</strong> or <strong>PREOP</strong>{' '}
         state.
       </p>
       <p>

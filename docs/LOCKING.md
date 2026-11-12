@@ -122,7 +122,7 @@ This file uses the vocabulary of the code. Read this table first if the reposito
 | SDO | Service Data Object. One mailbox read or write of one dictionary entry. |
 | CoE | CANopen over EtherCAT. The mailbox protocol that carries an SDO. |
 | FoE | File over EtherCAT. The mailbox protocol for a file transfer, such as firmware. |
-| AL state | Application Layer state of a device: INIT, PRE-OP, SAFE-OP, OP, or BOOT. |
+| AL state | Application Layer state of a device: INIT, PREOP, SAFEOP, OP, or BOOT. |
 | ESC | EtherCAT Slave Controller. The chip in a device. It holds registers that we read. |
 | SII | Slave Information Interface. The EEPROM in a device. |
 | WKC | Working counter. The number of devices that answered a frame. |

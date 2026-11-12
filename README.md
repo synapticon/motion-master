@@ -151,7 +151,7 @@ Every setting lives in a JSONC config file — comments are allowed, all keys ar
 | `parameterCache` | On-disk cache of CoE object-dictionary *definitions* (never values) keyed by vendor/product/firmware version (0x100A) — `enabled`, `cacheAllVendors`, `directory` |
 | `esiCache` | ESI files that add units, ranges, defaults, descriptions and options to live parameters, found by vendor and firmware version (0x100A) as `esi-<vendor>-<version>.xml` — `enabled`, `directory` (default: the `esis` subdirectory of the user cache) |
 | `userCache` | `directory` of the per-user file store served at `/api/user-cache` (default: the standard per-user cache directory, under `motion-master`). Everything in it is readable, writable and deletable through the API, so point it at a directory that holds nothing else |
-| `parameters` | `readObjectDictionaryOnPreop` (enumerate on the first PRE-OP) and `useCompleteAccess` (one CoE Complete Access upload per ARRAY/RECORD instead of per-subindex reads) |
+| `parameters` | `readObjectDictionaryOnPreop` (enumerate on the first PREOP) and `useCompleteAccess` (one CoE Complete Access upload per ARRAY/RECORD instead of per-subindex reads) |
 | `autoTuning` | `enabled`, `binaryPath` (default: `auto-tuning` next to the binary) and the loopback `port` (63528) of the auto-tuning child process |
 | `tls` | `certPath`, `keyPath` (empty = auto-discover), and `autoUpdate` — set `false` for air-gapped installs |
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from motion_master_client import INIT, OP, PRE_OP, SAFE_OP, STATE_NAMES
+from motion_master_client import INIT, OP, PREOP, SAFEOP, STATE_NAMES
 
 from bench import Bench
 
@@ -59,17 +59,17 @@ def test_pre_op_reads_the_object_dictionary_of_every_device(bench: Bench, record
     bench.client.reset()
     bench.client.init()
 
-    # Through INIT, because a step down to PRE-OP is not the transition this test is about.
-    bench.client.restart(PRE_OP)
+    # Through INIT, because a step down to PREOP is not the transition this test is about.
+    bench.client.restart(PREOP)
 
     states = bench.client.call("getDeviceStates").json()
-    assert [d["alState"] for d in states] == [PRE_OP] * len(bench.description.devices)
+    assert [d["alState"] for d in states] == [PREOP] * len(bench.description.devices)
     counts = []
     for device in bench.description.devices:
         parameters = bench.client.parameters(device.position)
         assert parameters, f"device {device.position} has no parameters"
         counts.append(f"{device.position}: {len(parameters)}")
-    record_property("message", f"{len(states)} devices in PRE-OP; parameters {', '.join(counts)}")
+    record_property("message", f"{len(states)} devices in PREOP; parameters {', '.join(counts)}")
 
 
 def _al_states(bench: Bench) -> list[int]:
@@ -81,15 +81,15 @@ def test_transition_walks_every_device_from_init_to_safe_op(bench: Bench, record
     bench.client.init()
     bench.client.restart(INIT)
 
-    # One request. The server walks every device through PRE-OP to SAFE-OP.
+    # One request. The server walks every device through PREOP to SAFEOP.
     start = time.monotonic()
-    result = bench.client.call("transitionToState", body={"state": SAFE_OP}).json()
+    result = bench.client.call("transitionToState", body={"state": SAFEOP}).json()
     seconds = time.monotonic() - start
 
     assert result["ok"], result
-    assert _al_states(bench) == [SAFE_OP] * len(bench.description.devices)
+    assert _al_states(bench) == [SAFEOP] * len(bench.description.devices)
     record_property(
-        "message", f"{len(result['devices'])} devices from INIT to SAFE-OP in {seconds:.1f} s"
+        "message", f"{len(result['devices'])} devices from INIT to SAFEOP in {seconds:.1f} s"
     )
 
 
@@ -101,7 +101,7 @@ def test_a_single_step_refuses_an_illegal_transition(bench: Bench, record_proper
     # INIT to OP is three transitions, so the single step refuses it and commands nothing.
     illegal = bench.client.call("changeState", body={"state": OP}, check=False)
     after_illegal = _al_states(bench)
-    legal = bench.client.call("changeState", body={"state": PRE_OP}, check=False)
+    legal = bench.client.call("changeState", body={"state": PREOP}, check=False)
 
     assert illegal.status_code == 409, illegal.text
     assert after_illegal == [INIT] * len(bench.description.devices)
@@ -110,6 +110,6 @@ def test_a_single_step_refuses_an_illegal_transition(bench: Bench, record_proper
     record_property(
         "message",
         f"INIT to {STATE_NAMES[OP]} answered 409 and moved no device;"
-        f" INIT to {STATE_NAMES[PRE_OP]} answered 200",
+        f" INIT to {STATE_NAMES[PREOP]} answered 200",
     )
 

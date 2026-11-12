@@ -2,11 +2,11 @@
 # Runs a mailbox workload against a running Motion Master while netem makes the bus adapter drop
 # or delay frames. It counts the mailbox warnings and the failed requests in the server log.
 #
-# One run is: reset, init, scan, PRE-OP, then N rounds of a full parameter read
+# One run is: reset, init, scan, PREOP, then N rounds of a full parameter read
 # (POST /api/devices/<position>/parameters/read) and one FoE file read
 # (GET /api/devices/<position>/files/<file>). Each file is compared with the first round's bytes.
 #
-# The netem rule is removed for reset, init, scan and PRE-OP, added for the rounds, and removed at
+# The netem rule is removed for reset, init, scan and PREOP, added for the rounds, and removed at
 # the end. A uniform delay during a scan makes the state writes fail, because SOEM waits 6 ms for one.
 #
 # Recipes, see NEXTGEN.md, Session 2026-10-20:
@@ -55,7 +55,7 @@ post() {
 }
 
 netem_off
-echo "== $label: reset, init, scan, PRE-OP"
+echo "== $label: reset, init, scan, PREOP"
 post /api/reset > /dev/null
 post /api/init "{\"adapter\":\"$adapter\"}" | head -c 200
 echo

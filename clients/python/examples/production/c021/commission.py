@@ -29,7 +29,7 @@ from common import (  # noqa: E402
     transition_to_state,
     tune_controller,
 )
-from motion_master_client import OP, PRE_OP, run  # noqa: E402
+from motion_master_client import OP, PREOP, run  # noqa: E402
 
 # Jasper firmware has no 0x2009:03, so the drive picks the method of the offset detection itself.
 OFFSET_DETECTION_METHOD = None
@@ -65,7 +65,7 @@ def main():
 
     with Session(args.slave, LOGS_DIR) as s:
         connect(s)
-        transition_to_state(s, PRE_OP)
+        transition_to_state(s, PREOP)
         read_hardware_description(s)
         install_firmware(s)
         load_configuration(s, CONFIG_FILE)

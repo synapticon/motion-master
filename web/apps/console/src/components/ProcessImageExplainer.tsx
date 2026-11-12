@@ -42,23 +42,23 @@ export default function ProcessImageExplainer() {
       </p>
 
       <p>
-        <strong>Where does this layout come from?</strong> When you command a device to SAFE-OP or OP,
+        <strong>Where does this layout come from?</strong> When you command a device to SAFEOP or OP,
         the master builds this image <em>before</em> actually moving it there — while it is still in
-        PRE-OP. It reads each device&apos;s PDO mapping over the mailbox (only possible from PRE-OP up),
+        PREOP. It reads each device&apos;s PDO mapping over the mailbox (only possible from PREOP up),
         concatenates every device&apos;s outputs into one output image and every device&apos;s inputs
         into one input image, and programs the per-slave <strong>Sync Managers and FMMUs</strong> (see
         the Configuration page) so each slave&apos;s physical buffer is wired into its slice of this
         shared logical image — and only then writes the AL state to complete the transition. The order
-        is required: the slave rejects SAFE-OP unless its process-data mapping is already in place. The
+        is required: the slave rejects SAFEOP unless its process-data mapping is already in place. The
         result is what you see here. So the <strong>Configuration</strong> page shows the ESC plumbing; this page
         shows the byte layout that plumbing produces.
       </p>
 
       <p>
         <strong>Generations.</strong> The image is rebuilt from scratch each time a device enters or
-        leaves SAFE-OP/OP — every rebuild is a new <strong>generation</strong>. The whole-bus image is
+        leaves SAFEOP/OP — every rebuild is a new <strong>generation</strong>. The whole-bus image is
         mapped in one shot, so a rebuild briefly pauses exchange for everyone; that is the accepted cost
-        of bringing a device online. When the last exchanging device leaves SAFE-OP/OP the live image is
+        of bringing a device online. When the last exchanging device leaves SAFEOP/OP the live image is
         torn down, but the most recent generation is <em>retained</em> so the layout stays inspectable
         here even while the bus is idle (working-counter health then no longer applies).
       </p>

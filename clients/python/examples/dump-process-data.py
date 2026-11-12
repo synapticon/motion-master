@@ -6,7 +6,7 @@ ring still has, with the layout of the process image in its header, so that a re
 it offline. The Console and the TypeScript client read .mmpd files. The file goes into the
 git-ignored files/ directory next to the client. Pass --output for a different path.
 
-Opens the fieldbus driver, scans and moves the device to SAFE-OP first when needed, because the
+Opens the fieldbus driver, scans and moves the device to SAFEOP first when needed, because the
 recorder holds cycles only once the process data is exchanged. A device in OP stays there.
 
     python dump-process-data.py
@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import SAFE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import SAFEOP, MotionMasterClient, run  # noqa: E402
 
 FILES_DIR = Path(__file__).resolve().parent.parent / "files"
 
@@ -35,7 +35,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(SAFE_OP)
+    client.ensure_state(SAFEOP)
 
     content = client.call(
         "streamProcessDataDump", headers={"Accept": "application/octet-stream"}

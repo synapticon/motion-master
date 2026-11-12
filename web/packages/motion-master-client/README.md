@@ -104,7 +104,7 @@ unsubscribe()
 await client.api.deleteMonitoring('my-axis')
 ```
 
-Each batch holds one row per cycle since the last batch. A row is the time in microseconds since the Unix epoch, then one value for each object, in the order of `parameters`. `GET /api/monitorings/{topic}` returns that order. A value is `null` while its device does not exchange process data, which starts in SAFE-OP.
+Each batch holds one row per cycle since the last batch. A row is the time in microseconds since the Unix epoch, then one value for each object, in the order of `parameters`. `GET /api/monitorings/{topic}` returns that order. A value is `null` while its device does not exchange process data, which starts in SAFEOP.
 
 `interval` is the time in milliseconds between two batches, from 5 to 2000. It does not change the sample rate. A longer interval gives larger batches.
 

@@ -57,7 +57,7 @@ struct FieldbusConfig {
   /// mailbox-status register (0x080D) into the cyclic image on every mailbox slave, letting the
   /// master notice a waiting mailbox message without a separate read. Motion Master does not use
   /// that optimisation, and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW is fatal (every
-  /// cyclic frame is dropped, SAFE-OP → OP fails). Default false ⇒ the FMMU is deactivated after
+  /// cyclic frame is dropped, SAFEOP → OP fails). Default false ⇒ the FMMU is deactivated after
   /// mapping. Set true only for hardware that both needs and supports it.
   bool mailboxStatusFmmu = false;
 };
@@ -147,7 +147,7 @@ struct UserCacheConfig {
 
 /// @brief @c "parameters" block — CoE object-dictionary behaviour.
 struct ParametersConfig {
-  /// Read each device's object dictionary when it first reaches PRE-OP (the earliest AL state with
+  /// Read each device's object dictionary when it first reaches PREOP (the earliest AL state with
   /// a live CoE mailbox), so object names and data types are known for recorder dumps, monitoring,
   /// and the Parameters page without a manual read. Cache-backed (see @c parameterCache), so a
   /// device model pays the (one-time) enumeration once. Disable to keep state transitions minimal —

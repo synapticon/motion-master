@@ -316,7 +316,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Exchange process data every cycle. No-op until devices are mapped and brought into SAFE-OP/OP
+  // Exchange process data every cycle. No-op until devices are mapped and brought into SAFEOP/OP
   // via the API, at which point DeviceManager publishes the image and the loop begins driving PDO
   // automatically. Declared before gameLoop so it is destroyed after it — a registered task must
   // outlive every call to GameLoop::run().

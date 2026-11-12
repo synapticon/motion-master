@@ -66,7 +66,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
 | `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
 | `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc` | `CAPTURE=<seconds>` records the adapter with `motion-master-capture` beside the runs, as do `flaky-bus.sh` and `al-state-loop.sh`
-| `al-state-loop.sh` | Walk one drive INIT, PRE-OP, SAFE-OP, OP, INIT again and again against a running server, with an optional `netem` rule during the rounds, and count the short maps and the map attempts in the server log. The loop of `NEXTGEN.md` Session 2026-10-22. Needs passwordless `sudo tc` |
+| `al-state-loop.sh` | Walk one drive INIT, PREOP, SAFEOP, OP, INIT again and again against a running server, with an optional `netem` rule during the rounds, and count the short maps and the map attempts in the server log. The loop of `NEXTGEN.md` Session 2026-10-22. Needs passwordless `sudo tc` |
 | `adapter-report.sh` | Print the settings of a Linux bus adapter and its host that can hold a frame: qdisc, coalescing, offloads, EEE, `cdc_ncm`, USB path and power management. Read-only, no root. For #138 |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
@@ -493,7 +493,7 @@ decision.
   1 ms grid. A task's own reads are per-signal, which is fine.
 - **The decode is eager.** Right after the frame arrives, the RT thread copies every mapped
   object of every exchanging device into its cell whether anything reads it or not. A device
-  below SAFE-OP keeps its region in the whole-bus image but writes nothing into the frame, so
+  below SAFEOP keeps its region in the whole-bus image but writes nothing into the frame, so
   the decode skips it and its cells keep the last value it sent. A device with the AL error bit
   set is skipped too. The rule is `mm::comm::exchangesProcessData`, the same one `Device` uses
   to choose between the image and an SDO read. This is a read-path decision: it
@@ -557,14 +557,14 @@ the current state with `POST /api/devices/state/transition`, or a walk from INIT
 `DeviceManager::transitionToState`. The image is one whole-bus layout, but the logic supports
 partial-bus operations.
 
-- **Entering SAFE-OP or OP** re-maps when there is no published image, or when any targeted
+- **Entering SAFEOP or OP** re-maps when there is no published image, or when any targeted
   device is rejoining from a non-exchange state. Its PDO mapping is re-read, because a
   firmware update may have changed it. A device already exchanging that is merely
   re-commanded skips the re-map.
-- **Leaving SAFE-OP or OP** tears the image down only when no device will remain exchanging.
+- **Leaving SAFEOP or OP** tears the image down only when no device will remain exchanging.
   Otherwise the leaving device drops out and `updateExpectedWkc()` removes its share.
 
-So a device can go to BOOT or PRE-OP while the others keep exchanging. Re-mapping briefly
+So a device can go to BOOT or PREOP while the others keep exchanging. Re-mapping briefly
 pauses the whole bus, which is the accepted cost.
 
 **Three rules the re-map depends on:**
@@ -573,7 +573,7 @@ pauses the whole bus, which is the accepted cost.
    `device_manager.cc`). `changeState` commands one transition and refuses an illegal one with
    `StateChangeError::kIllegalTransition`, which the route answers with 409. `transitionToState`
    and `restartToState` walk with `changeState`, one legal step at a time. This is not UX. The re-map reads PDO
-   mapping over the CoE mailbox, which is only live from PRE-OP up, so a device commanded
+   mapping over the CoE mailbox, which is only live from PREOP up, so a device commanded
    straight from BOOT would reach that read while still in BOOT and **segfault inside SOEM**
    before the slave could reject it.
 2. **Per-slave FMMU state is reset first.** `configureProcessData()` runs
@@ -791,7 +791,7 @@ delay on the wire or in the device, a clean capture beside the warnings puts it 
 
 **Per-device:** FoE, CoE object dictionary and SDO, PDO mapping read and write
 (`GET`/`PUT /api/devices/:slavePosition/pdo-mapping`; the write reconfigures 0x1C12/0x1C13
-and 0x16xx/0x1Axx in PRE-OP), ESC registers, SII, hardware description, Integro variant, and
+and 0x16xx/0x1Axx in PREOP), ESC registers, SII, hardware description, Integro variant, and
 firmware compatibility.
 
 Multi-subindex objects are read with one CoE Complete Access upload, probed once per device,
@@ -885,8 +885,8 @@ BOOT. A write is asked again only when the drive gave no answer. A read is asked
 FoE error 0x8004 or 0x800B, as below.
 **An Integro answers a read with FoE BUSY, and a master that then aborts it hangs the drive.**
 ETG.1000.5 defines BUSY only for a write. The Integro sends it when the file is not ready 0.5 s
-after the request: on the first read after it enters BOOT from PRE-OP, where the file is ready
-0.99 s after BOOT, and in the first seconds of PRE-OP after power-on, where it ends the read with
+after the request: on the first read after it enters BOOT from PREOP, where the file is ready
+0.99 s after BOOT, and in the first seconds of PREOP after power-on, where it ends the read with
 FoE error 0x800B at 2 s. After a BUSY the drive waits for an ACK of packet 0, the rule of the
 Beckhoff slave stack code, or for a new read request. **An abort with no new request after a BUSY
 leaves the drive in BOOT, refusing INIT and every mailbox request, until a power cycle.** So
@@ -910,7 +910,7 @@ answer", not "no such object".** See `NEXTGEN.md`, Session 2026-07-20.
 **The XMOS EtherCAT stack of a SOMANET drive locks its receive mailbox when it gets one mailbox
 request twice.** It sees the repeated counter and ignores the request, but it returns before it
 reads the request, so SM0 stays full. Every later SDO and FoE request then fails with "the slave's
-receive mailbox is full", and only INIT followed by PRE-OP frees it (`ethercat_service.xc:352`, synapticon/somanet_software#5811).
+receive mailbox is full", and only INIT followed by PREOP frees it (`ethercat_service.xc:352`, synapticon/somanet_software#5811).
 The bootloader does the same in BOOT. The netX stack of an Integro discards a repeat correctly.
 ETG.1000.4 allows a master to repeat a write, and upstream SOEM repeats one when its frame comes back
 later than `EC_TIMEOUTRET` (2 ms). So a slow host or a lost frame was enough to lock a drive.
@@ -1042,8 +1042,8 @@ Rules that are easy to get wrong:
 - **`ProcessData/RxPdo` and `TxPdo` are the only place a mapped value's object address appears.**
   The process image carries a name, a size and an offset and nothing else, so a document without the
   PDO declarations cannot tell a reader that the value at bit 16 is `0x607A:00`.
-- **Export needs the bus mapped.** FMMUs and logical addresses come into being at the SAFE-OP
-  transition. PRE-OP answers 409 rather than being guessed at.
+- **Export needs the bus mapped.** FMMUs and logical addresses come into being at the SAFEOP
+  transition. PREOP answers 409 rather than being guessed at.
 - **The cyclic frame is an LWR plus an LRD, never one LRW.** A read-write datagram is only correct
   where a device's two FMMUs share a logical address, and this master lays them out disjointly.
 - **A Sync Manager's `type` does not survive `decodeSyncManager`.** What a channel carries is not in
@@ -1169,8 +1169,8 @@ sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--sla
 
 Writes one mailbox request twice with the same counter and reports whether the drive locks its
 receive mailbox (LOCKED), answers the copy (HANDLED), or discards it (DISCARDED). A Circulo locks,
-and INIT followed by PRE-OP frees it. An Integro discards the copy. The request is an SDO upload in PRE-OP.
-With `--boot` it is an FoE read in BOOT, which tests the bootloader. The bootloader of a Jasper-based C021 discards the copy (one run, BOOT only; PRE-OP not measured). A drive that restarts on its way out of BOOT gets its station address back. It leaves the drive in PRE-OP.
+and INIT followed by PREOP frees it. An Integro discards the copy. The request is an SDO upload in PREOP.
+With `--boot` it is an FoE read in BOOT, which tests the bootloader. The bootloader of a Jasper-based C021 discards the copy (one run, BOOT only; PREOP not measured). A drive that restarts on its way out of BOOT gets its station address back. It leaves the drive in PREOP.
 It needs raw socket access, and no other master may use the adapter.
 
 ```bash
@@ -1181,13 +1181,13 @@ sudo ./build/x64-linux-debug/hil/mailbox_duplicate/mailbox_duplicate --ifname <i
 ### mailbox_counter0
 
 Shows what a drive does with mailbox counters that are out of the usual order. Every request is an
-SDO upload of 0x1000:00 in PRE-OP, and the tally per pattern says how many were answered, dropped
+SDO upload of 0x1000:00 in PREOP, and the tally per pattern says how many were answered, dropped
 (taken from SM0, never answered) or stuck (left in SM0). The patterns: `after` sends the next
 counter, 0, then 1, which is the sequence Motion Master 6.0.0-alpha.92 sent after a write with no
-frame back; `double` sends 0 twice; `first` sends 0 as the first request after INIT and PRE-OP;
-`init` repeats two counters after INIT and PRE-OP; `skip` leaves one counter out. A Circulo answers
+frame back; `double` sends 0 twice; `first` sends 0 as the first request after INIT and PREOP;
+`init` repeats two counters after INIT and PREOP; `skip` leaves one counter out. A Circulo answers
 every pattern. An Integro drops every counter that is not the one after the last accepted, and
-`skip` shows that in one round. It leaves the drive in PRE-OP. It needs raw socket access, and no
+`skip` shows that in one round. It leaves the drive in PREOP. It needs raw socket access, and no
 other master may use the adapter.
 
 ```bash
@@ -1197,7 +1197,7 @@ sudo ./build/x64-linux-debug/hil/mailbox_counter0/mailbox_counter0 --ifname <int
 
 ### foe_read_busy
 
-Shows what a drive does when it answers an FoE read request with BUSY, and what each reply of the master does then. Each round puts the drive into INIT, then into `--state` (BOOT or PRE-OP); `--via-preop` goes through PRE-OP and INIT first, because an Integro answers BUSY only on the first read after it enters BOOT from PRE-OP. It sends one read request after `--delay` ms and prints every mailbox message with the time since the request. `--after-busy` picks the reply to a BUSY: `wait`, `abort`, `reread`, `abort-reread` (the reply of the driver before #175), or `ack0`. `--until-file` sends the request again 200 ms after an FoE error. `--gap` pauses after each round, between the last ACK and the next state request. After the rounds it says whether the drive still reaches INIT. On an Integro, `wait` and `abort` hang the drive in BOOT until a power cycle. A drive that restarts on its way out of BOOT, as a Jasper-based drive does on the step to PRE-OP, gets its station address back. It leaves the drive in PRE-OP. It needs raw socket access, and no other master may use the adapter.
+Shows what a drive does when it answers an FoE read request with BUSY, and what each reply of the master does then. Each round puts the drive into INIT, then into `--state` (BOOT or PREOP); `--via-preop` goes through PREOP and INIT first, because an Integro answers BUSY only on the first read after it enters BOOT from PREOP. It sends one read request after `--delay` ms and prints every mailbox message with the time since the request. `--after-busy` picks the reply to a BUSY: `wait`, `abort`, `reread`, `abort-reread` (the reply of the driver before #175), or `ack0`. `--until-file` sends the request again 200 ms after an FoE error. `--gap` pauses after each round, between the last ACK and the next state request. After the rounds it says whether the drive still reaches INIT. On an Integro, `wait` and `abort` hang the drive in BOOT until a power cycle. A drive that restarts on its way out of BOOT, as a Jasper-based drive does on the step to PREOP, gets its station address back. It leaves the drive in PREOP. It needs raw socket access, and no other master may use the adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_read_busy/foe_read_busy --ifname <interface> [--slave 1] \
@@ -1207,7 +1207,7 @@ sudo ./build/x64-linux-debug/hil/foe_read_busy/foe_read_busy --ifname <interface
 
 ### foe_read_abort
 
-Wedges the file system of a Circulo on purpose, which is the reproduction of synapticon/somanet_software#5820. It reads a file in PRE-OP, reads it again and acknowledges `--packets` data packets, stops with the next one unacknowledged, sends the FoE abort (not with `--no-abort`), and reads the file twice more, comparing bytes with the first read. With the last packet of the file unacknowledged the drive answers "Illegal" and then "File System is busy" until a power cycle (WEDGED); with a packet in the middle unacknowledged it serves every file with its first packet as zeros (WRONG BYTES). A mid-file abort on other firmware ends OK. It leaves the drive in PRE-OP. It needs raw socket access, and no other master may use the adapter.
+Wedges the file system of a Circulo on purpose, which is the reproduction of synapticon/somanet_software#5820. It reads a file in PREOP, reads it again and acknowledges `--packets` data packets, stops with the next one unacknowledged, sends the FoE abort (not with `--no-abort`), and reads the file twice more, comparing bytes with the first read. With the last packet of the file unacknowledged the drive answers "Illegal" and then "File System is busy" until a power cycle (WEDGED); with a packet in the middle unacknowledged it serves every file with its first packet as zeros (WRONG BYTES). A mid-file abort on other firmware ends OK. It leaves the drive in PREOP. It needs raw socket access, and no other master may use the adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interface> [--slave 1]   [--file config.csv] [--packets 2] [--pause 200] [--no-abort]
@@ -1280,6 +1280,12 @@ Repo and folder names use hyphens. Naming is enforced in review; no tool checks 
 
 **SOEM and SPoE casing:** uppercase in prose, `Soem` PascalCase in type names, lowercase in
 config tokens, filenames, and namespaces.
+
+**AL state spelling:** `INIT`, `PREOP`, `BOOT`, `SAFEOP`, `OP` in prose, logs, messages, API
+text, the Console and Python or TypeScript names. Never `PRE-OP` or `PRE_OP`: a name with no
+hyphen is valid in every language, so a reader never has to guess the form. C++ enumerators keep
+PascalCase, `EtherCatState::PreOp`. The long forms are `Pre-Operational` and `Safe-Operational`.
+ESI values such as `WriteRestrictions="PreOP"` are ETG.2000 data and keep their spelling. See #213.
 
 **Class names encode the base only for polymorphic interface implementations.** A class held
 and passed as its abstract base — via `Base&`, `unique_ptr<Base>`, or `vector<Base*>` — embeds

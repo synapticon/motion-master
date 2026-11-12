@@ -72,7 +72,7 @@ export default function DiagnosticsExplainer() {
         <strong>The watchdogs</strong> are dead-man&apos;s switches, and there are two. The{' '}
         <strong>process-data (SM) watchdog</strong> is the important one: a device in OP that stops
         seeing fresh process data for longer than its timeout faults <em>itself</em> from OP down to
-        SAFE-OP with an error — a safety reflex so a drive whose master went silent doesn&apos;t keep
+        SAFEOP with an error — a safety reflex so a drive whose master went silent doesn&apos;t keep
         acting on stale targets. The <strong>PDI watchdog</strong> guards the internal ESC↔microcontroller
         interface instead. Each has an <strong>expirations</strong> counter (process-data{' '}
         <code>0x0442</code>, PDI <code>0x0443</code>) — how many times it has fired since power-up.
@@ -84,7 +84,7 @@ export default function DiagnosticsExplainer() {
       </p>
       <ul className="list-disc pl-5 space-y-1">
         <li><strong>State</strong> (<code>0x0440</code> bit 0) — <em>Running</em> (counting normally, being fed), <em>Expired</em> (timed out, or not yet fed since enable), or <em>Disabled</em> (timeout 0).</li>
-        <li><strong>Timeout</strong> — the configured time (<code>0x0420</code>) before expiry; on expiry an OP device drops to SAFE-OP+error.</li>
+        <li><strong>Timeout</strong> — the configured time (<code>0x0420</code>) before expiry; on expiry an OP device drops to SAFEOP+error.</li>
         <li>
           <strong>Derivation</strong> — the timeout is not stored in milliseconds; it is{' '}
           <em>ticks × a tick base</em>. The tick base is <code>(divider + 2) × 40 ns</code>, where{' '}

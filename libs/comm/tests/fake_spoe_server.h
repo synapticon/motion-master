@@ -18,7 +18,7 @@
 // file is not in the firmware source. The first packet of `com_firmware.bin` in BOOT answers 0x00
 // rather than ACK, because the firmware returns what `storage_prepare_for_writing` returned. The
 // firmware update answers, then goes silent until its reset, drops the connection, refuses
-// connections while it restarts, and comes back in PRE-OP. The watchdog value is stored and does
+// connections while it restarts, and comes back in PREOP. The watchdog value is stored and does
 // not fault the device.
 //
 // A request whose firmware answer cannot be modelled closes the connection and is counted in

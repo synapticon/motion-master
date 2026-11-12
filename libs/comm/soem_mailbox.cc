@@ -139,7 +139,7 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
     // mailbox"). The firmware source does not explain that failure, so its cause is not confirmed.
     ctx->slavelist[slave].mbx_cnt = 0;
   } else if (targetState == EtherCatState::PreOp) {
-    // PRE-OP SMs come from the standard SII mailbox entries, not the BOOT entries.
+    // PREOP SMs come from the standard SII mailbox entries, not the BOOT entries.
     ecx_readeeprom1(ctx, slave, ECT_SII_RXMBXADR);
     uint32_t eedat = ecx_readeeprom2(ctx, slave, EC_TIMEOUTEEP);
     ctx->slavelist[slave].mbx_wo = static_cast<uint16_t>(LO_WORD(etohl(eedat)));
@@ -157,7 +157,7 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
     ctx->slavelist[slave].SM[1].StartAddr = ctx->slavelist[slave].mbx_ro;
     ctx->slavelist[slave].SM[1].SMlength = ctx->slavelist[slave].mbx_rl;
 
-    spdlog::info("Device {}: PRE-OP mailbox - write 0x{:04X}/{}, read 0x{:04X}/{}", slave,
+    spdlog::info("Device {}: PREOP mailbox - write 0x{:04X}/{}, read 0x{:04X}/{}", slave,
                  ctx->slavelist[slave].mbx_wo, ctx->slavelist[slave].mbx_l,
                  ctx->slavelist[slave].mbx_ro, ctx->slavelist[slave].mbx_rl);
 
@@ -170,21 +170,21 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
       // refuses the state change — often silently (AL status 0x0000) rather than with a
       // mailbox-config error code. Surface it so it is not mistaken for a slave-side fault.
       spdlog::warn(
-          "Device {}: PRE-OP mailbox SM write incomplete (SM0 wkc={}, SM1 wkc={}) — "
+          "Device {}: PREOP mailbox SM write incomplete (SM0 wkc={}, SM1 wkc={}) — "
           "slave may refuse the transition",
           slave, wkc0, wkc1);
     }
 
     // This branch runs only for a slave that this driver drove into BOOT, so mbx_cnt holds the
-    // counter of the BOOT-mode FoE transfers. Leaving BOOT for PRE-OP restarts the device into
+    // counter of the BOOT-mode FoE transfers. Leaving BOOT for PREOP restarts the device into
     // the application, and a restarted device stores counter 0. So, as in the BOOT branch, this
-    // reset starts the master's counter from a known point. When a SOMANET slave reaches PRE-OP,
+    // reset starts the master's counter from a known point. When a SOMANET slave reaches PREOP,
     // transitionToState also sends it a request with counter 0.
     ctx->slavelist[slave].mbx_cnt = 0;
   }
 
   // Both EEPROM read paths above (the combined ecx_readeeprom in the BOOT branch and the
-  // split ecx_readeeprom1/2 in the PRE-OP branch) call ecx_eeprom2master and leave EEPROM
+  // split ecx_readeeprom1/2 in the PREOP branch) call ecx_eeprom2master and leave EEPROM
   // control with the master — neither restores it. Some slaves' PDI needs EEPROM access to
   // complete the state change and will silently stay in INIT (AL status 0x0000) if locked
   // out, so hand control back to the PDI before the caller issues writestate. This mirrors

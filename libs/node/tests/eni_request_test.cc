@@ -142,11 +142,11 @@ TEST(EniRequestTest, SaysWhichStateACommandRequestsOrWaitsFor) {
     // A write to AL Control is a request; a read of AL Status with a Validate is the wait, and the
     // state it waits for is in the validate data rather than in a payload.
     if (command["register"].contains("requestsState") &&
-        command["register"]["requestsState"] == "SAFE-OP") {
+        command["register"]["requestsState"] == "SAFEOP") {
       requests = true;
     }
     if (command["register"].contains("waitsForState") &&
-        command["register"]["waitsForState"] == "SAFE-OP") {
+        command["register"]["waitsForState"] == "SAFEOP") {
       waits = true;
     }
   }

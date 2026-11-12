@@ -148,7 +148,7 @@ FoeError makeFoeRefusal(uint32_t code, std::string_view text, std::string_view o
 ///     waits for the last ACK of the read before. That ACK is lost when an AL state request reaches
 ///     the drive within about 0.1 ms of it. The refusal puts the drive back to idle.
 ///   - 0x800B Program error: an Integro ends a read with it when the file is still not ready 2 s
-///     after the request, in the first seconds of PRE-OP after power-on.
+///     after the request, in the first seconds of PREOP after power-on.
 /// In both cases the next read request got the file, in every run measured.
 ///
 /// @param code  ETG.1000.6 error code from the Error packet.

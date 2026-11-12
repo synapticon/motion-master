@@ -11,8 +11,8 @@ The script prints the value before and after.
 A write to a parameter that controls the drive, such as a target, takes effect at once. Run
 store-parameters.py to keep a value across a power cycle.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there.
 
     python write-parameter.py --index 0x6060 --subindex 0 --value 8
     python write-parameter.py --index 0x6060 --subindex 0 --value 10 --slave 2
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def auto_int(text):
@@ -54,7 +54,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     path = {"slavePosition": args.slave, "index": args.index, "subindex": args.subindex}
     before = client.call("readParameter", path=path).json()

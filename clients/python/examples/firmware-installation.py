@@ -4,7 +4,7 @@
 The script uploads the package into the firmwares/ directory of the user cache of the server
 (PUT /api/user-cache/firmwares/<name>), and starts the procedure with only the filename, so the
 package moves as raw bytes. The procedure takes the device to BOOT, writes the files of the
-package over FoE, and moves the device to --final-state. PRE-OP, the default, is the proof that
+package over FoE, and moves the device to --final-state. PREOP, the default, is the proof that
 the install worked: the bootloader starts the new firmware on that transition.
 
 The device exchanges no process data for the whole installation, so whatever it drives is not
@@ -45,7 +45,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--package", required=True, help="path to the .zip firmware package")
-    ap.add_argument("--final-state", choices=STATES, default="pre-op")
+    ap.add_argument("--final-state", choices=STATES, default="preop")
     args = ap.parse_args()
 
     package = Path(args.package)

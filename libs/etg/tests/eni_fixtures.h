@@ -185,7 +185,7 @@ inline EniNetwork referenceNetwork() {
 
   slave.initCmds = {
       writeRegister(EniTransition::IP, kFirstStationAddress, kRegAlControl, {kAlStatePreOp, 0x00},
-                    "set the device to PRE-OP"),
+                    "set the device to PREOP"),
       checkState(EniTransition::IP, kFirstStationAddress, kAlStatePreOp),
       writeRegister(EniTransition::PS, kFirstStationAddress, kRegSyncManager0 + 0x10,
                     {0x00, 0x18, 0x23, 0x00, 0x64, 0x00, 0x01, 0x00}, "set sync manager 2"),
@@ -197,7 +197,7 @@ inline EniNetwork referenceNetwork() {
                      0x00, 0x00, 0x00},
                     "set FMMU 0 for the outputs"),
       writeRegister(EniTransition::PS, kFirstStationAddress, kRegAlControl, {kAlStateSafeOp, 0x00},
-                    "set the device to SAFE-OP"),
+                    "set the device to SAFEOP"),
       checkState(EniTransition::PS, kFirstStationAddress, kAlStateSafeOp),
       writeRegister(EniTransition::SO, kFirstStationAddress, kRegAlControl, {kAlStateOp, 0x00},
                     "set the device to OP"),

@@ -165,7 +165,7 @@ export default function FieldbusProcessImagePage() {
           <>
             The whole-bus EtherCAT process image published for cyclic exchange — what each device
             maps, where it sits in its direction's image, and the working-counter health. Rebuilt
-            automatically whenever a device enters or leaves SAFE-OP/OP; each rebuild is a new{' '}
+            automatically whenever a device enters or leaves SAFEOP/OP; each rebuild is a new{' '}
             <span className="font-mono">generation</span>.
           </>
         }
@@ -191,7 +191,7 @@ export default function FieldbusProcessImagePage() {
 
         {img && !img.configured && img.generations === 0 && (
           <p className="text-xs text-grey-600">
-            No process image has been published. Bring a device to SAFE-OP or OP to map process
+            No process image has been published. Bring a device to SAFEOP or OP to map process
             data.
           </p>
         )}
@@ -200,7 +200,7 @@ export default function FieldbusProcessImagePage() {
           <>
             {!img.configured && (
               <Callout variant="warning">
-                Not currently exchanging — all devices have left SAFE-OP/OP, so the live image was
+                Not currently exchanging — all devices have left SAFEOP/OP, so the live image was
                 torn down. Showing the most recent published image (generation {img.generations}).
                 Working-counter health does not apply while the bus is idle.
               </Callout>
@@ -219,7 +219,7 @@ export default function FieldbusProcessImagePage() {
               <Stat
                 label="Generations"
                 value={String(img.generations)}
-                hint="How many times the process image has been rebuilt since init. It is remapped each time a device enters or leaves SAFE-OP/OP."
+                hint="How many times the process image has been rebuilt since init. It is remapped each time a device enters or leaves SAFEOP/OP."
               />
               <Stat
                 label="Working counter"
@@ -231,7 +231,7 @@ export default function FieldbusProcessImagePage() {
                       ? 'text-status-good'
                       : 'text-status-bad'
                 }
-                hint="EtherCAT working counter: last observed vs expected. Each slave adds 2 for a successful write (outputs) and 1 for a successful read (inputs), so a drive doing both adds 3. A match means every device exchanged; a shortfall means one dropped out. Shows Idle when no device is in SAFE-OP/OP."
+                hint="EtherCAT working counter: last observed vs expected. Each slave adds 2 for a successful write (outputs) and 1 for a successful read (inputs), so a drive doing both adds 3. A match means every device exchanged; a shortfall means one dropped out. Shows Idle when no device is in SAFEOP/OP."
               />
               <Stat
                 label="Short cycles"
@@ -264,7 +264,7 @@ export default function FieldbusProcessImagePage() {
                   <span className="font-mono">{formatEpochUs(img.lastShortWkcUs)}</span>.
                 </p>
                 <p className="mt-1.5 text-grey-600">
-                  Cycles a device missed while you were deliberately taking it out of SAFE-OP/OP are
+                  Cycles a device missed while you were deliberately taking it out of SAFEOP/OP are
                   not counted here, so this is a fault the bus produced on its own — a cable, a
                   connector, or a device dropping out. The count survives a re-map and is cleared
                   only by <em>Reset</em>.

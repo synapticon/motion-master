@@ -552,7 +552,7 @@ Two consequences worth knowing:
 - **Driving the CiA402 state machine from a cycle is the right place for it.** Mode of operation,
   controlword and statusword are all exchanged every cycle, so the climb to Operation Enabled is one
   write per cycle with the wire doing the waiting, where an off-RT caller must sleep and poll. What
-  stays off the RT thread is the EtherCAT **AL** state (INIT / PRE-OP / SAFE-OP / OP) — seconds of
+  stays off the RT thread is the EtherCAT **AL** state (INIT / PREOP / SAFEOP / OP) — seconds of
   mailbox traffic, done through the HTTP API.
 - **An object that is not output-mapped is stored but never transmitted.** `setValue` writes the cell
   and returns, so reaching such an object needs `writeParameter` off the RT thread, just as reading a

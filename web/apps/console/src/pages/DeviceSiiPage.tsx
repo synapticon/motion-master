@@ -64,7 +64,7 @@ export default function DeviceSiiPage() {
       `Write ${bytes.length} bytes from "${file.name}" to the EEPROM of slave ${slavePosition}?\n\n` +
         `This overwrites the device's Slave Information Interface. A wrong image can leave the ` +
         `device unidentifiable until it is re-flashed. The device must be power-cycled afterwards ` +
-        `to apply the change, and writing is safest while it is in INIT or PRE-OP.`,
+        `to apply the change, and writing is safest while it is in INIT or PREOP.`,
     )
     if (!confirmed) {
       return
@@ -123,7 +123,7 @@ export default function DeviceSiiPage() {
             Controller reads at power-up for its identity and Sync Manager / FMMU / mailbox
             configuration. Browse the parsed categories or the raw image, download it, or overwrite
             the EEPROM from a file. Writing is destructive and requires a power cycle to apply — best
-            done in INIT or PRE-OP.
+            done in INIT or PREOP.
           </>
         }
       />
@@ -142,7 +142,7 @@ export default function DeviceSiiPage() {
               <FilePickerButton
                 onFile={handleWriteFile}
                 disabled={writing}
-                title="Overwrite the device EEPROM with an SII image from a file. Destructive — requires a power cycle to apply. Best done in INIT or PRE-OP."
+                title="Overwrite the device EEPROM with an SII image from a file. Destructive — requires a power cycle to apply. Best done in INIT or PREOP."
               >
                 {writing ? 'Writing…' : 'Write SII…'}
               </FilePickerButton>
@@ -168,7 +168,7 @@ export default function DeviceSiiPage() {
 
         {query.isError && (
           <p className="text-xs text-status-bad font-mono">
-            Failed to read the SII. The device must be present and reachable (INIT or PRE-OP).
+            Failed to read the SII. The device must be present and reachable (INIT or PREOP).
           </p>
         )}
 

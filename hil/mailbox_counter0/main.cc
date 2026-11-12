@@ -11,22 +11,22 @@
 // Every request is an SDO upload of 0x1000:00. A request is written with one datagram, and the
 // answer is awaited for EC_TIMEOUTRXM. When no answer comes, the SyncManager 0 status tells whether
 // the request is still in the mailbox (STUCK) or the drive took it and did not answer (DROPPED).
-// A stuck mailbox is freed with INIT followed by PRE-OP before the next round.
+// A stuck mailbox is freed with INIT followed by PREOP before the next round.
 //
 // Patterns, each run for --rounds rounds:
 //   after   a request with the next counter, then counter 0, then counter 1. This is the sequence
 //           Motion Master 6.0.0-alpha.92 sends after a write with no frame back. The first counter
 //           of each round moves through 1..7, so every preceding counter is covered.
 //   double  a request with the next counter, then counter 0 twice, then the next counter.
-//   first   INIT, PRE-OP, then counter 0 as the first request, then the next counter.
-//   init    two requests with the next counters, INIT, PRE-OP, counter 0, then the same two
+//   first   INIT, PREOP, then counter 0 as the first request, then the next counter.
+//   init    two requests with the next counters, INIT, PREOP, counter 0, then the same two
 //           counters again. This shows whether INIT clears what the drive remembers.
 //   skip    counters c, c+2, c+1, c+3, c+2, c+3, c+4. A drive that checks the sequence drops c+2
 //           and the first c+3. A drive that remembers the last two accepted counters drops the
 //           second c+3.
 //   all     every pattern in that order. This is the default.
 //
-// The drive is left in PRE-OP.
+// The drive is left in PREOP.
 
 #include <soem/soem.h>
 
@@ -210,7 +210,7 @@ bool recover(ecx_contextt* ctx, uint16_t slave, const std::vector<Step>& round) 
   if (!stuck) {
     return true;
   }
-  std::cout << "   mailbox stuck, INIT then PRE-OP\n";
+  std::cout << "   mailbox stuck, INIT then PREOP\n";
   return cycleToPreOp(ctx, slave);
 }
 
@@ -236,7 +236,7 @@ std::vector<Step> runDouble(ecx_contextt* ctx, uint16_t slave) {
 std::vector<Step> runFirst(ecx_contextt* ctx, uint16_t slave) {
   std::vector<Step> round;
   if (!cycleToPreOp(ctx, slave)) {
-    std::cout << "   the slave did not reach PRE-OP\n";
+    std::cout << "   the slave did not reach PREOP\n";
     return round;
   }
   round.push_back(sendRequest(ctx, slave, "zero first", 0));
@@ -251,7 +251,7 @@ std::vector<Step> runInit(ecx_contextt* ctx, uint16_t slave) {
   const uint8_t second = nextCounter(ctx, slave);
   round.push_back(sendRequest(ctx, slave, "before 2", second));
   if (!cycleToPreOp(ctx, slave)) {
-    std::cout << "   the slave did not reach PRE-OP\n";
+    std::cout << "   the slave did not reach PREOP\n";
     return {};
   }
   round.push_back(sendRequest(ctx, slave, "zero", 0));
@@ -394,12 +394,12 @@ int main(int argc, char** argv) {
   }
   const uint16_t slave = options.slave;
   if (!cycleToPreOp(ctx.get(), slave)) {
-    std::cerr << "the slave did not reach PRE-OP\n";
+    std::cerr << "the slave did not reach PREOP\n";
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }
   const ec_slavet& device = ctx->slavelist[slave];
-  std::cout << std::format("slave {} ({}, product 0x{:08X}, revision 0x{:08X}) is in PRE-OP\n",
+  std::cout << std::format("slave {} ({}, product 0x{:08X}, revision 0x{:08X}) is in PREOP\n",
                            slave, device.name, device.eep_id, device.eep_rev);
 
   std::vector<std::string> patterns;

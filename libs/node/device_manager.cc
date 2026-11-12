@@ -70,12 +70,12 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
 
 // The EtherCAT AL state machine, keyed by a device's current state: each entry lists every state
 // that state may transition to (including itself — re-commanding the current state is harmless).
-// Climbs are single-step only (INIT -> PRE-OP -> SAFE-OP -> OP); drops may skip levels (e.g.
+// Climbs are single-step only (INIT -> PREOP -> SAFEOP -> OP); drops may skip levels (e.g.
 // OP -> INIT); BOOT is reachable only from INIT and only returns to INIT.
 //
 // Motion Master must reject illegal transitions itself rather than leaving them to the slave (which
-// answers an illegal request with AL status 0x0011): entering SAFE-OP/OP triggers a re-map that
-// reads each device's PDO mapping over the CoE mailbox, which is only live from PRE-OP up. A device
+// answers an illegal request with AL status 0x0011): entering SAFEOP/OP triggers a re-map that
+// reads each device's PDO mapping over the CoE mailbox, which is only live from PREOP up. A device
 // asked to jump straight from BOOT (firmware-sized mailbox, no CoE) into an exchange state would
 // reach that mailbox read while still in BOOT and segfault inside SOEM before the slave ever sees
 // the request. Validating here keeps the bad jump away from the mapper entirely.
@@ -203,7 +203,7 @@ std::expected<int, std::string> DeviceManager::scan() {
   // Unpublish and drain the RT cycle first — exactly as reset()/configureProcessData() do — so
   // exchangeProcessData() is a no-op and the RT loop is no longer touching the IOmap while the
   // driver rebuilds it. Then reclaim the now-stale image generations (safe once exchange is
-  // gated off); a fresh image is published when the bus is next brought into SAFE-OP/OP.
+  // gated off); a fresh image is published when the bus is next brought into SAFEOP/OP.
   if (!stopExchange()) {
     // Refused rather than forced. A scan frees the recording, the retained images and — once this
     // set is replaced — every device and cell in it, and the RT thread is demonstrably still
@@ -437,7 +437,7 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     // consumers that captured the layout (the monitoring sampler) to re-capture it.
     processImageGeneration_.fetch_add(1, std::memory_order_relaxed);
     // The short-working-counter counters are deliberately *not* cleared here. A re-map happens
-    // whenever anyone brings a device into or out of SAFE-OP/OP, which is precisely when someone is
+    // whenever anyone brings a device into or out of SAFEOP/OP, which is precisely when someone is
     // chasing a fault — so clearing per generation erased the history at the moment it was most
     // wanted, and left the count describing a window nobody chose. They run from init() to reset()
     // instead, and `generations` already says how many images that spans.
@@ -539,7 +539,7 @@ void DeviceManager::decodeInputsIntoCells(const ProcessImage& image,
   // plus a bit extraction, and it is what a cyclic task's whole read path rests on.
   //
   // Gated on the AL state of the owning device. The image is one whole-bus layout, so a device
-  // below SAFE-OP still has a region in it, but it writes nothing into the frame. Its region holds
+  // below SAFEOP still has a region in it, but it writes nothing into the frame. Its region holds
   // whatever the master sent, which after a re-map can be zeros or another device's old bytes.
   // Skipping it keeps the last value the device did send. The state comes from the driver's
   // lock-free mirror, loaded once per device: the entries of one device are contiguous, and a
@@ -563,7 +563,7 @@ void DeviceManager::decodeInputsIntoCells(const ProcessImage& image,
       exchanging = mm::comm::exchangesProcessData(driver.slaveState(position));
     }
     if (!exchanging) {
-      continue;  // below SAFE-OP or in error — the region was not written by the device
+      continue;  // below SAFEOP or in error — the region was not written by the device
     }
     if (entry.parameter == nullptr) {
       continue;  // dictionary not enumerated — the object exchanges, it just has no cell
@@ -719,7 +719,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   info.healthy = info.configured && info.lastWkc >= info.expectedWkc;
 
   // Describe the live image when exchanging; otherwise fall back to the most recent retained
-  // generation so a bus that dropped out of SAFE-OP/OP (image torn down, but generations
+  // generation so a bus that dropped out of SAFEOP/OP (image torn down, but generations
   // kept until reset()) still shows what it last mapped. `configured` tells the caller which it
   // is, so a stale layout is never mistaken for an active one.
   const ProcessImage* describe = image;
@@ -1092,7 +1092,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   }
   const std::vector<uint16_t> targets = std::move(*resolved);
 
-  // The longest walk is BOOT to OP: INIT, PRE-OP, SAFE-OP, OP. A round moves every device that is
+  // The longest walk is BOOT to OP: INIT, PREOP, SAFEOP, OP. A round moves every device that is
   // not there yet by one step, so this bound is never reached by a walk that makes progress.
   constexpr int kMaxRounds = 5;
   // A device that does not answer has no state to walk from. It is commanded once, with the
@@ -1104,7 +1104,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
       return std::unexpected(current.error());
     }
     // std::map orders the steps by state value, so the lowest step goes first: a device climbing
-    // to PRE-OP has a mailbox before another one's step to SAFE-OP re-maps the bus.
+    // to PREOP has a mailbox before another one's step to SAFEOP re-maps the bus.
     std::map<EtherCatState, std::vector<uint16_t>> stepGroups;
     for (std::size_t i = 0; i < targets.size(); ++i) {
       const auto& raw = (*current)[i];
@@ -1174,7 +1174,7 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
   }
   std::vector<uint16_t> targets = std::move(*resolved);
 
-  // Reject illegal AL transitions before doing anything else. Entering SAFE-OP/OP re-maps by
+  // Reject illegal AL transitions before doing anything else. Entering SAFEOP/OP re-maps by
   // reading PDO mappings over the CoE mailbox, which a device still in BOOT cannot serve — that
   // read segfaults inside SOEM. Validate every target against the EtherCAT state machine here so a
   // bad jump never reaches the mapper. Read the live state first (a plain AL-status register read,
@@ -1197,16 +1197,16 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
       return std::unexpected(stateChangeError(
           StateChangeError::Kind::kIllegalTransition,
           std::format("illegal AL transition for device {}: {} -> {} (allowed: single-step climb "
-                      "INIT -> PRE-OP -> SAFE-OP -> OP, any drop, or BOOT only from/to INIT)",
+                      "INIT -> PREOP -> SAFEOP -> OP, any drop, or BOOT only from/to INIT)",
                       targets[i], mm::comm::toString(currentState),
                       mm::comm::toString(targetState))));
     }
   }
 
-  // React to the requested state. Process data is exchanged only in SAFE-OP and OP, so Motion
+  // React to the requested state. Process data is exchanged only in SAFEOP and OP, so Motion
   // Master maps/re-maps or tears down the whole-bus image around the user-driven AL transition.
   // A subset of the bus can be taken down (firmware download in BOOT, or a manual PDO re-map in
-  // PRE-OP) while the devices staying in SAFE-OP/OP keep exchanging; a device rejoining triggers
+  // PREOP) while the devices staying in SAFEOP/OP keep exchanging; a device rejoining triggers
   // a re-map because its firmware may carry a different PDO layout.
   const bool exchangeState =
       targetState == mm::comm::EtherCatState::SafeOp || targetState == mm::comm::EtherCatState::Op;
@@ -1214,7 +1214,7 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
     // Entering an exchange state. Re-map when there is no image yet, or when any targeted device
     // is (re)joining from a non-exchange state — it must be added to the whole-bus image and its
     // PDO mapping re-read (a firmware update or a manual re-map can change it). A device
-    // already exchanging being re-commanded (SAFE-OP -> OP) needs no re-map; the published image
+    // already exchanging being re-commanded (SAFEOP -> OP) needs no re-map; the published image
     // still describes it. Re-mapping briefly pauses exchange for the whole bus (stopExchange
     // inside configureProcessData) — the accepted cost of bringing a device back online.
     // A device that does not answer cannot reach an exchange state, so it does not count.
@@ -1226,9 +1226,9 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
       // Re-mapping rebuilds the single whole-bus IOmap in one shot, so remapProcessImage()
       // pauses PDO for *every* device — including ones meant to stay in OP — for the duration
       // of stopExchange() plus the per-device SDO reads it does. A device in OP that misses
-      // process data past its sync-manager watchdog timeout faults itself to SAFE-OP+error. To
-      // avoid that, deliberately drop any staying-in-OP device to SAFE-OP first (a missed frame
-      // in SAFE-OP is harmless — outputs are not applied there), re-map, then climb them back to
+      // process data past its sync-manager watchdog timeout faults itself to SAFEOP+error. To
+      // avoid that, deliberately drop any staying-in-OP device to SAFEOP first (a missed frame
+      // in SAFEOP is harmless — outputs are not applied there), re-map, then climb them back to
       // OP. The GameLoop resumes feeding PDO the instant the new image is published, so the climb
       // back is fed normally and needs no separate PDO tick.
       std::vector<uint16_t> opStayers;
@@ -1241,7 +1241,7 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
       }
       if (!opStayers.empty()) {
         spdlog::info(
-            "Re-map pauses the whole bus — dropping {} staying OP device(s) to SAFE-OP first to "
+            "Re-map pauses the whole bus — dropping {} staying OP device(s) to SAFEOP first to "
             "avoid a sync-manager watchdog fault",
             opStayers.size());
         // These devices keep exchanging as they drop, so the expectation has to come down with
@@ -1267,7 +1267,7 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
     }
   } else if (processDataConfigured()) {
     // Leaving the exchange states. Tear the whole-bus image down only when no device will remain
-    // exchanging afterwards; otherwise keep it published so the devices staying in SAFE-OP/OP
+    // exchanging afterwards; otherwise keep it published so the devices staying in SAFEOP/OP
     // keep running while the targeted ones drop out. The targeted devices' working-counter share
     // is removed by the updateExpectedWkc() below, so health still reflects the live bus.
     const bool anyStays = std::ranges::any_of(set->devices, [&targets](const Device& d) {
@@ -1276,7 +1276,7 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
     });
     if (anyStays) {
       spdlog::info(
-          "Transition to 0x{:02X} leaves other devices in SAFE-OP/OP — keeping the process image",
+          "Transition to 0x{:02X} leaves other devices in SAFEOP/OP — keeping the process image",
           static_cast<int>(targetState));
     } else {
       spdlog::info("Stopping process data exchange before transition to 0x{:02X}",
@@ -1312,10 +1312,10 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
   // Device states just changed, so the working counter expected from the bus did too.
   updateExpectedWkc();
 
-  // Reconcile module idents once a device reaches PRE-OP. A modular drive whose
+  // Reconcile module idents once a device reaches PREOP. A modular drive whose
   // Configured Module Ident List (0xF030) disagrees with its Detected list (0xF050)
-  // reports a mismatch and refuses to leave PRE-OP; copying detected into configured
-  // clears it. SDO mailbox is only available in PRE-OP+, so this is the earliest point
+  // reports a mismatch and refuses to leave PREOP; copying detected into configured
+  // clears it. SDO mailbox is only available in PREOP+, so this is the earliest point
   // the write is possible. Best-effort: failures are logged, never fatal to the transition.
   if (targetState == mm::comm::EtherCatState::PreOp) {
     for (const auto& info : result) {
@@ -1356,8 +1356,8 @@ void DeviceManager::readMissingObjectDictionaries(DeviceSet& set,
     if (!device || !device->mailboxActive() || device->hasParameters()) {
       continue;
     }
-    // Attempted once per scan, not once per transition. The CoE mailbox is live from PRE-OP up,
-    // so without this a device whose enumeration failed pays for it again on SAFE-OP and again on
+    // Attempted once per scan, not once per transition. The CoE mailbox is live from PREOP up,
+    // so without this a device whose enumeration failed pays for it again on SAFEOP and again on
     // OP — three passes over a bus that has already said it cannot answer, which on a large chain
     // is minutes. Deliberately not a retry-with-backoff: the explicit reads (POST
     // .../parameters/init) are the way back, and they clear this on success.
@@ -1369,8 +1369,8 @@ void DeviceManager::readMissingObjectDictionaries(DeviceSet& set,
       continue;
     }
     if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
-      // Names the occasion: the CoE mailbox is live from PRE-OP up, so this runs on entry to
-      // SAFE-OP and OP too, and at a scan that finds a device already there. It also says that
+      // Names the occasion: the CoE mailbox is live from PREOP up, so this runs on entry to
+      // SAFEOP and OP too, and at a scan that finds a device already there. It also says that
       // this was the only automatic attempt and how to ask for another, because that is the one
       // thing the device cannot convey afterwards — from here on it simply looks like a device
       // with no parameters.
@@ -1782,7 +1782,7 @@ std::expected<void, std::string> DeviceManager::writeDevicePdoMapping(uint16_t s
   // busOperationMutex_ makes it exclusive against a concurrent re-map and against another write to
   // the same device, which a shared lock alone never did. The mailbox writes themselves are still
   // serialised per transaction by the driver's socket mutex, and the process image is not touched
-  // here — a subsequent transitionToState back to SAFE-OP/OP re-reads the mapping and re-maps.
+  // here — a subsequent transitionToState back to SAFEOP/OP re-reads the mapping and re-maps.
   const std::lock_guard busOperationLock(busOperationMutex_);
   const std::shared_ptr<DeviceSet> set = deviceSet();
   Device* device = set->find(slavePosition);
@@ -1827,7 +1827,7 @@ std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(
     if (outputMapped && exchanging) {
       r.staged = true;
     } else if (!exchanging) {
-      r.error = "device not exchanging (not in SAFE-OP/OP) — value written but not cyclically sent";
+      r.error = "device not exchanging (not in SAFEOP/OP) — value written but not cyclically sent";
     } else {
       r.error = "object not output-mapped — value written via SDO, not cyclically sent";
     }

@@ -44,9 +44,9 @@ inline constexpr std::chrono::milliseconds kFoeReadTimeout{6000};
 /// encoding (ETG.1000.6 §6.4.1).
 enum class EtherCatState : uint16_t {
   Init = 0x01,    ///< INIT — reset state, no communication.
-  PreOp = 0x02,   ///< PRE-OPERATIONAL — mailbox communication active.
+  PreOp = 0x02,   ///< Pre-Operational — mailbox communication active.
   Boot = 0x03,    ///< BOOT — firmware download mode.
-  SafeOp = 0x04,  ///< SAFE-OPERATIONAL — outputs are received but not applied.
+  SafeOp = 0x04,  ///< Safe-Operational — outputs are received but not applied.
   Op = 0x08,      ///< OPERATIONAL — full PDO exchange.
 };
 
@@ -68,11 +68,11 @@ inline std::string_view toString(EtherCatState state) {
     case EtherCatState::Init:
       return "INIT";
     case EtherCatState::PreOp:
-      return "PRE-OP";
+      return "PREOP";
     case EtherCatState::Boot:
       return "BOOT";
     case EtherCatState::SafeOp:
-      return "SAFE-OP";
+      return "SAFEOP";
     case EtherCatState::Op:
       return "OP";
   }
@@ -110,13 +110,13 @@ inline std::string_view toString(Reachability reachability) {
 /// @brief Working-counter contribution of one slave for a given AL status and PDO presence.
 ///
 /// A slave increments the working counter of an LRW by 2 when it takes the outputs and by 1 when it
-/// delivers the inputs (ETG.1000.4, section 5.4.3.5). SAFE-OP and OP contribute the same. The
-/// PRE-OP to SAFE-OP transition enables the output Sync Manager as well as the input one, and
+/// delivers the inputs (ETG.1000.4, section 5.4.3.5). SAFEOP and OP contribute the same. The
+/// PREOP to SAFEOP transition enables the output Sync Manager as well as the input one, and
 /// leaving OP only sets the outputs to their safe values (ETG.1000.6, Tables 99 and 103). The slave
-/// must also receive outputs in SAFE-OP, or it refuses the step to OP with AL status code 0x0019.
-/// Below SAFE-OP a slave does not contribute.
+/// must also receive outputs in SAFEOP, or it refuses the step to OP with AL status code 0x0019.
+/// Below SAFEOP a slave does not contribute.
 ///
-/// A slave with the error flag set contributes 0. One that enters SAFE-OP with the flag set
+/// A slave with the error flag set contributes 0. One that enters SAFEOP with the flag set
 /// disables Sync Manager 2 and may still deliver its inputs, so 0 is lower than what it answers.
 /// The expected value is a lower limit, so that is safe, and the error itself is reported in the
 /// AL status.
@@ -141,10 +141,10 @@ inline int workingCounterContribution(uint16_t alStatus, bool hasOutputs, bool h
   }
 }
 
-/// @brief Returns whether a slave with this AL status exchanges process data: SAFE-OP or OP, with
+/// @brief Returns whether a slave with this AL status exchanges process data: SAFEOP or OP, with
 ///        the error flag clear.
 ///
-/// Below SAFE-OP a slave writes nothing into the frame, so its input region holds bytes it never
+/// Below SAFEOP a slave writes nothing into the frame, so its input region holds bytes it never
 /// sent. The control plane uses this rule to choose between the process image and an SDO upload,
 /// and the RT decode uses it to leave such a slave's cells alone. The two must agree, so the rule
 /// has one definition.
@@ -414,7 +414,7 @@ struct SlaveDiagnostics {
 /// deviation: it converges toward zero once the bus exchanges process data for long
 /// enough for the slaves' drift-compensation loops to settle, and a value that stays large or
 /// grows means a slave is not locked to the reference. The figure is only meaningful while the
-/// bus is exchanging in SAFE-OP/OP, since the master distributes the reference time in the
+/// bus is exchanging in SAFEOP/OP, since the master distributes the reference time in the
 /// cyclic frame. Non-DC slaves report @c dcCapable false and zeroed values.
 struct DcSyncDiagnostics {
   uint16_t slavePosition = 0;    ///< 1-based bus position.
@@ -525,7 +525,7 @@ class FieldbusDriver {
   /// @brief Maps the process data and lays out the IOmap (one-time, control-plane).
   ///
   /// Reads each slave's active PDO assignment, computes the process image, programs the
-  /// FMMUs, and fills the driver-owned IOmap.  Slaves must be in PRE-OP (mailbox active)
+  /// FMMUs, and fills the driver-owned IOmap.  Slaves must be in PREOP (mailbox active)
   /// so the assignment can be read.  Run again to re-map after the slave set changes (e.g.
   /// a device returning from a firmware download) — the previous @c PdoLayout is invalidated.
   /// Serialised with other control-plane operations via the socket mutex. This is the one
@@ -553,7 +553,7 @@ class FieldbusDriver {
   /// built up across control-plane operations, not one: @c scan() sets identity, addresses, the
   /// mailbox SMs and DC capability; @c configureProcessData() adds the process-data SMs, FMMUs and
   /// DC timing (and rebuilds the FMMUs on a re-map); and a BOOT state transition transiently
-  /// reprograms the mailbox SMs (reset on the return to PRE-OP). A meaningful snapshot therefore
+  /// reprograms the mailbox SMs (reset on the return to PREOP). A meaningful snapshot therefore
   /// needs @c scan(), plus @c configureProcessData() for the process-data SMs/FMMUs. Optional
   /// capability: the default returns an empty vector for transports without an ESC (e.g. SPoE); the
   /// SOEM driver overrides it.
@@ -582,7 +582,7 @@ class FieldbusDriver {
   ///
   /// Does @b not command any AL state change — it only closes the transport (for SOEM,
   /// @c ecx_close, which just destroys the mailbox-pool mutex and closes the raw socket; nothing
-  /// is sent on the wire). Slaves left in SAFE-OP/OP are not driven back to INIT by the master;
+  /// is sent on the wire). Slaves left in SAFEOP/OP are not driven back to INIT by the master;
   /// once process-data frames stop arriving, each slave's own sync-manager watchdog trips and it
   /// drops out of OP on its own (the safety guarantee for comms loss, independent of any graceful
   /// shutdown). After @c stop() returns, @c exchangeProcessData() must not be called again.
@@ -592,7 +592,7 @@ class FieldbusDriver {
   ///
   /// They answer different questions, from two ESC registers (ETG.1000.6 §6.4.1):
   ///   - @c alStatus (register 0x0130): the slave's current situation — the AL state in bits 3:0
-  ///     (1=INIT, 2=PRE-OP, 3=BOOT, 4=SAFE-OP, 8=OP) plus a bit-4 error indicator, set when the
+  ///     (1=INIT, 2=PREOP, 3=BOOT, 4=SAFEOP, 8=OP) plus a bit-4 error indicator, set when the
   ///     slave rejects a requested state change or faults. Decode via @c alState / @c alHasError.
   ///   - @c alStatusCode (register 0x0134): *why* an error was raised — a diagnostic code for a
   ///     failed transition. Meaningful only while @c alStatus's error bit is set (else 0x0000).
@@ -600,7 +600,7 @@ class FieldbusDriver {
   ///
   /// Examples:
   ///   - Healthy in OP: @c alStatus 0x0008 (OP, error bit clear), @c alStatusCode 0x0000.
-  ///   - Couldn't hold OP after outputs stopped: @c alStatus 0x0014 (SAFE-OP | error bit),
+  ///   - Couldn't hold OP after outputs stopped: @c alStatus 0x0014 (SAFEOP | error bit),
   ///     @c alStatusCode 0x001B ("Sync manager watchdog").
   ///   - Illegal INIT->OP jump rejected: @c alStatus 0x0011 (INIT | error bit), @c alStatusCode
   ///     0x0011 ("Invalid requested state change"). The two share the value 0x0011 only by
@@ -615,8 +615,8 @@ class FieldbusDriver {
   ///
   /// Refreshes slave state from the hardware in one pass, then returns the raw
   /// AL Status register and AL Status Code register for each requested position.
-  /// AL Status bits 3:0 encode the current state (1=Init, 2=PreOp, 3=Boot,
-  /// 4=SafeOp, 8=Op); bit 4 is the error indicator.  AL Status Code is non-zero
+  /// AL Status bits 3:0 encode the current state (1=INIT, 2=PREOP, 3=BOOT,
+  /// 4=SAFEOP, 8=OP); bit 4 is the error indicator.  AL Status Code is non-zero
   /// when an error is present and identifies the cause (ETG.1000.6 §6.4.1).
   ///
   /// A slave that does not answer reports both registers as 0 and says why in @c reachability,
@@ -661,7 +661,7 @@ class FieldbusDriver {
   /// registers for every DC-capable slave and decodes the signed deviation of each slave's local
   /// clock from the bus reference. The reference clock is the first DC-capable slave; its own
   /// difference is zero. Values are meaningful only while the bus is exchanging process data in
-  /// SAFE-OP/OP (the reference time is distributed in the cyclic frame), and the difference
+  /// SAFEOP/OP (the reference time is distributed in the cyclic frame), and the difference
   /// converges toward zero as the slaves' drift-compensation loops settle — poll this and watch
   /// for one that stays large or grows. Serialised with other control-plane operations via the
   /// socket mutex; runs concurrently with the lock-free @c exchangeProcessData and never blocks
@@ -728,7 +728,7 @@ class FieldbusDriver {
   /// @brief Writes an object dictionary entry to a slave (CoE SDO download).
   ///
   /// Performs a mailbox SDO download of @p data to (@p index, @p subindex). The slave
-  /// must be in PRE-OP, SAFE-OP, or OP (mailbox communication active).
+  /// must be in PREOP, SAFEOP, or OP (mailbox communication active).
   /// Called from non-RT (HTTP handler) threads; serialized with other control-plane
   /// operations via the driver's socket mutex, and runs concurrently with the lock-free
   /// @c exchangeProcessData (never blocks the RT cycle).
@@ -746,7 +746,7 @@ class FieldbusDriver {
   ///
   /// Performs the "Get Object List" → "Get Object Description" → "Get Entry Description"
   /// sequence (ETG.1000.6 §5.6) and returns one @c OdEntry per @c (index, subindex) pair.
-  /// The slave must be in PRE-OP, SAFE-OP, or OP — i.e. mailbox communication enabled.
+  /// The slave must be in PREOP, SAFEOP, or OP — i.e. mailbox communication enabled.
   /// Many transfers are issued; expect the call to take seconds on a fully populated drive.
   ///
   /// Slaves that do not implement the SDO Info service return an error.
@@ -768,7 +768,7 @@ class FieldbusDriver {
   /// Decode it with @c mm::comm::parseSii. EEPROM access is a control-plane operation serialised
   /// on the socket mutex per transaction (it runs concurrently with the lock-free
   /// @c exchangeProcessData); the real constraint is slave state — it is most reliable while the
-  /// slave is in INIT or PRE-OP. The driver hands EEPROM control back to the slave's PDI before
+  /// slave is in INIT or PREOP. The driver hands EEPROM control back to the slave's PDI before
   /// returning.
   ///
   /// Optional capability: the default returns an error for transports without an ESC EEPROM
@@ -788,7 +788,7 @@ class FieldbusDriver {
   /// length). This is a destructive control-plane operation: a malformed image can leave the slave
   /// unidentifiable until re-flashed. EEPROM access takes the socket mutex (running concurrently
   /// with the lock-free @c exchangeProcessData) and is only safe while the slave is in INIT or
-  /// PRE-OP. The slave does not adopt the new contents until its ESC reloads the EEPROM — i.e.
+  /// PREOP. The slave does not adopt the new contents until its ESC reloads the EEPROM — i.e.
   /// after a power cycle.
   ///
   /// Optional capability: the default returns an error for transports without an ESC EEPROM
@@ -806,7 +806,7 @@ class FieldbusDriver {
   /// @brief Reads a file from the slave via File over EtherCAT (FoE).
   ///
   /// Sends an FoE read request for @p filename and collects all data packets from the slave.
-  /// FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is
+  /// FoE is available in BOOT, PREOP, SAFEOP and OP states (device-dependent); the caller is
   /// responsible for ensuring the device is in a suitable state.
   /// Called from HTTP handler threads; serialised with other control-plane operations via the
   /// socket mutex, and runs concurrently with the lock-free @c exchangeProcessData.
@@ -827,7 +827,7 @@ class FieldbusDriver {
   /// @brief Writes a file to the slave via File over EtherCAT (FoE).
   ///
   /// Sends an FoE write request for @p filename and streams @p data to the slave.
-  /// FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is
+  /// FoE is available in BOOT, PREOP, SAFEOP and OP states (device-dependent); the caller is
   /// responsible for ensuring the device is in a suitable state.
   /// Called from non-RT (HTTP handler) threads; serialized with other control-plane
   /// operations via the driver's socket mutex.

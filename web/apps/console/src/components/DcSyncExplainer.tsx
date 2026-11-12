@@ -59,7 +59,7 @@ export default function DcSyncExplainer() {
 
       <p>
         <strong>Watch the trend, not the instant.</strong> The figure is only meaningful while the bus
-        is exchanging in SAFE-OP/OP, because it is the master&apos;s cyclic frame that distributes the
+        is exchanging in SAFEOP/OP, because it is the master&apos;s cyclic frame that distributes the
         reference time the followers correct against. So immediately after bring-up — or on an idle bus
         — a follower may legitimately show a large difference that simply hasn&apos;t converged yet.
         The thing that signals a real fault is a deviation that <em>stays</em> large or <em>grows</em>{' '}

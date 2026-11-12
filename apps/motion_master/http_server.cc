@@ -191,7 +191,7 @@ std::expected<StateRequest, mm::api::Response> parseStateRequest(
       requested != static_cast<uint16_t>(S::Boot) &&
       requested != static_cast<uint16_t>(S::SafeOp) && requested != static_cast<uint16_t>(S::Op)) {
     return std::unexpected(mm::api::badRequest(
-        "invalid state: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or 8 (Op)"));
+        "invalid state: use 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), or 8 (OP)"));
   }
   StateRequest request{.state = static_cast<S>(requested), .positions = {}};
   if (body.contains("positions")) {
@@ -393,7 +393,7 @@ std::expected<std::vector<mm::node::PdoMappingObject>, std::string> parsePdoMapp
 // Parses a PUT /api/devices/:slavePosition/pdo-mapping body into a PdoMapping. The body is
 // {"outputs": [...], "inputs": [...]}; both directions must be present (an empty array clears that
 // sync manager's assignment, so an omitted key would be an accidental wipe and is rejected). Deeper
-// validation (PRE-OP, per-object counts, read-back) is the node layer's job.
+// validation (PREOP, per-object counts, read-back) is the node layer's job.
 std::expected<mm::node::PdoMapping, std::string> parseDevicePdoMapping(const nlohmann::json& body) {
   if (!body.is_object() || !body.contains("outputs") || !body.contains("inputs")) {
     return std::unexpected<std::string>(
@@ -1304,7 +1304,7 @@ void HttpServer::run() {
                  return std::chrono::duration_cast<std::chrono::microseconds>(
                      std::chrono::steady_clock::now() - t0);
                };
-               // A failed write is usually a device-state precondition (not in PRE-OP) or a
+               // A failed write is usually a device-state precondition (not in PREOP) or a
                // rejected/verify-mismatched mapping — a conflict with the device's state rather
                // than a server fault.
                if (auto r = deviceManager_.writeDevicePdoMapping(*position, *mapping); !r) {
@@ -1790,7 +1790,7 @@ void HttpServer::run() {
 
   // ── What a device is, and which firmware fits it ─────────────────────────────────────────────
   // Two FoE reads behind the control-plane lock, so both are off the loop like every other device
-  // endpoint. The hardware description is readable in BOOT as well as PRE-OP and above, which is
+  // endpoint. The hardware description is readable in BOOT as well as PREOP and above, which is
   // what makes the compatibility check usable on a drive a failed install left stranded there.
   router.get("/api/devices/:slavePosition/hardware-description",
              [this](const mm::api::Request& req) -> mm::api::Response {
@@ -2134,7 +2134,7 @@ void HttpServer::run() {
 
   // Exports the bus as an ENI, the vendor-neutral configuration a third-party master replays to
   // bring the same bus up. The document describes the bus as this master has configured it, so it
-  // needs the bus configured: a 409 says to reach SAFE-OP or OP first. Reading it drives the bus —
+  // needs the bus configured: a 409 says to reach SAFEOP or OP first. Reading it drives the bus —
   // one EEPROM read and a burst of SDO uploads per device — which is why it is an explicit export
   // rather than something served alongside the other bus views.
   router.get("/api/eni", [this](const mm::api::Request&) -> mm::api::Response {
@@ -2239,7 +2239,7 @@ void HttpServer::run() {
             target != static_cast<uint16_t>(S::Boot) &&
             target != static_cast<uint16_t>(S::SafeOp) && target != static_cast<uint16_t>(S::Op)) {
           return mm::api::badRequest(
-              "invalid target: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or 8 (Op)");
+              "invalid target: use 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), or 8 (OP)");
         }
         std::vector<uint16_t> positions;
         if (body.contains("positions")) {

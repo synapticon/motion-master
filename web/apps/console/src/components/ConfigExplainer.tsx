@@ -44,20 +44,20 @@ export default function ConfigExplainer() {
         has two windows, each shown here as <em>length</em> @ <em>physical ESC offset</em>: a{' '}
         <strong>write</strong> window (master→slave) and a <strong>read</strong> window (slave→master).
         Both the sizes and offsets come from the SII EEPROM, and the slave is reached through this
-        channel from PRE-OP upward — not in INIT (no mailbox) and not as process data.
+        channel from PREOP upward — not in INIT (no mailbox) and not as process data.
       </p>
 
       <p>
-        <strong>Why is the mailbox bigger in BOOT than in PRE-OP?</strong> Because a slave defines{' '}
+        <strong>Why is the mailbox bigger in BOOT than in PREOP?</strong> Because a slave defines{' '}
         <em>two</em> mailbox configurations in its EEPROM: a <strong>standard mailbox</strong> (used
-        from PRE-OP up, sized for small CoE/SDO messages) and a separate{' '}
+        from PREOP up, sized for small CoE/SDO messages) and a separate{' '}
         <strong>bootstrap mailbox</strong> (used only in BOOT). BOOT exists for firmware download over
         FoE, and a bigger mailbox lets each firmware chunk be larger, so the transfer finishes faster —
-        e.g. <code>1024</code> bytes in BOOT versus <code>128</code> in PRE-OP on some SOMANET devices.
+        e.g. <code>1024</code> bytes in BOOT versus <code>128</code> in PREOP on some SOMANET devices.
         When the master takes a slave to BOOT it reprograms the mailbox Sync Managers from the
-        bootstrap EEPROM words; on the way back to PRE-OP it restores them from the standard words.
+        bootstrap EEPROM words; on the way back to PREOP it restores them from the standard words.
         The size shown on this card is whichever the master last programmed — after a fresh scan, the
-        standard (PRE-OP) mailbox.
+        standard (PREOP) mailbox.
       </p>
 
       <p>

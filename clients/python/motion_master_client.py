@@ -66,12 +66,12 @@ log = logging.getLogger("motion_master_client")
 
 # EtherCAT AL states, in the AL control register encoding the API uses.
 INIT = 1
-PRE_OP = 2
+PREOP = 2
 BOOT = 3
-SAFE_OP = 4
+SAFEOP = 4
 OP = 8
 
-STATE_NAMES = {0: "UNKNOWN", INIT: "INIT", PRE_OP: "PRE-OP", BOOT: "BOOT", SAFE_OP: "SAFE-OP", OP: "OP"}
+STATE_NAMES = {0: "UNKNOWN", INIT: "INIT", PREOP: "PREOP", BOOT: "BOOT", SAFEOP: "SAFEOP", OP: "OP"}
 
 # CiA402 objects, as (index, subindex). The names follow libs/node/cia402_drive_objects.h. A
 # monitoring parameter is (position, *VELOCITY_ACTUAL_VALUE).
@@ -118,7 +118,7 @@ def cia402_state(statusword):
 
 # The states a device climbs through, from the bottom. BOOT is not on it, because BOOT is
 # reachable only from INIT. _satisfied() orders the states with it.
-_LADDER = [INIT, PRE_OP, SAFE_OP, OP]
+_LADDER = [INIT, PREOP, SAFEOP, OP]
 
 
 def _path(position, **more):
@@ -409,7 +409,7 @@ class MotionMasterClient:
 
         Scans when the last scan is missing or wrong, then asks the server to walk each device to
         `state` (transitionToState), one legal transition at a time. A device already above
-        `state` stays where it is, because SAFE-OP and OP keep the mailbox of PRE-OP. Pass
+        `state` stays where it is, because SAFEOP and OP keep the mailbox of PREOP. Pass
         exact=True when the script needs that one state. A target of BOOT is always exact. Call
         init() first.
 
@@ -587,7 +587,7 @@ class MotionMasterClient:
         """Return a Monitoring that records the rows of the parameters while a with block runs.
 
         `parameters` is a list of (devicePosition, index, subindex). Create it after the devices
-        are in SAFE-OP or OP, because the server decides once, at creation, whether each object
+        are in SAFEOP or OP, because the server decides once, at creation, whether each object
         comes from the process data or from SDO reads. Without `topic`, a unique one is chosen.
 
             with client.monitoring([(1, *VELOCITY_ACTUAL_VALUE)]) as m:

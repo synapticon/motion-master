@@ -311,7 +311,7 @@ TEST(FakeSpoeServer, AFullInputBufferIsEmptiedBeforeTheNextFrame) {
 }
 
 TEST(FakeSpoeServer, TheInputBufferFillsInOpOnly) {
-  // `sqi_cyclic_rx_handler` pushes a frame only in OP. In SAFE-OP a Monitor-mode client gets
+  // `sqi_cyclic_rx_handler` pushes a frame only in OP. In SAFEOP a Monitor-mode client gets
   // empty replies.
   FakeSpoeServer server;
   server.setState(mm::comm::testing::kSpoeStateSafeOp);

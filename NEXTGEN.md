@@ -677,7 +677,7 @@ POST /api/state
 {"state": 8, "positions": [1, 2], "timeout": 5000}
 ```
 
-`state` uses the standard ETG.1000.6 AL control register encoding: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op). Numbers were chosen over strings because these values are well-known to EtherCAT engineers and map directly to the wire protocol. `positions` and `timeout` are optional; omitting `positions` targets all discovered devices, `timeout` defaults to 5000 ms.
+`state` uses the standard ETG.1000.6 AL control register encoding: 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), 8 (OP). Numbers were chosen over strings because these values are well-known to EtherCAT engineers and map directly to the wire protocol. `positions` and `timeout` are optional; omitting `positions` targets all discovered devices, `timeout` defaults to 5000 ms.
 
 ### Firmware update lifecycle — future work
 
@@ -692,7 +692,7 @@ Step 4 is not yet implemented. `transitionToState` as shipped covers steps 1 and
 
 ## Session 2026-05-30 — Module ident reconcile (CoE Modular Device Profile)
 
-**Problem.** A modular EtherCAT slave exposes two CoE Modular Device Profile lists (ETG.5001): the **Detected Module Ident List** (`0xF050`, what is physically plugged into each slot) and the **Configured Module Ident List** (`0xF030`, what the master expects). When the two disagree the slave reports a module mismatch and refuses to leave PRE-OP. With no ENI and no pre-engineered expected configuration, Motion Master's job is "talk to whatever drive is on the bus", so the configured list is meaningless to us — we clear the mismatch by copying detected into configured.
+**Problem.** A modular EtherCAT slave exposes two CoE Modular Device Profile lists (ETG.5001): the **Detected Module Ident List** (`0xF050`, what is physically plugged into each slot) and the **Configured Module Ident List** (`0xF030`, what the master expects). When the two disagree the slave reports a module mismatch and refuses to leave PREOP. With no ENI and no pre-engineered expected configuration, Motion Master's job is "talk to whatever drive is on the bus", so the configured list is meaningless to us — we clear the mismatch by copying detected into configured.
 
 **`FieldbusDriver::writeSdo`.** SDO download was missing from the driver interface (only `readSdo` existed). Added:
 
@@ -712,15 +712,15 @@ virtual std::expected<void, std::string> writeSdo(
 
 Idempotent (the already-matches skip means re-running is a no-op) and **vendor-neutral**. This is the one notable departure from the "Somanet specifics live in `namespace somanet`" rule: the function is keyed purely on the standard MDP objects and never branches on vendor ID, so it belongs in the generic `mm::node` layer, not in `somanet`. It generalises the older single-slot, Synapticon-labelled approach to any modular EtherCAT device while still covering the Somanet case.
 
-**Where it runs.** Wired into `DeviceManager::transitionToState`: when the target is PRE-OP, after the transition settles, the reconcile runs for every device that actually reached PRE-OP (`!error && alState == PreOp`). PRE-OP is the earliest point the write is possible — `0xF030`/`0xF050` are SDO mailbox objects, unavailable in INIT, and the mismatch must be cleared before SAFE-OP. Decided to make it **always-on** (no config flag, no separate HTTP route) and **best-effort**: failures are logged at warn level but never fail the transition.
+**Where it runs.** Wired into `DeviceManager::transitionToState`: when the target is PREOP, after the transition settles, the reconcile runs for every device that actually reached PREOP (`!error && alState == PreOp`). PREOP is the earliest point the write is possible — `0xF030`/`0xF050` are SDO mailbox objects, unavailable in INIT, and the mismatch must be cleared before SAFEOP. Decided to make it **always-on** (no config flag, no separate HTTP route) and **best-effort**: failures are logged at warn level but never fail the transition.
 
-**Open question — persistence.** The `0xF030` write is volatile on some firmwares (they require a `0x1010` store, or re-evaluate the list every boot). The current design re-runs on every PRE-OP transition, so it is self-healing regardless. If a mismatch is observed to reappear after a power cycle on real hardware, add an explicit store; until then the per-transition reconcile is sufficient and avoids unnecessary EEPROM wear.
+**Open question — persistence.** The `0xF030` write is volatile on some firmwares (they require a `0x1010` store, or re-evaluate the list every boot). The current design re-runs on every PREOP transition, so it is self-healing regardless. If a mismatch is observed to reappear after a power cycle on real hardware, add an explicit store; until then the per-transition reconcile is sufficient and avoids unnecessary EEPROM wear.
 
 ## Session 2026-06-01 — DC sync diagnostics, and the remaining fieldbus surface
 
 **DC sync health page.** Added a distributed-clock synchronisation diagnostic alongside the existing bus-health (ESC error-counter) one. `FieldbusDriver::readDcSync(positions)` (default "unsupported" for ESC-less transports; SOEM override) reads each DC-capable slave's **system-time delay (0x0928)** and **system-time difference (0x092C)** in one 8-byte FPRD. The reference clock is the first `hasdc` slave (SOEM elects it in `ecx_configdc`); its own difference is zero. 0x092C decodes as bits 0–30 magnitude + bit 31 sign → a signed-nanosecond deviation (positive = local clock ahead of the reference). Surfaced end-to-end: `mm::comm::DcSyncDiagnostics` → `DeviceManager::dcSync` + `DcSyncInfo`(+`to_json`) → `GET /api/dc-sync?positions=` → a polling **"DC Sync"** page under the **Fieldbus** sidebar group.
 
-The figures are meaningful only while exchanging in SAFE-OP/OP: this stack runs DC in **free-run** (`ecx_configdc` measures and elects a reference, but `ecx_dcsync0` is deliberately *not* called — no SYNC0 pulse), yet `ecx_send_processdata` still distributes the reference system time via the cyclic FRMW, so the slaves' drift-compensation loops run and 0x092C converges toward zero. A value that stays large or grows means a slave is not locked.
+The figures are meaningful only while exchanging in SAFEOP/OP: this stack runs DC in **free-run** (`ecx_configdc` measures and elects a reference, but `ecx_dcsync0` is deliberately *not* called — no SYNC0 pulse), yet `ecx_send_processdata` still distributes the reference system time via the cyclic FRMW, so the slaves' drift-compensation loops run and 0x092C converges toward zero. A value that stays large or grows means a slave is not locked.
 
 **Roadmap — fieldbus capabilities not yet exposed.** The exposed surface is now bus-level Control / Configuration / Process Image / Diagnostics / DC Sync, plus per-device FoE / Parameters (CoE OD + SDO) / PDO Mapping (read + write, shipped 2026-07-06 — see that session) / Registers (ESC) / SII (EEPROM read). What remains, ranked by value-vs-effort, deferred for a later session:
 
@@ -735,7 +735,7 @@ The figures are meaningful only while exchanging in SAFE-OP/OP: this stack runs 
 
 *Tier 3 — real capability, but write/RT/risk; deliberate actions, not toggles:*
 5. **DC SYNC0 activation** (`ecx_dcsync0`) — turn on true DC-synchronous operation with configurable cycle/shift. The natural *control* counterpart to the DC Sync diagnostic above; what you'd do for tight coordinated multi-axis motion. RT implications. **Planned for ~Sept–Oct 2026 on a PREEMPT_RT Linux host** (the DC-locked-timer requirement spelled out at the end of this item is the game-loop-facing part of that work). Why it matters and why the timer alone isn't enough: the fixed absolute-deadline cyclic timer (Session 2026-07-13) supplies master *cadence* (a fresh frame on a drift-free 1 ms grid) but **not hardware synchronisation**. In today's free-run mode a drive acts on **frame arrival**, so the master's wake jitter *is* the actuation jitter. SYNC0 makes each drive latch process data on a hardware pulse derived from the synced DC clock instead — the master then only has to deliver the frame *before* the pulse with margin, and the pulse (not the timer's jitter) defines when the axis acts. It is the missing tier for hard coordinated multi-axis. **Necessary-but-not-sufficient — three pieces, not one:** (a) `ecx_dcsync0` to raise the pulse, (b) a **DC-locked cycle timer**, and (c) a PREEMPT_RT host. Piece (b) is the part that touches the game loop directly and is genuinely *new work*: today's `CyclicTimer` (Session 2026-07-13) anchors its deadline grid to the **local monotonic clock** (`CLOCK_MONOTONIC`/QPC/mach) — a *different crystal* from the elected DC reference clock. Free-run tolerates the two clocks drifting apart; SYNC0 does **not**. Under SYNC0 the process-data frame must arrive at each slave *before* that slave's pulse **every** cycle, so a free-running local grid — which slowly slides in phase against the DC pulse grid — will eventually deliver the frame on the wrong side of a pulse, and the drive latches stale data (sync error, AL 0x001A/0x001B, or SM watchdog). The fix is to make the timer a **servo on the local clock**: a per-cycle PI controller that reads the DC phase (the reference system time, or the 0x092C system-time difference the DC Sync page already surfaces) and nudges the next wake earlier/later to hold the frame at a fixed offset ahead of SYNC0 — the standard EtherCAT master-sync loop (TwinCAT/IgH do the same). The point to internalise: **enabling SYNC0 without the DC-locked timer + RT host is a regression, not an improvement** — on a jittery or free-running master it converts today's benign setpoint-*arrival* jitter into missed-window stale latches and outright drive faults. The period was never the missing piece (the fixed-deadline timer already nails drift-free cadence); the missing piece is *phase-locking that cadence to a second clock*. That servo, plus SYNC0 activation itself, is the ~Sept–Oct 2026 PREEMPT_RT-Linux work.
-6. ~~**PDO remapping** — let the user change *which* objects are in the cyclic image (write `0x1C12`/`0x1C13` + the `0x160x`/`0x1A0x` mapping objects in PRE-OP), not just view the existing mapping. Most involved.~~ **SHIPPED 2026-07-06** — see the session note below.
+6. ~~**PDO remapping** — let the user change *which* objects are in the cyclic image (write `0x1C12`/`0x1C13` + the `0x160x`/`0x1A0x` mapping objects in PREOP), not just view the existing mapping. Most involved.~~ **SHIPPED 2026-07-06** — see the session note below.
 7. **SII / station-alias write** (`ecx_siiwrite`) — assign station aliases / reflash EEPROM. Higher risk; SII is read-only today.
 
 *Out of scope for SOMANET (absence is correct, not a gap):* cable redundancy, and the non-CoE mailbox protocols (EoE / SoE / AoE / VoE) — SOMANET is CoE-only.
@@ -951,11 +951,11 @@ A **seqlock, not per-field atomics**, precisely because the snapshot must be con
 
 ## Session 2026-06-07 — Two BOOT-excursion re-map crashes
 
-Cycling a device INIT → BOOT → INIT → PRE-OP → SAFE-OP (and the deliberate illegal BOOT → SAFE-OP) on real hardware crashed Motion Master two ways, both rooted in `configureProcessData()` re-mapping the bus with `ecx_config_map_group` *without* a fresh `ecx_config_init`. Both fixed and hardware-confirmed.
+Cycling a device INIT → BOOT → INIT → PREOP → SAFEOP (and the deliberate illegal BOOT → SAFEOP) on real hardware crashed Motion Master two ways, both rooted in `configureProcessData()` re-mapping the bus with `ecx_config_map_group` *without* a fresh `ecx_config_init`. Both fixed and hardware-confirmed.
 
 **Crash 1 — duplicate Outputs FMMU + out-of-bounds write.** SOEM's FMMU mappers (`ecx_config_create_{output,input}_mappings` + the mailbox-status mapper) start at `slavelist[i].FMMUunused` and *append*, trusting that `ecx_config_init`'s memset zeroed `FMMUunused` and the `FMMU[]` array. A re-map never memsets, so `FMMUunused` stayed at 3 from the prior map: the output mapper wrote a byte-identical duplicate Outputs FMMU at `FMMU[3]`, then the input/mailbox mappers ran at index 4. With `EC_MAXFMMU == 4` that wrote a 16-byte `ec_fmmut` past the end of the array, smashing the adjacent `ec_slavet` fields (`FMMU*func`, `mbx_*`, … and on repeated re-maps marching toward `PO2SOconfig`). This is the long-unconfirmed root corruptor behind the earlier `PO2SOconfig` segfault. **Fix:** in `configureProcessData()`'s pre-map reset loop, `memset` each slave's `FMMU[]` + `FMMUunused = 0` so SOEM re-derives FMMU0/1/2 from scratch like a clean scan, and FPWR-clear all `EC_MAXFMMU` ESC FMMU registers so a slave already carrying a stale duplicate self-heals on the next map. (Sits alongside the existing `outputs`/`inputs`/`PO2SOconfig` resets, all there for the same "a re-map doesn't memset the slavelist" reason.)
 
-**Crash 2 — illegal AL transition reads SDO over a dead CoE mailbox.** Entering SAFE-OP/OP re-maps, and the re-map reads each slave's PDO mapping over the **CoE mailbox** (`ecx_readPDOmap → ecx_SDOread → ecx_mbxreceive → memcpy`), which is only live from PRE-OP up. A device commanded straight from BOOT (firmware-sized mailbox SMs, no CoE) reached that mailbox read while still in BOOT and segfaulted in `ecx_mbxreceive` — *before* the slave could reject the illegal jump with AL status 0x0011. **Fix:** enforce the EtherCAT AL state machine in `DeviceManager::transitionToState` before any re-map, via a `kValidStateTransitions` map (current state → allowed targets: single-step climbs `INIT → PRE-OP → SAFE-OP → OP`, multi-step drops, BOOT only paired with INIT; self-transitions allowed). Validated against a fresh `readStates` (authoritative; an AL-status register read works in any state). Lives in the node layer on purpose — re-mapping is a Motion Master concern, not the fieldbus's, so direct `FieldbusDriver` use is the caller's own risk. Added `toString(EtherCatState)` next to `alState`/`alHasError` for the messages. The PWA's Control page already taught these rules in its inline AL-state hints; the backend now actually enforces them rather than trusting the slave (which it never reaches in the crashing case).
+**Crash 2 — illegal AL transition reads SDO over a dead CoE mailbox.** Entering SAFEOP/OP re-maps, and the re-map reads each slave's PDO mapping over the **CoE mailbox** (`ecx_readPDOmap → ecx_SDOread → ecx_mbxreceive → memcpy`), which is only live from PREOP up. A device commanded straight from BOOT (firmware-sized mailbox SMs, no CoE) reached that mailbox read while still in BOOT and segfaulted in `ecx_mbxreceive` — *before* the slave could reject the illegal jump with AL status 0x0011. **Fix:** enforce the EtherCAT AL state machine in `DeviceManager::transitionToState` before any re-map, via a `kValidStateTransitions` map (current state → allowed targets: single-step climbs `INIT → PREOP → SAFEOP → OP`, multi-step drops, BOOT only paired with INIT; self-transitions allowed). Validated against a fresh `readStates` (authoritative; an AL-status register read works in any state). Lives in the node layer on purpose — re-mapping is a Motion Master concern, not the fieldbus's, so direct `FieldbusDriver` use is the caller's own risk. Added `toString(EtherCatState)` next to `alState`/`alHasError` for the messages. The PWA's Control page already taught these rules in its inline AL-state hints; the backend now actually enforces them rather than trusting the slave (which it never reaches in the crashing case).
 
 ---
 
@@ -1022,12 +1022,12 @@ For "the user must get **every** cycle, no skips" (trajectory recording, offline
 The design worked out at parking time, kept for reference:
 
 - **What it is:** a *global* dump holding **exactly what the recorder keeps** — full raw inputs + outputs for every cycle in the ring span — **plus the process image embedded as a header** so the file decodes offline with no running Motion Master and no live bus (analyse a run after the device powered off). Supersedes the earlier "decode one monitoring's params to CSV" idea: monitorings are the *live* path, the dump is the recorder's raw archive — two distinct things.
-- **Trigger:** there is **no explicit pause**. The dump-worthy moment is *implicit* — when a device leaves the exchange states (OP/SAFE-OP → PRE-OP/INIT/BOOT), at which point its PDO production has stopped, which is exactly what makes a dump trivially safe (producer not advancing, no lapping possible).
+- **Trigger:** there is **no explicit pause**. The dump-worthy moment is *implicit* — when a device leaves the exchange states (OP/SAFEOP → PREOP/INIT/BOOT), at which point its PDO production has stopped, which is exactly what makes a dump trivially safe (producer not advancing, no lapping possible).
 - **Endpoint:** `POST /api/process-data/dump` → serializes the valid span to a file, returns `{ "path": "<dumpDir>/dump-<timestamp>.mmpd" }`. Not scoped to a monitoring topic. MM binds `127.0.0.1`, so the file is on the user's own machine — a path suffices; **no download/list/delete endpoints, no retention machinery** (the OS owns the dir). `dumpDir` becomes a `recorder` config key *when this is built* (not added yet). **Its default must be cross-platform** — derive from `std::filesystem::temp_directory_path()` (→ `/tmp/...` on Linux, `%TEMP%\...` on Windows), never a hardcoded `/tmp`.
 - **Format: self-describing binary** (CSV can't carry "whole raw image + the schema to decode it" without being huge and lossy about types/layout):
   `[magic + format-version]` · `[header: cycle period; start sequence; row count; input/output region sizes; process image = per device {slavePosition, name, vendorId, productCode, PDO entries[{index, subindex, name, dataType, bitOffset, bitLength, direction}]}]` · `[rows: per cycle {sequence, timestamp, raw input bytes, raw output bytes}]`. **No gap markers** — a bulk read of a frozen/contiguous span finishes ~300× faster than the ring wraps and the producer has stopped anyway, so the dump cannot be lapped; gaps are a *live-stream* concept only. The header **is** the `ProcessImage` from `configureProcessData()`/`buildProcessImage`; a `format-version` lets it evolve. A planned **UI tool** loads one file → per-device / per-parameter / per-window views.
 - **Synchronous write** off-RT on the HTTP thread (300 s ring ≈ ~38 MB per drive, sub-second). Background job + progress only if rings ever get huge (1 h ≈ 460 MB per drive, more with many drives).
-- **The hard open problem to solve on return — ring lifecycle vs. teardown & re-map:** the ring + its process-image header **must survive image teardown**, because tearing down the published image happens when the *last* device leaves OP/SAFE-OP — precisely the dump moment. So the ring is owned durably by `ProcessData` (which `DeviceManager` owns), retained across image republish *and* teardown; only `reset()`/`scan()` frees it. And because a **re-map changes the byte layout**, old records become undecodable under a new header — so a layout-changing re-map must **reset the recording** (clear the valid span, capture the new header); one span can't straddle two layouts. Lifecycle: *allocated & header captured at map → fills every cycle → frozen-but-retained when the device drops → reset & re-headered on the next re-map.*
+- **The hard open problem to solve on return — ring lifecycle vs. teardown & re-map:** the ring + its process-image header **must survive image teardown**, because tearing down the published image happens when the *last* device leaves OP/SAFEOP — precisely the dump moment. So the ring is owned durably by `ProcessData` (which `DeviceManager` owns), retained across image republish *and* teardown; only `reset()`/`scan()` frees it. And because a **re-map changes the byte layout**, old records become undecodable under a new header — so a layout-changing re-map must **reset the recording** (clear the valid span, capture the new header); one span can't straddle two layouts. Lifecycle: *allocated & header captured at map → fills every cycle → frozen-but-retained when the device drops → reset & re-headered on the next re-map.*
 
 **IMPLEMENTED (2026-06-09) — the live recorder.** `ProcessDataRing` (`libs/node/process_data_ring.{h,cc}`) is a lock-free circular recorder held as a member of `ProcessData`. The RT loop appends one record per cycle in `exchangeProcessData` (raw input + output IOmap, wall-clock epoch-ns timestamp, working counter) via a wait-free `write()` (a few `memcpy` + a per-slot release-stored absolute sequence number; readers re-check the sequence after copying to detect a write that raced the copy). It is allocated and best-effort `mlock`'d at `configureProcessData` for `recorder.historySeconds × (1e6 / gameLoop.periodUs)` cycles (a per-cycle record is 28 B fixed + the whole-bus IOmap, ~82 B per SOMANET drive → ~128 B/cycle for a single drive, so the default 300 s ≈ 38 MB per drive), re-allocated on a layout-changing re-map (the recording restarts — old records are undecodable under a new layout), retained across image teardown, and freed only by `reset()`/`scan()`. The pair of whole-image snapshots that used to carry inputs/outputs across the RT boundary is gone — `readPdo` and point reads now read the newest record (`head()-1`); `DeviceManager` exposes `recorderHead()`/`recorderOldestSeq()`/`readRecord()` as the off-RT read surface. `MonitoringManager` is rewired to the cursor model: each monitoring holds a read cursor and, on each flush, ships every recorded cycle in `[cursor, head)` as one batch (lossless), advancing the cursor; `bufferSize` was dropped and `interval` is now the flush cadence; a cursor lapped by more than a whole ring is logged (not notified) and resynced. Wire row timestamps are **epoch microseconds** (JS-exact to ~2255, distinct per cycle at sub-ms periods). Config gained a `recorder` block (`historySeconds`, default 300); `DeviceManager::init` takes the history depth and cycle period. The follow-ups are also done: `swagger.yml`, the regenerated `hil/api/src/mm-api.ts`, and the UI (`MonitoringsPage.tsx`) all reflect the new contract; `CLAUDE.md`/`README.md` updated.
 
@@ -1185,15 +1185,15 @@ Roadmap item #6 (fieldbus capabilities, Session 2026-06-01) shipped: the user ca
 
 This drove the rename that touches the most files: `PdoMappings → FlatPdoMapping`, `readPdoMappings() → readFlatPdoMapping()`, `pdoMappings() → flatPdoMapping()` — "flat" is now explicit everywhere the old whole-image view is meant, so the grouped view owns the plain `PdoMapping` name. The CoE mapping-word pack/unpack (`index<<16 | subindex<<8 | bitLength`) moved to `pdo_mapping.h` alongside the grouped `to_json`.
 
-**The write follows the ETG.1000.6 §5.6.7.4.9 ordering rule, transactionally.** `Device::writePdoMapping(const PdoMapping&)` reconfigures both directions in PRE-OP: clear the sync manager's PDO assignment to zero (which makes its mapping objects writable) → clear each mapping object's entry count → write the entries as packed `uint32` words → restore the entry count → finally write the assignment listing the mapping objects and its own count. A mapping object present before but absent from the new mapping is just left unassigned (no explicit clear needed — off the SM, its contents are irrelevant).
+**The write follows the ETG.1000.6 §5.6.7.4.9 ordering rule, transactionally.** `Device::writePdoMapping(const PdoMapping&)` reconfigures both directions in PREOP: clear the sync manager's PDO assignment to zero (which makes its mapping objects writable) → clear each mapping object's entry count → write the entries as packed `uint32` words → restore the entry count → finally write the assignment listing the mapping objects and its own count. A mapping object present before but absent from the new mapping is just left unassigned (no explicit clear needed — off the SM, its contents are irrelevant).
 
-**Why PRE-OP only.** The mapping and assignment objects are writable *only* in PRE-OP — INIT/BOOT have no CoE mailbox, and in SAFE-OP/OP the sync managers are active so the slave aborts the write. This is the "drop to PRE-OP, remap, climb back" flow. The write is deliberately **transport-agnostic and does not itself change AL state or re-map the image**: the caller (the UI, via `POST /api/state`) drives the device back to SAFE-OP/OP, and `DeviceManager::transitionToState` re-reads the mapping and rebuilds the whole-bus process image — the same reactive-mapping path a firmware update already exercised (the 2026-05-16 "manual re-map may have changed it" clause). No new re-map machinery.
+**Why PREOP only.** The mapping and assignment objects are writable *only* in PREOP — INIT/BOOT have no CoE mailbox, and in SAFEOP/OP the sync managers are active so the slave aborts the write. This is the "drop to PREOP, remap, climb back" flow. The write is deliberately **transport-agnostic and does not itself change AL state or re-map the image**: the caller (the UI, via `POST /api/state`) drives the device back to SAFEOP/OP, and `DeviceManager::transitionToState` re-reads the mapping and rebuilds the whole-bus process image — the same reactive-mapping path a firmware update already exercised (the 2026-05-16 "manual re-map may have changed it" clause). No new re-map machinery.
 
 **Retry the whole sequence, not per-write.** After writing, the mapping is read back (`readFlatPdoMapping`, which also refreshes the cache) and compared against the request; a mismatch or a transient SDO failure mid-sequence retries the **entire** mapping apply a few times before failing. A single dropped mailbox frame would otherwise leave the OD half-configured (some objects written, the assignment count stale); the apply is idempotent so a whole-sequence retry is safe, and read-back is the only trustworthy success signal. Related same-device concurrency fragility (shared `controlPlaneMutex_` serializes individual transactions but not the multi-write sequence) is noted but not yet guarded — see the standing memory on PDO-mapping write concurrency.
 
 **Monitoring re-classification fallout (`fix(node)`, a5b7933).** A monitoring classified each parameter's source (PDO vs SDO) once at creation and, on a re-map, only refreshed the decode spec of parameters *already* sourced from PDO. Editing a mapping therefore left the classification stale: a parameter removed from the image kept `source=pdo` and sampled null forever; one added kept `source=sdo` and read a stale background-poll cache. `recaptureIfRemapped` now re-classifies **every** plan against the freshly published image (mapped → PDO with a fresh spec, unmapped → SDO) and reconciles the `ParameterRefresher` refcounts on each transition (acquire on PDO→SDO, release on SDO→PDO). `processImageGeneration` bumps only on a successful re-map that publishes a new image (never on teardown), so a bus that merely pauses exchange causes no PDO↔SDO churn.
 
-**Console editor.** A per-device **PDO Mapping** page (`devices/:deviceId/pdo-mapping` + sidebar entry) loads the grouped mapping and edits it — add/remove/reorder mapping objects and entries across Outputs (RxPDO) and Inputs (TxPDO), with live bit-offset and per-object/per-direction totals. Each entry uses the shared `ParameterPicker` constrained to objects mappable in that direction (`ObjAccess` RxPDO/TxPDO bits), auto-filling bit length from object metadata; index/subindex/bitLength stay hand-editable for padding gaps or objects absent from the OD. PRE-OP guidance + a not-in-PRE-OP warning, validation, and a verified read-back on write. The Process Image page picked up the same two-column Outputs/Inputs layout and per-direction totals.
+**Console editor.** A per-device **PDO Mapping** page (`devices/:deviceId/pdo-mapping` + sidebar entry) loads the grouped mapping and edits it — add/remove/reorder mapping objects and entries across Outputs (RxPDO) and Inputs (TxPDO), with live bit-offset and per-object/per-direction totals. Each entry uses the shared `ParameterPicker` constrained to objects mappable in that direction (`ObjAccess` RxPDO/TxPDO bits), auto-filling bit length from object metadata; index/subindex/bitLength stay hand-editable for padding gaps or objects absent from the OD. PREOP guidance + a not-in-PREOP warning, validation, and a verified read-back on write. The Process Image page picked up the same two-column Outputs/Inputs layout and per-direction totals.
 
 ## Session 2026-07-07 — CoE Complete Access for the parameter value-read pass
 
@@ -1207,7 +1207,7 @@ This drove the rename that touches the most files: `PdoMappings → FlatPdoMappi
 
 **Support detection — probe once, per-object fallback.** CA is optional in CoE and support can vary; a slave/object that lacks it answers with an SDO abort. Rather than parse abort codes, the pass treats *any* CA failure as "fall back": the first eligible object is the probe — if its CA read fails, CA is disabled for the rest of the pass; once a CA read has succeeded, an individual later object that fails falls back for itself only. A CA read that *succeeds* but whose blob won't decode marks CA supported (it works) and just falls back for that object. Correctness is preserved in every branch by the per-subindex path; the only cost of a bad guess is losing the speedup.
 
-**Config + plumbing.** `parameters.useCompleteAccess` (JSONC, default **on**) → `ParametersConfig` → `DeviceManagerConfig` → `initializeParameters(readValues, useCompleteAccess)`, wired at the composition root and forwarded by `DeviceManager::initializeDeviceParameters`. Disable only for firmware with a broken CA implementation. The PRE-OP auto-read path is unaffected — it reads definitions only (`readValues=false`), so CA never runs there. No swagger change: the endpoint's request/response shape is unchanged; CA is a purely internal speedup on the always-live value read. Four unit tests cover the one-upload decode, the unsupported-slave fallback, the disabled-flag path, and a VAR skipping CA.
+**Config + plumbing.** `parameters.useCompleteAccess` (JSONC, default **on**) → `ParametersConfig` → `DeviceManagerConfig` → `initializeParameters(readValues, useCompleteAccess)`, wired at the composition root and forwarded by `DeviceManager::initializeDeviceParameters`. Disable only for firmware with a broken CA implementation. The PREOP auto-read path is unaffected — it reads definitions only (`readValues=false`), so CA never runs there. No swagger change: the endpoint's request/response shape is unchanged; CA is a purely internal speedup on the always-live value read. Four unit tests cover the one-upload decode, the unsupported-slave fallback, the disabled-flag path, and a VAR skipping CA.
 
 **Bulk read-all path (`POST /api/devices/:pos/parameters/read`).** The init path was only the first target; `readAllParameters` — the common "refresh every value" sweep, and the one usually hit — is now CA-aware too, but it is **PDO-aware**, which is the wrinkle. `readParameter` prefers the live process image for PDO-mapped subindices while exchanging, and CA is an SDO operation, so CA must not shadow the cyclic value. The sweep snapshots readable subindices grouped by object under the lock (released between objects), then per object: if the run is CA-eligible **and not currently image-served** (`ProcessData::readPdo` returns nothing for every subindex), one CA upload fills it; otherwise each subindex goes through the unchanged, PDO-aware `readParameter`. In practice the two sets are disjoint anyway (PDO maps single-sub VARs like statusword/position, never whole records), but the image-served gate makes that exact rather than incidental. The CA read + decode runs under `parametersMutex_` for one round-trip — matching `readParameter`'s own lock-across-one-SDO contract — so the re-found parameter pointers stay valid across the transfer. The shared machinery (`completeAccessEligible`, `decodeCompleteAccess`, a `CompleteAccessProbe` probe/fallback state machine, and `readCompleteInto`) was factored out of the init path so both use identical, tested blob-slicing; the helpers take `std::span<DeviceParameter* const>` so the init path (vector of definitions) and the bulk path (live map) both fit. Three more unit tests: bulk CA decode, unsupported→fallback, disabled-flag.
 
@@ -1430,7 +1430,7 @@ All three outbound tiers fit this one interface: tier-1 lifecycle status is `cha
 
 **The first source to fold in already exists as a standalone thread: `BusHealthReporter`** (`apps/motion_master/bus_health_reporter.{h,cc}`, 2026-08-16). It is this design in miniature — one off-RT thread, a change token (`ProcessImageInfo::shortWkcCycles`, an RT-bumped atomic), a render (format and `spdlog::warn`), and a last-seen mark so one fault is reported once. Folding it in is deleting the class and registering `Source{changeToken = shortWkcCycles, render = the same message}`; it publishes to the log rather than a topic today, which the bus's `publish_` callback subsumes.
 
-Two things it settled that are worth keeping. **The counters must not be per-image**: they were originally cleared on every re-map, and a re-map happens whenever a device is brought into or out of SAFE-OP/OP — precisely when someone is chasing a fault — so the record was erased at the moment it was most wanted. They now run `init` → `reset` and are cleared nowhere else, which also means the bus may poll them at any cadence without racing a teardown. **And reporting must not hang off control-plane boundaries**: the first version called a `DeviceManager::reportShortWkc` from the four moments that end a stretch of exchanging (state change, re-map, reset, rescan), which failed twice over — four call sites is a rule you can forget (the rescan one *was* forgotten, and only surfaced on a third review), and a boundary reports whenever the user next touches something rather than when the fault happened, so an unattended bus said nothing at all. That method is gone; the reporting logic, including the last-seen mark, belongs to whoever reports, not to `DeviceManager`.
+Two things it settled that are worth keeping. **The counters must not be per-image**: they were originally cleared on every re-map, and a re-map happens whenever a device is brought into or out of SAFEOP/OP — precisely when someone is chasing a fault — so the record was erased at the moment it was most wanted. They now run `init` → `reset` and are cleared nowhere else, which also means the bus may poll them at any cadence without racing a teardown. **And reporting must not hang off control-plane boundaries**: the first version called a `DeviceManager::reportShortWkc` from the four moments that end a stretch of exchanging (state change, re-map, reset, rescan), which failed twice over — four call sites is a rule you can forget (the rescan one *was* forgotten, and only surfaced on a third review), and a boundary reports whenever the user next touches something rather than when the fault happened, so an unattended bus said nothing at all. That method is gone; the reporting logic, including the last-seen mark, belongs to whoever reports, not to `DeviceManager`.
 
 *Inbound (client → RT): no thread — the reusable pieces are the transport, the pool, and a launch skeleton.* Three write-once pieces replace the per-task control-block boilerplate:
 
@@ -1520,7 +1520,7 @@ The absolute-deadline `CyclicTimer` (drift-free by construction — each cycle s
 
 **Why catch-up is wrong for EtherCAT — the frames it emits are stale and harmful.** (1) In CSP/CSV each PDO frame carries a setpoint meant for *this* cycle's point on the timeline; a burst of catch-up frames shoves N setpoints computed for already-elapsed moments, which is a jerk on the axis, not a replay of lost time. (2) Under DC SYNC0 the slave latches process data at the SYNC0 pulse, not on frame arrival — so a burst between two pulses just overwrites the SM buffer N-1 times and delivers the *same* single latched value, having burned RT budget during an already-stressed moment and raised the odds the *next* cycle also slips. (3) The missed real-world time can't be un-missed; catching up the master's cycle *count* buys nothing physical. This is what production masters (TwinCAT, IgH) do too: on a blown cycle they skip and bump an "exceed" counter, they don't emit the backlog.
 
-**Decision: skip-to-grid.** `waitForNextCycle()` now, after advancing the deadline by one period, checks whether that deadline is already behind `now`; if so it fast-forwards over the whole backlog (`while (next < now) { next += period; ++skipped; }`) to the next *future* grid point and sleeps to that, returning the skipped count. Two properties matter: (a) **at most one cycle runs per period** — the backlog is dropped, never bursted; (b) **phase is preserved** — because we advance along the original `T0`-based grid rather than re-anchoring to `now`, the frames that *do* go out stay aligned with the SYNC0 timing the drives expect (skip-*to-grid*, deliberately not re-anchor-to-now). Ordinary jitter is untouched: a late wake whose work still fits leaves the next deadline in the *future*, so the `while` never runs and `skipped == 0` — the drift-free absorption in the next cycle's slack is exactly as before. Two caveats that reinforce the choice: the slave's PDO/SM watchdog sets the ceiling where policy matters at all (a stall longer than the watchdog drops the slave to SAFE-OP regardless, and we re-map — see the AL-transition/partial-bus notes); and a single dropped CSP setpoint is recoverable (the drive interpolates/holds one cycle) whereas a stale-setpoint jerk is not.
+**Decision: skip-to-grid.** `waitForNextCycle()` now, after advancing the deadline by one period, checks whether that deadline is already behind `now`; if so it fast-forwards over the whole backlog (`while (next < now) { next += period; ++skipped; }`) to the next *future* grid point and sleeps to that, returning the skipped count. Two properties matter: (a) **at most one cycle runs per period** — the backlog is dropped, never bursted; (b) **phase is preserved** — because we advance along the original `T0`-based grid rather than re-anchoring to `now`, the frames that *do* go out stay aligned with the SYNC0 timing the drives expect (skip-*to-grid*, deliberately not re-anchor-to-now). Ordinary jitter is untouched: a late wake whose work still fits leaves the next deadline in the *future*, so the `while` never runs and `skipped == 0` — the drift-free absorption in the next cycle's slack is exactly as before. Two caveats that reinforce the choice: the slave's PDO/SM watchdog sets the ceiling where policy matters at all (a stall longer than the watchdog drops the slave to SAFEOP regardless, and we re-map — see the AL-transition/partial-bus notes); and a single dropped CSP setpoint is recoverable (the drive interpolates/holds one cycle) whereas a stale-setpoint jerk is not.
 
 **Sustained overrun on a coarse-timer machine — the common Windows case, and why skip-to-grid matters most here.** The above frames overruns as *occasional*, but the case that will actually dominate is *steady-state* under-delivery: many Windows hosts have an effective timer granularity of ~1.5 ms, so wakes land ~1.5 ms apart no matter what deadline is requested, and a configured 1 ms period is simply unachievable. This is not an edge case for us — most commissioning/inspection users run Windows userspace. Trace the steady state (executes at ~T0, +1.5, +3.0, +4.5, +6.0 ms against a 1 ms grid): each `waitForNextCycle()` does `next += 1ms` then skips the grid points now behind `now`, so it settles into *execute ~every 1.5 ms, skip one grid slot roughly every other cycle*. The numbers: **executed ≈ 667 Hz** (1 per 1.5 ms), **skipped ≈ 333/s** (grid runs at 1000/s, so ~1 skip per 2 executed cycles), and `skippedCycles()` climbs steadily at ~333/s. Crucially it **degrades gracefully** — the three things a naive design would do and this does not: (1) *no burst* — every executed cycle sleeps to a real future grid point, frames go out at ~667 Hz phase-aligned to the 1 ms grid, never in catch-up bursts; (2) *no drift* — the grid stays anchored at `T0`, the frames that go out are on true 1 ms boundaries; (3) *no runaway* — per-cycle `skipped` stays ~0–1, the backlog never grows. Per consumer: `elapsed` still advances at the true 1 ms-grid rate (it is `executed + skipped`, and skipped fills the gap), so a *Real-time* trajectory stays on wall-clock schedule and merely drops ~1/3 of its points (small jumps), while a *Sequential* trajectory advances one point per executed cycle and stretches (a 1 s move plays in ~1.5 s, smoothly). For EtherCAT/DC the drives get a fresh frame in only ~2 of every 3 SYNC0 windows — fine only if the PDO/SM watchdog and interpolation tolerance allow it. **The remedy is operational, not code**: a `skippedCycles()` that climbs steadily right after start is the signal that the configured period is too aggressive for that hardware — raise it (e.g. to 2 ms) so the loop actually meets its grid. Skip-to-grid cannot conjure timer resolution the OS does not provide; its whole value on these machines is that it fails *visibly and honestly* (runs at the achievable rate, phase-locked, with a monotonic skip counter) instead of drifting, bursting, or spiralling. This is the strongest argument for the policy — the machines most likely to overrun are exactly the ones most of our users are on.
 
@@ -1683,7 +1683,7 @@ Why `SoemFieldbusDriver::blockLrwOnPruIcssSlaves()` exists, and how EtherCAT pro
 
 The working-counter arithmetic in the codebase encodes the LRW convention: an output region contributes **+2** and an input region **+1** to the expected WKC (`fieldbus_driver.h`), because an LRW slave that both reads and writes bumps the counter by 3. With split LRD/LWR that accounting differs (each direction is a separate +1), which SOEM handles internally once `blockLRW` is set.
 
-**Why Jasper can't do LRW.** The PRU-ICSS firmware's processing unit mishandles the combined read-and-write LRW datagram. When an LRW cyclic frame hits it, every frame dies in the processing unit (RX error counter `0x030C` saturates at 255), the working counter stays 0, and the SAFE-OP → OP transition fails with AL status `0x001B` (SM watchdog) — the drive never sees valid process data, so its sync-manager watchdog trips. (This is the same class of soft-ESC limitation behind the neighbouring `deactivateMailboxStatusFmmus()` fix, where a *register-space* FMMU inside an LRW is likewise fatal on these ESCs.)
+**Why Jasper can't do LRW.** The PRU-ICSS firmware's processing unit mishandles the combined read-and-write LRW datagram. When an LRW cyclic frame hits it, every frame dies in the processing unit (RX error counter `0x030C` saturates at 255), the working counter stays 0, and the SAFEOP → OP transition fails with AL status `0x001B` (SM watchdog) — the drive never sees valid process data, so its sync-manager watchdog trips. (This is the same class of soft-ESC limitation behind the neighbouring `deactivateMailboxStatusFmmus()` fix, where a *register-space* FMMU inside an LRW is likewise fatal on these ESCs.)
 
 **The fix — `blockLRW`.** Before `ecx_config_map_group` builds the group's send plan, we read each slave's ESC type and set `s.blockLRW = 1` on every `0x90` slave. `ecx_config_map_group` folds the per-slave flag into `grouplist[0].blockLRW`, and from then on SOEM emits, per cycle, an **LWR datagram for the outputs and a separate LRD datagram for the inputs** instead of one combined LRW. Same process data, split into a write pass and a read pass — the two-datagram form the PRU firmware does handle correctly. Must run *before* the map, since that's when SOEM reads `blockLRW` to build the plan. The cost is one extra datagram per cycle (~12-byte header + the different WKC accounting), not a whole extra Ethernet frame: EtherCAT concatenates multiple datagrams into a single frame up to the ~1486-byte MTU, so for a normal Jasper bus the LWR + LRD pair rides in **one** Ethernet frame (SOEM only segments across frames when a group's process data exceeds the MTU — which happens with plain LRW too).
 
@@ -1748,7 +1748,7 @@ A user noticed that reading an unknown object gave two *different* error message
 
 So `0` is the *only* ambiguous value (send-failed vs. answered-with-abort), and that is precisely the case the error queue exists to explain; `EC_TIMEOUT (-5)` is unambiguous from the return alone. **Concretely: our `0x2345:01` bare failure is `wkc == -5`, not `0`** — the ~703 ms latency (= `EC_TIMEOUTRXM`) confirms it sat in the receive timeout. This corrects the first version of this note, which said the unanswered case returns "`0`". `SoemFieldbusDriver::readSdo` originally collapsed everything into `if (wkc <= 0)` and classified purely via `ecx_poperror`, discarding the `-5`-vs-`0` signal — so a "no response" timeout and a send failure both rendered as the same suffix-less `failed`. **Fixed 2026-07-21:** `sdoErrorSuffix(ctx, wkc)` now takes the return value; it still prefers a queued reason (SDO abort / mailbox error) when `ecx_poperror` yields one, but on an *empty* queue it decodes the `wkc` sentinel — `EC_TIMEOUT (-5)` → `(no response — mailbox timeout)`, `EC_NOFRAME`/`EC_OTHERFRAME`/`EC_ERROR`/`EC_SLAVECOUNTEXCEEDED` → their own tails — leaving only `wkc == 0` with nothing queued (a mailbox-send failure) as a bare `failed`. So `0x2345:01` now reports `… failed (no response — mailbox timeout)` while `0x2345:00` still reports `… failed (SDO abort 0x08000000: General error)`. The message is richer but nothing *branches* on the reason yet — the `~700 ms` stall is identical — so this stays a `std::string` face, not a promotion to a structured `Error`; that promotion waits for a real "retry-on-timeout, abort-on-refusal" caller (a firmware/param-sweep feature), exactly the `FoeError` posture.
 
-**Verified against real hardware, not reasoned** — the user had a SOMANET Integro wired up in PRE-OP, so I read it through the running server's `GET /api/devices/1/sdo/0x2345/0x{00,01}` and timed it with `curl -w %{time_total}`:
+**Verified against real hardware, not reasoned** — the user had a SOMANET Integro wired up in PREOP, so I read it through the running server's `GET /api/devices/1/sdo/0x2345/0x{00,01}` and timed it with `curl -w %{time_total}`:
 
 | Read | Latency | Body |
 | --- | --- | --- |
@@ -1971,7 +1971,7 @@ The raw escape hatch is `procedures/os-command` (body: the eight command bytes +
 
 **"Every OS command is a procedure" does not invert — and firmware installation is the proof.** There are three of them, on three different transports, and all three are procedures:
 
-- **Drive firmware — no OS commands at all.** Transition the device to BOOT, write two files over FoE, optionally write the SII, transition back to PRE-OP. The generic OS-command body does not serve this one; its body is state transitions plus FoE.
+- **Drive firmware — no OS commands at all.** Transition the device to BOOT, write two files over FoE, optionally write the SII, transition back to PREOP. The generic OS-command body does not serve this one; its body is state transitions plus FoE.
 - **SMM firmware — FoE *and* OS commands.** The safety module is updated through a combination of file transfer and the 11.x SMM acyclic handler commands (11.9 software update login, 11.10 configure, 11.11 transmit, 11.12 finalize).
 - **Kübler encoder firmware — OS commands only** (17.2 switch to bootloader, 17.3 check update size, 17.4 erase, 17.5 write, 17.6 exit bootloader). A different artefact reached *through* the drive's mailbox, not the drive's own firmware — easy to confuse with the first, and the two are unrelated.
 
@@ -2021,7 +2021,7 @@ The trigger was `ProcedureManager` needing to hold a `SomanetDrive&` for a thirt
 
 So a five-second procedure leaves the UI responsive, SDO reads working, monitoring streaming and the drive cycling — the cost is confined to `init`/`scan`/`reset` and, decisively, **`transitionToState`**.
 
-That last one is not merely "a user cannot change state meanwhile": **the body cannot either**. It holds the lock shared and `transitionToState` wants it exclusively, and `std::shared_mutex` offers no upgrade — the body would deadlock against itself. Harmless for everything queued next (os-command, offset detection, store/restore, auto-tuning are SDO/mailbox work) and fatal for firmware installation, which *is* its state transitions: BOOT → two FoE writes → PRE-OP, and the SMM and Kübler variants likewise.
+That last one is not merely "a user cannot change state meanwhile": **the body cannot either**. It holds the lock shared and `transitionToState` wants it exclusively, and `std::shared_mutex` offers no upgrade — the body would deadlock against itself. Harmless for everything queued next (os-command, offset detection, store/restore, auto-tuning are SDO/mailbox work) and fatal for firmware installation, which *is* its state transitions: BOOT → two FoE writes → PREOP, and the SMM and Kübler variants likewise.
 
 **The exception: a second body shape, not a redesign.** The deadlock comes entirely from who holds the lock, so the fix is to stop holding it across the span. Alongside today's
 
@@ -2048,7 +2048,7 @@ Step 2 of the sequencing in *Session 2026-08-02* ("Every OS command is a procedu
 
 **Never-run answers `200` with an idle snapshot, not `404`.** The poll-only design already said never-run is well-formed *precisely* so a client renders one component with no empty-state branch — and the `404` the first cut returned forced exactly that branch. The blocker was that `ProcedureManager` cannot invent an all-idle snapshot: it is only told a step template when a run *starts*. The catalogue holds the template, so `idleSnapshot(steps)` lives beside the manager rather than in it, and the caller the manager's own doc comment anticipated now exists. `404` is left meaning what it should: unknown device, or a procedure this device does not have.
 
-**Applicability is decided from identity known at scan time — a bug caught before it shipped.** The obvious predicate for the OS command entry was `createSomanetDrive(device).has_value()`, and it is wrong: that factory also requires the device's object dictionary to have been enumerated, because its CiA402 check looks for controlword/statusword in the parameter map. Enumeration is *opportunistic* — `deviceStates()` does it when a device is first seen at PRE-OP, gated on `readObjectDictionaryOnPreop` — so a genuine drive whose OD had not been read yet would be reported as having **no procedures at all**. That is a wrong answer, not a late one. The predicate is the vendor ID, which comes from SII at scan and is always known; whether the device is also a conformant CiA402 drive stays the *body's* business, where it fails with a reason. The general rule: **a catalogue predicate may only consult state that exists as soon as the device does.**
+**Applicability is decided from identity known at scan time — a bug caught before it shipped.** The obvious predicate for the OS command entry was `createSomanetDrive(device).has_value()`, and it is wrong: that factory also requires the device's object dictionary to have been enumerated, because its CiA402 check looks for controlword/statusword in the parameter map. Enumeration is *opportunistic* — `deviceStates()` does it when a device is first seen at PREOP, gated on `readObjectDictionaryOnPreop` — so a genuine drive whose OD had not been read yet would be reported as having **no procedures at all**. That is a wrong answer, not a late one. The predicate is the vendor ID, which comes from SII at scan and is always known; whether the device is also a conformant CiA402 drive stays the *body's* business, where it fails with a reason. The general rule: **a catalogue predicate may only consult state that exists as soon as the device does.**
 
 **`ProcedureStartError` became `ProcedureError` with four kinds.** `kBusy` → 409 and `kUnknownDevice` → 404 are still the only two the manager can judge; the catalogue adds `kUnknownProcedure` → 404 and `kInvalidRequest` → 400, because whether a procedure *exists* and whether a request *validates* are things the manager is never told (it is handed a body, not a name). One type across both layers keeps the status mapping in a single `procedureErrorStatus()` in `http_server.cc` instead of translating between two error vocabularies.
 
@@ -2129,11 +2129,11 @@ The `BusProcedureBody` designed on 2026-08-02 was built, and with it the procedu
 
 **It lives in `somanet_procedures`, not a file of its own.** The first cut was `firmware_procedures.{h,cc}`, which is the wrong axis: procedure files here split by *scope* — `profile_procedures` for generic CiA301, `somanet_procedures` for vendor-specific — and every piece of firmware installation is SOMANET (the `app_`/`com_` naming, the `fs-remove=` pseudo-file, the dummy FoE filenames, the bootloader handover). Splitting by feature instead would have started a second organizing principle in the same directory. `firmware_package.{h,cc}` does stay separate, because it is an offline data model like `pdo_mapping` or `process_data_dump` rather than a procedure.
 
-**The final state is a parameter, and the reason is the factory-reset case.** "Return to PRE-OP" was the plan and it is the right *default* — but a device whose application has been erased has nothing to reach PRE-OP with, so a hard-coded transition would report a failure for an operation that succeeded. Restoring the *previous* state was considered and rejected: it described a device running the old firmware, and "previous" is a snapshot nothing protects, since the body holds no lock between steps and a user can change state underneath it.
+**The final state is a parameter, and the reason is the factory-reset case.** "Return to PREOP" was the plan and it is the right *default* — but a device whose application has been erased has nothing to reach PREOP with, so a hard-coded transition would report a failure for an operation that succeeded. Restoring the *previous* state was considered and rejected: it described a device running the old firmware, and "previous" is a snapshot nothing protects, since the body holds no lock between steps and a user can change state underneath it.
 
-**`finalState` is an AL state number, and getting there took two corrections worth recording.** The first cut was a string enum of this procedure's own — `"preop" | "init" | "boot"` — which is a second vocabulary for a concept the API already names: `POST /api/devices/state` takes `state: 1|2|3|4|8` and every state read reports `alState` in the same ETG.1000.6 encoding, and no string form of an AL state exists anywhere on the wire (`toString(EtherCatState)` is for log lines). It is now `mm::comm::EtherCatState` end to end, integer on the wire, with the descriptor's `enum` options carrying the titles so the Console still reads "PRE-OP — loads and confirms the new firmware". **The general rule: a procedure parameter may invent a vocabulary (`group`, `mode`, `data` do) only where the API has none; where one exists, use it.** The second correction was the restriction to three states. It was justified by "SAFE-OP and OP re-map the whole bus", which does not survive scrutiny — the caller's own follow-up `POST /api/devices/state` performs the identical re-map, so refusing split one operation into two and bought nothing. The original argument had leaned on a power cycle being required first, which turned out to be false. Every AL state is accepted; PRE-OP is the default.
+**`finalState` is an AL state number, and getting there took two corrections worth recording.** The first cut was a string enum of this procedure's own — `"preop" | "init" | "boot"` — which is a second vocabulary for a concept the API already names: `POST /api/devices/state` takes `state: 1|2|3|4|8` and every state read reports `alState` in the same ETG.1000.6 encoding, and no string form of an AL state exists anywhere on the wire (`toString(EtherCatState)` is for log lines). It is now `mm::comm::EtherCatState` end to end, integer on the wire, with the descriptor's `enum` options carrying the titles so the Console still reads "PREOP — loads and confirms the new firmware". **The general rule: a procedure parameter may invent a vocabulary (`group`, `mode`, `data` do) only where the API has none; where one exists, use it.** The second correction was the restriction to three states. It was justified by "SAFEOP and OP re-map the whole bus", which does not survive scrutiny — the caller's own follow-up `POST /api/devices/state` performs the identical re-map, so refusing split one operation into two and bought nothing. The original argument had leaned on a power cycle being required first, which turned out to be false. Every AL state is accepted; PREOP is the default.
 
-**What the drive firmware actually does, read out of `sc_somanet_ip/module_ethercat/libsrc/ethercat_service.xc` rather than assumed.** The bootloader and the application are **two builds of the same EtherCAT service**, selected by the compile-time `ETHERCAT_BOOTLOADER` flag; both implement the full AL state machine, so registers, SII and AL status work whichever is running. (Register communication needs neither — the ESC serves those in hardware, which is why they work in any state and on a device with blank flash.) **The handover is driven by the master's INIT → PRE-OP request**: in the bootloader build the PRE-OP case calls `foe_glb_buffer_request_restart()` and then waits `REBOOT_TIMEOUT`; if a valid application exists the device *restarts into it inside that wait* and the following lines never run. If the wait expires, the application did not start, and the code sets `al_status_code = AL_NO_VALID_FIRMWARE` (`0x0014`), disables mailbox and PDO services, and returns to INIT. BOOT is the mirror: the application build's BOOTSTRAP case calls `boot_to_bootloader()`. Three consequences: **no power cycle is needed for the firmware** (only for an SII, since the ESC reads EEPROM at reset); the exit from BOOT is a *reboot*, so its timeout is sized in tens of seconds rather than as a mailbox round trip; and the no-firmware case is a decodable `0x0014` rather than a hang, which is what makes `preop` a safe default even when it is the wrong choice. Still unknown: what a *cold* power-up does when a valid application is present — the code read covers only the master-driven transition, so the descriptor does not claim either way.
+**What the drive firmware actually does, read out of `sc_somanet_ip/module_ethercat/libsrc/ethercat_service.xc` rather than assumed.** The bootloader and the application are **two builds of the same EtherCAT service**, selected by the compile-time `ETHERCAT_BOOTLOADER` flag; both implement the full AL state machine, so registers, SII and AL status work whichever is running. (Register communication needs neither — the ESC serves those in hardware, which is why they work in any state and on a device with blank flash.) **The handover is driven by the master's INIT → PREOP request**: in the bootloader build the PREOP case calls `foe_glb_buffer_request_restart()` and then waits `REBOOT_TIMEOUT`; if a valid application exists the device *restarts into it inside that wait* and the following lines never run. If the wait expires, the application did not start, and the code sets `al_status_code = AL_NO_VALID_FIRMWARE` (`0x0014`), disables mailbox and PDO services, and returns to INIT. BOOT is the mirror: the application build's BOOTSTRAP case calls `boot_to_bootloader()`. Three consequences: **no power cycle is needed for the firmware** (only for an SII, since the ESC reads EEPROM at reset); the exit from BOOT is a *reboot*, so its timeout is sized in tens of seconds rather than as a mailbox round trip; and the no-firmware case is a decodable `0x0014` rather than a hang, which is what makes `preop` a safe default even when it is the wrong choice. Still unknown: what a *cold* power-up does when a valid application is present — the code read covers only the master-driven transition, so the descriptor does not claim either way.
 
 **`foe_error.h` finally has the caller it was written for, in 2026-07-17, and left deliberately unused for.** `readFile`/`writeFile` now return `FoeError`. Two branches earned it and neither can be written against a string without matching on wording: retry a `Transient` failure (packet desync, bootloader not yet warm) and abort at once on a `Permanent` one; and treat `FileNotFound` from the `fs-remove=` pseudo-file as success, because a removal with nothing to remove is the outcome the caller wanted. The prediction that the string face would confine the blast radius held exactly — six call sites changed by one word (`.error()` → `.error().message`), and twelve test fakes changed by their signature only.
 
@@ -2150,7 +2150,7 @@ The `BusProcedureBody` designed on 2026-08-02 was built, and with it the procedu
 
 **A Tools *Utilities* page exists now, and the reason it is plural matters.** `GET /api/firmware-package-name` decodes a package filename; the Console page behind it is explicitly a container for several small device-free helpers rather than a page for this one. The two existing Tools pages each justify themselves with one substantial artefact (an ESI file, an SII image), and a one-input-one-answer helper cannot — so without a shared page it would either get a sidebar entry out of proportion to it, or not exist. Two shape notes: the endpoint is a `GET` with a query where its siblings are `POST`s, because there is no file to upload, only a short string; and the decode runs on the server rather than in TypeScript, so the answer the page gives is by construction the one the installer will act on, rather than a second grammar that would disagree first on exactly the odd names worth checking.
 
-**Hardware runs found one bug, and my first diagnosis of it was wrong — the wrong turn is worth recording, because it was avoidable.** On an ACTILINK: BOOT entered, `app_firmware.bin` (405504 B) written in 11.5 s, and then `com_firmware.bin` refused in under a second, five times over, before the always-attempted exit put the device cleanly back in PRE-OP.
+**Hardware runs found one bug, and my first diagnosis of it was wrong — the wrong turn is worth recording, because it was avoidable.** On an ACTILINK: BOOT entered, `app_firmware.bin` (405504 B) written in 11.5 s, and then `com_firmware.bin` refused in under a second, five times over, before the always-attempted exit put the device cleanly back in PREOP.
 
 *The wrong diagnosis.* The previous generation re-read the AL state before each binary and re-entered BOOT if it had been left; that guard was lost in the rewrite, so the obvious story was "committing the first image takes the bootloader out of BOOT". It was built and shipped. It was wrong twice over: the second run showed the re-entry log line **never fired**, and it could not have — **AL status is served by the ESC in hardware**, so it stays readable no matter what the bootloader's CPU is doing. A guard that reads AL status is structurally incapable of detecting a busy bootloader, which is the very fact this session had already written down two sections earlier when explaining why registers work in any state. The lesson is not "check the logs" but that a plausible mechanism copied from a previous implementation is not evidence, and the timing in the log was evidence all along: **every failure took ~700 ms, which is `EC_TIMEOUTRXM` exactly.**
 
@@ -2168,9 +2168,9 @@ A second defect in the same branch was fixed with it, and it is the more frighte
 
 One diagnostic improvement came out of it: `EC_TIMEOUT` is `-5` and `EC_ERR_TYPE_FOE_ERROR` is `5`, so a `-5` return from an FoE call means *either* "the slave sent an error" or "the slave never answered", with nothing to tell them apart. Reporting only the first is what made three logs read as a refusal when they were a timeout; the message now names both.
 
-**Reaching PRE-OP after an install is the point, and it needed a fix of our own.** Once the binaries actually wrote, the install ended with the device in INIT and the run failed: *the firmware was written; the device did not reach PRE-OP*. The previous generation "succeeds" here only because it re-initialises the entire master afterwards and lets a full rescan pick the device up — which is exactly what v6 exists to improve on, so matching it would have been the wrong lesson. **Bringing one device back up without disturbing the bus is the feature.**
+**Reaching PREOP after an install is the point, and it needed a fix of our own.** Once the binaries actually wrote, the install ended with the device in INIT and the run failed: *the firmware was written; the device did not reach PREOP*. The previous generation "succeeds" here only because it re-initialises the entire master afterwards and lets a full rescan pick the device up — which is exactly what v6 exists to improve on, so matching it would have been the wrong lesson. **Bringing one device back up without disturbing the bus is the feature.**
 
-The cause was ours, in `SoemFieldbusDriver::transitionToState`, and it took two passes to reach the bottom of it. The first pass saw that the mailbox sync managers were programmed exactly once — the slave being struck off `bootMailboxSlaves_` on the attempt — so nothing could reprogram them after the restart. True, and fixed, and not enough: the next run showed the reprogramming running thirteen times and failing every time, `PRE-OP mailbox - write 0x0000/0` with `SM0 wkc=0, SM1 wkc=0`.
+The cause was ours, in `SoemFieldbusDriver::transitionToState`, and it took two passes to reach the bottom of it. The first pass saw that the mailbox sync managers were programmed exactly once — the slave being struck off `bootMailboxSlaves_` on the attempt — so nothing could reprogram them after the restart. True, and fixed, and not enough: the next run showed the reprogramming running thirteen times and failing every time, `PREOP mailbox - write 0x0000/0` with `SM0 wkc=0, SM1 wkc=0`.
 
 **The restart clears the ESC's station address.** Everything the master does is addressed by that value, so the device did not merely lose its sync managers — it disappeared. The reprogramming was reading EEPROM from a slave that could not hear it, getting zeros, and writing those zeros into the master's own copy of the mailbox configuration; the state reads were reporting the last value SOEM had cached, which is why it looked like a device calmly sitting in INIT with no error. **A slave that refuses a state says why; a slave that cannot hear the request says nothing, and the two are indistinguishable from AL status alone.** The recovery needs no scan: auto-increment addressing reaches a slave by its position on the wire with no configuration whatsoever, which is exactly how `ecx_config_init` assigns the address in the first place, so one `ecx_APWRw` puts it back for that one device. The driver now probes reachability, re-addresses if needed, and only then reprograms.
 
@@ -2178,13 +2178,13 @@ The diagnostic that found it is worth keeping as a habit: on a failed transition
 
 Two things this run taught beyond the fix. **The bug could only appear once the transfers succeeded** — every earlier failure stopped before the handover, so a working COM write was the precondition for discovering it; a feature can hide its next bug behind its current one. And **an error message that omits a zero field throws away the diagnosis**: the transition error only printed the AL status code when it was non-zero, so the single most informative fact — that the slave reported no error at all — was formatted out of existence. It is now always printed, with zero spelled out in words.
 
-**Verified end to end on an ACTILINK-S, all the way to OP, in ~24 s.** BOOT; application binary in 11.7 s; communication binary through two `FOE_BUSY` resends in 2.4 s; the handover restart taking the device off the bus for ~6 s; the master noticing it had lost its station address and re-assigning it at its wire position; the mailbox reprogrammed; PRE-OP 100 ms later; then the whole-bus re-map — which **re-read the PDO mapping out of the firmware just installed**, the exact case the reactive-mapping design was written for — SAFE-OP, and OP. **One device went down and came back by itself; nothing else on the bus was touched.** That is the improvement over re-initialising the master, demonstrated rather than argued.
+**Verified end to end on an ACTILINK-S, all the way to OP, in ~24 s.** BOOT; application binary in 11.7 s; communication binary through two `FOE_BUSY` resends in 2.4 s; the handover restart taking the device off the bus for ~6 s; the master noticing it had lost its station address and re-assigning it at its wire position; the mailbox reprogrammed; PREOP 100 ms later; then the whole-bus re-map — which **re-read the PDO mapping out of the firmware just installed**, the exact case the reactive-mapping design was written for — SAFEOP, and OP. **One device went down and came back by itself; nothing else on the bus was touched.** That is the improvement over re-initialising the master, demonstrated rather than argued.
 
-A worry that turned out to be unfounded, recorded because it looked serious: the restart clears *all* ESC configuration, so FMMUs are gone too, and PRE-OP only needs the station address and the mailbox sync managers. Reaching SAFE-OP/OP looked like it might need a separate recovery. It does not — `configureProcessData` reprograms FMMUs and sync managers wholesale on every re-map, so the climb out of PRE-OP repairs the rest as a side effect of what it already does.
+A worry that turned out to be unfounded, recorded because it looked serious: the restart clears *all* ESC configuration, so FMMUs are gone too, and PREOP only needs the station address and the mailbox sync managers. Reaching SAFEOP/OP looked like it might need a separate recovery. It does not — `configureProcessData` reprograms FMMUs and sync managers wholesale on every re-map, so the climb out of PREOP repairs the rest as a side effect of what it already does.
 
 **The three defects each hid the next, which is why this took four hardware runs.** The BUSY resend bug stopped the communication binary, which meant the handover never happened, which meant the address loss could not be discovered. Nothing was going to reveal the second problem until the first was fixed, and nothing the third until the second. That is worth expecting rather than being surprised by: on a multi-stage operation against real hardware, *fixing a bug is how you find the next one*, and a plan that budgets one round trip per bug will be wrong.
 
-**Still open:** `hil/api` coverage of the new procedure. The install now runs on real hardware up to the second binary; whether the fix carries it through, and everything past it (the SII write, the PRE-OP handover), is still unproven.
+**Still open:** `hil/api` coverage of the new procedure. The install now runs on real hardware up to the second binary; whether the fix carries it through, and everything past it (the SII write, the PREOP handover), is still unproven.
 
 ## Session 2026-08-08 — Handlers that cannot block the loop: the HTTP surface becomes Request → Response (as-built)
 
@@ -2226,7 +2226,7 @@ A week of bugs that were all the same bug — cached reads stuck behind the cont
 
 **Defect 1 — the recorder ring has three writers, not one, and the third one frees the buffer.** `ProcessDataRing` documents "single writer (the RT loop), many concurrent readers". `allocate()` and `clear()` are the undocumented third: they run from the control plane (`remapProcessImage`, `scan`, `reset`) under `busMutex_` exclusively, and they *release the storage* — `buffer_.clear() + shrink_to_fit()`, and `seqWords_` swapped out. Every ring reader is covered by that lock except three: `DeviceManager::recorderHead`, `recorderOldestSeq` and `readRecord` take **no lock at all**, and their Doxygen says "Thread-safe, lock-free". They are the sampler's entry points. `serializeDumpSpan`, the other reader, takes it shared — so the inconsistency is inside one class, between two readers of the same structure.
 
-So: an active monitoring plus a SAFE-OP→PRE-OP→SAFE-OP bounce (or `POST /api/reset`). `flushEntry` reads `head`, then decodes `[cursor, head)` — thousands of records, milliseconds of wall time, **a wide window and not a narrow one** — while `clear()` frees the buffer underneath it. `readRecord` then indexes `seqWords_[slot]` on swapped-away storage and reads `buffer_.data() + slot * stride_` on freed memory; the `capacity_ == 0` guard is itself a non-atomic read racing the write. **The lock-free reader protocol is correct against the producer it was designed against, and says nothing about the re-allocation it was not.** That the comment claims otherwise is the whole lesson: a thread-safety comment scoped to one adversary reads as a general guarantee.
+So: an active monitoring plus a SAFEOP→PREOP→SAFEOP bounce (or `POST /api/reset`). `flushEntry` reads `head`, then decodes `[cursor, head)` — thousands of records, milliseconds of wall time, **a wide window and not a narrow one** — while `clear()` frees the buffer underneath it. `readRecord` then indexes `seqWords_[slot]` on swapped-away storage and reads `buffer_.data() + slot * stride_` on freed memory; the `capacity_ == 0` guard is itself a non-atomic read racing the write. **The lock-free reader protocol is correct against the producer it was designed against, and says nothing about the re-allocation it was not.** That the comment claims otherwise is the whole lesson: a thread-safety comment scoped to one adversary reads as a general guarantee.
 
 **Defect 2 — `driver_` is read unsynchronised from the RT thread, by a check that does not need to exist.** `exchangeProcessData()` opens `if (!driver_)`, a plain `unique_ptr` read, while `init`/`reset` write it under a lock the RT thread never takes. Benign on real hardware, formal UB, TSan-visible — and redundant: no image can be published without a driver, and `reset()` calls `stopExchange()` before `driver_.reset()`, so the seq_cst image load two lines down already covers it. Deleting the check removes the race outright.
 
@@ -2252,7 +2252,7 @@ Order: `busOperationMutex_ → deviceSetMutex_ → parametersMutex_ → controlP
 
 **The contested consequence, stated plainly: a borrow no longer excludes an AL transition.** A `withDevice` borrower holds `deviceSetMutex_` shared; `transitionToState` no longer takes it. So a minutes-long auto-tuning run and a user pressing "go to INIT" now interleave — the transition proceeds and the procedure's next bus transaction fails against the changed state, where previously the HTTP request hung for the procedure's whole duration. **This was accepted rather than tolerated.** The user asked for the bus to stop and the bus stops; the safety invariant that actually matters (a borrowed `Device&` never dangles) is untouched, because only `scan`/`reset` destroy devices and those still wait for the borrow. A hung request that might convoy the entire device API on Windows is not a feature worth preserving. The `withDevice` warning had to grow a second clause to say so, since the old one implied more exclusion than it ever promised.
 
-**What the split does *not* buy, recorded because it is the natural thing to assume it buys.** It does nothing for process-data exchange during a firmware install. `exchangeProcessData()` takes no lock and never did — it is gated by the atomic image pointer alone — so no mutex has ever been able to stall the RT cycle. What pauses exchange is `stopExchange()` plus the whole-bus re-map when the flashed device rejoins SAFE-OP/OP, and that pause is the same length as before. **What improves is everything around the exchange**: monitoring keeps streaming and the read endpoints stay responsive across the BOOT and PRE-OP transitions, where before they stalled for each one. Observability during the install, not throughput.
+**What the split does *not* buy, recorded because it is the natural thing to assume it buys.** It does nothing for process-data exchange during a firmware install. `exchangeProcessData()` takes no lock and never did — it is gated by the atomic image pointer alone — so no mutex has ever been able to stall the RT cycle. What pauses exchange is `stopExchange()` plus the whole-bus re-map when the flashed device rejoins SAFEOP/OP, and that pause is the same length as before. **What improves is everything around the exchange**: monitoring keeps streaming and the read endpoints stay responsive across the BOOT and PREOP transitions, where before they stalled for each one. Observability during the install, not throughput.
 
 **One lock's exclusive window shrank; one operation's lock got *stronger*.** `writeDevicePdoMapping` now takes `busOperationMutex_`. It rewrites `flatPdoMapping_` — the same field `remapProcessImage` rewrites and `buildProcessImage` reads — and a shared lock never excluded that. The PDO-mapping write serialisation deferred in July fell out of the split rather than needing its own change, exactly as predicted.
 
@@ -2276,7 +2276,7 @@ The last item from the lock inventory, and the one whose sizing was wrong when i
 
 **The re-find forces a decision the old code did not have to make.** If the entry is gone, or its `dataType` differs from the one snapshotted, the dictionary was re-enumerated mid-transfer and those bytes were decoded under a type the object no longer declares. `readParameter` reports "re-enumerated during the read — retry" rather than caching a possibly-misdecoded value; the CA path drops the blob and falls back to per-subindex reads. Rare, but it is a real state that now has a written answer instead of an assumption. `writeParameter` is easier: it is cache-first, so the value is already committed and only `syncState` is provisional across the transfer — a reader mid-download sees the intended value, which is the contract it always claimed.
 
-**A latent bug fell out of unifying the two lambdas.** `readAllParameters`' copy did not check `mailboxActive()` before attempting a Complete Access upload. Below PRE-OP that upload fails, and `CompleteAccessProbe::recordFailure()` latches `caSupport_` to `kUnsupported` for the device's whole lifetime — on evidence that says nothing about whether the slave supports CA. `readObject`'s copy did check. The shared helper checks, so the answer is now the same one in both.
+**A latent bug fell out of unifying the two lambdas.** `readAllParameters`' copy did not check `mailboxActive()` before attempting a Complete Access upload. Below PREOP that upload fails, and `CompleteAccessProbe::recordFailure()` latches `caSupport_` to `kUnsupported` for the device's whole lifetime — on evidence that says nothing about whether the slave supports CA. `readObject`'s copy did check. The shared helper checks, so the answer is now the same one in both.
 
 **The tests were validated by re-introducing the defect, because otherwise they assert nothing.** Both new tests park a transfer inside the fake driver's `readSdo`/`writeSdo` and require a cached read to complete anyway. They passed immediately — which proves nothing on its own, so the lock was deliberately widened back over each transfer in turn and each test was confirmed to fail (blocking out its full five-second timeout) against its own defect and to pass against the other. **A concurrency test that has never been seen to fail is decoration.** A first attempt at the injection did not compile, and the run then silently used the stale binary and reported green — the failure mode of the whole exercise in miniature.
 
@@ -3008,7 +3008,7 @@ module remains the interesting case for the transfer itself, being the only one 
 (2517 bytes) does not fit the 2024-byte buffer.
 
 **The bench drive was left wedged.** After roughly 250 SDO reads probing subindices by hand, slave 2
-began aborting *every* SDO with 0x08000000 while reporting PRE-OP with no AL error; slave 1 stayed
+began aborting *every* SDO with 0x08000000 while reporting PREOP with no AL error; slave 1 stayed
 healthy. The probing is the likeliest trigger and the command 21 run cannot be ruled out. Not
 diagnosed, and a power cycle is what would separate the two.
 
@@ -3219,7 +3219,7 @@ setpoint. The symptom is a sync error, AL 0x001A or 0x001B, or an SM watchdog tr
 ### The pieces
 
 1. **Arm SYNC0.** Call `ecx_dcsync0(ctx, slave, TRUE, cycleTime, shift)` for each DC-capable slave,
-   in SAFE-OP, before the transition to OP. `cycleTime` must equal the loop period.
+   in SAFEOP, before the transition to OP. `cycleTime` must equal the loop period.
 2. **A common pulse grid falls out of SOEM's own arithmetic.** `ecx_dcsync0` reads that slave's
    local system time from 0x0910. It rounds the value up to a whole multiple of `CyclTime`, then
    adds one more `CyclTime` plus the shift. `ecx_configdc` already disciplined every slave's system
@@ -3361,8 +3361,8 @@ rather than a test that silently passes.
 
 **A `.mmpd`-style export is one action, not an accessor.** `GET /api/eni` drives the bus: one EEPROM
 read and a burst of SDO uploads per device. It also needs the bus mapped, because FMMUs and logical
-addresses come into being at the SAFE-OP transition and there is nothing to describe before that. A
-bus in PRE-OP answers 409 rather than being guessed at.
+addresses come into being at the SAFEOP transition and there is nothing to describe before that. A
+bus in PREOP answers 409 rather than being guessed at.
 
 **The cyclic frame is a logical write and a logical read, not one read-write.** A read-write datagram
 is only correct where a device's input and output FMMUs share a logical address, and this master
@@ -3372,7 +3372,7 @@ confirmed the reading.
 ### Open
 
 **Nothing here has run against hardware.** Every test is against a fake bus or a document on disk.
-The export drives a real bus, and `GET /api/eni` with a drive in SAFE-OP is the one path no test
+The export drives a real bus, and `GET /api/eni` with a drive in SAFEOP is the one path no test
 reaches.
 
 **The collector never fills `DC`, so an export is always free-run.** Reading and writing the element
@@ -3389,11 +3389,11 @@ a warning rather than a gap somebody could miss.
 by xmllint on every build. Whether EC-Master or TwinCAT brings a bus up from one is unverified, and
 xmllint cannot answer it.
 
-## Session 2026-10-02 — The mailbox counter is reset with counter 0 on every INIT→PRE-OP (as-built)
+## Session 2026-10-02 — The mailbox counter is reset with counter 0 on every INIT→PREOP (as-built)
 
 SOMANET firmware ignores a mailbox request whose counter equals the counter of the previous
 request (`ethercat_service.xc`, the `h.control != 0 && h.control == g_mbox_last_master_count`
-check). Firmware v5.6.0 and newer clears the stored counter on INIT→PRE-OP (somanet_software
+check). Firmware v5.6.0 and newer clears the stored counter on INIT→PREOP (somanet_software
 32780ec9b, PR #4924). Older firmware keeps it across INIT.
 
 **This master restarts its counter in two places.** `ecx_config_init` calls `ecx_init_context`,
@@ -3415,11 +3415,11 @@ device of the same type swapped in at the same position. The second fix covers a
 is the one built.
 
 **`resetMailboxCounter` sends an SDO upload of 0x1000:00 with counter 0.** It runs in
-`SoemFieldbusDriver::transitionToState`, when a slave that left INIT reaches PRE-OP. It runs under
-the same `controlPlaneMutex_` hold as the state read that saw PRE-OP, so it is the first mailbox
-request the slave gets in PRE-OP. A scan leaves every slave in INIT, because `ecx_config_init`
+`SoemFieldbusDriver::transitionToState`, when a slave that left INIT reaches PREOP. It runs under
+the same `controlPlaneMutex_` hold as the state read that saw PREOP, so it is the first mailbox
+request the slave gets in PREOP. A scan leaves every slave in INIT, because `ecx_config_init`
 broadcasts INIT, so no request can reach a device before this one. The cost is one SDO for each
-device on each INIT→PRE-OP, a few milliseconds.
+device on each INIT→PREOP, a few milliseconds.
 
 **Only Synapticon (0x22D2) and Sensodrive (0x063A) devices get the request.** ETG1000.4 reserves
 counter 0, so the behaviour of another vendor's stack is unknown. Both IDs live in
@@ -3544,8 +3544,8 @@ is.
 where the image is published, and in Monitor mode v6 sends no state change. The old client read
 the state and the mapping once, at startup, so a drive that reached OP later was probably never
 monitored. `DeviceManager::followObservedStates()` is one pass: it reads every state, re-maps when a
-device enters SAFE-OP or OP, and tears down when none exchanges. A re-map reads the mapping again,
-because the PLC can change it in PRE-OP. It reuses `remapProcessImage` and `stopExchange`.
+device enters SAFEOP or OP, and tears down when none exchanges. A re-map reads the mapping again,
+because the PLC can change it in PREOP. It reuses `remapProcessImage` and `stopExchange`.
 
 **The thread that repeats it lives in `main.cc`, not in `DeviceManager`.** `DeviceManager` owns no
 background thread, so that it stays embeddable (`docs/THREADS.md`). The state follower is thread 7.
@@ -3602,14 +3602,14 @@ state the catalogue rule allows. The LEDs stop at the end of the run and when it
 ## Session 2026-10-10 — SPoE meets hardware: a drive starts in OP, and the netX filters file names (as-built)
 
 Issue #36. The first runs against real drives. One drive spoke SPoE protocol 1.0. A second drive,
-an ACTILINK-S, spoke protocol 1.2 and ran firmware that keeps it in PRE-OP. Neither drive could
-reach SAFE-OP in Control mode on this bench, so process data in Control mode is still untested on
+an ACTILINK-S, spoke protocol 1.2 and ran firmware that keeps it in PREOP. Neither drive could
+reach SAFEOP in Control mode on this bench, so process data in Control mode is still untested on
 1.2. PR #68 ships as a test release, and the remaining hardware checks run elsewhere.
 
 **A drive that starts in OP is mapped by the scan.** An SPoE drive starts in OP. The image is
 otherwise published only by `transitionToState`, so in Control mode no state change ever brought
 the drive there, and nothing was exchanged. `DeviceManager::scan()` now reads every state. When a
-device is in SAFE-OP or OP, it reads that device's object dictionary and calls
+device is in SAFEOP or OP, it reads that device's object dictionary and calls
 `remapProcessImage`. A failure there is logged, and the scan still succeeds, because every device
 was found. A SOEM scan leaves every slave in INIT, so the step does nothing for EtherCAT. The scan
 also records what it mapped in `observedExchanging_`, so the Monitor-mode follower does not map the
@@ -3940,7 +3940,7 @@ happens, to at most once per 2 s per object. This is accepted.
 ## Session 2026-10-19 — A SOMANET drive gets each mailbox request once (as-built)
 
 Issue #100. A field report on a bus of 30 drives: one full parameter read left 7 drives answering
-every SDO and FoE request with "the slave's receive mailbox is full". INIT followed by PRE-OP always
+every SDO and FoE request with "the slave's receive mailbox is full". INIT followed by PREOP always
 freed a drive. The same drives never showed it under another master.
 
 **The firmware locks SM0 when it gets one request twice.** `ecat_process_packet()` in
@@ -3950,7 +3950,7 @@ freed a drive. The same drives never showed it under another master.
 SyncManager (lines 374-378), and only that read makes the ESC clear the mailbox-full bit. So SM0
 stays full, the main loop finds the same header on every pass and ignores it again, and no error
 reply is sent (line 1672). A transition to INIT deactivates SM0, which discards the message, and
-INIT to PRE-OP sets the last counter to 0 (line 819). The early return came in with 038ea8229 in
+INIT to PREOP sets the last counter to 0 (line 819). The early return came in with 038ea8229 in
 2017 to pass an ETG conformance test check. The `DL_MBXERR_NOMOREMEMORY` return at lines 345-347
 has the same flaw. Reported as synapticon/somanet_software#5811 with the one-line fix.
 
@@ -3967,7 +3967,7 @@ is a workaround for drives in the field.
 **Measured on a Circulo, alone on the bench.**
 
 - `hil/mailbox_duplicate` writes one SDO upload twice with the same counter. SM0 status stays
-  0x48, no reply comes, the next write gets a working counter of 0, and INIT then PRE-OP frees it.
+  0x48, no reply comes, the next write gets a working counter of 0, and INIT then PREOP frees it.
 - With SOEM built at `EC_TIMEOUTRET` 200 µs, the server locked the drive after four SDO reads of
   the first enumeration. Every later read failed with the reporter's message.
 - At the default 2 ms on an idle host, 10,000 round trips had 3 over 0.5 ms, 1 over 1 ms, none
@@ -4004,7 +4004,7 @@ is a workaround for drives in the field.
   that a late frame triggers.
 - **Send once to every vendor.** It removes the recovery of a lost write from devices that do not
   need the workaround.
-- **Free a locked drive with INIT and PRE-OP.** That is an AL state change nobody asked for, and it
+- **Free a locked drive with INIT and PREOP.** That is an AL state change nobody asked for, and it
   drops the drive out of OP.
 
 **What is tested, and what is not.**
@@ -4026,7 +4026,7 @@ is a workaround for drives in the field.
   in BOOT.
 - `ctest` passes. The SOEM patch has no unit test, because it needs a network adapter.
 - **The Integro does not have the flaw.** `hil/mailbox_duplicate` on an Integro (product 0x401,
-  revision 0x11000003) in PRE-OP: the ESC accepted the second copy, the netX stack took it out of
+  revision 0x11000003) in PREOP: the ESC accepted the second copy, the netX stack took it out of
   SM0 without an answer, and the next read worked. That is the behaviour ETG.1000.4 asks for. The
   patch still writes to it once, because it checks the vendor and nothing on the bus tells the
   two stacks apart. On an Integro that costs the 700 ms mailbox timeout for a write that is lost on
@@ -4078,15 +4078,15 @@ real-time kernel. The log showed a mailbox write with no frame back, then a requ
 704 ms later. alpha.91 served the same requests on the same PC without one failure.
 
 **How the netX stack of an Integro treats the mailbox counter.** Measured with the new
-`hil/mailbox_counter0`, product 0x401, firmware v5.6.11, in PRE-OP:
+`hil/mailbox_counter0`, product 0x401, firmware v5.6.11, in PREOP:
 
 - It takes a request only when its counter is the one after the last counter it accepted. Pattern
   `skip`, 14 rounds, every round the same: `c` answered, `c+2` dropped, `c+1` answered, `c+3`
   dropped, `c+2` answered, `c+3` answered, `c+4` answered. A dropped request is taken out of SM0 and
   never answered, so the master waits the 700 ms mailbox timeout for it.
-- Counter 0 is always answered, as the first request after PRE-OP, twice in a row, and in the
+- Counter 0 is always answered, as the first request after PREOP, twice in a row, and in the
   middle of a sequence. It does not change what the drive remembers.
-- INIT followed by PRE-OP clears what it remembers.
+- INIT followed by PREOP clears what it remembers.
 - ETG.1000.4 Table 29 says the slave shall not check the sequence. The XMOS stack of a Circulo does
   not: it answers every pattern, and locks only on a repeated counter (Session 2026-10-19).
 
@@ -4181,7 +4181,7 @@ fault:
 
 Rules that cost a run each to learn:
 
-- **Off during init, scan and the PRE-OP transition, on during the rounds only.** The harness
+- **Off during init, scan and the PREOP transition, on during the rounds only.** The harness
   removes the rule, does the three, adds the rule, runs the rounds, and removes it again.
 - **`tc` needs root on every switch.** A line in `/etc/sudoers.d/` for `/usr/sbin/tc` alone lets
   the harness switch it. The same for `/usr/sbin/tcpdump` when a capture is wanted; stop a capture
@@ -4192,7 +4192,7 @@ Rules that cost a run each to learn:
   stays, because a scan under a uniform delay still fails on the state writes.
 
 The harness is `tools/flaky-bus.sh`: `POST /api/reset`, `POST /api/init`, `POST /api/scan`,
-`POST /api/devices/state` to PRE-OP, then N rounds of `POST /api/devices/1/parameters/read` and
+`POST /api/devices/state` to PREOP, then N rounds of `POST /api/devices/1/parameters/read` and
 `GET /api/devices/1/files/config.csv`, with the file compared to the first round's bytes, and a
 count of the warnings and failures in the server log between the first and the last round. The
 numbers to watch: writes without a frame back, requests sent with counter 0, mailbox timeouts, FoE
@@ -4301,16 +4301,16 @@ firmware written, "could not reach INIT: the device reported BOOT rather than IN
 read the boot code and found a restart the master did not expect: an INIT request in BOOT after a
 com binary makes the SoC ask the netX for a reset 500 ms away, and only then report INIT
 (`AppECS_Functions_Boot.c`, `Boot_Handle_ESM_AL_Control_Changed_Ind`). The master gave the step to
-INIT 10 s and recovered a lost station address only on the step to PRE-OP. The proposed fix was to
+INIT 10 s and recovered a lost station address only on the step to PREOP. The proposed fix was to
 treat both steps alike. That is built, and it is not what failed.
 
 **The restart is real, and Session 2026-08-07 put it on the wrong step.** On the bench Integro,
 every install took the same path: INIT reached about 100 ms after the com binary was written, then
-the netX reset landed during the step to PRE-OP, where the driver already re-addressed the device.
+the netX reset landed during the step to PREOP, where the driver already re-addressed the device.
 The netX is off the bus for 6 s when the same build is written again and 17 to 19 s when the build
-changes. The step to PRE-OP restarts the SoC only, and the boot code says the netX does not reset
-there. So the address loss that the 2026-08-07 session attributed to the step to PRE-OP was this
-reset, 500 ms late. A Circulo or Node has no com binary and no netX, so only the step to PRE-OP
+changes. The step to PREOP restarts the SoC only, and the boot code says the netX does not reset
+there. So the address loss that the 2026-08-07 session attributed to the step to PREOP was this
+reset, 500 ms late. A Circulo or Node has no com binary and no netX, so only the step to PREOP
 restarts it. The two processors leave BOOT differently, and no comment may describe one restart.
 
 **A clean bus did not reproduce it.** 24 of 24 installs passed on alpha.93 and 10 of 10 on
@@ -4340,7 +4340,7 @@ mailbox transfer. It applies to the two reads of `probeReachability`, the two of
 `EC_TIMEOUTRET` until the total expires, and a late answer to an earlier copy is accepted because
 it carries the same header, which is the check #114 added. A register datagram is safe to send
 again. A device that is really absent now costs 100 ms per datagram, which only the control plane
-pays. The step to INIT also gets the address recovery and the 30 s of the step to PRE-OP, as the
+pays. The step to INIT also gets the address recovery and the 30 s of the step to PREOP, as the
 report proposed. That never triggered in 60 rounds, and stays as the cover for a master that reads
 INIT later than 500 ms after it asked.
 
@@ -4367,14 +4367,14 @@ netem leg for that reason. The loop is `tools/install-loop.sh`, beside `flaky-bu
 
 ## Session 2026-10-22 — A late frame maps a device short, and nothing said so (as-built)
 
-Issue #119. On a desk PC that returns frames late, the step to SAFE-OP on an Integro sometimes
+Issue #119. On a desk PC that returns frames late, the step to SAFEOP on an Integro sometimes
 failed with "output mapping is 280 bits but the driver reserved only 0 bytes", once with 31 bytes.
 The report read it as the counter-0 recovery of Session 2026-10-20: the one request the netX stack
 drops after a recovery landed inside SOEM's map, where a dropped read is silent.
 
 **Reproduced without the recovery.** Bench Integro, alpha.95, `netem delay 150ms reorder 98% 0%`
-on the adapter during 30 rounds of INIT, PRE-OP, SAFE-OP, OP, INIT through `POST /api/devices/state`,
-with the rule off during reset, init, scan and the first PRE-OP. The loop is
+on the adapter during 30 rounds of INIT, PREOP, SAFEOP, OP, INIT through `POST /api/devices/state`,
+with the rule off during reset, init, scan and the first PREOP. The loop is
 `tools/al-state-loop.sh`, beside `flaky-bus.sh`. SOEM mapped short in 3 rounds (0 of
 35 output bytes; 0 of 47 input bytes; 45 of 47 input bytes). MM's own read of the mapping failed in
 6 rounds with "no frame returned" or a mailbox timeout, and the step was refused. No request went
@@ -4386,7 +4386,7 @@ measurement.
 
 **The worse finding: the check passed a map of nothing.** In one round SOEM mapped 0 output bytes
 and the step passed. The log said "Process data configured: 0 output bytes, 47 input bytes,
-expected WKC 1", the drive reached SAFE-OP and OP, and every output write landed nowhere. SOEM sets
+expected WKC 1", the drive reached SAFEOP and OP, and every output write landed nowhere. SOEM sets
 `Obits` on every map and `Obytes` only when `Obits > 7` (`ecx_map_sm` in `ec_config.c`). After a
 short map `Obytes` still held the 35 of the map before, and `buildProcessImage` compared 280 bits
 against 35 bytes. The report saw the 500 because its process was fresh: `ecx_config_init` had
@@ -4524,7 +4524,7 @@ patched SOEM source in the vcpkg build tree, `soem_fieldbus_driver.cc`, `soem_ma
 **The verdict: the approach is right, and its core stays.** Three reasons.
 
 - **The two costs are not symmetric.** A request sent again locks the XMOS stack, and only INIT
-  then PRE-OP frees it, which takes the drive out of OP. That locked 7 of 30 drives in #100. A
+  then PREOP frees it, which takes the drive out of OP. That locked 7 of 30 drives in #100. A
   request not sent again costs one failed transfer at the 700 ms mailbox timeout when the frame was
   truly lost, and nothing when the frame was late. A late frame is the common case on a desk PC. A
   lost frame on a wired segment is rare.
@@ -4567,7 +4567,7 @@ reused index, and the reply check in `ecx_SDOread` refuses a reply for another o
    error reply is an answer, and it still proves delivery. Set `gotmsg` in every branch but the
    emergency branch.
 3. **The counter reset is sent once.** `resetMailboxCounter` sends one SDO upload with counter 0 on
-   every INIT to PRE-OP, and logs a warning when it gets no answer. On firmware older than v5.6.0 the
+   every INIT to PREOP, and logs a warning when it gets no answer. On firmware older than v5.6.0 the
    stored counter survives INIT, so a lost reset leaves about one chance in seven that the next
    request repeats it and locks the drive. Both stacks accept counter 0 twice in a row, so a second
    attempt is safe. Send the reset once more when the first got no answer.
@@ -4687,7 +4687,7 @@ Two things happened on the Circulo at 150 ms that this branch does not cause and
 - **The 20-round run wedged the drive's file system from round 5.** A read of data packet 5 came
   back later than 100 ms, the abort went out, the retry's READ was accepted and served two packets,
   the drive answered the ACK of packet 2 with FoE error 0x8004 "Illegal", and every READ after it
-  got 0x800B "File System is busy". INIT then PRE-OP did not clear it; a power cycle did. The
+  got 0x800B "File System is busy". INIT then PREOP did not clear it; a power cycle did. The
   capture has the whole exchange, and the firmware's `foe.c` and `foe_buffer.c` show the storage
   task left busy by the abort's erase. Issue #131, with the firmware issue beside it.
 
@@ -4720,7 +4720,7 @@ apart.
 **The decision: continue with the next counter, and never use the counter of an unknown write
 again.** The XMOS stack locks only on two requests in a row with the same counter, so a counter that
 is never used again cannot lock it, whenever the late write lands. Counter 0 stays for the
-INIT to PRE-OP reset only. The SyncManager status read after an unknown write and the settle in
+INIT to PREOP reset only. The SyncManager status read after an unknown write and the settle in
 `ecx_mbxreceive` existed only to decide whether to reuse the counter, and go with it. The port is
 153 lines shorter.
 
@@ -4752,7 +4752,7 @@ case of #130.
 **A second firmware fault came out of the same run.** In round 11 the master's read of data packet
 3 came back late, the port aborted, and the retry was served in full. From then on every file read
 of the drive returned its first packet as zeros, 1012 bytes of `config.csv` and all 535 bytes of
-`.hardware_description`, through INIT and PRE-OP. `hil/foe_read_abort` on branch 131 compares the
+`.hardware_description`, through INIT and PREOP. `hil/foe_read_abort` on branch 131 compares the
 bytes of a read with its baseline for that reason. It belongs to #131 with the busy state, and both
 are the firmware's.
 
@@ -5154,7 +5154,7 @@ firmware source and was not tested.
 
 ## Session 2026-10-30 — A read answered with FoE BUSY waits, and two refusals are asked again (as-built)
 
-Issue #175. An Integro refused FoE reads for about 2 s after it reached PRE-OP from power-on, and
+Issue #175. An Integro refused FoE reads for about 2 s after it reached PREOP from power-on, and
 the server answered 409. A capture showed what the log could not: the drive answers the read
 request with FoE BUSY, and SOEM's `ecx_FOEread` takes BUSY for a packet it does not expect and
 returns `-EC_ERR_TYPE_PACKET_ERROR`, the `wkc -3` of the issue. ETG.1000.5 defines BUSY only for a
@@ -5164,7 +5164,7 @@ write ("busy to store the written file data").
 The program talks to the drive through SOEM and lets one run pick the reply to a BUSY. On an Integro
 with firmware v5.6.11:
 
-- The first read after the drive enters BOOT from PRE-OP gets BUSY 0.5 s after the request. The
+- The first read after the drive enters BOOT from PREOP gets BUSY 0.5 s after the request. The
   file is ready 0.99 s after BOOT, wherever the request falls: a read 500 ms after BOOT gets DATA
   with no BUSY, one at 1000 ms gets it in 23 ms. INIT straight to BOOT after power-on gives no BUSY.
 - After the BUSY, an ACK of packet 0 gets the file for the same request (5 of 5). So does a new
@@ -5173,7 +5173,7 @@ with firmware v5.6.11:
   refuses INIT, and takes no mailbox request, not even the abort, until a power cycle. The driver
   before this change aborted and asked again 100 ms later, and the second request is what kept the
   drive alive. Its last attempt could still end on a bare abort.
-- In PRE-OP after power-on, the drive sends BUSY every 0.5 s and ends the read with FoE error
+- In PREOP after power-on, the drive sends BUSY every 0.5 s and ends the read with FoE error
   0x800B Program error at 2.0 s, whatever the master sends. The next request gets the file at once.
   No reply hung the drive here. The server gave up at about 1.9 s, just before the 0x800B, which is
   the 409. 2 of 3 power-ons through the server hit this window; why the third did not is not known.
@@ -5183,14 +5183,14 @@ stack code, whose `ecatfoe.c` handles "busy on a read request" (change V5.11 FOE
 BUSY it waits for an ACK and then sends the data. The Integro's Hilscher stack behaves the same way
 on the wire. Jasper's file system holds its reply instead of sending BUSY, because "SOEM-based
 masters abort a read on a Busy service" (`foe_filesystem.c`). The Circulo sent no BUSY in any run:
-BOOT via PRE-OP (10), PRE-OP via INIT (5), PRE-OP after power-on (1).
+BOOT via PREOP (10), PREOP via INIT (5), PREOP after power-on (1).
 
 **So `ports/soem` answers each BUSY on a read with an ACK of the last packet, and `readFile` asks
 again after two refusals.** The ACK covers the BOOT case with no second request. The BUSY phase is
 bounded by the read timeout, counted from the first BUSY. 0x800B covers the power-on case. Both
 codes count against the 3 attempts, so a read is still bounded.
 
-**0x8004 came from a second, unrelated finding on the Circulo.** In the PRE-OP rounds of the
+**0x8004 came from a second, unrelated finding on the Circulo.** In the PREOP rounds of the
 program, a read request got FoE error 0x8004 "Missing reply" at once in 13 of 20 rounds when INIT
 followed the last ACK of the round before by about 0.1 ms. With a pause of 1, 2, 3, 5 or 50 ms
 after that ACK: 0 of 20 each. The firmware explains it: `sc_somanet_ip/module_ethercat/libsrc/foe.c`
@@ -5213,3 +5213,35 @@ client can send a state request within 0.1 ms of a read.
 
 For the firmware team: the Integro sends BUSY in answer to a read, and a master that aborts after it
 hangs the drive; the XMOS FoE handler keeps its READ state across AL state changes.
+
+## Session 2026-11-12 — The AL states are written PREOP and SAFEOP (#213)
+
+**One spelling for each AL state, and it is the one with no hyphen.** The repository wrote `PRE-OP`
+in prose, logs, messages and the Console, `PRE_OP` in Python, `PreOp` in C++, and `PREOP` in the
+ENI. A user who read `PRE-OP` in a log and then wrote a script had to guess which form applied.
+`PREOP` is a valid name in Python and TypeScript as it is, so the text in a log and the name in a
+script are now the same.
+
+**It is also what the rest of the field writes.** Counted in the documents and sources on hand:
+
+| Source | Form |
+| --- | --- |
+| ETG.1000.6 | `PREOP` 33, `SAFEOP` 57, `PRE-OP` 0 |
+| ETG.1000.4, ETG.1000.5 | The long forms only, `Pre-Operational` and `Safe-Operational` |
+| ETG.1020 | Mixed: `SAFEOP` 53, `SAFE-OP` 18 |
+| TwinCAT, the Online tab of an EtherCAT device | `PREOP`, `SAFEOP` |
+| IgH master 1.6.13, its tool and its kernel module | `PREOP`, `SAFEOP` |
+| `somanet_software`, `jasper`, `oblac` | Mostly `PREOP` |
+
+**Names in code have no single standard, so C++ keeps its rule.** SOEM writes `EC_STATE_PRE_OP`,
+IgH `EC_AL_STATE_PREOP`, the ESI schema `PreOP` and `PreOp`, and the ESC data sheet `PreOp`. C++
+enumerators are PascalCase, and ETG itself writes `PreOp`, so `EtherCatState::PreOp` stays. No
+source writes `Preop`.
+
+**What does not change.** ESI values such as `WriteRestrictions="PreOP"` are ETG.2000 data. The
+released sections of `CHANGELOG.md` record what was released. The SOEM names belong to SOEM.
+
+**The API breaks on purpose.** The strings the server sends change, for example `requestsState` of
+`POST /api/eni/parse`, and a client that compared them with `PRE-OP` must change too. The project
+is in alpha, so there is no transition period. The number of places changed was not a reason to
+keep the old spelling: this software will be in use for years.

@@ -47,7 +47,7 @@ std::vector<ProgressStep> storeParametersSteps();
 /// stops waiting for the confirmation, which the step says rather than implying the store was
 /// undone.
 ///
-/// Needs an active mailbox (PRE-OP or above) and nothing else — no operation mode, no enable, and
+/// Needs an active mailbox (PREOP or above) and nothing else — no operation mode, no enable, and
 /// the shaft does not move.
 ///
 /// @param device   Device to run against, borrowed by the manager for this call.

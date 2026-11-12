@@ -45,7 +45,7 @@ namespace mm::example {
 /// cycle, so the climb (Switch On Disabled → Ready To Switch On → Switched On → Operation Enabled)
 /// is one write per cycle with the wire doing the waiting — where an off-RT caller has to sleep and
 /// poll for the same result. What must stay off the RT thread is the **EtherCAT AL state** (INIT /
-/// PRE-OP / SAFE-OP / OP): seconds of mailbox and register traffic, done through the HTTP API. A
+/// PREOP / SAFEOP / OP): seconds of mailbox and register traffic, done through the HTTP API. A
 /// task runs in OP and never touches it.
 ///
 /// **One value here is not free.** @c Config's temperature object is SDO-only on most drives, so

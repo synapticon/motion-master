@@ -18,7 +18,7 @@ descriptor of the procedure gives:
     file          a local path, which the script reads and sends as base64
 
 Opens the fieldbus driver, scans and moves the device to --state first when needed. The default
-is PRE-OP, because most procedures need the mailbox. A procedure that enables the drive needs OP,
+is PREOP, because most procedures need the mailbox. A procedure that enables the drive needs OP,
 because the drive enables only while it exchanges process data. Give --state op for it.
 
     python run-procedure.py
@@ -127,7 +127,7 @@ def main():
     ap.add_argument("name", nargs="?", help="the procedure to run (default: list them)")
     ap.add_argument("params", nargs="*", help="parameters as name=value")
     ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--state", choices=STATES, default="pre-op")
+    ap.add_argument("--state", choices=STATES, default="preop")
     ap.add_argument("--describe", action="store_true", help="describe the procedure, do not run it")
     args = ap.parse_args()
 

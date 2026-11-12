@@ -20,8 +20,8 @@ enum class AddressState {
 ///
 /// A restart clears the configured station address (0x0010) along with everything else the master
 /// programmed, and every FPRD and FPWR of the master is addressed by that value. A SOMANET
-/// bootloader restarts the device on the step from BOOT to PRE-OP. A Jasper-based drive restarts
-/// on the step from BOOT to INIT after a commit, and on the step from INIT to PRE-OP after a BOOT
+/// bootloader restarts the device on the step from BOOT to PREOP. A Jasper-based drive restarts
+/// on the step from BOOT to INIT after a commit, and on the step from INIT to PREOP after a BOOT
 /// session with no commit.
 ///
 /// Recovery needs no scan. Auto-increment addressing reaches a slave by its position on the wire

@@ -5,8 +5,8 @@ CiA 402 is the device profile for drives. The server decodes the Statusword into
 profile's state machine, and reads the mode of operation, the actual values, the targets and the
 drive's error report.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there.
 
     python cia402-state.py
     python cia402-state.py --slave 2
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def main():
@@ -29,7 +29,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     s = client.call("getCia402Status", path={"slavePosition": args.slave}).json()
     print(

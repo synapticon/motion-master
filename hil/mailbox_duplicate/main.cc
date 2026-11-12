@@ -1,19 +1,19 @@
 // Shows on a real drive what the drive does with a mailbox request that it receives twice with the
 // same mailbox counter. A SOMANET drive with the XMOS EtherCAT stack stops taking mailbox requests,
-// and INIT followed by PRE-OP frees it. An Integro discards the second copy.
+// and INIT followed by PREOP frees it. An Integro discards the second copy.
 //
 // The program talks to the drive through SOEM directly, not through SoemFieldbusDriver, because it
 // has to write one request twice on purpose. The driver never does that.
 //
 // Steps:
-//   1. Put the drive into PRE-OP and read 0x1000:00. This shows that the drive answers.
+//   1. Put the drive into PREOP and read 0x1000:00. This shows that the drive answers.
 //   2. Write an SDO upload request of 0x1000:00 into the receive mailbox and read the answer.
 //   3. Write the same request again, with the same counter.
 //   4. Read the SyncManager 0 status, and wait for an answer. The result is one of three:
 //      LOCKED, when the mailbox-full bit stays set; HANDLED, when the drive answers the second
 //      copy; DISCARDED, when the drive takes the second copy and does not answer it.
 //   5. Read 0x1000:00. It fails when the mailbox is locked, and works otherwise.
-//   6. Put the drive into INIT and then PRE-OP, and read 0x1000:00 again. It works.
+//   6. Put the drive into INIT and then PREOP, and read 0x1000:00 again. It works.
 //
 // The program ends with LOCKED or NOT LOCKED, or with FAIL when a step does not match.
 //
@@ -21,9 +21,9 @@
 // layer. The drive goes into BOOT, and the request is an FoE read of a file. The bootloader does
 // not answer a second read while the first one is open, so the result tells three cases apart: the
 // duplicate locks the mailbox, the bootloader discards it, or the bootloader handles it as a new
-// request. The program then aborts the read, and puts the drive into INIT and PRE-OP.
+// request. The program then aborts the read, and puts the drive into INIT and PREOP.
 //
-// The drive is left in PRE-OP.
+// The drive is left in PREOP.
 
 #include <soem/soem.h>
 
@@ -175,9 +175,9 @@ int readDeviceType(ecx_contextt* ctx, uint16_t slave) {
 }
 
 // A drive can restart on its way out of BOOT, and the restart clears its station address: a
-// SOMANET drive on the step to PRE-OP, and a Jasper-based drive on the step to INIT after a commit
-// or on the step to PRE-OP without one. So the request is written again every second until
-// kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PRE-OP
+// SOMANET drive on the step to PREOP, and a Jasper-based drive on the step to INIT after a commit
+// or on the step to PREOP without one. So the request is written again every second until
+// kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PREOP
 // its mailbox sync managers too.
 bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
   const auto raw = static_cast<uint16_t>(state);
@@ -276,9 +276,9 @@ int runBoot(ecx_contextt* ctx, uint16_t slave, const std::string& file) {
   mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::PreOp);
   const bool preOp = init && requestState(ctx, slave, EtherCatState::PreOp);
   const bool counterReset = preOp && resetCounter(ctx, slave);
-  std::cout << "3. INIT, then PRE-OP, then read 0x1000:00";
+  std::cout << "3. INIT, then PREOP, then read 0x1000:00";
   const int read = counterReset ? readDeviceType(ctx, slave) : 0;
-  std::cout << std::format(": INIT {}, PRE-OP {}, wkc {}\n", init, preOp, read);
+  std::cout << std::format(": INIT {}, PREOP {}, wkc {}\n", init, preOp, read);
   return read > 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
@@ -297,8 +297,8 @@ int main(int argc, char** argv) {
     std::cerr << "ecx_init failed on " << options.ifname << "\n";
     return EXIT_FAILURE;
   }
-  // Without this, ecx_config_init asks every slave for PRE-OP, and in --boot mode a bootloader that
-  // gets PRE-OP starts the application.
+  // Without this, ecx_config_init asks every slave for PREOP, and in --boot mode a bootloader that
+  // gets PREOP starts the application.
   ctx->manualstatechange = 1;
   const int found = ecx_config_init(ctx.get());
   if (found < options.slave) {
@@ -317,12 +317,12 @@ int main(int argc, char** argv) {
 
   if (!requestState(ctx.get(), slave, EtherCatState::Init) ||
       !requestState(ctx.get(), slave, EtherCatState::PreOp)) {
-    std::cerr << "the slave did not reach PRE-OP\n";
+    std::cerr << "the slave did not reach PREOP\n";
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }
   const ec_slavet& device = ctx->slavelist[slave];
-  std::cout << std::format("slave {} ({}, product 0x{:08X}, revision 0x{:08X}) is in PRE-OP\n",
+  std::cout << std::format("slave {} ({}, product 0x{:08X}, revision 0x{:08X}) is in PREOP\n",
                            slave, device.name, device.eep_id, device.eep_rev);
   if (!resetCounter(ctx.get(), slave)) {
     std::cout << "FAIL: the slave did not answer a request with counter 0\n";
@@ -389,7 +389,7 @@ int main(int argc, char** argv) {
   const bool recoveredState = requestState(ctx.get(), slave, EtherCatState::Init) &&
                               requestState(ctx.get(), slave, EtherCatState::PreOp);
   const bool recoveredCounter = recoveredState && resetCounter(ctx.get(), slave);
-  std::cout << "6. INIT, then PRE-OP, then read 0x1000:00";
+  std::cout << "6. INIT, then PREOP, then read 0x1000:00";
   const int recovered = recoveredCounter ? readDeviceType(ctx.get(), slave) : 0;
   std::cout << std::format(": wkc {}, SM0 status 0x{:02X}\n", recovered,
                            sm0Status(ctx.get(), slave));

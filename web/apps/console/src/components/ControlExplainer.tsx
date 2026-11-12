@@ -65,7 +65,7 @@ export default function ControlExplainer() {
       <p>
         <strong>Refresh</strong> (next to the device list, and in the sidebar) is the non-destructive
         counterpart: it re-reads the existing device list and each slave's current AL state without
-        re-scanning, so slaves keep whatever state they are in (e.g. PRE-OP or OP). Use Scan when the
+        re-scanning, so slaves keep whatever state they are in (e.g. PREOP or OP). Use Scan when the
         cabling changed; use Refresh just to update what is shown.
       </p>
 
@@ -84,11 +84,11 @@ export default function ControlExplainer() {
           access is in fact most reliable in INIT.
         </li>
         <li>
-          <strong>PRE-OP</strong> — mailbox communication (CoE / SDO) is live; no process data yet.
+          <strong>PREOP</strong> — mailbox communication (CoE / SDO) is live; no process data yet.
           This is where parameters are read and written.
         </li>
         <li>
-          <strong>SAFE-OP</strong> — inputs (TxPDO) are exchanged cyclically and the mailbox stays
+          <strong>SAFEOP</strong> — inputs (TxPDO) are exchanged cyclically and the mailbox stays
           active, but outputs are held in their safe state, not applied.
         </li>
         <li>
@@ -103,7 +103,7 @@ export default function ControlExplainer() {
 
       <p>
         <strong>The transitions are not free-form.</strong> Climbing must be step by step
-        (INIT → PRE-OP → SAFE-OP → OP), but you can drop several states at once (e.g. OP → INIT), and
+        (INIT → PREOP → SAFEOP → OP), but you can drop several states at once (e.g. OP → INIT), and
         BOOT pairs only with INIT. Illegal jumps are rejected by the slave with AL status code{' '}
         <code>0x0011</code>, “Invalid requested state change”. Motion Master also rejects them up
         front, before commanding the bus.
@@ -111,11 +111,11 @@ export default function ControlExplainer() {
 
       <p>
         <strong>Motion Master reacts to the state you ask for.</strong> Changing AL state is your
-        decision; the master responds to it. Entering SAFE-OP or OP, it reads each targeted slave's
+        decision; the master responds to it. Entering SAFEOP or OP, it reads each targeted slave's
         PDO mapping over the mailbox and (re)builds the whole-bus <strong>process image</strong> — the
         memory layout the real-time loop exchanges every cycle — then starts exchanging. Leaving those
         states, it tears the image down only once no slave will remain exchanging, so a subset of
-        devices can be taken to BOOT (for firmware) or PRE-OP (to re-map) while the rest keep running.
+        devices can be taken to BOOT (for firmware) or PREOP (to re-map) while the rest keep running.
         Bringing them back re-maps the whole bus, which briefly pauses exchange for everyone — the
         accepted cost of bringing a device online.
       </p>

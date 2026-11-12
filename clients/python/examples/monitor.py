@@ -5,7 +5,7 @@ Creates a monitoring over the HTTP API (POST /api/monitorings), subscribes to it
 WebSocket, and prints each batch of cycle rows as it arrives. The monitoring is deleted on exit.
 
 Opens the fieldbus driver, scans and moves the device to OP first when needed. A value is null
-while its device is not exchanging process data, which starts in SAFE-OP.
+while its device is not exchanging process data, which starts in SAFEOP.
 
 The defaults sample four objects of the device: Timestamp (0x20F0:00), Position actual value
 (0x6064:00), DC link circuit voltage (0x6079:00) and Drive temperature (0x2031:01). The server

@@ -151,7 +151,7 @@ function Stat({ label, value, hint, cls }: { label: string; value: string; hint?
 }
 
 // The PD watchdog is the dead-man's switch behind the "PD watchdog" expiration counter above it:
-// a device in OP that misses process data past this timeout faults itself to SAFE-OP+error, and
+// a device in OP that misses process data past this timeout faults itself to SAFEOP+error, and
 // raising it lets a device tolerate the brief whole-bus PDO pause of a re-map. This panel shows how
 // the timeout is configured (ticks × the divider's time base) and its live run state, and lets the
 // user change it. Per-device (config lives in the slave's ESC), so its own query/mutation rather
@@ -216,7 +216,7 @@ function WatchdogControl({ slavePosition, expirations }: { slavePosition: number
             <Stat
               label="Timeout"
               value={wd.enabled ? `${formatMs(wd.timeoutMs)} ms` : 'disabled'}
-              hint="Process-data watchdog timeout (0x0420 × the tick base). On expiry a device in OP drops to SAFE-OP+error."
+              hint="Process-data watchdog timeout (0x0420 × the tick base). On expiry a device in OP drops to SAFEOP+error."
             />
             <Stat
               label="Derivation"

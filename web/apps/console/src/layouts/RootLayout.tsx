@@ -19,12 +19,12 @@ const deviceLinks = [
 ]
 
 const AL_STATE_LABEL: Record<number, string> = {
-  0: 'None', // No state — slave lost / powered off (SOEM reports state 0).
-  1: 'Init',
-  2: 'PreOp',
-  3: 'Boot',
-  4: 'SafeOp',
-  8: 'Op',
+  0: 'UNKNOWN', // The device does not answer: lost or powered off. The server reports state 0.
+  1: 'INIT',
+  2: 'PREOP',
+  3: 'BOOT',
+  4: 'SAFEOP',
+  8: 'OP',
 }
 
 // Per-state badge colors (bg + text), matching the Transition-to-State buttons on
@@ -73,8 +73,8 @@ function alStateLabel(state?: DeviceState): string | null {
   return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`
 }
 
-// Mailbox (CoE/SDO) communication is live in PRE-OP, SAFE-OP and OP — independent of the
-// AL error flag (a device in SAFE-OP+error still answers). INIT has no mailbox and BOOT's
+// Mailbox (CoE/SDO) communication is live in PREOP, SAFEOP and OP — independent of the
+// AL error flag (a device in SAFEOP+error still answers). INIT has no mailbox and BOOT's
 // is FoE-only, so both count as inactive. Mirrors Device::mailboxActive() on the backend, so
 // it can be derived from the batched device-state poll instead of a per-device request.
 const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8])
@@ -239,7 +239,7 @@ function DeviceSection({
   const { api } = useConnection()
 
   // The iC-MU page is listed only for a drive with an encoder it can configure. The encoder objects
-  // exist once the dictionary is read, from PRE-OP up, and the link stays hidden until they answer.
+  // exist once the dictionary is read, from PREOP up, and the link stays hidden until they answer.
   const hasDictionary = state !== undefined && state.alState >= 2
   const encodersQuery = useQuery({
     queryKey: ['encoders', Number(deviceId)],
@@ -277,11 +277,11 @@ function DeviceSection({
       : isBoot
         ? 'FoE only — the device is in BOOT, so its mailbox carries only File-over-EtherCAT (firmware transfer); CoE/SDO is unavailable until it leaves BOOT'
         : mailboxActive
-          ? 'Mailbox active — the device is in PRE-OP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
+          ? 'Mailbox active — the device is in PREOP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
           : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT, or is not responding (powered off, unplugged, or left the bus)'
 
   // Object-dictionary read state. The backend enumerates a device's OD when it reaches
-  // PRE-OP; we share the Parameters page's query cache (identical key) so this neither
+  // PREOP; we share the Parameters page's query cache (identical key) so this neither
   // double-fetches nor drifts out of sync with that page. `null` while the first read is
   // in flight; an empty list means the OD has not been read yet.
   const parametersQuery = useQuery({
@@ -289,7 +289,7 @@ function DeviceSection({
     queryFn: () => api.getDeviceParameters(Number(deviceId)),
     staleTime: Infinity,
     retry: false,
-    // The backend reads the OD automatically once the device reaches PRE-OP, which is often
+    // The backend reads the OD automatically once the device reaches PREOP, which is often
     // after this query first runs and returns an empty list. With staleTime: Infinity that empty
     // result would stick forever. Poll while empty so the green dictionary icon (and the shared
     // Parameters page cache) pick up the auto-read; stop polling the moment it is populated.
@@ -308,8 +308,8 @@ function DeviceSection({
     parameterCount === null
       ? 'Object dictionary — reading the device’s parameters…'
       : parameterCount > 0
-        ? `Object dictionary — ${parameterCount} parameters read (the device’s CoE object dictionary has been enumerated; it is read automatically once the device reaches PRE-OP)`
-        : 'Object dictionary — not read yet: no parameters enumerated. The device reads its OD on reaching PRE-OP; open the Parameters page to read it on demand.'
+        ? `Object dictionary — ${parameterCount} parameters read (the device’s CoE object dictionary has been enumerated; it is read automatically once the device reaches PREOP)`
+        : 'Object dictionary — not read yet: no parameters enumerated. The device reads its OD on reaching PREOP; open the Parameters page to read it on demand.'
 
   const stateLabel = alStateLabel(state)
 

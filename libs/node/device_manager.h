@@ -37,7 +37,8 @@ struct ProcessData;
 struct DeviceStateInfo {
   uint16_t slavePosition = 0;  ///< 1-based position on the fieldbus.
   uint16_t alStatus = 0;  ///< Raw AL Status register (bits 3:0 = state, bit 4 = error indicator).
-  /// AL state decoded from alStatus (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op).
+  /// AL state decoded from alStatus (0=UNKNOWN, 1=INIT, 2=PREOP, 3=BOOT, 4=SAFEOP, 8=OP).
+  /// UNKNOWN when the device does not answer.
   uint16_t alState = 0;
   bool error = false;         ///< True when the AL Status error indicator bit is set.
   uint16_t alStatusCode = 0;  ///< AL Status Code (ETG.1000.6 §6.4.1); non-zero when error is true.
@@ -103,7 +104,7 @@ struct ProcessImageObjectInfo {
 /// live (@c configured true) the layout describes it. When no image is published (@c configured
 /// false) but generations were mapped since the last reset(), the byte sizes and object
 /// lists describe the most recent retained generation — the last-known layout — so a bus that has
-/// dropped out of SAFE-OP/OP remains inspectable; @c lastWkc then holds the final exchange value
+/// dropped out of SAFEOP/OP remains inspectable; @c lastWkc then holds the final exchange value
 /// while @c expectedWkc reflects the now-idle bus. The lists are empty only before any image has
 /// ever been mapped.
 struct ProcessImageInfo {
@@ -211,7 +212,7 @@ void to_json(nlohmann::json& j, const DcSyncInfo& info);
 ///        caller can pass @c {} (or omit it) and override only what it cares about; new knobs can
 ///        be added here without changing the @c init signature.
 struct DeviceManagerConfig {
-  /// Read a device's object dictionary when it first reaches PRE-OP (definitions only, cache-first)
+  /// Read a device's object dictionary when it first reaches PREOP (definitions only, cache-first)
   /// so dumps/monitoring/Parameters have names and data types without a manual read. See
   /// @c transitionToState.
   bool readObjectDictionaryOnPreop = true;
@@ -397,7 +398,7 @@ class DeviceManager {
   ///
   /// Must be called after @c init(). Forwards to @c FieldbusDriver::scan().
   ///
-  /// When a device is already in SAFE-OP or OP after the scan, this reads its object dictionary and
+  /// When a device is already in SAFEOP or OP after the scan, this reads its object dictionary and
   /// publishes the process image, as @c transitionToState would. An SPoE drive starts in OP, so no
   /// state change brings it there. A failure of that step is logged, and the scan still succeeds.
   ///
@@ -531,7 +532,7 @@ class DeviceManager {
   /// FMMUs), reads each device's PDO mapping via SDO, assembles a @c ProcessImage that resolves
   /// every mapped object to an absolute position *and* to its owning parameter's cell, and
   /// publishes the image so @c exchangeProcessData begins exchanging. All devices must be in
-  /// PRE-OP (mailbox active) for the mapping reads to succeed.
+  /// PREOP (mailbox active) for the mapping reads to succeed.
   ///
   /// Re-runnable: a later call (e.g. after a device returns from a firmware download)
   /// re-maps the whole bus and republishes. While re-mapping it first unpublishes the image
@@ -574,18 +575,18 @@ class DeviceManager {
   /// @brief The working counter from the most recent process-data exchange (0 before any).
   int lastWorkingCounter() const;
 
-  /// @brief The working counter expected from the devices currently exchanging (SAFE-OP/OP).
+  /// @brief The working counter expected from the devices currently exchanging (SAFEOP/OP).
   ///
   /// Computed from each device's PDO presence and current AL state, so it tracks a partially
-  /// operational bus. A device in SAFE-OP or OP with outputs and inputs contributes 3, and a device
-  /// in PRE-OP or below contributes 0. Recomputed on configure and on each state transition — not
+  /// operational bus. A device in SAFEOP or OP with outputs and inputs contributes 3, and a device
+  /// in PREOP or below contributes 0. Recomputed on configure and on each state transition — not
   /// the whole-bus all-OP figure.
   int expectedWorkingCounter() const;
 
   /// @brief Whether every device that should be exchanging is contributing to the cycle.
   ///
   /// True when process data is configured and the last working counter is at least the
-  /// expected value. A drop below expected means a device that should be in SAFE-OP/OP stopped
+  /// expected value. A drop below expected means a device that should be in SAFEOP/OP stopped
   /// contributing (cable, fault, or an unexpected state change).
   bool processDataHealthy() const;
 
@@ -613,7 +614,7 @@ class DeviceManager {
   /// Freezes the recorder span at the instant of the call — @c [recorderOldestSeq(),
   /// recorderHead()) — and writes every cycle in it (full raw inputs + outputs, sequence,
   /// epoch-ns timestamp) plus the process image embedded as a header, so the file decodes fully
-  /// offline. Works in any state: while exchanging (OP/SAFE-OP) it dumps tail→head at that moment
+  /// offline. Works in any state: while exchanging (OP/SAFEOP) it dumps tail→head at that moment
   /// and ignores cycles the producer records afterwards; after teardown it uses the most recent
   /// retained image generation. The header objects' names/data types come from each device's
   /// parameter map (empty/0 when the object dictionary is not enumerated).
@@ -652,7 +653,7 @@ class DeviceManager {
   ///
   /// Refuses a transition the AL state machine does not allow for any targeted device, before any
   /// device is commanded: a climb of more than one state, or BOOT entered or left other than
-  /// through INIT. This is not only a rule of the standard. Entering SAFE-OP or OP re-maps the
+  /// through INIT. This is not only a rule of the standard. Entering SAFEOP or OP re-maps the
   /// process image, and a device in BOOT that reaches the PDO mapper crashes SOEM. A transition to
   /// the state a device is in is allowed, and acknowledges an AL error it holds. @c
   /// transitionToState and @c restartToState are walks of this step.
@@ -677,7 +678,7 @@ class DeviceManager {
   ///
   /// The AL state machine climbs one state at a time, may drop any number of states at once, and
   /// enters and leaves BOOT only through INIT. Each device walks from the state it is in, so a
-  /// request for OP takes a device in INIT through PRE-OP and SAFE-OP, and a device in BOOT
+  /// request for OP takes a device in INIT through PREOP and SAFEOP, and a device in BOOT
   /// through INIT first. Devices in different states take different steps; each step is one
   /// transition of the devices that need it, lowest state first. The walk stops at the first step
   /// a device does not reach.
@@ -705,7 +706,7 @@ class DeviceManager {
 
   /// @brief Takes a set of devices to INIT and then up to @p targetState one AL state at a time.
   ///
-  /// The steps are INIT, PRE-OP, SAFE-OP and OP, as far as @p targetState. A target of BOOT is
+  /// The steps are INIT, PREOP, SAFEOP and OP, as far as @p targetState. A target of BOOT is
   /// INIT and then BOOT, and a target of INIT is INIT alone. Each step is a call of
   /// @c changeState, so the re-map and the check of the AL transition stay in one place. The
   /// walk stops at the first step a device does not reach, and the outcome names that step and the
@@ -736,9 +737,9 @@ class DeviceManager {
   /// For a driver that refuses state changes, such as SPoE in Monitor mode, a PLC moves the
   /// devices and nothing here commands them. So nothing calls @c transitionToState, and that is
   /// where the image is otherwise published. This reads every state and does what
-  /// @c transitionToState would have done. When a device is seen entering SAFE-OP or OP, the image
+  /// @c transitionToState would have done. When a device is seen entering SAFEOP or OP, the image
   /// is re-mapped, which also reads the PDO mapping again, because the other master can change it
-  /// in PRE-OP. The object dictionary of that device is read before the re-map, when it has none.
+  /// in PREOP. The object dictionary of that device is read before the re-map, when it has none.
   /// When no device exchanges any more, the image is torn down.
   ///
   /// One pass, with no thread of its own. The caller repeats it, the way the composition root does
@@ -789,7 +790,7 @@ class DeviceManager {
   /// If @p positions is empty, all discovered devices are queried. Forwards to
   /// @c FieldbusDriver::readDcSync (FPRD reads — not cached) and wraps each result with its device
   /// name. The system-time difference is meaningful only while the bus is exchanging in
-  /// SAFE-OP/OP; a page polls this and watches for a slave whose deviation from the reference
+  /// SAFEOP/OP; a page polls this and watches for a slave whose deviation from the reference
   /// clock stays large or grows rather than converging toward zero.
   ///
   /// Must be called after both @c init() and @c scan().
@@ -902,13 +903,13 @@ class DeviceManager {
   /// @brief Convenience: finds a device by position and writes its PDO mapping.
   ///
   /// Equivalent to @c findDevice(slavePosition)->writePdoMapping(mapping) — see
-  /// @c Device::writePdoMapping for the procedure and the PRE-OP requirement. Does not itself
-  /// re-map the process image: the caller drives the device back to SAFE-OP/OP afterwards, and
+  /// @c Device::writePdoMapping for the procedure and the PREOP requirement. Does not itself
+  /// re-map the process image: the caller drives the device back to SAFEOP/OP afterwards, and
   /// @c transitionToState re-reads the mapping and rebuilds the whole-bus image at that point.
   ///
   /// @param slavePosition  1-based bus position of the target device.
   /// @param mapping        Desired output (RxPDO) and input (TxPDO) mapping, in assignment order.
-  /// @return Void on success, or an error string if the device is unknown, is not in PRE-OP, or the
+  /// @return Void on success, or an error string if the device is unknown, is not in PREOP, or the
   ///         mapping write/verify fails.
   std::expected<void, std::string> writeDevicePdoMapping(uint16_t slavePosition,
                                                          const PdoMapping& mapping);
@@ -986,7 +987,7 @@ class DeviceManager {
   ///         it is no longer in the ring or the copy raced the producer (the caller skips it).
   bool readRecord(uint64_t seq, ProcessDataRing::Record& out) const;
 
-  /// @brief Whether the device at @p slavePosition is currently exchanging (SAFE-OP/OP).
+  /// @brief Whether the device at @p slavePosition is currently exchanging (SAFEOP/OP).
   ///        Thread-safe; reads the driver's cached AL state, no bus I/O.
   ///
   /// The monitoring sampler's per-device live gate: only an exchanging device has live process
@@ -1029,12 +1030,12 @@ class DeviceManager {
   /// published set from changing underneath it; the ring re-allocation takes @c processDataMutex_
   /// exclusively for its own brief window. Its callers are the public @c configureProcessData,
   /// @c transitionToState when a (re)joining device requires a re-map, @c followObservedStates,
-  /// and @c scan when it finds a device already in SAFE-OP or OP.
+  /// and @c scan when it finds a device already in SAFEOP or OP.
   std::expected<void, std::string> remapProcessImage();
 
   /// @brief Reads the object dictionary of each device in @p positions that has no parameters yet.
   ///
-  /// Only devices with a live CoE mailbox are read, which is PRE-OP and up. The read is definitions
+  /// Only devices with a live CoE mailbox are read, which is PREOP and up. The read is definitions
   /// only and cache-first, so a device model pays for the slow enumeration once, and every later
   /// scan of the same hardware loads the cache. With the dictionary in place, recorder dumps,
   /// monitoring and the Parameters page have names and data types without a manual read. A failure
@@ -1043,7 +1044,7 @@ class DeviceManager {
   void readMissingObjectDictionaries(DeviceSet& set, std::span<const uint16_t> positions,
                                      std::string_view occasion);
 
-  /// @brief Publishes the process image when a scan finds devices already in SAFE-OP or OP.
+  /// @brief Publishes the process image when a scan finds devices already in SAFEOP or OP.
   ///
   /// The dictionary of those devices is read first, because @c buildProcessImage binds each entry
   /// to its parameter cell. A failure is logged and not returned. The caller must hold
@@ -1072,7 +1073,7 @@ class DeviceManager {
   /// one cannot drift apart. With an empty @p transitioning it is simply the live figure.
   ///
   /// The lower of the two per device, not per bus: one call can carry a drop and a climb at once
-  /// (`{1, 2} -> SAFE-OP` with 1 in OP and 2 in PRE-OP), and there the two would net out to a
+  /// (`{1, 2} -> SAFEOP` with 1 in OP and 2 in PREOP), and there the two would net out to a
   /// figure the bus does not reach until the climbing device arrives — counting the seconds in
   /// between as a fault, which is the very thing this exists to prevent.
   int expectedWkcDuring(std::span<const uint16_t> transitioning,
@@ -1086,7 +1087,7 @@ class DeviceManager {
   ///        if that is less than what is expected now.
   ///
   /// Called *before* commanding a drop, and it is what keeps a deliberate transition from being
-  /// counted as a bus fault. A device commanded below SAFE-OP stops answering the moment it leaves,
+  /// counted as a bus fault. A device commanded below SAFEOP stops answering the moment it leaves,
   /// while @c updateExpectedWkc only runs once the transition settles — so without this the RT
   /// loop spends the whole multi-second transition comparing the bus against an expectation that
   /// still includes a device we told to stop, and @c shortWkcCycles fills up with our own doing.

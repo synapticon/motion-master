@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read one object dictionary entry with a CoE SDO upload (GET .../sdo/{index}/{subindex}).
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed, because the
-mailbox is live from PRE-OP up. A device in SAFE-OP or OP stays there. The server returns the
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed, because the
+mailbox is live from PREOP up. A device in SAFEOP or OP stays there. The server returns the
 raw bytes of the object. The script prints them and their little-endian unsigned value.
 
 The defaults read the Statusword, 0x6041:00.
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def auto_int(text):
@@ -35,7 +35,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     data = client.call(
         "sdoUpload",

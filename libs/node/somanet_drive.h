@@ -1805,7 +1805,7 @@ class SomanetDrive : public Cia402Drive {
   /// Blocks the calling thread for up to @c config.timeout (plus @c config.abortTimeout if the
   /// command has to be aborted). Control-plane only: it sleeps between polls, but each poll takes
   /// the driver's lock for one transaction, so it never blocks the RT loop. Requires the mailbox
-  /// to be active (PRE-OP/SAFE-OP/OP).
+  /// to be active (PREOP/SAFEOP/OP).
   ///
   /// A command that carries bulk data moves it through @p fsBuffer. A write goes after the write to
   /// 0x1023:01 and before the first poll. A read goes after a terminal status that is a success.
@@ -1947,7 +1947,7 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// Unlike the motor measurements this needs **no preparation at all**: no diagnostics mode, no
   /// Operation Enabled, no brake, and the shaft does not move. It needs only an active mailbox, so
-  /// it works from PRE-OP up and can be run on a drive that is exchanging process data without
+  /// it works from PREOP up and can be run on a drive that is exchanging process data without
   /// disturbing it.
   ///
   /// A refusal is an error and never a finding: this command either performs the transaction or
@@ -2106,7 +2106,7 @@ class SomanetDrive : public Cia402Drive {
   /// of the descriptor that decides which firmware belongs on it, which is what most callers want
   /// it for (see @c checkFirmwareCompatibility).
   ///
-  /// **Readable in BOOT as well as PRE-OP and above.** The bootloader deliberately allows this one
+  /// **Readable in BOOT as well as PREOP and above.** The bootloader deliberately allows this one
   /// file, which is what lets a compatibility check work on a drive left stranded in BOOT by a
   /// failed install — precisely when knowing whether the package was the right one matters most.
   ///

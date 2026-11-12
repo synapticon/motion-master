@@ -14,7 +14,7 @@ import pytest
 from motion_master_client import (
     INIT,
     OP,
-    PRE_OP,
+    PREOP,
     PROFILE_ACCELERATION,
     QUICK_STOP_DECELERATION,
     QUICK_STOP_OPTION_CODE,
@@ -56,11 +56,11 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     client = bench.client
 
     # A test before may have left a drive in OP, so every drive restarts. Every drive goes to
-    # PRE-OP, because the map of the process data reads the PDO mapping of every slave, and a slave
+    # PREOP, because the map of the process data reads the PDO mapping of every slave, and a slave
     # in INIT does not answer (#208).
     bench.client.reset()
     client.init()
-    client.restart(PRE_OP)
+    client.restart(PREOP)
     client.restart(OP, positions=[integro.position])
 
     acceleration = client.read_value(integro.position, PROFILE_ACCELERATION)

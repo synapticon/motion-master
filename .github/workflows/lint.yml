@@ -153,6 +153,32 @@ jobs:
           print(f"{len(table['cases'])} statuswords decode as the table says")
           PY
 
+      - name: Monitoring.write_csv() writes the rows with named columns
+        working-directory: clients/python
+        run: |
+          python - <<'PY'
+          import csv, pathlib, tempfile
+          from motion_master_client import Monitoring
+
+          m = Monitoring(None, [], 50, "ci", None)
+          m.parameters = [
+              {"devicePosition": 1, "index": 0x6041, "subindex": 0, "source": "pdo"},
+              {"devicePosition": 2, "index": 0x9999, "subindex": 3, "source": "sdo"},
+          ]
+          m.rows = [[1_000_000, 0x0237, 7], [1_001_000, None, 8]]
+          path = pathlib.Path(tempfile.mkdtemp()) / "sub" / "m.csv"
+          m.write_csv(path)
+          rows = list(csv.reader(path.open()))
+          expected = [
+              ["time_s", "timestamp_us", "1:STATUSWORD", "2:0x9999:03"],
+              ["0.000000", "1000000", "567", "7"],
+              ["0.001000", "1001000", "", "8"],
+          ]
+          if rows != expected:
+              raise SystemExit(f"::error::write_csv() wrote {rows}, expected {expected}")
+          print("write_csv() writes the rows as expected")
+          PY
+
       # Guard against swagger drift: every operationId the client and the
       # examples call must still exist in swagger.yml (mirrors the
       # api-client-drift job for the generated TS client). The client's own

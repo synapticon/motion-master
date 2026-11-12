@@ -43,7 +43,9 @@ a server that is not running, into one line on stderr.
 
 from __future__ import annotations
 
+import csv
 import enum
+import functools
 import json
 import logging
 import os
@@ -723,6 +725,22 @@ class MotionMasterClient:
         return Monitoring(self, parameters, interval_ms, topic, name)
 
 
+@functools.cache
+def _object_names():
+    """Map (index, subindex) to the generated name of every object, for example STATUSWORD."""
+    names = {}
+    for group in (Profile, _Cia402Objects, Somanet):
+        for name, value in vars(group).items():
+            if isinstance(value, ObjectAddress):
+                names.setdefault(tuple(value), name)
+    return names
+
+
+def _object_name(index, subindex):
+    """Return the generated name of an object, or 0xIIII:SS when it has none."""
+    return _object_names().get((index, subindex), f"0x{index:04X}:{subindex:02X}")
+
+
 class Monitoring:
     """A monitoring on the server, and every row it sent while the with block ran.
 
@@ -794,6 +812,32 @@ class Monitoring:
             if (after is None or t >= after) and predicate(v):
                 return t
         return None
+
+    def write_csv(self, path):
+        """Write every row to a CSV file at `path`, and create its folder when it is missing.
+
+        The columns are time_s, the seconds from the first row; timestamp_us, the time on the
+        server when the cycle ran, in epoch microseconds; then one column per parameter, in order.
+        A parameter's column is named after its device position and its object, 1:STATUSWORD, or
+        1:0x2110:03 for an object with no generated name. A value is empty in a cycle where its
+        device did not exchange process data.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            rows = list(self.rows)
+        start = rows[0][0] if rows else 0
+        header = ["time_s", "timestamp_us"]
+        header += [
+            f"{p['devicePosition']}:{_object_name(p['index'], p['subindex'])}"
+            for p in self.parameters
+        ]
+        with path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            for timestamp_us, *values in rows:
+                times = [f"{(timestamp_us - start) / 1e6:.6f}", timestamp_us]
+                writer.writerow(times + ["" if v is None else v for v in values])
 
     def __enter__(self):
         body = {"topic": self.topic, "interval": self._interval_ms, "parameters": self._request}

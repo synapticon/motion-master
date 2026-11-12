@@ -136,6 +136,7 @@ Three values in that column are not states:
 | `read-pdo-mapping.py` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PREOP |
 | `write-pdo-mapping.py` | Writes the PDO mapping from a JSON file. It moves the device to PREOP for the write, and back to SAFEOP or OP. | PREOP for the write |
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
+| `monitoring.py` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`: 250 for 2 s, then 0. Prints the target, the actual velocity and the CiA402 state, and saves every cycle as a CSV file in `files/`. **The motor turns.** | OP |
 | `dump-process-data.py` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFEOP |
 
 ### Drive
@@ -215,7 +216,9 @@ Other methods:
 - `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,
   keeps every row while the block runs, and deletes the monitoring at the end. Then `column()`
   returns the values of one object with their timestamps, `values()` returns the values in a time
-  window, and `first()` returns the time of the first value that meets a condition.
+  window, `first()` returns the time of the first value that meets a condition, and
+  `write_csv(path)` writes every row to a CSV file, with one column per object named like
+  `1:STATUSWORD`.
 - `notifications()` streams the notifications from the WebSocket.
 - `devices()` returns the scanned devices in bus order, as `GET /api/devices` gives them.
 - `parameters(position)` returns every parameter of a device, with its value and metadata.

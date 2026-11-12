@@ -272,7 +272,7 @@ std::optional<std::vector<uint8_t>> normaliseData(std::vector<uint8_t> data, uin
     data.resize(expected);
     return data;
   }
-  const bool negative = isSigned && !data.empty() && (data.back() & 0x80) != 0;
+  const bool negative = isSigned && (data.back() & 0x80) != 0;
   data.resize(expected, negative ? uint8_t{0xFF} : uint8_t{0x00});
   return data;
 }

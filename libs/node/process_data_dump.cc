@@ -37,12 +37,14 @@ void putRegion(std::ostream& o, const std::vector<uint8_t>& src, uint32_t cap) {
 void writeHeader(std::ostream& o, const DumpHeader& header, uint64_t startSeq) {
   o.write(kDumpMagic.data(), kDumpMagic.size());
   putLE<uint16_t>(o, kDumpFormatVersion);
-  putLE<uint16_t>(o, 0);  // flags (reserved)
+  putLE<uint16_t>(o, header.flags);
   putLE<uint64_t>(o, startSeq);
   putLE<uint64_t>(o, 0);  // rowCount placeholder, patched after the rows are streamed
   putLE<uint32_t>(o, header.inputBytes);
   putLE<uint32_t>(o, header.outputBytes);
   putLE<uint32_t>(o, static_cast<uint32_t>(header.devices.size()));
+  putLE<uint64_t>(o, header.span.fromNs.value_or(0));
+  putLE<uint64_t>(o, header.span.toNs.value_or(0));
 
   for (const DumpDevice& d : header.devices) {
     putLE<uint16_t>(o, d.slavePosition);

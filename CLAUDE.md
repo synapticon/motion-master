@@ -524,7 +524,14 @@ decision.
 circular recorder the RT loop appends to **every cycle**: raw input and output IOmap, an
 epoch-ns timestamp, and the working counter. It is the single RT-written structure and the
 source for live monitoring, point reads of the freshest value, and the `.mmpd` dump
-(`POST /api/process-data/dump`). The RT `write()` is wait-free; readers re-check a per-slot
+(`POST /api/process-data/dump`).
+
+**A dump of a span is chosen by timestamp, never by sequence.** The sequence restarts at 0 whenever
+the ring is allocated, so it cannot name a cycle across a re-map. A client reads a mark on the
+recorder clock (`GET /api/process-data/mark`, `recorderClockNs`) and passes it as `from` or `to`.
+`serializeDump` binary-searches the ring's timestamps, so a step of the system clock during a span
+moves its ends. The ring keeps the newest timestamp it ever discarded, and a dump whose start is
+not later than that sets `kDumpFlagIncompleteStart`. The RT `write()` is wait-free; readers re-check a per-slot
 release-stored sequence number after copying.
 
 The ring is allocated and `mlock`'d at `configureProcessData` for `recorder.capacity`

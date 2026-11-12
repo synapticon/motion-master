@@ -5347,3 +5347,45 @@ of a fixed length there.
 **The capture is a program of its own, on an adapter the request may name.** The bench resets the
 server at the start of each test, and a reset closes the bus, so a capture tied to the bus would end
 with it. The fixture names the adapter from `bench.description.toml` and starts before the reset.
+
+## Session 2026-11-12 — A process-data dump of a span (#211)
+
+**A dump held one bench test only because the test reset the server.** A reset frees the recorder
+ring, and every test resets in its first lines, so the dump at its end held its own cycles. The
+fixture relied on that and did not say so. A test that does not reset, or a script that runs several
+phases with the drives in OP, could not get a dump per part. A reset between the parts would close
+the bus.
+
+**The mark is a timestamp on the server clock.** The ring numbers every cycle with a sequence, but
+the sequence restarts at 0 whenever the ring is allocated, on every re-map, reset and scan. A mark
+made of a sequence alone can point into the wrong ring. A ring id plus a sequence would be exact,
+but opaque to a client, and a mark from an older ring could only be refused. Every cycle also
+carries its epoch timestamp, which survives every allocation, and a client can read the same clock
+through `GET /api/process-data/mark`. A client clock does not work, because the server can run on
+another computer. The cost: a step of the system clock during a span moves its ends.
+
+**The mark is the time now, not the newest cycle.** At the start of a bench test the ring is often
+empty, or about to be freed. A cycle recorded after the mark always has a later timestamp, so "now"
+is the start every caller wants.
+
+**The span is found by binary search.** Within one ring the timestamps grow with the sequence, so
+`serializeDump` searches `ProcessDataRing::timestampOf`, which reads eight bytes of a record and
+re-checks the sequence word like `readRecord`. A record that does not read was lapped, so it sorts
+before every timestamp. A linear filter would survive a clock step and copy every record of the ring
+for each dump.
+
+**An incomplete start is reported, not refused.** The ring keeps the newest timestamp of any cycle it
+discarded. When that is not earlier than `from`, or the cycle just before the first row was
+overwritten, the dump still holds what the ring has and sets bit 0 of the file's `flags`, which was
+reserved. The flag is in the file, so a dump streamed over `GET` says it too. On the bench the flag is
+the usual case: the cycles of the test before, recorded after the mark, are discarded by the reset at
+the start of the test. They are under the layout of another test, so nothing that test needs is lost,
+and the fixture logs the flag at INFO.
+
+**The file says which span it was asked for.** A dump sent in without the server log must still say
+what it holds and what was asked. So the prefix gets `spanFromNs` and `spanToNs` after `deviceCount`,
+0 for an end that was not given, and the format becomes version 2. The fields go at the end of the
+prefix, so every offset a version 1 reader knows stays where it was. The parser reads both versions.
+
+**A dump never holds two layouts.** One ring is one layout, and a span is read from the current ring
+only. So a mark from before a re-map gives the cycles after the re-map, with the flag set.

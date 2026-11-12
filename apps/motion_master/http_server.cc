@@ -10,6 +10,7 @@
 #include <expected>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -155,6 +156,39 @@ std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::
     positions.push_back(position);
   }
   return positions;
+}
+
+// The optional `?from=&to=` span of a process-data dump, in epoch microseconds of the server clock,
+// both ends included. The device manager takes nanoseconds, so `to` covers its whole microsecond.
+std::expected<mm::node::DumpRange, std::string> parseDumpRange(const mm::api::Request& req) {
+  constexpr uint64_t kMaxUs = std::numeric_limits<uint64_t>::max() / 1000 - 1;
+  auto readNs =
+      [&req](std::string_view key) -> std::expected<std::optional<uint64_t>, std::string> {
+    if (!req.query(key)) {
+      return std::nullopt;
+    }
+    const auto us = req.queryAs<uint64_t>(key);
+    if (!us || *us > kMaxUs) {
+      return std::unexpected(std::format("'{}' must be a time in epoch microseconds", key));
+    }
+    return *us * 1000;
+  };
+  auto from = readNs("from");
+  if (!from) {
+    return std::unexpected(from.error());
+  }
+  auto to = readNs("to");
+  if (!to) {
+    return std::unexpected(to.error());
+  }
+  mm::node::DumpRange range{.fromNs = *from, .toNs = *to};
+  if (range.toNs) {
+    *range.toNs += 999;
+  }
+  if (range.fromNs && range.toNs && *range.fromNs > *range.toNs) {
+    return std::unexpected("'from' must not be later than 'to'");
+  }
+  return range;
 }
 
 // A 404 for the first listed position that names no device, as the routes for one device answer.
@@ -2182,20 +2216,34 @@ void HttpServer::run() {
   });
 
   // ── Process data and AL state ───────────────────────────────────────────────────────────────
-  router.post("/api/process-data/dump", [this](const mm::api::Request&) -> mm::api::Response {
-    auto path = deviceManager_.dumpProcessData();
-    if (!path) {
-      return mm::api::error("409 Conflict", path.error());
+  // The time a client marks the start or the end of a dump span with: the clock the recorder
+  // stamps every cycle with, read on the server, because the client can run on another computer.
+  router.get("/api/process-data/mark", [](const mm::api::Request&) -> mm::api::Response {
+    return mm::api::json(nlohmann::json{{"timestampUs", mm::node::recorderClockNs() / 1000}});
+  });
+
+  router.post("/api/process-data/dump", [this](const mm::api::Request& req) -> mm::api::Response {
+    auto range = parseDumpRange(req);
+    if (!range) {
+      return mm::api::badRequest(range.error());
     }
-    return mm::api::json(nlohmann::json{{"path", *path}});
+    auto file = deviceManager_.dumpProcessData(*range);
+    if (!file) {
+      return mm::api::error("409 Conflict", file.error());
+    }
+    return mm::api::json(nlohmann::json(*file));
   });
 
   // Streams the recorder span as a raw `.mmpd` — the binary the client SDK parses. (The POST
   // variant writes the same bytes to a file and returns the path, for terminal users.) A dump is
   // tens of megabytes; the hand-written tryEnd/onWritable loop this used to carry is gone, because
   // the Router writes every response backpressure-aware.
-  router.get("/api/process-data/dump", [this](const mm::api::Request&) -> mm::api::Response {
-    auto buffer = deviceManager_.dumpProcessDataBuffer();
+  router.get("/api/process-data/dump", [this](const mm::api::Request& req) -> mm::api::Response {
+    auto range = parseDumpRange(req);
+    if (!range) {
+      return mm::api::badRequest(range.error());
+    }
+    auto buffer = deviceManager_.dumpProcessDataBuffer(*range);
     if (!buffer) {
       return mm::api::error("409 Conflict", buffer.error());
     }

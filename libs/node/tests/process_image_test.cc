@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <functional>
 #include <map>
@@ -13,6 +14,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -285,6 +287,129 @@ TEST(DeviceManagerProcessData, ConfigurePublishesAndExchangePublishesInputs) {
   dm.reset();
   EXPECT_FALSE(dm.processDataConfigured());
   dm.exchangeProcessData();  // no-op, must not crash
+}
+
+// A DeviceManager on one fake device whose image is mapped, with a recorder of @p capacity cycles.
+std::unique_ptr<DeviceManager> mappedManager(uint32_t capacity) {
+  auto bus = std::make_unique<FakeBus>();
+  programMapping(*bus);
+  bus->slaves = 1;
+  bus->layout.outputBytes = 6;
+  bus->layout.inputBytes = 6;
+  bus->layout.expectedWkc = 3;
+  bus->layout.slaves = {SlaveIo{
+      .slavePosition = 1, .outputOffset = 0, .outputBytes = 6, .inputOffset = 0, .inputBytes = 6}};
+  auto dm = std::make_unique<DeviceManager>();
+  mm::node::DeviceManagerConfig config;
+  config.recorderCapacity = capacity;
+  EXPECT_TRUE(dm->init(std::move(bus), config).has_value());
+  EXPECT_TRUE(dm->scan().has_value());
+  EXPECT_TRUE(dm->configureProcessData().has_value());
+  return dm;
+}
+
+// The fixed prefix fields of a `.mmpd` dump that say which span it holds.
+struct DumpPrefix {
+  uint16_t flags = 0;
+  uint64_t startSequence = 0;
+  uint64_t rowCount = 0;
+  uint64_t spanFromNs = 0;
+  uint64_t spanToNs = 0;
+};
+
+DumpPrefix readPrefix(const std::string& dump) {
+  DumpPrefix p;
+  std::memcpy(&p.flags, dump.data() + 6, sizeof(p.flags));
+  std::memcpy(&p.startSequence, dump.data() + 8, sizeof(p.startSequence));
+  std::memcpy(&p.rowCount, dump.data() + 16, sizeof(p.rowCount));
+  std::memcpy(&p.spanFromNs, dump.data() + 36, sizeof(p.spanFromNs));
+  std::memcpy(&p.spanToNs, dump.data() + 44, sizeof(p.spanToNs));
+  return p;
+}
+
+// A mark on the recorder clock that lies strictly between the cycles before it and after it.
+uint64_t markBetweenCycles() {
+  std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  const uint64_t mark = mm::node::recorderClockNs();
+  std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  return mark;
+}
+
+TEST(DeviceManagerProcessData, ADumpFromAMarkHoldsOnlyTheCyclesAfterIt) {
+  auto dm = mappedManager(64);
+  for (int i = 0; i < 3; ++i) {
+    dm->exchangeProcessData();
+  }
+  const uint64_t mark = markBetweenCycles();
+  for (int i = 0; i < 4; ++i) {
+    dm->exchangeProcessData();
+  }
+
+  auto dump = dm->dumpProcessDataBuffer({.fromNs = mark, .toNs = std::nullopt});
+  ASSERT_TRUE(dump.has_value()) << dump.error();
+  const DumpPrefix prefix = readPrefix(*dump);
+  EXPECT_EQ(prefix.startSequence, 3u);
+  EXPECT_EQ(prefix.rowCount, 4u);
+  EXPECT_EQ(prefix.flags, 0u);
+  EXPECT_EQ(prefix.spanFromNs, mark);  // the file says which span it was asked for
+  EXPECT_EQ(prefix.spanToNs, 0u);
+
+  // With no range, the dump is the whole ring.
+  auto whole = dm->dumpProcessDataBuffer();
+  ASSERT_TRUE(whole.has_value()) << whole.error();
+  EXPECT_EQ(readPrefix(*whole).rowCount, 7u);
+}
+
+TEST(DeviceManagerProcessData, ADumpUpToAMarkHoldsOnlyTheCyclesBeforeIt) {
+  auto dm = mappedManager(64);
+  dm->exchangeProcessData();
+  const uint64_t from = markBetweenCycles();
+  dm->exchangeProcessData();
+  dm->exchangeProcessData();
+  const uint64_t to = markBetweenCycles();
+  dm->exchangeProcessData();
+
+  auto dump = dm->dumpProcessDataBuffer({.fromNs = from, .toNs = to});
+  ASSERT_TRUE(dump.has_value()) << dump.error();
+  EXPECT_EQ(readPrefix(*dump).startSequence, 1u);
+  EXPECT_EQ(readPrefix(*dump).rowCount, 2u);
+}
+
+TEST(DeviceManagerProcessData, ADumpOfASpanTheRingOverwroteSaysItStartsLate) {
+  auto dm = mappedManager(4);
+  dm->exchangeProcessData();
+  const uint64_t mark = markBetweenCycles();
+  for (int i = 0; i < 10; ++i) {
+    dm->exchangeProcessData();
+  }
+
+  auto dump = dm->dumpProcessDataBuffer({.fromNs = mark, .toNs = std::nullopt});
+  ASSERT_TRUE(dump.has_value()) << dump.error();
+  const DumpPrefix prefix = readPrefix(*dump);
+  EXPECT_EQ(prefix.rowCount, 4u);
+  EXPECT_EQ(prefix.flags, mm::node::kDumpFlagIncompleteStart);
+}
+
+TEST(DeviceManagerProcessData, ADumpOfASpanARemapDiscardedSaysItStartsLate) {
+  auto dm = mappedManager(64);
+  const uint64_t mark = markBetweenCycles();
+  dm->exchangeProcessData();
+  ASSERT_TRUE(dm->configureProcessData().has_value());  // a re-map allocates a new ring
+  dm->exchangeProcessData();
+
+  auto dump = dm->dumpProcessDataBuffer({.fromNs = mark, .toNs = std::nullopt});
+  ASSERT_TRUE(dump.has_value()) << dump.error();
+  EXPECT_EQ(readPrefix(*dump).rowCount, 1u);
+  EXPECT_EQ(readPrefix(*dump).flags, mm::node::kDumpFlagIncompleteStart);
+}
+
+TEST(DeviceManagerProcessData, ADumpOfASpanWithNoCycleIsRefused) {
+  auto dm = mappedManager(64);
+  dm->exchangeProcessData();
+  const uint64_t mark = markBetweenCycles();
+  auto dump = dm->dumpProcessDataBuffer({.fromNs = mark, .toNs = std::nullopt});
+  ASSERT_FALSE(dump.has_value());
+  EXPECT_EQ(dump.error(), "the recorder holds no cycle in the span");
 }
 
 // --- bit copy helpers --------------------------------------------------------

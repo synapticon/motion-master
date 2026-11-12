@@ -2,10 +2,17 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
 namespace mm::node {
+
+/// @brief The clock of the recorder: epoch nanoseconds of the system clock.
+///
+/// Every record carries a timestamp from it, and a client takes the mark of a dump span from it,
+/// through @c GET /api/process-data/mark. One function, so the two cannot use different clocks.
+uint64_t recorderClockNs();
 
 /// @brief A lock-free circular recorder of the raw process image, one record per RT cycle.
 ///
@@ -109,6 +116,20 @@ class ProcessDataRing {
   ///         the producer (a torn read — the caller may retry or skip the cycle).
   bool readRecord(uint64_t seq, Record& out) const;
 
+  /// @brief The timestamp of the record for @p seq, without copying the record. Lock-free, on the
+  ///        same terms as @c readRecord.
+  ///
+  /// @return The epoch nanoseconds of the cycle, or @c std::nullopt when @p seq is not in the ring
+  ///         or the read raced the producer.
+  std::optional<uint64_t> timestampOf(uint64_t seq) const;
+
+  /// @brief The timestamp of the newest cycle that @c allocate or @c clear discarded, over the
+  ///        whole life of the ring, or 0 when none was discarded.
+  ///
+  /// A cycle recorded after a given time is gone from the ring when this is later than that time.
+  /// A dump of a span uses it to say that the span starts later than asked.
+  uint64_t discardedUntilNs() const { return discardedUntilNs_; }
+
  private:
   // Per-record payload layout in buffer_ (accessed by memcpy, so no alignment constraints):
   //   [0] timestampNs (u64)  [8] wkc (i32)  [12] inputBytes (u32)  [16] outputBytes (u32)
@@ -124,6 +145,8 @@ class ProcessDataRing {
   uint32_t outputCap_ = 0;
   std::atomic<uint64_t> head_{0};  // next sequence number to write (monotonic, never wraps)
   bool locked_ = false;            // whether the storage was successfully mlock'd
+  // Written by clear, under the same exclusion as clear, so a plain member.
+  uint64_t discardedUntilNs_ = 0;
 };
 
 }  // namespace mm::node

@@ -23,6 +23,7 @@
 #include "node/device.h"
 #include "node/esi_cache.h"
 #include "node/parameter_cache.h"
+#include "node/process_data_dump.h"
 #include "node/process_data_ring.h"
 #include "node/process_image.h"
 
@@ -83,6 +84,15 @@ struct ScanStatus {
 
 /// @brief Serialises a ScanStatus to JSON.
 void to_json(nlohmann::json& j, const ScanStatus& status);
+
+/// @brief A `.mmpd` file that @c DeviceManager::dumpProcessData wrote.
+struct ProcessDataDumpFile {
+  std::string path;              ///< Absolute path of the file.
+  uint64_t rows = 0;             ///< Number of cycles in it.
+  bool incompleteStart = false;  ///< The ring no longer held every cycle right after the start.
+};
+
+void to_json(nlohmann::json& j, const ProcessDataDumpFile& file);
 
 /// @brief One mapped object in the published process image, with its name resolved.
 ///
@@ -609,26 +619,32 @@ class DeviceManager {
   /// are wanted too.
   uint64_t shortWkcCycles() const;
 
-  /// @brief Serialises the recorder's current span to a `.mmpd` dump file and returns its path.
+  /// @brief Serialises the cycles of @p range that the recorder holds to a `.mmpd` dump file.
   ///
-  /// Freezes the recorder span at the instant of the call — @c [recorderOldestSeq(),
-  /// recorderHead()) — and writes every cycle in it (full raw inputs + outputs, sequence,
-  /// epoch-ns timestamp) plus the process image embedded as a header, so the file decodes fully
-  /// offline. Works in any state: while exchanging (OP/SAFEOP) it dumps tail→head at that moment
-  /// and ignores cycles the producer records afterwards; after teardown it uses the most recent
-  /// retained image generation. The header objects' names/data types come from each device's
-  /// parameter map (empty/0 when the object dictionary is not enumerated).
+  /// Freezes the recorder at the instant of the call — @c [recorderOldestSeq(), recorderHead()) —
+  /// and writes every cycle of it whose timestamp is in @p range (full raw inputs + outputs,
+  /// sequence, epoch-ns timestamp) plus the process image embedded as a header, so the file decodes
+  /// fully offline. The default range is the whole ring. Works in any state: while exchanging
+  /// (OP/SAFEOP) it ignores cycles the producer records afterwards; after teardown it uses the most
+  /// recent retained image generation. The header objects' names/data types come from each
+  /// device's parameter map (empty/0 when the object dictionary is not enumerated).
+  ///
+  /// The span is found by its timestamps, which grow with the sequence while the system clock does
+  /// not step back. A step of the clock during the span moves its ends. When the ring no longer
+  /// holds every cycle right after @c range.fromNs — a re-map or a reset discarded some, or the
+  /// ring overwrote them — the dump still holds the cycles the ring has, and says so with
+  /// @c kDumpFlagIncompleteStart and @c ProcessDataDumpFile::incompleteStart.
   ///
   /// The file is written to the configured @c recorderDumpDir (created if absent); an empty
   /// @c recorderDumpDir (the default) resolves to a @c "dumps" subdirectory of the per-user cache
-  /// directory. The filename is @c dump-<UTC-timestamp>-<endSequence>.mmpd. Only the path is
-  /// returned, but because the default location sits under the user-cache root, the written file
-  /// is reachable through the @c /api/user-cache endpoints — listed, downloaded and deleted
-  /// remotely rather than only from a shell on the host.
+  /// directory. The filename is @c dump-<UTC-timestamp>-<endSequence>.mmpd. Because the default
+  /// location sits under the user-cache root, the written file is reachable through the
+  /// @c /api/user-cache endpoints — listed, downloaded and deleted remotely rather than only from a
+  /// shell on the host.
   ///
-  /// @return The absolute path of the written file, or an error string if no image has ever been
-  ///         mapped, the recorder is empty, or the directory/file could not be written.
-  std::expected<std::string, std::string> dumpProcessData();
+  /// @return The file, or an error string if no image has ever been mapped, the recorder holds no
+  ///         cycle in @p range, or the directory/file could not be written.
+  std::expected<ProcessDataDumpFile, std::string> dumpProcessData(const DumpRange& range = {});
 
   /// @brief Serialises the recorder dump into an in-memory buffer — the same `.mmpd` bytes
   /// @c dumpProcessData writes to disk — for streaming over HTTP.
@@ -638,8 +654,8 @@ class DeviceManager {
   /// producer is never blocked. Runs on the (non-RT) caller's thread.
   ///
   /// @return The dump bytes, or an error string if no image has ever been mapped or the recorder
-  ///         is empty.
-  std::expected<std::string, std::string> dumpProcessDataBuffer();
+  ///         holds no cycle in @p range.
+  std::expected<std::string, std::string> dumpProcessDataBuffer(const DumpRange& range = {});
 
   /// @brief Snapshots each slave's static ESC configuration (SM, FMMU, mailbox, DC) for the API.
   ///
@@ -1011,15 +1027,17 @@ class DeviceManager {
     uint64_t rows = 0;
     uint64_t startSeq = 0;
     uint64_t endSeq = 0;
+    bool incompleteStart = false;
   };
 
-  /// @brief Serialises the current recorder span as a `.mmpd` byte stream to @p out.
+  /// @brief Serialises the cycles of @p range the recorder holds as a `.mmpd` byte stream to
+  ///        @p out.
   ///
   /// Shared by @c dumpProcessData (file) and @c dumpProcessDataBuffer (in-memory). Holds @c
   /// processDataMutex_ shared for the whole serialisation (the ring is read while held; the RT
   /// producer appends lock-free and is never blocked). @p out must be seekable — @c
   /// writeProcessDataDump patches the row count after streaming the rows.
-  std::expected<DumpSpan, std::string> serializeDump(std::ostream& out);
+  std::expected<DumpSpan, std::string> serializeDump(std::ostream& out, const DumpRange& range);
 
   /// @brief (Re)maps the whole-bus process image and publishes it for exchange.
   ///

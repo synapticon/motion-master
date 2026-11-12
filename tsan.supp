@@ -16,4 +16,6 @@
 # hottest RT write path; it is worth measuring before it is worth doing, and it is recorded in
 # NEXTGEN.md rather than done here.
 race:mm::node::ProcessDataRing::write
+# timestampOf is the same reader for the first eight bytes of a record only.
 race:mm::node::ProcessDataRing::readRecord
+race:mm::node::ProcessDataRing::timestampOf

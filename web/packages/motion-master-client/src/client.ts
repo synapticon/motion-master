@@ -62,9 +62,20 @@ export class MotionMasterClient {
     return response.data.value as T
   }
 
+  /// Reads the recorder clock of the server (`GET /api/process-data/mark`), in epoch microseconds.
+  /// Pass it as `from` or `to` of `fetchProcessDataDump` to dump one part of a run.
+  async readProcessDataMark(): Promise<number> {
+    const response = await this.api.getProcessDataMark()
+    return response.data.timestampUs
+  }
+
   /// Fetches and parses the live recorder dump (`GET /api/process-data/dump`) as an `MmpdFile`.
-  fetchProcessDataDump(signal?: AbortSignal): Promise<MmpdFile> {
-    return fetchProcessDataDump(this.httpBaseUrl, { fetch: this.customFetch, signal })
+  /// `from` and `to` limit it to a span, from `readProcessDataMark`. Without them it is the whole
+  /// recorder.
+  fetchProcessDataDump(
+    options: { signal?: AbortSignal; from?: number; to?: number } = {},
+  ): Promise<MmpdFile> {
+    return fetchProcessDataDump(this.httpBaseUrl, { fetch: this.customFetch, ...options })
   }
 
   /// Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown.

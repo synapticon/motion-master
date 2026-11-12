@@ -3,8 +3,10 @@
 // Master and no live bus. All multi-byte integers are little-endian.
 //
 // Layout:
-//   Prefix (36 bytes): magic 'MMPD', u16 formatVersion, u16 flags,
-//     u64 startSequence, u64 rowCount, u32 inputBytes, u32 outputBytes, u32 deviceCount.
+//   Prefix (52 bytes): magic 'MMPD', u16 formatVersion, u16 flags,
+//     u64 startSequence, u64 rowCount, u32 inputBytes, u32 outputBytes, u32 deviceCount,
+//     u64 spanFromNs, u64 spanToNs (the span the dump asked for; 0 = none). Version 1 has no
+//     span, so its prefix ends at deviceCount, 36 bytes.
 //   Device table (deviceCount): u16 slavePosition, u32 vendorId/productCode/revisionNumber/
 //     serialNumber, str name, u32 entryCount, then per entry: u16 index, u8 subindex,
 //     u8 direction (1=output/RxPDO, 0=input/TxPDO), u16 dataType, u16 bitLength, u32 bitOffset,
@@ -13,7 +15,7 @@
 //     inputs[inputBytes], outputs[outputBytes].
 
 const MAGIC = 0x4450_4d4d // 'MMPD' as a little-endian u32 ('M','M','P','D')
-const SUPPORTED_FORMAT_VERSION = 1
+const SUPPORTED_FORMAT_VERSIONS = [1, 2]
 
 /// One PDO-mapped object recorded in the dump header.
 export interface MmpdPdoEntry {
@@ -41,14 +43,25 @@ export interface MmpdDevice {
   entries: MmpdPdoEntry[]
 }
 
+/// A flag bit of `MmpdHeader.flags`: the dump is of a span, and the server no longer held every
+/// cycle right after its start. A re-map, a reset or a scan discarded some, or the ring overwrote
+/// them. The rows are all in the span, but the first one is later than the span asked for.
+export const MMPD_FLAG_INCOMPLETE_START = 0x0001
+
 /// The embedded process-image header — everything needed to decode the rows offline.
 export interface MmpdHeader {
   formatVersion: number
+  /// `MMPD_FLAG_*` bits.
   flags: number
   /// Sequence number of the first row (oldest cycle in the span).
   startSequence: bigint
   /// Number of rows in the file.
   rowCount: number
+  /// The start of the span the dump asked for, in epoch nanoseconds, or `null` when it asked for
+  /// none, or the file is version 1.
+  spanFromNs: bigint | null
+  /// The end of the span the dump asked for, in epoch nanoseconds, or `null` when it is open.
+  spanToNs: bigint | null
   inputBytes: number
   outputBytes: number
   devices: MmpdDevice[]
@@ -183,8 +196,21 @@ export function parseMmpd(data: ArrayBuffer | Uint8Array): MmpdFile {
     throw new Error('Not a .mmpd file (bad magic)')
   }
   const formatVersion = dv.getUint16(4, true)
-  if (formatVersion !== SUPPORTED_FORMAT_VERSION) {
-    throw new Error(`Unsupported .mmpd format version ${formatVersion} (expected ${SUPPORTED_FORMAT_VERSION})`)
+  if (!SUPPORTED_FORMAT_VERSIONS.includes(formatVersion)) {
+    throw new Error(
+      `Unsupported .mmpd format version ${formatVersion} (expected ${SUPPORTED_FORMAT_VERSIONS.join(' or ')})`,
+    )
+  }
+  const prefixBytes = formatVersion >= 2 ? 52 : 36
+  if (u8.byteLength < prefixBytes) {
+    throw new Error('Not a .mmpd file (the prefix is cut off)')
+  }
+  const spanEnd = (offset: number): bigint | null => {
+    if (formatVersion < 2) {
+      return null
+    }
+    const value = dv.getBigUint64(offset, true)
+    return value === 0n ? null : value
   }
 
   const header: MmpdHeader = {
@@ -192,13 +218,15 @@ export function parseMmpd(data: ArrayBuffer | Uint8Array): MmpdFile {
     flags: dv.getUint16(6, true),
     startSequence: dv.getBigUint64(8, true),
     rowCount: Number(dv.getBigUint64(16, true)),
+    spanFromNs: spanEnd(36),
+    spanToNs: spanEnd(44),
     inputBytes: dv.getUint32(24, true),
     outputBytes: dv.getUint32(28, true),
     devices: [],
   }
   const deviceCount = dv.getUint32(32, true)
 
-  const cursor = new Cursor(dv, u8, 36)
+  const cursor = new Cursor(dv, u8, prefixBytes)
   for (let d = 0; d < deviceCount; d++) {
     const device: MmpdDevice = {
       slavePosition: cursor.u16(),
@@ -298,14 +326,24 @@ function numericReader(dataType: number): ScalarReader | null {
 }
 
 /// Fetches the live recorder dump (`GET /api/process-data/dump`) and parses it. `baseUrl` is the
-/// HTTP API origin (e.g. `https://host:61447`). Throws on a non-OK response (the response body's
-/// `error` message when present). Pass `fetch` to inject an implementation (Node, request logging).
+/// HTTP API origin (e.g. `https://host:61447`). `from` and `to` limit the dump to a span, in epoch
+/// microseconds of the server clock, both included: take them from `GET /api/process-data/mark`.
+/// Throws on a non-OK response (the response body's `error` message when present). Pass `fetch`
+/// to inject an implementation (Node, request logging).
 export async function fetchProcessDataDump(
   baseUrl: string,
-  options: { fetch?: typeof fetch; signal?: AbortSignal } = {},
+  options: { fetch?: typeof fetch; signal?: AbortSignal; from?: number; to?: number } = {},
 ): Promise<MmpdFile> {
   const doFetch = options.fetch ?? fetch
-  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/process-data/dump`, {
+  const query = new URLSearchParams()
+  if (options.from !== undefined) {
+    query.set('from', String(options.from))
+  }
+  if (options.to !== undefined) {
+    query.set('to', String(options.to))
+  }
+  const search = query.toString() ? `?${query.toString()}` : ''
+  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/process-data/dump${search}`, {
     headers: { Accept: 'application/octet-stream' },
     signal: options.signal,
   })

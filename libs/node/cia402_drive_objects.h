@@ -8,8 +8,8 @@
 // Each constant carries an object's index, subindex and the C++ type its declared
 // ETG.1020 type maps to, so a call site cannot disagree with the object it names:
 //
-//     device.value(objects::kStatusword)        // std::optional<uint16_t>
-//     device.readValue(objects::kDeviceName)    // std::expected<std::string, ...>
+//     device.value(objects::kStatusword)                    // std::optional<uint16_t>
+//     device.readValue(objects::kManufacturerDeviceName)    // std::expected<std::string, ...>
 //
 // The union of every device in the ESI is emitted: which module is fitted is unknowable
 // offline, so an address that does not apply to the drive in front of you simply fails
@@ -121,7 +121,7 @@ inline constexpr ObjectAddress<uint32_t> kDCLinkCircuitVoltage{0x6079, 0x00};
 inline constexpr ObjectAddress<int32_t> kTargetPosition{0x607A, 0x00};
 
 /// Position range limit / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kPositionRangeLimitCount{0x607B, 0x00};
+inline constexpr ObjectAddress<uint8_t> kPositionRangeLimit{0x607B, 0x00};
 
 /// Position range limit / SubIndex 001 — rw, Inc
 inline constexpr ObjectAddress<int32_t> kPositionRangeLimitSubIndex001{0x607B, 0x01};
@@ -133,7 +133,7 @@ inline constexpr ObjectAddress<int32_t> kPositionRangeLimitSubIndex002{0x607B, 0
 inline constexpr ObjectAddress<int32_t> kHomeOffset{0x607C, 0x00};
 
 /// Software position limit / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSoftwarePositionLimitCount{0x607D, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSoftwarePositionLimit{0x607D, 0x00};
 
 /// Software position limit / SubIndex 001 — rw, Inc
 inline constexpr ObjectAddress<int32_t> kSoftwarePositionLimitSubIndex001{0x607D, 0x01};
@@ -169,7 +169,7 @@ inline constexpr ObjectAddress<uint32_t> kTorqueSlope{0x6087, 0x00};
 inline constexpr ObjectAddress<int16_t> kTorqueProfileType{0x6088, 0x00};
 
 /// Gear ratio / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kGearRatioCount{0x6091, 0x00};
+inline constexpr ObjectAddress<uint8_t> kGearRatio{0x6091, 0x00};
 
 /// Gear ratio / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kGearRatioSubIndex001{0x6091, 0x01};
@@ -178,7 +178,7 @@ inline constexpr ObjectAddress<uint32_t> kGearRatioSubIndex001{0x6091, 0x01};
 inline constexpr ObjectAddress<uint32_t> kGearRatioSubIndex002{0x6091, 0x02};
 
 /// Feed constant / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kFeedConstantCount{0x6092, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFeedConstant{0x6092, 0x00};
 
 /// Feed constant / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kFeedConstantSubIndex001{0x6092, 0x01};
@@ -190,7 +190,7 @@ inline constexpr ObjectAddress<uint32_t> kFeedConstantSubIndex002{0x6092, 0x02};
 inline constexpr ObjectAddress<int8_t> kHomingMethod{0x6098, 0x00};
 
 /// Homing speeds / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kHomingSpeedsCount{0x6099, 0x00};
+inline constexpr ObjectAddress<uint8_t> kHomingSpeeds{0x6099, 0x00};
 
 /// Homing speeds / SubIndex 001 — rw, rpm
 inline constexpr ObjectAddress<uint32_t> kHomingSpeedsSubIndex001{0x6099, 0x01};
@@ -244,7 +244,7 @@ inline constexpr ObjectAddress<int32_t> kPositionDemandInternalValue{0x60FC, 0x0
 inline constexpr ObjectAddress<uint32_t> kDigitalInputs{0x60FD, 0x00};
 
 /// Digital outputs / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kDigitalOutputsCount{0x60FE, 0x00};
+inline constexpr ObjectAddress<uint8_t> kDigitalOutputs{0x60FE, 0x00};
 
 /// Digital outputs / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kDigitalOutputsSubIndex001{0x60FE, 0x01};
@@ -268,7 +268,7 @@ inline constexpr ObjectAddress<int32_t> kSafeVelocityActualValue{0x6613, 0x00};
 inline constexpr ObjectAddress<int16_t> kSafeTorqueActualValue{0x6616, 0x00};
 
 /// Safety statusword / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSafetyStatuswordCount{0x6621, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSafetyStatusword{0x6621, 0x00};
 
 /// Safety statusword / SubIndex 001 — ro
 inline constexpr ObjectAddress<uint8_t> kSafetyStatuswordSubIndex001{0x6621, 0x01};
@@ -295,37 +295,37 @@ inline constexpr ObjectAddress<uint8_t> kSTOCommand{0x6640, 0x00};
 inline constexpr ObjectAddress<uint8_t> kSTORestart{0x6641, 0x00};
 
 /// SS1 command / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSS1CommandCount{0x6650, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSS1Command{0x6650, 0x00};
 
 /// SS1 command / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSS1CommandSubIndex001{0x6650, 0x01};
 
 /// t_SS1 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTSS1Count{0x6651, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTSS1{0x6651, 0x00};
 
 /// t_SS1 / SubIndex 001 — rw, ms
 inline constexpr ObjectAddress<uint16_t> kTSS1SubIndex001{0x6651, 0x01};
 
 /// n_Zero_SS1 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kNZeroSS1Count{0x6653, 0x00};
+inline constexpr ObjectAddress<uint8_t> kNZeroSS1{0x6653, 0x00};
 
 /// n_Zero_SS1 / SubIndex 001 — rw, c/min
 inline constexpr ObjectAddress<uint32_t> kNZeroSS1SubIndex001{0x6653, 0x01};
 
 /// t_L_SS1 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTLSS1Count{0x6654, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTLSS1{0x6654, 0x00};
 
 /// t_L_SS1 / SubIndex 001 — rw, ms
 inline constexpr ObjectAddress<uint16_t> kTLSS1SubIndex001{0x6654, 0x01};
 
 /// a_SS1 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kASS1Count{0x6656, 0x00};
+inline constexpr ObjectAddress<uint8_t> kASS1{0x6656, 0x00};
 
 /// a_SS1 / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kASS1SubIndex001{0x6656, 0x01};
 
 /// t_D_SS1 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTDSS1Count{0x6657, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTDSS1{0x6657, 0x00};
 
 /// t_D_SS1 / SubIndex 001 — rw, ms
 inline constexpr ObjectAddress<uint16_t> kTDSS1SubIndex001{0x6657, 0x01};
@@ -337,67 +337,67 @@ inline constexpr ObjectAddress<uint8_t> kSBCCommand{0x6660, 0x00};
 inline constexpr ObjectAddress<uint16_t> kBrakeTimeDelay{0x6661, 0x00};
 
 /// SOS command / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSOSCommandCount{0x6668, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSOSCommand{0x6668, 0x00};
 
 /// SOS command / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSOSCommandSubIndex001{0x6668, 0x01};
 
 /// s_Zero_SOS / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSZeroSOSCount{0x666A, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSZeroSOS{0x666A, 0x00};
 
 /// s_Zero_SOS / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kSZeroSOSSubIndex001{0x666A, 0x01};
 
 /// n_Zero_SOS / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kNZeroSOSCount{0x666C, 0x00};
+inline constexpr ObjectAddress<uint8_t> kNZeroSOS{0x666C, 0x00};
 
 /// n_Zero_SOS / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kNZeroSOSSubIndex001{0x666C, 0x01};
 
 /// SS2 command / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSS2CommandCount{0x6670, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSS2Command{0x6670, 0x00};
 
 /// SS2 command / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSS2CommandSubIndex001{0x6670, 0x01};
 
 /// t_SS2 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTSS2Count{0x6671, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTSS2{0x6671, 0x00};
 
 /// t_SS2 / SubIndex 001 — rw, ms
 inline constexpr ObjectAddress<uint16_t> kTSS2SubIndex001{0x6671, 0x01};
 
 /// t_L_SS2 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTLSS2Count{0x6672, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTLSS2{0x6672, 0x00};
 
 /// t_L_SS2 / SubIndex 001 — rw, ms
 inline constexpr ObjectAddress<uint16_t> kTLSS2SubIndex001{0x6672, 0x01};
 
 /// a_SS2 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kASS2Count{0x6674, 0x00};
+inline constexpr ObjectAddress<uint8_t> kASS2{0x6674, 0x00};
 
 /// a_SS2 / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kASS2SubIndex001{0x6674, 0x01};
 
 /// t_D_SS2 / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTDSS2Count{0x6675, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTDSS2{0x6675, 0x00};
 
 /// t_D_SS2 / SubIndex 001 — rw, ms
 inline constexpr ObjectAddress<uint16_t> kTDSS2SubIndex001{0x6675, 0x01};
 
 /// SOS restart / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSOSRestartCount{0x6676, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSOSRestart{0x6676, 0x00};
 
 /// SOS restart / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSOSRestartSubIndex001{0x6676, 0x01};
 
 /// SS2 limit violation reaction / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSS2LimitViolationReactionCount{0x6677, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSS2LimitViolationReaction{0x6677, 0x00};
 
 /// SS2 limit violation reaction / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kSS2LimitViolationReactionSubIndex001{0x6677, 0x01};
 
 /// SLS command / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSLSCommandCount{0x6690, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSLSCommand{0x6690, 0x00};
 
 /// SLS command / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSLSCommandSubIndex001{0x6690, 0x01};
@@ -412,7 +412,7 @@ inline constexpr ObjectAddress<uint8_t> kSLSCommandSubIndex003{0x6690, 0x03};
 inline constexpr ObjectAddress<uint8_t> kSLSCommandSubIndex004{0x6690, 0x04};
 
 /// t_SLS / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTSLSCount{0x6691, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTSLS{0x6691, 0x00};
 
 /// t_SLS / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint16_t> kTSLSSubIndex001{0x6691, 0x01};
@@ -427,7 +427,7 @@ inline constexpr ObjectAddress<uint16_t> kTSLSSubIndex003{0x6691, 0x03};
 inline constexpr ObjectAddress<uint16_t> kTSLSSubIndex004{0x6691, 0x04};
 
 /// n_SLS / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kNSLSCount{0x6692, 0x00};
+inline constexpr ObjectAddress<uint8_t> kNSLS{0x6692, 0x00};
 
 /// n_SLS / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kNSLSSubIndex001{0x6692, 0x01};
@@ -442,7 +442,7 @@ inline constexpr ObjectAddress<uint32_t> kNSLSSubIndex003{0x6692, 0x03};
 inline constexpr ObjectAddress<uint32_t> kNSLSSubIndex004{0x6692, 0x04};
 
 /// t_L_SLS / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTLSLSCount{0x6694, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTLSLS{0x6694, 0x00};
 
 /// t_L_SLS / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint16_t> kTLSLSSubIndex001{0x6694, 0x01};
@@ -457,7 +457,7 @@ inline constexpr ObjectAddress<uint16_t> kTLSLSSubIndex003{0x6694, 0x03};
 inline constexpr ObjectAddress<uint16_t> kTLSLSSubIndex004{0x6694, 0x04};
 
 /// t_D_SLS / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kTDSLSCount{0x6695, 0x00};
+inline constexpr ObjectAddress<uint8_t> kTDSLS{0x6695, 0x00};
 
 /// t_D_SLS / SubIndex 001 — rw, ms
 inline constexpr ObjectAddress<uint16_t> kTDSLSSubIndex001{0x6695, 0x01};
@@ -472,7 +472,7 @@ inline constexpr ObjectAddress<uint16_t> kTDSLSSubIndex003{0x6695, 0x03};
 inline constexpr ObjectAddress<uint16_t> kTDSLSSubIndex004{0x6695, 0x04};
 
 /// a_SLS / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kASLSCount{0x6696, 0x00};
+inline constexpr ObjectAddress<uint8_t> kASLS{0x6696, 0x00};
 
 /// a_SLS / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kASLSSubIndex001{0x6696, 0x01};
@@ -487,7 +487,7 @@ inline constexpr ObjectAddress<uint32_t> kASLSSubIndex003{0x6696, 0x03};
 inline constexpr ObjectAddress<uint32_t> kASLSSubIndex004{0x6696, 0x04};
 
 /// SLS Limit violation reaction / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSLSLimitViolationReactionCount{0x6698, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSLSLimitViolationReaction{0x6698, 0x00};
 
 /// SLS Limit violation reaction / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kSLSLimitViolationReactionSubIndex001{0x6698, 0x01};
@@ -511,31 +511,31 @@ inline constexpr ObjectAddress<int32_t> kNNegMax{0x66AC, 0x00};
 inline constexpr ObjectAddress<uint32_t> kSMSLimitViolationReaction{0x66AD, 0x00};
 
 /// SLT command / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSLTCommandCount{0x66B0, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSLTCommand{0x66B0, 0x00};
 
 /// SLT command / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint8_t> kSLTCommandSubIndex001{0x66B0, 0x01};
 
 /// f_PosLim_SLT / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kFPosLimSLTCount{0x66B1, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFPosLimSLT{0x66B1, 0x00};
 
 /// f_PosLim_SLT / SubIndex 001 — rw, mNm
 inline constexpr ObjectAddress<int16_t> kFPosLimSLTSubIndex001{0x66B1, 0x01};
 
 /// f_NegLim_SLT / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kFNegLimSLTCount{0x66B2, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFNegLimSLT{0x66B2, 0x00};
 
 /// f_NegLim_SLT / SubIndex 001 — rw, mNm
 inline constexpr ObjectAddress<int16_t> kFNegLimSLTSubIndex001{0x66B2, 0x01};
 
 /// SLT limit violation reaction / SubIndex 000 — ro
-inline constexpr ObjectAddress<uint8_t> kSLTLimitViolationReactionCount{0x66B3, 0x00};
+inline constexpr ObjectAddress<uint8_t> kSLTLimitViolationReaction{0x66B3, 0x00};
 
 /// SLT limit violation reaction / SubIndex 001 — rw
 inline constexpr ObjectAddress<uint32_t> kSLTLimitViolationReactionSubIndex001{0x66B3, 0x01};
 
 /// FSoE Master Frame Elements / Subindex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kFSoEMasterFrameElementsCount{0x6760, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFSoEMasterFrameElements{0x6760, 0x00};
 
 /// FSoE Master Frame Elements / FSoE Command — rw
 inline constexpr ObjectAddress<uint8_t> kFSoEMasterFrameElementsFSoECommand{0x6760, 0x01};
@@ -568,7 +568,7 @@ inline constexpr ObjectAddress<uint16_t> kFSoEMasterFrameElementsFSoECRC6{0x6760
 inline constexpr ObjectAddress<uint16_t> kFSoEMasterFrameElementsFSoECRC7{0x6760, 0x0A};
 
 /// FSoE Slave Frame Elements / Subindex 000 — rw
-inline constexpr ObjectAddress<uint8_t> kFSoESlaveFrameElementsCount{0x6770, 0x00};
+inline constexpr ObjectAddress<uint8_t> kFSoESlaveFrameElements{0x6770, 0x00};
 
 /// FSoE Slave Frame Elements / FSoE Command — rw
 inline constexpr ObjectAddress<uint8_t> kFSoESlaveFrameElementsFSoECommand{0x6770, 0x01};

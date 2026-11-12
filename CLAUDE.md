@@ -65,7 +65,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `shellcheck.sh` | shellcheck every tracked shell script |
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
 | `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
-| `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc` | `CAPTURE=<seconds>` records the adapter with `motion-master-capture` beside the runs, as do `flaky-bus.sh` and `al-state-loop.sh`
+| `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc`. `CAPTURE=<seconds>` records the adapter with `motion-master-capture` beside the runs, as do `flaky-bus.sh` and `al-state-loop.sh`. |
 | `al-state-loop.sh` | Walk one drive INIT, PREOP, SAFEOP, OP, INIT again and again against a running server, with an optional `netem` rule during the rounds, and count the short maps and the map attempts in the server log. The loop of `NEXTGEN.md` Session 2026-10-22. Needs passwordless `sudo tc` |
 | `adapter-report.sh` | Print the settings of a Linux bus adapter and its host that can hold a frame: qdisc, coalescing, offloads, EEE, `cdc_ncm`, USB path and power management. Read-only, no root. For #138 |
 | `clean.sh` | Remove `build/<preset>` |
@@ -1073,6 +1073,21 @@ clients**: `clients/python/motion_master_objects.py` and
 `kStatusword` is `Cia402.STATUSWORD` in both clients. So C++, Python and TypeScript cannot hold
 different lists or different names.
 
+**Name an object by its generated address, never by a hand-written enum or constant.** A call
+takes the address, so the subindex and the type come with it:
+`device.readValue(cia402::objects::kStatusword)`. Code that needs a whole record, such as a
+Complete Access read, names it by its subindex 0: `cia402::objects::kGearRatio.index`.
+
+**The naming rule.** Subindex 0 takes the object's name, so a record's name is its subindex 0 and
+gives its index. Every other subindex adds the entry's name, like a member of a struct
+(`kBrakeOptionsBrakeStatus`), also where the firmware gives an entry the record's own name: six
+safety objects come out doubled, such as `kSTOInputSTOInput`. The doubled name shows a naming fault
+of the firmware. The generator never hides one.
+
+**A typed address catches a type the code assumed.** Where the code and the ESI disagree, the
+build fails, and the ESI wins: the code follows what the device declares. A real disagreement with
+a standard goes into `FIRMWARE_DEFECTS.md`, as 0x1016:01 did.
+
 Generated from the pinned `libs/etg/tests/data/somanet-v5.6.6.xml`:
 
 ```bash
@@ -1271,6 +1286,12 @@ Enforced by `.clang-format`: Google layout, 100 columns. Run `./tools/format.sh`
 
 Headers use `.h`, sources use `.cc`. Always `#pragma once`, never include guards. Always brace
 an `if`, even a single statement.
+
+**A namespace alias is allowed in a `.cc` file, never in a header.** Put it at file scope, inside
+the anonymous namespace of a test, or in the function that needs it:
+`namespace cia402 = mm::node::cia402;`, `namespace fs = std::filesystem;`. In a header an alias
+leaks into every file that includes it. Never write `using namespace`, except for a literals
+namespace such as `std::string_view_literals`, which a suffix like `"..."sv` needs.
 
 ### Naming Conventions
 

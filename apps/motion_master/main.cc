@@ -467,7 +467,9 @@ int main(int argc, char** argv) {
   // this the task never gets a reading and its interlock holds the drive stopped. Off the RT
   // thread, as it must be — an ordinary call on an ordinary thread. Must name the same object as
   // ExampleCyclicTask::Config.
-  // monitoringManager.keepFresh(1, 0x2031, 0x01, std::chrono::milliseconds{200});
+  // monitoringManager.keepFresh(
+  //     1, mm::node::somanet::objects::kDriveTemperatureMeasuredTemperature,
+  //     std::chrono::milliseconds{200});
 
   // Says what the RT loop saw and cannot say itself. One thread serves every such source; a
   // feature contributes a version counter to watch and a message to build. Declared after

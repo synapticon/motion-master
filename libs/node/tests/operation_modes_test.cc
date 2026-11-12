@@ -17,10 +17,13 @@
 #include "comm/fieldbus_driver.h"
 #include "comm/object_data_types.h"
 #include "node/cia402.h"
+#include "node/cia402_drive_objects.h"
 #include "node/device.h"
 #include "node/synapticon.h"
 
 namespace {
+
+namespace cia402 = mm::node::cia402;
 
 using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
@@ -34,7 +37,6 @@ using mm::node::kSynapticonVendorId;
 using mm::node::OperationModeInfo;
 using mm::node::OperationModeKind;
 using mm::node::OperationModes;
-using mm::node::cia402::Object;
 
 constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
@@ -61,6 +63,12 @@ class ModesFakeDriver : public FieldbusDriver {
     return (static_cast<uint32_t>(index) << 8) | subindex;
   }
 
+  template <typename T>
+  void programObject(mm::node::ObjectAddress<T> address, ObjectDataType type,
+                     std::vector<uint8_t> initial) {
+    programObject(address.index, address.subindex, type, std::move(initial));
+  }
+
   void programObject(uint16_t index, uint8_t subindex, ObjectDataType type,
                      std::vector<uint8_t> initial) {
     OdEntry e{};
@@ -77,9 +85,9 @@ class ModesFakeDriver : public FieldbusDriver {
   // The controlword and statusword are what makes the device a CiA402 drive; 0x6502 is what this
   // module reads.
   void programDrive(uint32_t supportedDriveModes) {
-    programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, u16le(0));
-    programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, u16le(0x0040));
-    programObject(Object::kSupportedDriveModes, 0, ObjectDataType::UNSIGNED32,
+    programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, u16le(0));
+    programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16, u16le(0x0040));
+    programObject(cia402::objects::kSupportedDriveModes, ObjectDataType::UNSIGNED32,
                   u32le(supportedDriveModes));
   }
 

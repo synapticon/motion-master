@@ -4516,8 +4516,8 @@ port treats a mailbox request to a SOMANET device: send it once, wait 100 ms for
 send it again, and recover with counter 0. Is that the right approach, against the two alternatives
 a reader asks about first? One is to send the request again, as upstream SOEM does. The other is to
 raise `EC_TIMEOUTRET` for every datagram, as the previous master did. This is the part of the master
-that must work best, so everything was read again from the start: the four sessions, issues #100,
-#113, #115, #119 and #124, pull requests #109, #114, #116 and #122, `ports/soem/portfile.cmake`, the
+that must work best, so everything was read again from the start: the four sessions,
+issues #100, #113, #115, #119 and #124, pull requests #109, #114, #116 and #122, `ports/soem/portfile.cmake`, the
 patched SOEM source in the vcpkg build tree, `soem_fieldbus_driver.cc`, `soem_mailbox.cc`, and
 `ethercat_service.xc` in somanet_software. Nothing was run on hardware for this review.
 
@@ -5287,3 +5287,36 @@ reads the pinned ESI in the repository, so that lag cannot fail it. What it catc
 languages drifting apart: a hand edit, or a generator change regenerated for one language. It
 compares the headers with whitespace removed, because the build job has no clang-format and the
 clang-format job already checks their layout.
+
+## Session 2026-11-12 — The generated addresses are the only object names (#214)
+
+**Two sets of names for one object are gone.** The views named objects with three hand-written
+enums, `GenericObject`, `cia402::Object` and `somanet::Object`, 87 indices with no subindex and no
+type, and with six enums of subindices beside them. The generated addresses of Session 2026-08-10
+came later, and nobody moved the views onto them. So `kManufacturerSoftwareVersion` was an index in
+one namespace and an address in another, and every call repeated the subindex and the type. Now
+every call takes the address: `readValue<uint16_t>(Object::kStatusword, 0)` is
+`readValue(cia402::objects::kStatusword)`. `Device` and the test fakes take an address wherever they
+took an index and a subindex.
+
+**Subindex 0 takes the object's name.** The generator named subindex 0 of a record `k<Object>Count`.
+`Count` is in no ESI and no standard. The generator invented it because six safety objects
+(0x2630, 0x2641, 0x2650, 0x2668, 0x2670, 0x26B2) name subindex 1 after the record itself, and that
+entry took the bare record name. Now subindex 0 takes the record's name, so
+`cia402::objects::kGearRatio.index` names the whole record, and every other subindex adds its entry
+name. A record is like a struct: `Person` has `name` and `age`, not `Person`. So an entry named
+after its record is a naming fault of the firmware, and the generator shows it as `kSTOInputSTOInput`
+rather than hide it behind a number. A rename by meaning, not by text, was needed where code used
+the old bare name: `kEncoderSourceType` meant subindex 1 and now means subindex 0.
+
+**Encoder 1 and encoder 2 share a layout,** at 0x2110 and 0x2112, and code picks one at run time.
+`somanet::encoderConfiguration(ordinal)` returns the addresses of the entries the master reads, so
+that code needs no index arithmetic.
+
+**The typed addresses found one disagreement with the ESI.** The code read 0x1016:01, the consumer
+heartbeat time, as UNSIGNED32, as CiA 301 declares it. The ESI, the EDS and the dictionary of the
+firmware declare INTEGER32. `Device` converted between the two at run time. The code now follows the
+ESI, and `FIRMWARE_DEFECTS.md` records the difference from CiA 301.
+
+**A namespace alias is allowed in a `.cc` file and never in a header,** now written in `CLAUDE.md`.
+It was already the practice, and this change added aliases to tests.

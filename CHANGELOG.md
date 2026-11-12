@@ -27,6 +27,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - **The Python and TypeScript clients name every object of a SOMANET device, the AL states and the CiA402 states.** `Profile`, `Cia402` and `Somanet` hold an address for every object, such as `Cia402.STATUSWORD`, with the same names in both clients and the type of the value. `AlState` names the AL states with `UNKNOWN` for 0, and `Cia402.state()` decodes a statusword in both clients. In Python, `Cia402State` names the CiA402 states, and the flat constants such as `STATUSWORD` and `PREOP`, `STATE_NAMES` and `cia402_state()` are gone. In TypeScript, `client.readValue()` returns the type of the address. The C++ type `EtherCatState` is now `AlState`, because the SPoE driver reports the same states (#215).
 
+- **Subindex 0 of a record takes the record's name in the generated object addresses, and every other subindex adds the entry's name.** `kPositionRangeLimitCount` is now `kPositionRangeLimit`, and in the clients `POSITION_RANGE_LIMIT_COUNT` is now `POSITION_RANGE_LIMIT`. Six safety entries that the firmware names after their record come out doubled, such as `kSTOInputSTOInput` and `STO_INPUT_STO_INPUT`. The C++ code names every object by its generated address, and the hand-written object enums are gone. The consumer heartbeat time, 0x1016:01, is read and written as INTEGER32, as the ESI declares (#214).
+
 ## [6.0.0-alpha.122] - 2026-11-10
 
 ### Fixed

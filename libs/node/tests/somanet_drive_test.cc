@@ -18,11 +18,17 @@
 #include "comm/fieldbus_driver.h"
 #include "comm/object_data_types.h"
 #include "node/cia402.h"
+#include "node/cia402_drive_objects.h"
 #include "node/device.h"
 #include "node/plant_identification.h"
+#include "node/profile_device_objects.h"
+#include "node/somanet_drive_objects.h"
 #include "node/synapticon.h"
 
 namespace {
+
+namespace profile = mm::node::profile;
+namespace cia402 = mm::node::cia402;
 
 using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
@@ -36,11 +42,8 @@ using mm::node::FsBufferTransfer;
 using mm::node::kFsBufferFilename;
 namespace somanet = mm::node::somanet;
 using mm::node::Device;
-using mm::node::kOsCommand;
-using mm::node::kOsCommandMode;
 using mm::node::kSynapticonVendorId;
 using mm::node::removeDeviceFile;
-using mm::node::cia402::Object;
 
 constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
@@ -51,6 +54,11 @@ class IdentityFakeDriver : public FieldbusDriver {
   uint32_t vendorId = kSynapticonVendorId;
   std::vector<OdEntry> ods;
 
+  template <typename T>
+  void programObject(mm::node::ObjectAddress<T> address, ObjectDataType type) {
+    programObject(address.index, address.subindex, type);
+  }
+
   void programObject(uint16_t index, uint8_t subindex, ObjectDataType type) {
     OdEntry e{};
     e.index = index;
@@ -60,8 +68,8 @@ class IdentityFakeDriver : public FieldbusDriver {
   }
 
   void programCia402Objects() {
-    programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16);
-    programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16);
+    programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16);
+    programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16);
   }
 
   SlaveInfo slaveInfo(uint16_t) const override {
@@ -172,8 +180,19 @@ class OsCommandFakeDriver : public FieldbusDriver {
   bool failCommandWrite = false;
   std::vector<uint8_t> modeWrites;
 
+  template <typename T>
+  static uint32_t key(mm::node::ObjectAddress<T> address) {
+    return key(address.index, address.subindex);
+  }
+
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
+  }
+
+  template <typename T>
+  void programObject(mm::node::ObjectAddress<T> address, ObjectDataType type,
+                     std::vector<uint8_t> initial) {
+    programObject(address.index, address.subindex, type, std::move(initial));
   }
 
   void programObject(uint16_t index, uint8_t subindex, ObjectDataType type,
@@ -190,17 +209,19 @@ class OsCommandFakeDriver : public FieldbusDriver {
   }
 
   void programOsCommandObjects() {
-    programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-    programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-    programObject(kOsCommand, 1, ObjectDataType::OCTET_STRING, std::vector<uint8_t>(8, 0));
-    programObject(kOsCommand, 2, ObjectDataType::UNSIGNED8, {0});
-    programObject(kOsCommand, 3, ObjectDataType::OCTET_STRING, std::vector<uint8_t>(8, 0));
-    programObject(kOsCommandMode, 0, ObjectDataType::UNSIGNED8, {0});
+    programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, {0, 0});
+    programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16, {0, 0});
+    programObject(profile::objects::kOSCommandCommand, ObjectDataType::OCTET_STRING,
+                  std::vector<uint8_t>(8, 0));
+    programObject(profile::objects::kOSCommandStatus, ObjectDataType::UNSIGNED8, {0});
+    programObject(profile::objects::kOSCommandResponse, ObjectDataType::OCTET_STRING,
+                  std::vector<uint8_t>(8, 0));
+    programObject(profile::objects::kOSCommandMode, ObjectDataType::UNSIGNED8, {0});
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
-    if (index == kOsCommand && subindex == 3) {
+    if (index == profile::objects::kOSCommand.index && subindex == 3) {
       // A real drive has a response to give only between a command being issued and that response
       // being read: reading it returns the drive to idle. Modelling that is what lets the drain
       // read runOsCommand performs before *every* command avoid eating the next command's scripted
@@ -218,7 +239,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
       }
       return reply;
     }
-    if (index == kOsCommand && subindex == 2) {
+    if (index == profile::objects::kOSCommand.index && subindex == 2) {
       ++statusReads;
       return std::vector<uint8_t>{0};
     }
@@ -231,7 +252,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
 
   std::expected<void, std::string> writeSdo(uint16_t, uint16_t index, uint8_t subindex,
                                             std::span<const uint8_t> data) override {
-    if (index == kOsCommand && subindex == 1) {
+    if (index == profile::objects::kOSCommand.index && subindex == 1) {
       if (failCommandWrite) {
         return std::unexpected(
             "SDO abort 0x08000021: Data cannot be transferred because of local control");
@@ -240,7 +261,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
       awaitingCommand = false;
       lastCommand.assign(data.begin(), data.end());
     }
-    if (index == kOsCommandMode && subindex == 0 && !data.empty()) {
+    if (index == profile::objects::kOSCommandMode.index && subindex == 0 && !data.empty()) {
       modeWrites.push_back(data[0]);
     }
     store[key(index, subindex)] = std::vector<uint8_t>(data.begin(), data.end());
@@ -359,16 +380,16 @@ const std::vector<uint8_t> kRequest{8, 0, 0, 0, 0, 0, 0, 0};
 // but distinct, so a test can tell which object a value came from.
 void programBrakeObjects(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrategy strategy,
                          somanet::BrakeStatus status, uint16_t pullTimeMs = 120) {
-  driver.programObject(somanet::kBrakeOptions, somanet::kBrakePullVoltage,
-                       ObjectDataType::UNSIGNED32, {0xE8, 0x03, 0, 0});  // 1000 mV
-  driver.programObject(somanet::kBrakeOptions, somanet::kBrakeHoldVoltage,
-                       ObjectDataType::UNSIGNED32, {0xF4, 0x01, 0, 0});  // 500 mV
+  driver.programObject(somanet::objects::kBrakeOptionsPullVoltage, ObjectDataType::UNSIGNED32,
+                       {0xE8, 0x03, 0, 0});  // 1000 mV
+  driver.programObject(somanet::objects::kBrakeOptionsHoldVoltage, ObjectDataType::UNSIGNED32,
+                       {0xF4, 0x01, 0, 0});  // 500 mV
   driver.programObject(
-      somanet::kBrakeOptions, somanet::kBrakePullTime, ObjectDataType::UNSIGNED16,
+      somanet::objects::kBrakeOptionsPullTime, ObjectDataType::UNSIGNED16,
       {static_cast<uint8_t>(pullTimeMs & 0xFF), static_cast<uint8_t>((pullTimeMs >> 8) & 0xFF)});
-  driver.programObject(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy,
-                       ObjectDataType::UNSIGNED8, {static_cast<uint8_t>(strategy)});
-  driver.programObject(somanet::kBrakeOptions, somanet::kBrakeStatus, ObjectDataType::UNSIGNED8,
+  driver.programObject(somanet::objects::kBrakeOptionsReleaseStrategy, ObjectDataType::UNSIGNED8,
+                       {static_cast<uint8_t>(strategy)});
+  driver.programObject(somanet::objects::kBrakeOptionsBrakeStatus, ObjectDataType::UNSIGNED8,
                        {static_cast<uint8_t>(status)});
 }
 
@@ -376,38 +397,41 @@ void programBrakeObjects(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrat
 // on port 1 with 2^18 counts, encoder 2 is unconfigured. Position and velocity control use encoder
 // 1; commutation names no encoder, so the "no encoder" value is covered too.
 void programEncoderObjects(OsCommandFakeDriver& driver) {
-  auto record = [&](uint16_t index, uint8_t port, uint8_t type, uint32_t resolution,
-                    uint8_t polarity, uint8_t multiturn, uint8_t singleturn) {
-    driver.programObject(index, somanet::kEncoderSensorPort, ObjectDataType::UNSIGNED8, {port});
-    driver.programObject(index, somanet::kEncoderType, ObjectDataType::UNSIGNED8, {type});
+  auto record = [&](somanet::EncoderOrdinal ordinal, uint8_t port, uint8_t type,
+                    uint32_t resolution, uint8_t polarity, uint8_t multiturn, uint8_t singleturn) {
+    const auto a = somanet::encoderConfiguration(ordinal);
+    driver.programObject(a.sensorPort.index, a.sensorPort.subindex, ObjectDataType::UNSIGNED8,
+                         {port});
+    driver.programObject(a.type.index, a.type.subindex, ObjectDataType::UNSIGNED8, {type});
     driver.programObject(
-        index, somanet::kEncoderResolution, ObjectDataType::UNSIGNED32,
+        a.resolution.index, a.resolution.subindex, ObjectDataType::UNSIGNED32,
         {static_cast<uint8_t>(resolution & 0xFF), static_cast<uint8_t>((resolution >> 8) & 0xFF),
          static_cast<uint8_t>((resolution >> 16) & 0xFF),
          static_cast<uint8_t>((resolution >> 24) & 0xFF)});
-    driver.programObject(index, somanet::kEncoderPolarity, ObjectDataType::UNSIGNED8, {polarity});
-    driver.programObject(index, somanet::kEncoderMultiturnBits, ObjectDataType::UNSIGNED8,
+    driver.programObject(a.polarity.index, a.polarity.subindex, ObjectDataType::UNSIGNED8,
+                         {polarity});
+    driver.programObject(a.multiturnBits.index, a.multiturnBits.subindex, ObjectDataType::UNSIGNED8,
                          {multiturn});
-    driver.programObject(index, somanet::kEncoderSingleturnBits, ObjectDataType::UNSIGNED8,
-                         {singleturn});
+    driver.programObject(a.singleturnBits.index, a.singleturnBits.subindex,
+                         ObjectDataType::UNSIGNED8, {singleturn});
   };
-  record(somanet::kEncoder1Configuration, 1, 4, 262144, 1, 0, 18);
-  record(somanet::kEncoder2Configuration, 0, 0, 0, 0, 0, 0);
-  driver.programObject(somanet::kPositionController, somanet::kPositionControllerEncoderSource,
+  record(somanet::EncoderOrdinal::kEncoder1, 1, 4, 262144, 1, 0, 18);
+  record(somanet::EncoderOrdinal::kEncoder2, 0, 0, 0, 0, 0, 0);
+  driver.programObject(somanet::objects::kPositionControllerEncoderSource,
                        ObjectDataType::UNSIGNED8, {1});
-  driver.programObject(somanet::kVelocityController, somanet::kVelocityControllerEncoderSource,
+  driver.programObject(somanet::objects::kVelocityControllerEncoderSource,
                        ObjectDataType::UNSIGNED8, {1});
-  driver.programObject(somanet::kTorqueController, somanet::kTorqueControllerEncoderSource,
-                       ObjectDataType::UNSIGNED8, {0});
+  driver.programObject(somanet::objects::kTorqueControllerEncoderSource, ObjectDataType::UNSIGNED8,
+                       {0});
 }
 
 // A device whose brake is programmed as given. Brake tests use a zero settle so they never really
 // wait; the pull time is still read and added, so it is kept small.
 Device makeBrakeDevice(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrategy strategy,
                        somanet::BrakeStatus status) {
-  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  driver.programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kModesOfOperation, ObjectDataType::INTEGER8, {0});
   programBrakeObjects(driver, strategy, status, /*pullTimeMs=*/1);
   Device device(1, driver);
   EXPECT_TRUE(device.initializeParameters().has_value());
@@ -415,8 +439,7 @@ Device makeBrakeDevice(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrateg
 }
 
 uint8_t storedBrakeStatus(const OsCommandFakeDriver& driver) {
-  return driver.store.at(
-      OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus))[0];
+  return driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus))[0];
 }
 
 Device makeOsCommandDevice(OsCommandFakeDriver& driver) {
@@ -902,9 +925,9 @@ constexpr auto kNoSettle = std::chrono::milliseconds(0);
 
 TEST(SomanetDrive, EncodersReportsBothRecordsAndTheControllerSources) {
   OsCommandFakeDriver driver;
-  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  driver.programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kModesOfOperation, ObjectDataType::INTEGER8, {0});
   programEncoderObjects(driver);
   Device device(1, driver);
   ASSERT_TRUE(device.initializeParameters().has_value());
@@ -944,19 +967,19 @@ TEST(SomanetDrive, EncodersTakeTheRingFromTheResolutionWhenSingleturnBitsHoldNon
   // Jasper firmware on a C021 holds 0 or 1 in :0C for its iC-MU encoders. The resolution, 2^19,
   // gives the ring. An incremental encoder with the same resolution keeps its :0C.
   OsCommandFakeDriver driver;
-  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  driver.programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kModesOfOperation, ObjectDataType::INTEGER8, {0});
   programEncoderObjects(driver);
   using Driver = OsCommandFakeDriver;
-  driver.store[Driver::key(somanet::kEncoder1Configuration, somanet::kEncoderResolution)] = {
-      0x00, 0x00, 0x08, 0x00};
-  driver.store[Driver::key(somanet::kEncoder1Configuration, somanet::kEncoderSingleturnBits)] = {0};
-  driver.store[Driver::key(somanet::kEncoder2Configuration, somanet::kEncoderType)] = {
+  driver.store[Driver::key(somanet::objects::kEncoder1ConfigurationResolution)] = {0x00, 0x00, 0x08,
+                                                                                   0x00};
+  driver.store[Driver::key(somanet::objects::kEncoder1ConfigurationSingleturnBits)] = {0};
+  driver.store[Driver::key(somanet::objects::kEncoder2ConfigurationType)] = {
       static_cast<uint8_t>(somanet::EncoderType::kIncremental)};
-  driver.store[Driver::key(somanet::kEncoder2Configuration, somanet::kEncoderResolution)] = {
-      0x00, 0x00, 0x08, 0x00};
-  driver.store[Driver::key(somanet::kEncoder2Configuration, somanet::kEncoderSingleturnBits)] = {1};
+  driver.store[Driver::key(somanet::objects::kEncoder2ConfigurationResolution)] = {0x00, 0x00, 0x08,
+                                                                                   0x00};
+  driver.store[Driver::key(somanet::objects::kEncoder2ConfigurationSingleturnBits)] = {1};
   Device device(1, driver);
   ASSERT_TRUE(device.initializeParameters().has_value());
   auto drive = createSomanetDrive(device);
@@ -1001,9 +1024,9 @@ TEST(BrakeState, ReportsTheConfigurationAndDerivedFlags) {
 
 // A drive without the brake object 0x2004, as one running Jasper firmware: the CiA402 objects only.
 Device makeDeviceWithoutBrake(OsCommandFakeDriver& driver) {
-  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  driver.programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(cia402::objects::kModesOfOperation, ObjectDataType::INTEGER8, {0});
   Device device(1, driver);
   EXPECT_TRUE(device.initializeParameters().has_value());
   return device;
@@ -1038,8 +1061,8 @@ TEST(ReleaseBrake, WritesNothingOnADriveWithoutTheBrakeObject) {
   EXPECT_TRUE(drive->releaseBrake(kNoSettle).has_value());
   EXPECT_TRUE(drive->engageBrake(kNoSettle).has_value());
   EXPECT_TRUE(drive->setBrakeStatus(somanet::BrakeStatus::kDisengaged).has_value());
-  EXPECT_FALSE(driver.store.contains(
-      OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)));
+  EXPECT_FALSE(
+      driver.store.contains(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)));
 }
 
 TEST(ReleaseBrake, DisengagesAClutchBrakeAndReadsItBack) {
@@ -1852,7 +1875,7 @@ TEST(RunMotorPhaseOrderDetection, DecodesNormalOrder) {
   EXPECT_EQ(result->order, somanet::MotorPhaseOrder::kNormal);
   EXPECT_FALSE(result->inverted());
   EXPECT_EQ(result->describe(), "motor phase order is normal");
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 4);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 4);
 }
 
 TEST(RunMotorPhaseOrderDetection, DecodesInvertedOrder) {
@@ -1928,7 +1951,7 @@ TEST(RunCommutationOffsetMeasurement, DecodesTheTwoByteBigEndianOffset) {
   EXPECT_EQ(result->angleOffset, 2035);
   EXPECT_EQ(result->method, somanet::CommutationOffsetMethod::kRotating);
   EXPECT_EQ(result->describe(), "commutation angle offset 2035 (rotating method)");
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 5);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 5);
 }
 
 TEST(RunCommutationOffsetMeasurement, RecordsTheMethodItRanUnder) {
@@ -1982,7 +2005,7 @@ TEST(RunPolePairDetection, DecodesTheCountFromTheFirstPayloadByte) {
   ASSERT_TRUE(result.has_value()) << result.error();
   EXPECT_EQ(result->polePairs, 3);
   EXPECT_EQ(result->describe(), "3 pole pairs");
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 7);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 7);
 }
 
 TEST(RunPolePairDetection, SaysPolePairSingularForOne) {
@@ -2037,7 +2060,8 @@ TEST(RunPhaseResistanceMeasurement, IssuesCommandEight) {
   driver.responses = {{1, 0, 0, 0, 0, 1, 0, 0}};
   ASSERT_TRUE(drive->runPhaseResistanceMeasurement({.pollInterval = kNoDelay}).has_value());
 
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 8);
 }
@@ -2109,7 +2133,7 @@ TEST(RunPhaseInductanceMeasurement, IssuesCommandNine) {
 
   driver.responses = {{1, 0, 0, 0, 0, 1, 0, 0}};
   ASSERT_TRUE(drive->runPhaseInductanceMeasurement({.pollInterval = kNoDelay}).has_value());
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 9);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 9);
 }
 
 TEST(RunPhaseInductanceMeasurement, SharesTheCurrentAmplitudeFaultTable) {
@@ -2152,7 +2176,7 @@ TEST(RunTorqueConstantMeasurement, IssuesCommandTen) {
 
   driver.responses = {{1, 0, 0, 0, 0, 1, 0, 0}};
   ASSERT_TRUE(drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay}).has_value());
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 10);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 10);
 }
 
 TEST(RunTorqueConstantMeasurement, ReportsANegativeValueRatherThanAHugeUnsignedOne) {
@@ -2229,7 +2253,8 @@ TEST(AccessKueblerRegister, WritesTheSpecificationsWorkedExample) {
   driver.responses = {{1, 0, 0xC0, 0x00, 0, 0, 0, 0}};
   auto result = drive->accessKueblerRegister(0x50, 2, true, 0x00C0, {.pollInterval = kNoDelay});
   ASSERT_TRUE(result.has_value()) << result.error();
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 0x13);
   EXPECT_EQ(written[1], 0x01);
@@ -2344,7 +2369,8 @@ TEST(SetVelocitySource, PutsTheSourceInBitZeroOfByteOne) {
   ASSERT_TRUE(
       drive->setVelocitySource(somanet::VelocitySource::kEncoder, {.pollInterval = kNoDelay})
           .has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 18);
   EXPECT_EQ(written[1], 1);
@@ -2360,7 +2386,7 @@ TEST(SetVelocitySource, ClearsTheBitForTheFirmwareValue) {
   ASSERT_TRUE(
       drive->setVelocitySource(somanet::VelocitySource::kFirmware, {.pollInterval = kNoDelay})
           .has_value());
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[1], 0);
 }
 
 TEST(SetVelocitySource, AGeneralOsErrorNamesItself) {
@@ -2426,7 +2452,8 @@ TEST(TriggerError, PutsTheServiceAndTypeInBytesOneAndTwo) {
   auto result = drive->triggerError(somanet::FirmwareService::kMotionControl,
                                     somanet::FirmwareErrorType::kEcall, {.pollInterval = kNoDelay});
   ASSERT_TRUE(result.has_value()) << result.error();
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 16);
   EXPECT_EQ(written[1], 1);
@@ -2521,7 +2548,8 @@ TEST(SetOpenLoopFieldParameter, PutsTheIndexInByteOneAndASignedValueBigEndian) {
                   ->setOpenLoopFieldParameter(somanet::OpenLoopFieldParameter::kAngleEnd, -7850,
                                               {.pollInterval = kNoDelay})
                   .has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 2);
   EXPECT_EQ(written[1], 1);
@@ -2613,7 +2641,8 @@ TEST(SetSystemIdentificationParameter, PutsTheIndexInByteOneAndTheValueBigEndian
                       somanet::SystemIdentificationParameter::kTransitionTime, 10,
                       {.pollInterval = kNoDelay})
                   .has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 15);
   EXPECT_EQ(written[1], 3);
@@ -2637,7 +2666,8 @@ TEST(SetSystemIdentificationParameter, SpansAllFourValueBytes) {
                       somanet::SystemIdentificationParameter::kTargetFrequency,
                       somanet::kMaxChirpFrequencyMilliHz, {.pollInterval = kNoDelay})
                   .has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   EXPECT_EQ(written[1], 1);
   // 1000000 = 0x000F4240.
   EXPECT_EQ(written[2], 0x00);
@@ -2692,7 +2722,8 @@ TEST(SetIgnoreBissStatusBits, PacksTheEncoderAboveTheTriggerBit) {
                   ->setIgnoreBissStatusBits(somanet::EncoderOrdinal::kEncoder1, true,
                                             {.pollInterval = kNoDelay})
                   .has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 14);
   EXPECT_EQ(written[1], 0b011);
@@ -2710,7 +2741,8 @@ TEST(SetIgnoreBissStatusBits, ClearsTheTriggerToStopIgnoring) {
                                             {.pollInterval = kNoDelay})
                   .has_value());
   // Encoder 2, trigger clear: 0b100. The encoder must survive the trigger going to zero.
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0b100);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[1],
+            0b100);
 }
 
 TEST(SetIgnoreBissStatusBits, ATimeoutSaysTheEncoderIsNotBiss) {
@@ -2774,7 +2806,8 @@ TEST(ReadSkippedCycles, PutsTheServiceInByteOne) {
   ASSERT_TRUE(
       drive->readSkippedCycles(somanet::FirmwareService::kMotionControl, {.pollInterval = kNoDelay})
           .has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 13);
   EXPECT_EQ(written[1], 1);
@@ -2848,7 +2881,8 @@ TEST(FirmwareLatency, StartPutsTheActionAndTheIndexInBytesOneAndTwo) {
                   ->startFirmwareLatencyMeasurement(somanet::FirmwareLatency::kFeedback,
                                                     {.pollInterval = kNoDelay})
                   .has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 22);
   EXPECT_EQ(written[1], 0);  // start measurement
@@ -2865,7 +2899,8 @@ TEST(FirmwareLatency, TheStopActionCarriesNoLatencyIndex) {
 
   driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
   ASSERT_TRUE(drive->stopFirmwareLatencyMeasurements({.pollInterval = kNoDelay}).has_value());
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   ASSERT_EQ(written.size(), 8u);
   EXPECT_EQ(written[0], 22);
   EXPECT_EQ(written[1], 2);  // stop all measurements
@@ -2977,10 +3012,10 @@ TEST(GeneralOsError, AnAbortNamesTheFaultTheDriveIsIn) {
   // resulting 252 said only "command aborted". The fault is the answer, and it has to be in the
   // message — it is two object reads away and nobody thinks to make them.
   OsCommandFakeDriver driver;
-  driver.programObject(somanet::kErrorReport, somanet::kErrorReportDescription,
-                       ObjectDataType::VISIBLE_STRING, {'P', 'u', 'U', 'v', ' ', ' ', ' ', ' '});
+  driver.programObject(somanet::objects::kErrorReportDescription, ObjectDataType::VISIBLE_STRING,
+                       {'P', 'u', 'U', 'v', ' ', ' ', ' ', ' '});
   Device device = makeOsCommandDevice(driver);
-  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x38, 0x02};
+  driver.store[OsCommandFakeDriver::key(cia402::objects::kStatusword)] = {0x38, 0x02};
   auto drive = createSomanetDrive(device);
   ASSERT_TRUE(drive.has_value()) << drive.error();
 
@@ -2998,7 +3033,7 @@ TEST(GeneralOsError, AddsNothingWhenTheDriveIsStillEnabled) {
   // so the message is left as it was.
   OsCommandFakeDriver driver;
   Device device = makeOsCommandDevice(driver);
-  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x37, 0x02};
+  driver.store[OsCommandFakeDriver::key(cia402::objects::kStatusword)] = {0x37, 0x02};
   auto drive = createSomanetDrive(device);
   ASSERT_TRUE(drive.has_value()) << drive.error();
 
@@ -3015,7 +3050,7 @@ TEST(GeneralOsError, ACommandSpecificCodeIsLeftAlone) {
   // front of a user who was told about a motor fault.
   OsCommandFakeDriver driver;
   Device device = makeOsCommandDevice(driver);
-  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x38, 0x02};
+  driver.store[OsCommandFakeDriver::key(cia402::objects::kStatusword)] = {0x38, 0x02};
   auto drive = createSomanetDrive(device);
   ASSERT_TRUE(drive.has_value()) << drive.error();
 
@@ -3031,10 +3066,10 @@ TEST(GeneralOsError, OpenPhaseDetectionExplainsItsRefusalToo) {
   // The one command whose failure is normally a *finding* rather than an error — which is exactly
   // why a general code here needs explaining: it means the check never ran at all.
   OsCommandFakeDriver driver;
-  driver.programObject(somanet::kErrorReport, somanet::kErrorReportDescription,
-                       ObjectDataType::VISIBLE_STRING, {'P', 'u', 'U', 'v', ' ', ' ', ' ', ' '});
+  driver.programObject(somanet::objects::kErrorReportDescription, ObjectDataType::VISIBLE_STRING,
+                       {'P', 'u', 'U', 'v', ' ', ' ', ' ', ' '});
   Device device = makeOsCommandDevice(driver);
-  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x38, 0x02};
+  driver.store[OsCommandFakeDriver::key(cia402::objects::kStatusword)] = {0x38, 0x02};
   auto drive = createSomanetDrive(device);
   ASSERT_TRUE(drive.has_value()) << drive.error();
 

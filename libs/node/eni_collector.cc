@@ -17,6 +17,7 @@
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/pdo_mapping.h"
+#include "node/profile_device_objects.h"
 
 namespace mm::node {
 
@@ -56,10 +57,6 @@ constexpr std::uint32_t kStateTimeoutMs = 10000;
 constexpr std::uint32_t kCoeTimeoutMs = 1000;
 constexpr std::uint32_t kRetries = 3;
 constexpr std::size_t kMacBytes = 6;
-
-/// PDO assignment objects: 0x1C12 lists the RxPDOs of a Sync Manager, 0x1C13 the TxPDOs.
-constexpr std::uint16_t kRxPdoAssign = 0x1C12;
-constexpr std::uint16_t kTxPdoAssign = 0x1C13;
 
 /// @brief Names a mapped object's type the way an ESI spells it, for @c ProcessImage/DataType.
 ///
@@ -225,7 +222,8 @@ mm::etg::EniCoeCmd coeDownload(std::uint16_t index, std::uint8_t subindex,
 /// than left on its own defaults.
 void appendPdoAssignment(std::vector<mm::etg::EniCoeCmd>& commands, std::uint16_t assignIndex,
                          const std::vector<PdoMappingObject>& objects) {
-  const std::string direction = assignIndex == kRxPdoAssign ? "RxPDO" : "TxPDO";
+  const std::string direction =
+      assignIndex == profile::objects::kSM2Assignment.index ? "RxPDO" : "TxPDO";
   for (const PdoMappingObject& object : objects) {
     commands.push_back(coeDownload(object.pdoIndex, 0, {0x00},
                                    std::format("clear the entries of {:#06x}", object.pdoIndex)));
@@ -491,8 +489,10 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
       }
 
       if (mapping) {
-        appendPdoAssignment(mailbox.coeInitCmds, kRxPdoAssign, mapping->outputs);
-        appendPdoAssignment(mailbox.coeInitCmds, kTxPdoAssign, mapping->inputs);
+        appendPdoAssignment(mailbox.coeInitCmds, profile::objects::kSM2Assignment.index,
+                            mapping->outputs);
+        appendPdoAssignment(mailbox.coeInitCmds, profile::objects::kSM3Assignment.index,
+                            mapping->inputs);
       }
       slave.mailbox = mailbox;
     }

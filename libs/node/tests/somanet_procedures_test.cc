@@ -34,15 +34,21 @@
 #include "core/platform.h"
 #include "fake_spoe_server.h"
 #include "node/cia402.h"
+#include "node/cia402_drive_objects.h"
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/ic_mu_bridge.h"
 #include "node/ic_mu_encoder.h"
 #include "node/procedure.h"
+#include "node/profile_device_objects.h"
 #include "node/profile_procedures.h"
+#include "node/somanet_drive_objects.h"
 #include "node/synapticon.h"
 
 namespace {
+
+namespace profile = mm::node::profile;
+namespace cia402 = mm::node::cia402;
 
 using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
@@ -73,8 +79,6 @@ using mm::node::IgnoreBissStatusBitsRequest;
 using mm::node::ignoreBissStatusBitsSteps;
 using mm::node::kEncoderRegisterStep;
 using mm::node::kFsBufferFilename;
-using mm::node::kOsCommand;
-using mm::node::kOsCommandMode;
 using mm::node::kOsCommandStep;
 using mm::node::kReadObjectDictionaryStep;
 using mm::node::kSynapticonVendorId;
@@ -126,7 +130,6 @@ using mm::node::torqueConstantMeasurementSteps;
 using mm::node::VelocitySourceRequest;
 using mm::node::velocitySourceSteps;
 namespace somanet = mm::node::somanet;
-using mm::node::cia402::Object;
 
 constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 constexpr auto kNoDelay = std::chrono::milliseconds(0);
@@ -159,8 +162,19 @@ class OsCommandFakeDriver : public FieldbusDriver {
   // leaves the drive healthy for the whole run.
   int faultAfterCommands = 0;
 
+  template <typename T>
+  static uint32_t key(mm::node::ObjectAddress<T> address) {
+    return key(address.index, address.subindex);
+  }
+
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
+  }
+
+  template <typename T>
+  void programObject(mm::node::ObjectAddress<T> address, ObjectDataType type,
+                     std::vector<uint8_t> initial) {
+    programObject(address.index, address.subindex, type, std::move(initial));
   }
 
   void programObject(uint16_t index, uint8_t subindex, ObjectDataType type,
@@ -177,36 +191,37 @@ class OsCommandFakeDriver : public FieldbusDriver {
   }
 
   void programDrive() {
-    programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-    programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
-    programObject(kOsCommand, 1, ObjectDataType::OCTET_STRING, std::vector<uint8_t>(8, 0));
-    programObject(kOsCommand, 3, ObjectDataType::OCTET_STRING, std::vector<uint8_t>(8, 0));
-    programObject(kOsCommandMode, 0, ObjectDataType::UNSIGNED8, {0});
-    programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {8});  // CSP, to restore
-    programObject(Object::kModeOfOperationDisplay, 0, ObjectDataType::INTEGER8, {8});
-    programObject(somanet::kBrakeOptions, somanet::kBrakePullVoltage, ObjectDataType::UNSIGNED32,
+    programObject(cia402::objects::kControlword, ObjectDataType::UNSIGNED16, {0, 0});
+    programObject(cia402::objects::kStatusword, ObjectDataType::UNSIGNED16, {0, 0});
+    programObject(profile::objects::kOSCommandCommand, ObjectDataType::OCTET_STRING,
+                  std::vector<uint8_t>(8, 0));
+    programObject(profile::objects::kOSCommandResponse, ObjectDataType::OCTET_STRING,
+                  std::vector<uint8_t>(8, 0));
+    programObject(profile::objects::kOSCommandMode, ObjectDataType::UNSIGNED8, {0});
+    programObject(cia402::objects::kModesOfOperation, ObjectDataType::INTEGER8,
+                  {8});  // CSP, to restore
+    programObject(cia402::objects::kModesOfOperationDisplay, ObjectDataType::INTEGER8, {8});
+    programObject(somanet::objects::kBrakeOptionsPullVoltage, ObjectDataType::UNSIGNED32,
                   {0, 0, 0, 0});
-    programObject(somanet::kBrakeOptions, somanet::kBrakeHoldVoltage, ObjectDataType::UNSIGNED32,
+    programObject(somanet::objects::kBrakeOptionsHoldVoltage, ObjectDataType::UNSIGNED32,
                   {0, 0, 0, 0});
-    programObject(somanet::kBrakeOptions, somanet::kBrakePullTime, ObjectDataType::UNSIGNED16,
-                  {0, 0});
-    programObject(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy, ObjectDataType::UNSIGNED8,
+    programObject(somanet::objects::kBrakeOptionsPullTime, ObjectDataType::UNSIGNED16, {0, 0});
+    programObject(somanet::objects::kBrakeOptionsReleaseStrategy, ObjectDataType::UNSIGNED8,
                   {static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kClutch)});
-    programObject(somanet::kBrakeOptions, somanet::kBrakeStatus, ObjectDataType::UNSIGNED8,
+    programObject(somanet::objects::kBrakeOptionsBrakeStatus, ObjectDataType::UNSIGNED8,
                   {static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
     // INTEGER8, matching the drive.
-    programObject(somanet::kCommutationOffsetDetection, somanet::kCommutationOffsetMethod,
-                  ObjectDataType::INTEGER8,
+    programObject(somanet::objects::kCommutationOffsetMeasurementMethod, ObjectDataType::INTEGER8,
                   {static_cast<uint8_t>(somanet::CommutationOffsetMethod::kRotating)});
     // What the drive says about a fault, which a blocked step quotes back.
-    programObject(somanet::kErrorReport, somanet::kErrorReportDescription,
-                  ObjectDataType::VISIBLE_STRING, {'O', 'V', 'E', 'R', 'C', 'U', 'R', 'R'});
-    store[key(Object::kStatusword, 0)] = {0x40, 0x00};
+    programObject(somanet::objects::kErrorReportDescription, ObjectDataType::VISIBLE_STRING,
+                  {'O', 'V', 'E', 'R', 'C', 'U', 'R', 'R'});
+    store[key(cia402::objects::kStatusword)] = {0x40, 0x00};
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
-    if (index == kOsCommand && subindex == 3) {
+    if (index == profile::objects::kOSCommand.index && subindex == 3) {
       // A real drive has a response to give only between a command being issued and that response
       // being read: reading it returns the drive to idle. Modelling that is what lets the drain
       // read runOsCommand performs before *every* command avoid eating the next command's scripted
@@ -236,10 +251,10 @@ class OsCommandFakeDriver : public FieldbusDriver {
     store[key(index, subindex)] = std::vector<uint8_t>(data.begin(), data.end());
     writeLog.push_back({index, subindex});
     // The drive shows a requested mode in 0x6061, and takes 0 as "keep the mode".
-    if (index == Object::kModeOfOperation && !data.empty() && data[0] != 0) {
-      store[key(Object::kModeOfOperationDisplay, 0)] = {data[0]};
+    if (index == cia402::objects::kModesOfOperation.index && !data.empty() && data[0] != 0) {
+      store[key(cia402::objects::kModesOfOperationDisplay)] = {data[0]};
     }
-    if (index == kOsCommand && subindex == 1) {
+    if (index == profile::objects::kOSCommand.index && subindex == 1) {
       ++commandWrites;
       awaitingCommand = false;
       if (!data.empty()) {
@@ -248,17 +263,18 @@ class OsCommandFakeDriver : public FieldbusDriver {
       }
       if (faultAfterCommands > 0 && commandWrites >= faultAfterCommands) {
         statusword = 0x0008;  // Fault
-        store[key(Object::kStatusword, 0)] = {static_cast<uint8_t>(statusword & 0xFF),
-                                              static_cast<uint8_t>(statusword >> 8)};
+        store[key(cia402::objects::kStatusword)] = {static_cast<uint8_t>(statusword & 0xFF),
+                                                    static_cast<uint8_t>(statusword >> 8)};
       }
     }
-    if (index == somanet::kBrakeOptions && subindex == somanet::kBrakeStatus && !data.empty()) {
+    if (index == somanet::objects::kBrakeOptions.index &&
+        subindex == somanet::objects::kBrakeOptionsBrakeStatus.subindex && !data.empty()) {
       brakeStatusWrites.push_back(data[0]);
     }
     // Model just enough of the CiA402 machine for enable() to converge: a controlword write
     // advances the state and the statusword follows it. Without that the drive never reports
     // OperationEnabled and every enable in a test would sit out its full timeout.
-    if (index == Object::kControlword && data.size() >= 2) {
+    if (index == cia402::objects::kControlword.index && data.size() >= 2) {
       const uint16_t cw = static_cast<uint16_t>(data[0] | (data[1] << 8));
       const uint16_t cmd = cw & 0x000F;
       if (cmd == 0x0006) {
@@ -270,10 +286,15 @@ class OsCommandFakeDriver : public FieldbusDriver {
       } else {
         statusword = 0x0040;  // SwitchOnDisabled
       }
-      store[key(Object::kStatusword, 0)] = {static_cast<uint8_t>(statusword & 0xFF),
-                                            static_cast<uint8_t>(statusword >> 8)};
+      store[key(cia402::objects::kStatusword)] = {static_cast<uint8_t>(statusword & 0xFF),
+                                                  static_cast<uint8_t>(statusword >> 8)};
     }
     return {};
+  }
+
+  template <typename T, typename U>
+  bool wroteBefore(mm::node::ObjectAddress<T> address, mm::node::ObjectAddress<U> other) const {
+    return wroteBefore(address.index, address.subindex, other.index, other.subindex);
   }
 
   // Whether index/subindex was written before otherIndex/otherSubindex — the procedure's step order
@@ -292,6 +313,11 @@ class OsCommandFakeDriver : public FieldbusDriver {
     const int first = at(index, subindex);
     const int second = at(otherIndex, otherSubindex);
     return first >= 0 && second >= 0 && first < second;
+  }
+
+  template <typename T>
+  int lastWriteIndex(mm::node::ObjectAddress<T> address) const {
+    return lastWriteIndex(address.index, address.subindex);
   }
 
   // Position of the *last* write to index/subindex, or -1. The restore's ordering has to be
@@ -766,7 +792,7 @@ TEST(RunEncoderRegisterProcedure, AWriteCarriesTheDirectionBitAndTheValue) {
                              .registerAddress = 0x11,
                              .value = 0x08});
   ASSERT_TRUE(result.has_value()) << result.error();
-  EXPECT_EQ(driver.store[OsCommandFakeDriver::key(kOsCommand, 1)],
+  EXPECT_EQ(driver.store[OsCommandFakeDriver::key(profile::objects::kOSCommandCommand)],
             (std::vector<uint8_t>{0, 2, 1, 0x11, 0x08, 0, 0, 0}));
 }
 
@@ -784,7 +810,8 @@ TEST(RunEncoderRegisterProcedure, PreparesNothingAndRestoresNothing) {
                   .has_value());
 
   for (const auto& [index, subindex] : driver.writeLog) {
-    EXPECT_TRUE(index == kOsCommand || index == kOsCommandMode)
+    EXPECT_TRUE(index == profile::objects::kOSCommand.index ||
+                index == profile::objects::kOSCommandMode.index)
         << std::format("wrote 0x{:04X}:{:02X}", index, subindex);
   }
   EXPECT_TRUE(driver.brakeStatusWrites.empty());
@@ -869,7 +896,7 @@ TEST(RunIcMuCalibrationModeProcedure, RecordsWhichEncoderIsInWhichMode) {
   EXPECT_EQ(steps[0].value["encoderOrdinal"], 2);
   EXPECT_EQ(steps[0].value["mode"], "raw");
   // Mode 1 shifted up three bits, plus ordinal 2.
-  EXPECT_EQ(driver.store[OsCommandFakeDriver::key(kOsCommand, 1)],
+  EXPECT_EQ(driver.store[OsCommandFakeDriver::key(profile::objects::kOSCommandCommand)],
             (std::vector<uint8_t>{1, 10, 0, 0, 0, 0, 0, 0}));
 }
 
@@ -1017,8 +1044,9 @@ std::optional<mm::node::ProgressStep> stepById(const std::vector<mm::node::Progr
 
 // Whether the brake object was written at all during a run.
 int brakeWrites(const OsCommandFakeDriver& driver) {
-  return static_cast<int>(std::ranges::count_if(
-      driver.writeLog, [](const auto& write) { return write.first == somanet::kBrakeOptions; }));
+  return static_cast<int>(std::ranges::count_if(driver.writeLog, [](const auto& write) {
+    return write.first == somanet::objects::kBrakeOptions.index;
+  }));
 }
 
 TEST(RunOpenPhaseDetectionProcedure, PreparesChecksAndRestores) {
@@ -1038,7 +1066,8 @@ TEST(RunOpenPhaseDetectionProcedure, PreparesChecksAndRestores) {
   }
 
   // Diagnostics mode was requested before the command ran.
-  EXPECT_TRUE(driver.wroteBefore(Object::kModeOfOperation, 0, kOsCommand, 1));
+  EXPECT_TRUE(
+      driver.wroteBefore(cia402::objects::kModesOfOperation, profile::objects::kOSCommandCommand));
 }
 
 TEST(RunOpenPhaseDetectionProcedure, NeverTouchesTheBrake) {
@@ -1062,7 +1091,7 @@ TEST(RunOpenPhaseDetectionProcedure, RestoresTheModeItFound) {
   ASSERT_TRUE(runOpenPhaseDetectionProcedure(device, reporter, std::stop_token{}).has_value());
 
   // Back as found: mode 8 (CSP), not left in diagnostics.
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -1088,7 +1117,7 @@ TEST(RunOpenPhaseDetectionProcedure, AnOpenPhaseFailsTheStepAndStillRestores) {
   const auto restore = stepById(steps, "restore");
   ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -1106,7 +1135,7 @@ TEST(RunOpenPhaseDetectionProcedure, RestoresAfterCancellation) {
   const auto restore = stepById(steps, "restore");
   ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -1147,18 +1176,20 @@ TEST(RunPolePairDetectionProcedure, PreparesReleasesDetectsAndRestores) {
   // The brake may only be released once the drive is enabled: in diagnostics mode enabling does not
   // release it, and the write only takes effect from OP ENABLED. So the controlword walk must come
   // first — this is the ordering the firmware requires, not a stylistic preference.
-  EXPECT_TRUE(
-      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 7);
+  EXPECT_TRUE(driver.wroteBefore(cia402::objects::kControlword,
+                                 somanet::objects::kBrakeOptionsBrakeStatus));
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 7);
 }
 
 TEST(RunPolePairDetectionProcedure, RunsOnADriveWithoutTheBrakeObject) {
   OsCommandFakeDriver driver;
   driver.programDrive();
   // A drive with no brake, as one running Jasper firmware, has no 0x2004 at all.
-  std::erase_if(driver.ods, [](const OdEntry& e) { return e.index == somanet::kBrakeOptions; });
-  std::erase_if(driver.store,
-                [](const auto& entry) { return (entry.first >> 8) == somanet::kBrakeOptions; });
+  std::erase_if(driver.ods,
+                [](const OdEntry& e) { return e.index == somanet::objects::kBrakeOptions.index; });
+  std::erase_if(driver.store, [](const auto& entry) {
+    return (entry.first >> 8) == somanet::objects::kBrakeOptions.index;
+  });
   Device device(1, driver);
   ASSERT_TRUE(device.initializeParameters().has_value());
   ProgressReporter reporter(polePairDetectionSteps());
@@ -1182,10 +1213,9 @@ TEST(RunPolePairDetectionProcedure, RestoresTheBrakeAndModeItFound) {
   ASSERT_TRUE(runPolePairDetectionProcedure(device, reporter, std::stop_token{}).has_value());
 
   // Back as found: brake engaged, mode 8 (CSP) — not left in diagnostics with the brake released.
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)),
+            std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -1197,9 +1227,9 @@ TEST(RunPolePairDetectionProcedure, RestoresTheBrakeThenDisablesThenPutsTheModeB
   driver.responses = {{1, 0, 4, 0, 0, 0, 0, 0}};
   ASSERT_TRUE(runPolePairDetectionProcedure(device, reporter, std::stop_token{}).has_value());
 
-  const int brake = driver.lastWriteIndex(somanet::kBrakeOptions, somanet::kBrakeStatus);
-  const int controlword = driver.lastWriteIndex(Object::kControlword, 0);
-  const int mode = driver.lastWriteIndex(Object::kModeOfOperation, 0);
+  const int brake = driver.lastWriteIndex(somanet::objects::kBrakeOptionsBrakeStatus);
+  const int controlword = driver.lastWriteIndex(cia402::objects::kControlword);
+  const int mode = driver.lastWriteIndex(cia402::objects::kModesOfOperation);
   ASSERT_GE(brake, 0);
   ASSERT_GE(controlword, 0);
   ASSERT_GE(mode, 0);
@@ -1226,9 +1256,8 @@ TEST(RunPolePairDetectionProcedure, AFailedDetectionStillRestoresTheBrake) {
   const auto restore = stepById(reporter.steps(), "restore");
   ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)),
+            std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
 }
 
 // --- Motor phase order detection procedure -------------------------------------------------------
@@ -1263,10 +1292,10 @@ TEST(RunMotorPhaseOrderDetectionProcedure, PreparesReleasesDetectsAndRestores) {
   EXPECT_EQ(detected->value.at("order").get<std::string>(), "inverted");
   EXPECT_TRUE(detected->value.at("inverted").get<bool>());
 
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 4);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 4);
   // The brake may only be released once the drive is enabled.
-  EXPECT_TRUE(
-      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
+  EXPECT_TRUE(driver.wroteBefore(cia402::objects::kControlword,
+                                 somanet::objects::kBrakeOptionsBrakeStatus));
 }
 
 TEST(RunMotorPhaseOrderDetectionProcedure, RestoresTheBrakeAndModeButNotThePhaseOrder) {
@@ -1281,10 +1310,9 @@ TEST(RunMotorPhaseOrderDetectionProcedure, RestoresTheBrakeAndModeButNotThePhase
   ASSERT_TRUE(
       runMotorPhaseOrderDetectionProcedure(device, reporter, std::stop_token{}).has_value());
 
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)),
+            std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
   const auto motorSettingWrites = std::ranges::count_if(
       driver.writeLog, [](const auto& write) { return write.first == 0x2003; });
@@ -1304,9 +1332,8 @@ TEST(RunMotorPhaseOrderDetectionProcedure, RestoresAfterCancellation) {
   const auto restore = stepById(reporter.steps(), "restore");
   ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)),
+            std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
 }
 
 // --- Offset detection (the whole commissioning sequence)
@@ -1390,12 +1417,14 @@ TEST(RunOffsetDetectionProcedure, ReleasesTheBrakeOnlyAfterTheWindingMeasurement
   // Three commands were issued before the brake was ever written.
   const auto& log = driver.writeLog;
   const auto firstBrakeWrite = std::ranges::find_if(log, [](const auto& write) {
-    return write.first == somanet::kBrakeOptions && write.second == somanet::kBrakeStatus;
+    return write.first == somanet::objects::kBrakeOptions.index &&
+           write.second == somanet::objects::kBrakeOptionsBrakeStatus.subindex;
   });
   ASSERT_NE(firstBrakeWrite, log.end());
-  const auto commandsBeforeBrake = std::ranges::count_if(
-      log.begin(), firstBrakeWrite,
-      [](const auto& write) { return write.first == kOsCommand && write.second == 1; });
+  const auto commandsBeforeBrake =
+      std::ranges::count_if(log.begin(), firstBrakeWrite, [](const auto& write) {
+        return write.first == profile::objects::kOSCommand.index && write.second == 1;
+      });
   EXPECT_EQ(commandsBeforeBrake, 3);
 }
 
@@ -1516,8 +1545,7 @@ TEST(RunCommutationOffsetMeasurementProcedure, TheStationaryMethodNeverTouchesTh
   // Its release-brake step stays idle rather than reporting work that did not happen.
   OsCommandFakeDriver driver;
   Device device = makeDevice(driver);
-  driver.store[OsCommandFakeDriver::key(somanet::kCommutationOffsetDetection,
-                                        somanet::kCommutationOffsetMethod)] = {
+  driver.store[OsCommandFakeDriver::key(somanet::objects::kCommutationOffsetMeasurementMethod)] = {
       static_cast<uint8_t>(somanet::CommutationOffsetMethod::kStationary)};
   ProgressReporter reporter(commutationOffsetMeasurementSteps());
 
@@ -1540,7 +1568,7 @@ TEST(RunCommutationOffsetMeasurementProcedure, RestoresTheBrakeItFound) {
   // A drive found with the brake already released must be left that way.
   OsCommandFakeDriver driver;
   Device device = makeDevice(driver);
-  driver.store[OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)] = {
+  driver.store[OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)] = {
       static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)};
   ProgressReporter reporter(commutationOffsetMeasurementSteps());
 
@@ -1548,9 +1576,8 @@ TEST(RunCommutationOffsetMeasurementProcedure, RestoresTheBrakeItFound) {
   ASSERT_TRUE(
       runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{}).has_value());
 
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)),
+            std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)});
 }
 
 TEST(RunCommutationOffsetMeasurementProcedure, AFailedMeasurementStillRestoresTheBrake) {
@@ -1565,9 +1592,8 @@ TEST(RunCommutationOffsetMeasurementProcedure, AFailedMeasurementStillRestoresTh
   const auto steps = reporter.steps();
   EXPECT_EQ(stepById(steps, "commutation-offset-measurement")->status, ProgressStatus::kFailed);
   EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)),
+            std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
 }
 
 TEST(RunCommutationOffsetMeasurementProcedure, AnUnreadableMethodLeavesTheDriveUntouched) {
@@ -1575,8 +1601,8 @@ TEST(RunCommutationOffsetMeasurementProcedure, AnUnreadableMethodLeavesTheDriveU
   // fail before the drive is enabled rather than guess — no step runs, and nothing is written.
   OsCommandFakeDriver driver;
   Device device = makeDevice(driver);
-  driver.store[OsCommandFakeDriver::key(somanet::kCommutationOffsetDetection,
-                                        somanet::kCommutationOffsetMethod)] = {7};
+  driver.store[OsCommandFakeDriver::key(somanet::objects::kCommutationOffsetMeasurementMethod)] = {
+      7};
   ProgressReporter reporter(commutationOffsetMeasurementSteps());
 
   auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
@@ -1597,8 +1623,8 @@ TEST(RunCommutationOffsetMeasurementProcedure, AMissingMethodReleasesTheBrakeAnd
   OsCommandFakeDriver driver;
   driver.programDrive();
   std::erase_if(driver.ods, [](const OdEntry& e) {
-    return e.index == somanet::kCommutationOffsetDetection &&
-           e.subindex == somanet::kCommutationOffsetMethod;
+    return e.index == somanet::objects::kCommutationOffset.index &&
+           e.subindex == somanet::objects::kCommutationOffsetMeasurementMethod.subindex;
   });
   Device device(1, driver);
   ASSERT_TRUE(device.initializeParameters().has_value());
@@ -1623,8 +1649,9 @@ TEST(RunCommutationOffsetMeasurementProcedure, ReadsSixteenBitBrakeObjects) {
   OsCommandFakeDriver driver;
   driver.programDrive();
   for (auto& e : driver.ods) {
-    if (e.index == somanet::kBrakeOptions &&
-        (e.subindex == somanet::kBrakeReleaseStrategy || e.subindex == somanet::kBrakeStatus)) {
+    if (e.index == somanet::objects::kBrakeOptions.index &&
+        (e.subindex == somanet::objects::kBrakeOptionsReleaseStrategy.subindex ||
+         e.subindex == somanet::objects::kBrakeOptionsBrakeStatus.subindex)) {
       e.dataType = static_cast<uint16_t>(ObjectDataType::UNSIGNED16);
       e.bitLength = 16;
       driver.store[OsCommandFakeDriver::key(e.index, e.subindex)].push_back(0);
@@ -1677,8 +1704,9 @@ TEST(RunPhaseResistanceMeasurementProcedure, PreparesMeasuresAndRestores) {
   EXPECT_EQ(measured->value.at("milliohms").get<uint32_t>(), 100000u);
 
   // Diagnostics mode was requested before the command ran, and the mode was put back afterwards.
-  EXPECT_TRUE(driver.wroteBefore(Object::kModeOfOperation, 0, kOsCommand, 1));
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_TRUE(
+      driver.wroteBefore(cia402::objects::kModesOfOperation, profile::objects::kOSCommandCommand));
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -1715,7 +1743,7 @@ TEST(RunPhaseResistanceMeasurementProcedure, FailsTheMeasurementStepAndStillRest
   const auto restore = stepById(steps, "restore");
   ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -1732,7 +1760,7 @@ TEST(RunPhaseResistanceMeasurementProcedure, RestoresAfterCancellation) {
   const auto restore = stepById(reporter.steps(), "restore");
   ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -1768,7 +1796,7 @@ TEST(RunPhaseInductanceMeasurementProcedure, PreparesMeasuresAndRestores) {
 
   // Command 9, not 8 — the two procedures share their whole body, so which command each issues is
   // the one thing that could silently be wrong.
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 9);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 9);
 }
 
 TEST(RunPhaseInductanceMeasurementProcedure, NeverTouchesTheBrake) {
@@ -1821,8 +1849,8 @@ TEST(RunVelocitySourceProcedure, AppliesTheChoiceAndTouchesNothingElse) {
   EXPECT_EQ(step->value.at("source").get<std::string>(), "firmware");
   EXPECT_EQ(driver.commandIds, std::vector<uint8_t>{18});
   // Prepares nothing: no mode, no controlword, no brake.
-  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
-  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kModesOfOperation), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kControlword), -1);
   EXPECT_EQ(brakeWrites(driver), 0);
 }
 
@@ -2016,10 +2044,11 @@ TEST(RunIgnoreBissStatusBitsProcedure, AppliesTheChangeAndTouchesNothingElse) {
   EXPECT_EQ(step->value.at("encoderOrdinal").get<uint8_t>(), 2);
   EXPECT_TRUE(step->value.at("ignore").get<bool>());
 
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0b101);
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[1],
+            0b101);
   // Prepares nothing: no operation mode, no controlword, no brake.
-  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
-  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kModesOfOperation), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kControlword), -1);
   EXPECT_EQ(brakeWrites(driver), 0);
 }
 
@@ -2085,8 +2114,8 @@ TEST(RunSkippedCyclesProcedure, ReadsTheCounterAndTouchesNothingElse) {
 
   // The whole point of this procedure: it prepares nothing. No operation mode, no controlword, no
   // brake — a pure read, safe on a drive that is enabled and moving.
-  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
-  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kModesOfOperation), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kControlword), -1);
   EXPECT_EQ(brakeWrites(driver), 0);
 }
 
@@ -2196,8 +2225,8 @@ TEST(RunFirmwareLatencyProcedure, MeasureStartsObservesAndReads) {
   EXPECT_EQ(stopped->status, ProgressStatus::kIdle);
 
   // Prepares nothing, like the counter read: no operation mode, no controlword, no brake.
-  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
-  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kModesOfOperation), -1);
+  EXPECT_EQ(driver.lastWriteIndex(cia402::objects::kControlword), -1);
   EXPECT_EQ(brakeWrites(driver), 0);
 }
 
@@ -2218,7 +2247,8 @@ TEST(RunFirmwareLatencyProcedure, StartOnlyStartsAndLeavesTheReadIdle) {
     EXPECT_EQ(stepById(steps, id)->status, ProgressStatus::kIdle) << id;
   }
   // One command, and it is the start action.
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   EXPECT_EQ(written[0], 22);
   EXPECT_EQ(written[1], 0);
 }
@@ -2237,7 +2267,8 @@ TEST(RunFirmwareLatencyProcedure, StopIssuesTheStopActionAlone) {
   const auto steps = reporter.steps();
   EXPECT_EQ(stepById(steps, "stop-measurements")->status, ProgressStatus::kSucceeded);
   EXPECT_EQ(stepById(steps, "start-measurement")->status, ProgressStatus::kIdle);
-  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  const auto written =
+      driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand));
   EXPECT_EQ(written[1], 2);
 }
 
@@ -2303,9 +2334,9 @@ TEST(RunTorqueConstantMeasurementProcedure, PreparesReleasesMeasuresAndRestores)
   EXPECT_EQ(measured->value.at("milliNewtonMetresPerAmpere").get<int32_t>(), 1203210);
 
   // The brake is released only once the drive is enabled, as for pole pair detection.
-  EXPECT_TRUE(
-      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 10);
+  EXPECT_TRUE(driver.wroteBefore(cia402::objects::kControlword,
+                                 somanet::objects::kBrakeOptionsBrakeStatus));
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(profile::objects::kOSCommandCommand))[0], 10);
 }
 
 TEST(RunTorqueConstantMeasurementProcedure, AFailedMeasurementStillRestoresTheBrake) {
@@ -2320,9 +2351,8 @@ TEST(RunTorqueConstantMeasurementProcedure, AFailedMeasurementStillRestoresTheBr
   const auto restore = stepById(reporter.steps(), "restore");
   ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsBrakeStatus)),
+            std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
 }
 
 TEST(RunOpenPhaseDetectionProcedure, FailsTheDeviceCheckBeforeAnyStepRuns) {
@@ -3047,10 +3077,10 @@ constexpr uint32_t kRatedTorqueMilliNm = 2000;
 // torque to zero, and a recording on its files. The chirp settings and the HRD commands answer
 // through the scripted OS command replies like every other command.
 void programPlant(OsCommandFakeDriver& driver) {
-  driver.programObject(Object::kMotorRatedTorque, 0, ObjectDataType::UNSIGNED32,
+  driver.programObject(cia402::objects::kMotorRatedTorque, ObjectDataType::UNSIGNED32,
                        {static_cast<uint8_t>(kRatedTorqueMilliNm & 0xFF),
                         static_cast<uint8_t>(kRatedTorqueMilliNm >> 8), 0, 0});
-  driver.programObject(Object::kTargetTorque, 0, ObjectDataType::INTEGER16, {0x10, 0x00});
+  driver.programObject(cia402::objects::kTargetTorque, ObjectDataType::INTEGER16, {0x10, 0x00});
 }
 
 // A system identification recording: one 6-byte sample per millisecond, velocity in rpm as Q15 and
@@ -3205,14 +3235,15 @@ TEST(RunPlantIdentificationProcedure, ExcitesRecordsFitsStoresAndRestores) {
   EXPECT_EQ(stepById(steps, "store")->value.at("content"), csv);
 
   // CST and a zero target torque before the enable.
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kTargetTorque, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kTargetTorque)),
             (std::vector<uint8_t>{0, 0}));
-  EXPECT_TRUE(driver.wroteBefore(Object::kModeOfOperation, 0, Object::kControlword, 0));
-  EXPECT_TRUE(driver.wroteBefore(Object::kTargetTorque, 0, Object::kControlword, 0));
+  EXPECT_TRUE(
+      driver.wroteBefore(cia402::objects::kModesOfOperation, cia402::objects::kControlword));
+  EXPECT_TRUE(driver.wroteBefore(cia402::objects::kTargetTorque, cia402::objects::kControlword));
 
   // Restored: the mode it found, the drive in Switched On, and the chirp disarmed last of all the
   // OS commands. The brake was the drive's to release, so it was never written.
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
   EXPECT_EQ(driver.statusword, 0x0023);
   ASSERT_FALSE(driver.commands.empty());
@@ -3228,7 +3259,7 @@ TEST(RunPlantIdentificationProcedure, ReleasesAManualBrakeAfterTheEnableAndEngag
   programPlant(driver);
   Device device = makeDevice(driver);
   recordPlant(driver, 100, 60.0, 500);
-  driver.store[OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy)] = {
+  driver.store[OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsReleaseStrategy)] = {
       static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kManualOutputVoltage)};
   RecordingFit fit;
   ProgressReporter reporter(plantIdentificationSteps());
@@ -3242,10 +3273,10 @@ TEST(RunPlantIdentificationProcedure, ReleasesAManualBrakeAfterTheEnableAndEngag
   EXPECT_EQ(driver.brakeStatusWrites,
             (std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged),
                                   static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)}));
-  EXPECT_TRUE(
-      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
-  EXPECT_LT(driver.lastWriteIndex(somanet::kBrakeOptions, somanet::kBrakeStatus),
-            driver.lastWriteIndex(Object::kControlword, 0));
+  EXPECT_TRUE(driver.wroteBefore(cia402::objects::kControlword,
+                                 somanet::objects::kBrakeOptionsBrakeStatus));
+  EXPECT_LT(driver.lastWriteIndex(somanet::objects::kBrakeOptionsBrakeStatus),
+            driver.lastWriteIndex(cia402::objects::kControlword));
   EXPECT_EQ(stepById(reporter.steps(), "release-brake")->value.at("brake"), "released manually");
 }
 
@@ -3347,8 +3378,9 @@ TEST(RunPlantIdentificationProcedure, AFaultDuringTheChirpFailsTheRecordingAndRe
 
 TEST(RunPlantIdentificationProcedure, RefusesADriveWithNoRatedTorqueBeforeAnythingMoves) {
   OsCommandFakeDriver driver;
-  driver.programObject(Object::kMotorRatedTorque, 0, ObjectDataType::UNSIGNED32, {0, 0, 0, 0});
-  driver.programObject(Object::kTargetTorque, 0, ObjectDataType::INTEGER16, {0, 0});
+  driver.programObject(cia402::objects::kMotorRatedTorque, ObjectDataType::UNSIGNED32,
+                       {0, 0, 0, 0});
+  driver.programObject(cia402::objects::kTargetTorque, ObjectDataType::INTEGER16, {0, 0});
   Device device = makeDevice(driver);
   RecordingFit fit;
   ProgressReporter reporter(plantIdentificationSteps());
@@ -3390,7 +3422,7 @@ TEST(RunPlantIdentificationProcedure, RestoresAfterCancellation) {
                                                 plantRequest(), fit.fn());
   ASSERT_FALSE(result.has_value());
   EXPECT_FALSE(fit.measurement.has_value());
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
 }
 
@@ -3480,8 +3512,8 @@ class IcMuFakeDriver : public OsCommandFakeDriver {
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slave, uint16_t index,
                                                            uint8_t subindex) override {
-    if (index != kOsCommand || subindex != 3 || awaitingCommand || commands.empty() ||
-        commands.back()[0] != 0) {
+    if (index != profile::objects::kOSCommand.index || subindex != 3 || awaitingCommand ||
+        commands.empty() || commands.back()[0] != 0) {
       return OsCommandFakeDriver::readSdo(slave, index, subindex);
     }
     awaitingCommand = true;
@@ -3730,7 +3762,7 @@ TEST(RunIcMuEncoderConfigurationProcedure, RefusesBeforeWritingAnything) {
     IcMuFakeDriver driver;
     Device device =
         makeIcMuDevice(driver, c.firmware, c.sensorPort, c.singleturnBits, c.multiturnBits);
-    driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {
+    driver.store[OsCommandFakeDriver::key(cia402::objects::kStatusword)] = {
         static_cast<uint8_t>(c.statusword & 0xFF), static_cast<uint8_t>(c.statusword >> 8)};
     ProgressReporter reporter(mm::node::icMuEncoderConfigurationSteps());
 
@@ -3917,8 +3949,9 @@ void expectRefusal(Device& device, IcMuFakeDriver& driver,
   EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
   EXPECT_TRUE(driver.registerWrites.empty());
   // No controlword was written, so the drive was never enabled.
-  EXPECT_EQ(std::ranges::count_if(driver.writeLog,
-                                  [](const auto& w) { return w.first == Object::kControlword; }),
+  EXPECT_EQ(std::ranges::count_if(
+                driver.writeLog,
+                [](const auto& w) { return w.first == cia402::objects::kControlword.index; }),
             0);
 }
 
@@ -3971,7 +4004,7 @@ TEST(RunIcMuCalibrationProcedure, RefusesAFeedConstantOfZero) {
 TEST(RunIcMuCalibrationProcedure, RefusesADriveInOperationEnabled) {
   IcMuFakeDriver driver;
   Device device = makeCalibrationDevice(driver, 1, 19, [](IcMuFakeDriver& d) {
-    d.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x27, 0x00};
+    d.store[OsCommandFakeDriver::key(cia402::objects::kStatusword)] = {0x27, 0x00};
   });
   expectRefusal(device, driver, calibrationRequest(), "Operation Enabled");
 }
@@ -4182,7 +4215,7 @@ TEST(RunIcMuEepromExportProcedure, TurnsTheStatusBitsOnAgainAfterAFailedRead) {
 TEST(RunIcMuEepromExportProcedure, RefusesADriveInOperationEnabled) {
   IcMuFakeDriver driver;
   Device device = makeIcMuDevice(driver, "v5.6.11", 1, 20, 18);
-  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x27, 0x00};
+  driver.store[OsCommandFakeDriver::key(cia402::objects::kStatusword)] = {0x27, 0x00};
   ProgressReporter reporter(mm::node::icMuEepromExportSteps());
   auto result = mm::node::runIcMuEepromExportProcedure(
       device, reporter, {}, {.encoderOrdinal = somanet::EncoderOrdinal::kEncoder1});
@@ -4443,10 +4476,11 @@ TEST(RunOpenLoopFieldControlProcedure, WritesTheProfileBeforeTheEnableAndRestore
   EXPECT_EQ(value(driver.commands[6]), 10000);
 
   // Mode -3 and every parameter before the enable, because the profile starts with it.
-  EXPECT_TRUE(driver.wroteBefore(Object::kModeOfOperation, 0, kOsCommand, 1));
+  EXPECT_TRUE(
+      driver.wroteBefore(cia402::objects::kModesOfOperation, profile::objects::kOSCommandCommand));
   // Restored: Switched On, and the mode it found.
   EXPECT_EQ(driver.statusword, 0x0023);
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)),
             std::vector<uint8_t>{8});
   EXPECT_EQ(brakeWrites(driver), 0);
   const auto plan = stepById(reporter.steps(), "validate")->value;
@@ -4464,10 +4498,11 @@ TEST(RunOpenLoopFieldControlProcedure, EnablesOnlyAfterTheLastParameter) {
                   .has_value());
   // The procedure writes no controlword before the profile is complete: the first one, which starts
   // the enable, comes after the last OS command.
-  int lastCommand = driver.lastWriteIndex(kOsCommand, 1);
+  int lastCommand = driver.lastWriteIndex(profile::objects::kOSCommandCommand);
   int firstEnable = -1;
   for (size_t k = 0; k < driver.writeLog.size(); ++k) {
-    if (driver.writeLog[k] == std::pair<uint16_t, uint8_t>{Object::kControlword, 0}) {
+    if (driver.writeLog[k] ==
+        std::pair<uint16_t, uint8_t>{cia402::objects::kControlword.index, 0}) {
       firstEnable = static_cast<int>(k);
       break;
     }
@@ -4479,7 +4514,7 @@ TEST(RunOpenLoopFieldControlProcedure, ReleasesAManualBrakeAndEngagesItBeforeThe
   OsCommandFakeDriver driver;
   Device device = makeOpenLoopDevice(driver, 5);
   driver.enabledStatusword = 0x0427;
-  driver.store[OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy)] = {
+  driver.store[OsCommandFakeDriver::key(somanet::objects::kBrakeOptionsReleaseStrategy)] = {
       static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kManualOutputVoltage)};
   ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
 
@@ -4489,8 +4524,8 @@ TEST(RunOpenLoopFieldControlProcedure, ReleasesAManualBrakeAndEngagesItBeforeThe
   EXPECT_EQ(driver.brakeStatusWrites,
             (std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged),
                                   static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)}));
-  EXPECT_LT(driver.lastWriteIndex(somanet::kBrakeOptions, somanet::kBrakeStatus),
-            driver.lastWriteIndex(Object::kControlword, 0));
+  EXPECT_LT(driver.lastWriteIndex(somanet::objects::kBrakeOptionsBrakeStatus),
+            driver.lastWriteIndex(cia402::objects::kControlword));
 }
 
 TEST(RunOpenLoopFieldControlProcedure, FailsWhenTheProfileDoesNotEndInTime) {
@@ -4518,7 +4553,8 @@ TEST(RunOpenLoopFieldControlProcedure, RefusesAMotorWithoutPolePairsBeforeAnythi
   EXPECT_NE(result.error().find("0 pole pairs"), std::string::npos) << result.error();
   EXPECT_TRUE(driver.commands.empty());
   EXPECT_EQ(
-      std::ranges::count(driver.writeLog, std::pair<uint16_t, uint8_t>{Object::kControlword, 0}),
+      std::ranges::count(driver.writeLog,
+                         std::pair<uint16_t, uint8_t>{cia402::objects::kControlword.index, 0}),
       0);
 }
 
@@ -4533,17 +4569,18 @@ TEST(RunOpenLoopFieldControlProcedure, RefusesADeviceThatIsNotInOp) {
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("only in OP"), std::string::npos) << result.error();
   EXPECT_TRUE(driver.commands.empty());
-  EXPECT_EQ(std::ranges::count(driver.writeLog,
-                               std::pair<uint16_t, uint8_t>{Object::kModeOfOperation, 0}),
-            0);
+  EXPECT_EQ(
+      std::ranges::count(driver.writeLog,
+                         std::pair<uint16_t, uint8_t>{cia402::objects::kModesOfOperation.index, 0}),
+      0);
 }
 
 TEST(RunOpenLoopFieldControlProcedure, SaysWhenTheDriveCannotGoBackToNoMode) {
   OsCommandFakeDriver driver;
   Device device = makeOpenLoopDevice(driver, 5);
   driver.enabledStatusword = 0x0427;
-  driver.store[OsCommandFakeDriver::key(Object::kModeOfOperation, 0)] = {0};
-  driver.store[OsCommandFakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {0};
+  driver.store[OsCommandFakeDriver::key(cia402::objects::kModesOfOperation)] = {0};
+  driver.store[OsCommandFakeDriver::key(cia402::objects::kModesOfOperationDisplay)] = {0};
   ProgressReporter reporter(mm::node::openLoopFieldControlSteps());
 
   ASSERT_TRUE(mm::node::runOpenLoopFieldControlProcedure(device, reporter, std::stop_token{},

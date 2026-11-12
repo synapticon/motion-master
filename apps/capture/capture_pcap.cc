@@ -12,7 +12,8 @@ namespace mm::capture {
 
 std::expected<void, std::string> captureFrames(const std::string& adapter,
                                                std::chrono::milliseconds duration,
-                                               const FrameSink& sink) {
+                                               const FrameSink& sink, const std::atomic<bool>& stop,
+                                               const ReadyFn& ready) {
   std::array<char, PCAP_ERRBUF_SIZE> error{};
   // Immediate mode, so a frame reaches this program when it arrives rather than when the capture
   // buffer fills. The read timeout bounds each wait, so the deadline is checked often.
@@ -36,9 +37,15 @@ std::expected<void, std::string> captureFrames(const std::string& adapter,
     pcap_setfilter(handle, &filter);
     pcap_freecode(&filter);
   }
+  if (auto r = ready(); !r) {
+    pcap_close(handle);
+    return std::unexpected(r.error());
+  }
 
   const auto deadline = std::chrono::steady_clock::now() + duration;
-  while (std::chrono::steady_clock::now() < deadline) {
+  // The read timeout of 100 ms bounds each wait, so a stop request ends the capture within that
+  // time.
+  while (std::chrono::steady_clock::now() < deadline && !stop.load(std::memory_order_relaxed)) {
     pcap_pkthdr* header = nullptr;
     const u_char* data = nullptr;
     const int rc = pcap_next_ex(handle, &header, &data);

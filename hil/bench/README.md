@@ -82,6 +82,25 @@ image starts a new ring, so a dump holds only the cycles after the last such re-
 The motion test asks for a dump. In GitHub Actions, the input `process-data-dumps` of the workflow
 turns the option on, and the workflow uploads every dump with `report.xml`.
 
+## Packet captures
+
+With `pytest --packet-captures`, a test marked with `@pytest.mark.usefixtures("packet_capture")`
+gets every EtherCAT frame on the adapter of the bench, from the start of the test to its end, as a
+file: `captures/<test name>.pcap`. It gets the file also when it fails. Open the file in Wireshark,
+or read the summary of late frames with `GET /api/captures/{name}` once the file is in `captures/`
+of the user cache of a server. The option is off by default, because a capture of a motion test is
+large: it holds every cyclic frame.
+
+The fixture starts the capture with `POST /api/captures/start` before the test, on the adapter that
+`bench.description.toml` names, and stops it with `POST /api/captures/stop` after the test. The
+server runs the capture as a program of its own, so the reset at the start of the test is recorded
+and does not end it. The fixture then downloads the file and deletes it from the server. A capture
+that the server refuses to start, for example because another capture runs, fails the setup of
+the test with the server's reason.
+
+The motion test asks for a capture. In GitHub Actions, the input `packet-captures` of the workflow
+turns the option on, and the workflow uploads every capture with `report.xml`.
+
 ## The bench report
 
 Before the first test, the run reads the version of the server. Then it brings every device to
@@ -165,13 +184,14 @@ somebody else uses.
 ## Run the tests in GitHub Actions
 
 The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the tests on
-`ci-belgrade-linux`. Start it by hand from the Actions tab. It has three inputs:
+`ci-belgrade-linux`. Start it by hand from the Actions tab. It has four inputs:
 
 | Input | Empty | Set |
 | --- | --- | --- |
 | `version` | Build the Docker image of the server from the selected branch. | Pull `synapticon/motion-master:<version>` from Docker Hub and test that image. A version that is not on Docker Hub fails the run before any test runs. |
 | `tests` | Run every test. | Run the tests that a pytest `-k` expression selects, for example `scan and not power`. |
 | `process-data-dumps` | Off, the default: save no dump. | On: save a process-data dump of each test that asks for one, and upload it. |
+| `packet-captures` | Off, the default: save no capture. | On: save a packet capture of each test that asks for one, and upload it. |
 
 To start the workflow from a terminal, use the GitHub CLI. `--ref` selects the branch that the
 tests come from, and the image is built from that branch too when `version` is empty.
@@ -180,11 +200,12 @@ tests come from, and the image is built from that branch too when `version` is e
 # Every test, with a server built from main
 gh workflow run bench-tests.yml --ref main
 
-# Some tests, against a released image, with the process-data dumps
+# Some tests, against a released image, with the process-data dumps and the packet captures
 gh workflow run bench-tests.yml --ref main \
   -f version=6.0.0-alpha.122 \
   -f tests="scan and not power" \
-  -f process-data-dumps=true
+  -f process-data-dumps=true \
+  -f packet-captures=true
 ```
 
 Then follow the run, and download its files when it ends:
@@ -198,7 +219,8 @@ gh run download <run-id>                           # report.xml, server.log and 
 The tests always come from the selected branch, also when the server is a pulled image. The job
 summary names the server that ran. The workflow starts the server with the capabilities that SOEM
 needs. When the tests end, it uploads `report.xml`, the report file, `server.log`, the log of the
-server, and the process-data dumps when the input `process-data-dumps` is on.
+server, the process-data dumps when the input `process-data-dumps` is on, and the packet captures
+when the input `packet-captures` is on.
 
 The run page shows two tables below the job graph, in the job summary: the bench report, and one
 row for each test with its result and its message.

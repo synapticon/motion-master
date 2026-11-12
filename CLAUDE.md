@@ -779,8 +779,13 @@ a customer PC through `GET /api/captures/{name}` once the file is in `captures/`
 cache. A frame from the master and the same frame on its way back are told apart by the locally
 administered bit of the source MAC, which every ESC sets on a frame it processed. The match of a
 return to its send is the port's rule: index, command, offset, length, and the position for every
-command the slaves do not count up. The route runs the program through `mm::core::spawnChild`
-and `waitChild`, one capture at a time, on the adapter the bus is on. **A packet tap sits at the
+command the slaves do not count up. `CaptureRunner` (`capture_runner.{h,cc}`) runs the program
+through `mm::core::spawnChild`, one capture at a time, on the adapter the bus is on or on one the
+request names. `POST /api/captures` records for a fixed time. `POST /api/captures/start` and
+`/stop` record a span: SIGTERM ends the program within 100 ms with a complete file and summary, and
+the program creates its file only once the adapter is open, which is how the start knows the
+capture runs. Linux and macOS only, because Windows has no signal for a program without a console.
+The bench records one capture per test that asks for it (`--packet-captures`). **A packet tap sits at the
 driver boundary on both sides**, so a capture covers the NIC, the wire and the device, and not the
 host's queues and scheduling between that boundary and SOEM. `netem` is such a queue: under
 `delay 150ms` the server logs writes with no frame back while the capture beside it reads 0.6 ms.

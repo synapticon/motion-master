@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstring>
@@ -31,7 +32,8 @@ int64_t nowNs() {
 
 std::expected<void, std::string> captureFrames(const std::string& adapter,
                                                std::chrono::milliseconds duration,
-                                               const FrameSink& sink) {
+                                               const FrameSink& sink, const std::atomic<bool>& stop,
+                                               const ReadyFn& ready) {
   // A raw socket for every Ethernet type, bound to the adapter. The kernel hands a frame this host
   // sends only to a packet socket opened for every type; a socket opened for one type, the way
   // SOEM opens its own, gets incoming frames alone, and a capture of returns with no sends says
@@ -62,24 +64,33 @@ std::expected<void, std::string> captureFrames(const std::string& adapter,
     return std::unexpected("cannot ask the kernel for timestamps: " +
                            mm::core::errnoMessage(errno));
   }
+  if (auto r = ready(); !r) {
+    close(sock);
+    return std::unexpected(r.error());
+  }
 
   std::array<uint8_t, 65536> frame{};
   std::array<uint8_t, 256> control{};
   const auto deadline = std::chrono::steady_clock::now() + duration;
+  // Each wait is at most 100 ms, so a stop request ends the capture within that time even when no
+  // frame arrives. A signal also wakes poll early, with EINTR.
+  constexpr auto kLongestWait = std::chrono::milliseconds{100};
   for (;;) {
     const auto left = deadline - std::chrono::steady_clock::now();
-    if (left <= std::chrono::milliseconds{0}) {
+    if (left <= std::chrono::milliseconds::zero() || stop.load(std::memory_order_relaxed)) {
       break;
     }
     pollfd pfd{sock, POLLIN, 0};
-    const int waitMs =
-        static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(left).count()) + 1;
-    const int ready = poll(&pfd, 1, waitMs);
-    if (ready < 0 && errno != EINTR) {
+    const auto wait = std::min(
+        std::chrono::duration_cast<std::chrono::milliseconds>(left) + std::chrono::milliseconds{1},
+        kLongestWait);
+    const int waitMs = static_cast<int>(wait.count());
+    const int polled = poll(&pfd, 1, waitMs);
+    if (polled < 0 && errno != EINTR) {
       close(sock);
       return std::unexpected("poll failed: " + mm::core::errnoMessage(errno));
     }
-    if (ready <= 0) {
+    if (polled <= 0) {
       continue;
     }
     iovec iov{frame.data(), frame.size()};

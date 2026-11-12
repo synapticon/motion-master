@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **A capture can record a span of work: `POST /api/captures/start`, then `POST /api/captures/stop`.** The stop answers the pcap file and its summary, as `POST /api/captures` does. The capture runs as a program of its own, so a reset, a scan or an AL state change in between is recorded, not interrupted. `motion-master-capture` ends on SIGTERM or SIGINT with a complete file. Linux and macOS servers only; on Windows the start answers 501. The Console's Capture section has Start and Stop, and the Python client has `start_capture()` and `stop_capture()`. With `pytest --packet-captures`, or the input `packet-captures` of the Bench Tests workflow, a bench test that asks for the `packet_capture` fixture saves its frames as `captures/<test>.pcap`, and the motion test asks for one (#219).
+
 ### Changed
 
 - **AL state changes have three routes under `/api/devices/state`.** `POST /api/devices/state` commands one legal AL transition, as before, and now answers 409 instead of 500 for one the AL state machine does not allow; its operationId is `changeState`. `POST /api/devices/state/transition` (operationId `transitionToState`) walks to the state from where each device is: a climb goes one state at a time, a drop is one step, and BOOT is entered and left only through INIT, with `timeout` for each step. `POST /api/devices/restart` moves to `POST /api/devices/state/restart`. A client that calls `transitionToState` now walks, and the Console's AL state buttons and per-device select walk too.

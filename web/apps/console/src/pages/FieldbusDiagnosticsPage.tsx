@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { CaptureSummary, DeviceDiagnostics, PortDiagnostics } from '@synapticon/motion-master-client'
 import FilePickerButton from '../components/FilePickerButton'
@@ -375,11 +375,30 @@ function SummaryTable({ summary }: { summary: CaptureSummary }) {
   )
 }
 
+// A server that cannot stop a capture early answers 501 to a start: Windows, where a program
+// without a console gets no signal. The page then records for a fixed time instead.
+const isNotImplemented = (err: unknown) =>
+  !!err && typeof err === 'object' && (err as { status?: number }).status === 501
+
+// The longest a capture of a fixed length may run, the limit of POST /api/captures.
+const TIMED_CAPTURE_MAX_SECONDS = 300
+
 function CaptureSection() {
   const { api } = useConnection()
-  const [seconds, setSeconds] = useState('30')
+  const [seconds, setSeconds] = useState('600')
   const [result, setResult] = useState<{ path: string; summary: CaptureSummary } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The capture that runs until Stop, and when it started, for the readout beside the button.
+  const [started, setStarted] = useState<{ path: string; since: number } | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!started) {
+      return
+    }
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [started])
 
   const run = useMutation({
     mutationFn: (n: number) => api.runCapture({ seconds: n }).then(r => r.data),
@@ -388,6 +407,40 @@ function CaptureSection() {
     },
     onSuccess: data => setResult({ path: data.path, summary: data.summary }),
     onError: err => setError(apiError(err)),
+  })
+
+  const start = useMutation({
+    mutationFn: (n: number) => api.startCapture({ seconds: n }).then(r => r.data),
+    onMutate: () => {
+      setError(null)
+    },
+    onSuccess: data => {
+      setStarted({ path: data.path, since: Date.now() })
+      setNow(Date.now())
+    },
+    onError: (err, n) => {
+      if (isNotImplemented(err)) {
+        run.mutate(Math.min(n, TIMED_CAPTURE_MAX_SECONDS))
+      } else {
+        setError(apiError(err))
+      }
+    },
+  })
+
+  const stop = useMutation({
+    mutationFn: () => api.stopCapture().then(r => r.data),
+    onMutate: () => {
+      setError(null)
+    },
+    onSuccess: data => {
+      setStarted(null)
+      setResult({ path: data.path, summary: data.summary })
+    },
+    onError: err => {
+      // Nothing to stop any more, or the capture failed: either way no capture runs.
+      setStarted(null)
+      setError(apiError(err))
+    },
   })
 
   // A pcap from another PC: into captures/ through the user cache, then the same summary.
@@ -414,8 +467,9 @@ function CaptureSection() {
   })
 
   const n = Number(seconds)
-  const canRun = Number.isFinite(n) && n >= 1 && n <= 300 && !run.isPending && !upload.isPending
-  const busy = run.isPending || upload.isPending
+  const busy = run.isPending || start.isPending || stop.isPending || upload.isPending
+  const canStart = Number.isFinite(n) && n >= 1 && n <= 3600 && !busy && !started
+  const elapsed = started ? Math.max(0, Math.floor((now - started.since) / 1000)) : 0
 
   return (
     <section className="border border-grey-200 bg-white">
@@ -428,48 +482,77 @@ function CaptureSection() {
       </div>
       <div className="p-4 space-y-4">
         <p className="text-xs text-grey-600 leading-relaxed">
-          Motion Master runs the capture program once, for the seconds you choose, on the adapter
-          the bus is on. The program records with the kernel&apos;s timestamps, adds no frame to
-          the bus, and writes a pcap file under <span className="font-mono">captures/</span> in
-          the user cache, so the Storage page lists it and Wireshark opens it. The summary matches
-          each frame the master sent to the one that came back, per kind: the cyclic process-data
-          frame, and the control plane, which is every mailbox and register request. The bands are
-          the three waits the driver uses, and they are cumulative. The time is taken at the
-          boundary to the NIC driver, so it covers the NIC, the wire and the device, and not the
-          PC&apos;s own queues between that boundary and Motion Master. Late frames here put the
-          delay on the wire or in the device. A clean capture beside &ldquo;got no frame
-          back&rdquo; warnings in the server log puts it inside the PC. A pcap from tcpdump on
-          another PC gets the same summary: pick the file.
+          Start runs the capture program on the adapter the bus is on, and Stop ends it and shows
+          the summary, so the capture holds exactly what happened in between. If you never press
+          Stop, the capture ends by itself after the seconds you choose. The program runs on its
+          own, so a reset, a scan or an AL state change in between is recorded, not interrupted. It
+          records with the kernel&apos;s timestamps, adds no frame to the bus, and writes a pcap
+          file under <span className="font-mono">captures/</span> in the user cache, so the Storage
+          page lists it and Wireshark opens it. The summary matches each frame the master sent to
+          the one that came back, per kind: the cyclic process-data frame, and the control plane,
+          which is every mailbox and register request. The bands are the three waits the driver
+          uses, and they are cumulative. The time is taken at the boundary to the NIC driver, so it
+          covers the NIC, the wire and the device, and not the PC&apos;s own queues between that
+          boundary and Motion Master. Late frames here put the delay on the wire or in the device.
+          A clean capture beside &ldquo;got no frame back&rdquo; warnings in the server log puts it
+          inside the PC. A server on Windows cannot stop a capture early, so there the capture
+          records for a fixed time: the seconds you choose, at most {TIMED_CAPTURE_MAX_SECONDS}. A pcap from
+          tcpdump on another PC gets the same summary: pick the file.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-xs text-grey-600">
-            Seconds
+            Stop after
             <input
               type="number"
               min={1}
-              max={300}
+              max={3600}
               value={seconds}
               onChange={e => setSeconds(e.target.value)}
+              disabled={!!started}
               className="ml-2 w-20 h-[38px] border border-grey-300 px-2 font-mono text-sm"
             />
+            <span className="ml-1">s</span>
           </label>
-          <button onClick={() => run.mutate(n)} disabled={!canRun} className={btnOutline}>
-            {run.isPending ? `Recording ${n} s…` : 'Start'}
-          </button>
+          {started ? (
+            <button
+              onClick={() => stop.mutate()}
+              disabled={stop.isPending}
+              className={`${btnOutline} min-w-[8rem]`}
+            >
+              {stop.isPending ? 'Stopping…' : 'Stop'}
+            </button>
+          ) : (
+            <button
+              onClick={() => start.mutate(n)}
+              disabled={!canStart}
+              className={`${btnOutline} min-w-[8rem]`}
+            >
+              {run.isPending
+                ? `Recording ${run.variables} s…`
+                : start.isPending
+                  ? 'Starting…'
+                  : 'Start'}
+            </button>
+          )}
           <FilePickerButton
             onFile={file => upload.mutate(file)}
             accept=".pcap,application/vnd.tcpdump.pcap,application/octet-stream"
-            disabled={busy}
+            disabled={busy || !!started}
             className="h-[38px]"
             title="Upload a pcap into captures/ in the user cache and summarise it"
           >
             {upload.isPending ? 'Summarising…' : 'Summarise a pcap'}
           </FilePickerButton>
+          {started && (
+            <span className="text-xs text-grey-600 font-mono">Recording, {elapsed} s</span>
+          )}
         </div>
         {error && <p className="text-xs text-status-bad font-mono">{error}</p>}
-        {busy && !error && (
+        {(run.isPending || upload.isPending) && !error && (
           <p className="text-xs text-grey-600">
-            {run.isPending ? 'Recording. The summary appears when the time is up.' : 'Reading the file…'}
+            {run.isPending
+              ? `This server cannot stop a capture early, so it records for a fixed time: ${run.variables} s. The summary appears when the time is up.`
+              : 'Reading the file…'}
           </p>
         )}
         {result && (

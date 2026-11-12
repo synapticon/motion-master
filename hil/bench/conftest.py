@@ -16,6 +16,7 @@ _results: list[tuple[str, str, str]] = []
 
 # The workflow uploads every file in this folder with report.xml.
 DUMPS = Path(__file__).resolve().parent / "dumps"
+CAPTURES = Path(__file__).resolve().parent / "captures"
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--process-data-dumps",
         action="store_true",
         help="save a process-data dump of each test that asks for one, in dumps/",
+    )
+    parser.addoption(
+        "--packet-captures",
+        action="store_true",
+        help="save a packet capture of each test that asks for one, in captures/",
     )
 
 
@@ -129,3 +135,37 @@ def _message(report: pytest.TestReport) -> str:
     if isinstance(report.longrepr, tuple):
         return report.longrepr[2]
     return str(report.longrepr).splitlines()[-1]
+
+
+@pytest.fixture
+def packet_capture(bench: Bench, request: pytest.FixtureRequest) -> Iterator[None]:
+    """Save the EtherCAT frames of the test to captures/<test>.pcap.
+
+    Only with --packet-captures. The capture starts before the test, on the adapter of the bench
+    description, and runs as a program of its own on the server, so the reset at the start of the
+    test is recorded and does not end it. A test that asks for this fixture gets the file also when
+    it fails: the teardown runs after the finally of the test. A capture the server refuses to
+    start, for example because another one runs, fails the setup of the test with the server's
+    reason. A failed stop or download is logged and does not change the result of the test. The
+    file is deleted from the user cache of the server once it is saved, so the cache does not grow
+    with every run.
+    """
+    if not request.config.getoption("--packet-captures"):
+        yield
+        return
+    name = request.node.name
+    bench.client.start_capture(adapter=bench.description.adapter)
+    try:
+        yield
+    finally:
+        try:
+            stopped = bench.client.stop_capture()
+            remote = {"path": stopped["path"]}
+            data = bench.client.call("getUserCacheFile", path=remote).content
+            CAPTURES.mkdir(exist_ok=True)
+            path = CAPTURES / f"{name}.pcap"
+            path.write_bytes(data)
+            bench.client.call("deleteUserCacheFile", path=remote)
+            log.info("%s: saved %s, %d bytes", name, path.relative_to(CAPTURES.parent), len(data))
+        except Exception:
+            log.exception("%s: the packet capture failed", name)

@@ -4,3 +4,4 @@ __pycache__/
 report.xml
 server.log
 dumps/
+captures/

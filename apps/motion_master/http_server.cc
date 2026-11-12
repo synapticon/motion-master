@@ -803,59 +803,132 @@ void HttpServer::run() {
   // file lands in the user cache under captures/, so the user-cache routes list, download and
   // delete it, and the summary is computed here from the file, which is also how a pcap that a
   // user put into captures/ by hand gets its summary.
-  router.post("/api/captures", [this](const mm::api::Request& req) -> mm::api::Response {
-    if (!config_.runCapture) {
-      return mm::api::statusOnly("501 Not Implemented");
-    }
+  // The capture body: an optional JSON object with an `adapter` and a number of `seconds`, where
+  // the adapter defaults to the adapter of the bus.
+  struct CaptureRequest {
+    std::string adapter;
+    int seconds = 0;
+  };
+  const auto readCaptureRequest =
+      [this](const mm::api::Request& req, int defaultSeconds, int maxSeconds,
+             std::string_view why) -> std::expected<CaptureRequest, mm::api::Response> {
     nlohmann::json body = nlohmann::json::object();
     if (!req.body().empty()) {
       body = nlohmann::json::parse(req.body(), nullptr, false);
       if (body.is_discarded() || !body.is_object()) {
-        return mm::api::badRequest("body must be a JSON object");
+        return std::unexpected(mm::api::badRequest("body must be a JSON object"));
       }
     }
-    constexpr int kMaxSeconds = 300;
-    const int seconds = body.value("seconds", 30);
-    if (seconds < 1 || seconds > kMaxSeconds) {
-      return mm::api::badRequest(
-          std::format("seconds must be between 1 and {}; a capture is a measurement a person "
-                      "starts, not a recorder",
-                      kMaxSeconds));
+    CaptureRequest request{body.value("adapter", std::string{}),
+                           body.value("seconds", defaultSeconds)};
+    if (request.seconds < 1 || request.seconds > maxSeconds) {
+      return std::unexpected(mm::api::badRequest(
+          std::format("seconds must be between 1 and {}; {}", maxSeconds, why)));
     }
-    std::string adapter = body.value("adapter", std::string{});
-    if (adapter.empty()) {
-      adapter = deviceManager_.adapter();
+    if (request.adapter.empty()) {
+      request.adapter = deviceManager_.adapter();
     }
-    if (adapter.empty()) {
-      return mm::api::error("409 Conflict",
-                            "no adapter to capture on: bring a bus up with POST /api/init, or "
-                            "name one in the body as `adapter`. SPoE sends no EtherCAT frames, "
-                            "so there is nothing to capture over it");
+    if (request.adapter.empty()) {
+      return std::unexpected(
+          mm::api::error("409 Conflict",
+                         "no adapter to capture on: bring a bus up with POST /api/init, or "
+                         "name one in the body as `adapter`. SPoE sends no EtherCAT frames, "
+                         "so there is nothing to capture over it"));
     }
-    if (captureRunning_.exchange(true)) {
-      return mm::api::error("409 Conflict", "a capture is running; wait for it to finish");
+    return request;
+  };
+  const auto captureError = [](const mm::CaptureError& e) -> mm::api::Response {
+    switch (e.kind) {
+      case mm::CaptureError::Kind::kBusy:
+      case mm::CaptureError::Kind::kNotRunning:
+        return mm::api::error("409 Conflict", e.message);
+      case mm::CaptureError::Kind::kNotSupported:
+        return mm::api::error("501 Not Implemented", e.message);
+      case mm::CaptureError::Kind::kFailed:
+        break;
     }
-    // Cleared on every way out, a throw included, so a capture that fails never refuses the next.
-    struct ClearOnExit {
-      std::atomic<bool>& flag;
-      ~ClearOnExit() { flag.store(false); }
-    } clearOnExit{captureRunning_};
-    auto file = config_.runCapture(adapter, seconds);
-    if (!file) {
-      return mm::api::error("500 Internal Server Error", file.error());
-    }
-    auto records = mm::capture::readPcap(*file);
+    return mm::api::error("500 Internal Server Error", e.message);
+  };
+  // The path of a capture file relative to the user cache, and its summary.
+  const auto captureResult =
+      [this](
+          const std::filesystem::path& file) -> std::expected<nlohmann::json, mm::api::Response> {
+    auto records = mm::capture::readPcap(file);
     if (!records) {
-      return mm::api::error("500 Internal Server Error", records.error());
+      return std::unexpected(mm::api::error("500 Internal Server Error", records.error()));
     }
     std::error_code ec;
-    const auto rel = std::filesystem::relative(*file, userCache_.root(), ec);
-    return mm::api::json(
-        nlohmann::json{{"path", ec ? file->generic_string() : rel.generic_string()},
-                       {"adapter", adapter},
-                       {"seconds", seconds},
-                       {"summary", mm::capture::summarise(*records)}});
-  });
+    const auto rel = std::filesystem::relative(file, userCache_.root(), ec);
+    return nlohmann::json{{"path", ec ? file.generic_string() : rel.generic_string()},
+                          {"summary", mm::capture::summarise(*records)}};
+  };
+
+  router.post("/api/captures",
+              [this, readCaptureRequest, captureError,
+               captureResult](const mm::api::Request& req) -> mm::api::Response {
+                if (!config_.runCapture) {
+                  return mm::api::statusOnly("501 Not Implemented");
+                }
+                auto request = readCaptureRequest(
+                    req, 30, 300,
+                    "a capture of a fixed length is a measurement a person starts, not a recorder");
+                if (!request) {
+                  return request.error();
+                }
+                auto file = config_.runCapture(request->adapter, request->seconds);
+                if (!file) {
+                  return captureError(file.error());
+                }
+                auto body = captureResult(*file);
+                if (!body) {
+                  return body.error();
+                }
+                (*body)["adapter"] = request->adapter;
+                (*body)["seconds"] = request->seconds;
+                return mm::api::json(*body);
+              });
+
+  // A capture with no fixed length: started before a span of work and stopped after it, so a
+  // client records exactly that span. The capture program runs on its own, so a reset, a scan or
+  // an AL state change in between does not end it.
+  router.post(
+      "/api/captures/start",
+      [this, readCaptureRequest, captureError](const mm::api::Request& req) -> mm::api::Response {
+        if (!config_.startCapture) {
+          return mm::api::statusOnly("501 Not Implemented");
+        }
+        auto request = readCaptureRequest(req, 600, 3600,
+                                          "the limit ends a capture that a client never stops");
+        if (!request) {
+          return request.error();
+        }
+        auto file = config_.startCapture(request->adapter, request->seconds);
+        if (!file) {
+          return captureError(file.error());
+        }
+        std::error_code ec;
+        const auto rel = std::filesystem::relative(*file, userCache_.root(), ec);
+        return mm::api::json(
+            nlohmann::json{{"path", ec ? file->generic_string() : rel.generic_string()},
+                           {"adapter", request->adapter},
+                           {"seconds", request->seconds}});
+      });
+
+  router.post("/api/captures/stop",
+              [this, captureError, captureResult](const mm::api::Request&) -> mm::api::Response {
+                if (!config_.stopCapture) {
+                  return mm::api::statusOnly("501 Not Implemented");
+                }
+                auto file = config_.stopCapture();
+                if (!file) {
+                  return captureError(file.error());
+                }
+                auto body = captureResult(*file);
+                if (!body) {
+                  return body.error();
+                }
+                return mm::api::json(*body);
+              });
 
   router.get("/api/captures/*", [this](const mm::api::Request& req) -> mm::api::Response {
     constexpr std::string_view kPrefix = "/api/captures/";

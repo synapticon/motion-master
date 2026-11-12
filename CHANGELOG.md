@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.123] - 2026-11-12
+
 ### Added
 
 - **A capture can record a span of work: `POST /api/captures/start`, then `POST /api/captures/stop`.** The stop answers the pcap file and its summary, as `POST /api/captures` does. The capture runs as a program of its own, so a reset, a scan or an AL state change in between is recorded, not interrupted. `motion-master-capture` ends on SIGTERM or SIGINT with a complete file. Linux and macOS servers only; on Windows the start answers 501. The Console's Capture section has Start and Stop, and the Python client has `start_capture()` and `stop_capture()`. With `pytest --packet-captures`, or the input `packet-captures` of the Bench Tests workflow, a bench test that asks for the `packet_capture` fixture saves its frames as `captures/<test>.pcap`, and the motion test asks for one (#219).
@@ -1099,7 +1101,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.122...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.123...HEAD
+[6.0.0-alpha.123]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.122...v6.0.0-alpha.123
 [6.0.0-alpha.122]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.121...v6.0.0-alpha.122
 [6.0.0-alpha.121]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.120...v6.0.0-alpha.121
 [6.0.0-alpha.120]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.119...v6.0.0-alpha.120

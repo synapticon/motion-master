@@ -2704,7 +2704,7 @@ TEST(FirmwareInstallationBody, WritesThePackageAndReturnsToPreOp) {
   EXPECT_TRUE(bus.driver->removed.empty());
   EXPECT_EQ(bus.driver->written.size(), 1u);
 
-  // INIT and BOOT on the way in, INIT and PRE-OP on the way out — BOOT is only ever paired with
+  // INIT and BOOT on the way in, INIT and PREOP on the way out — BOOT is only ever paired with
   // INIT, which is what the AL state machine allows.
   EXPECT_EQ(bus.driver->commanded,
             (std::vector<uint16_t>{static_cast<uint16_t>(EtherCatState::Init),
@@ -2726,9 +2726,9 @@ TEST(FirmwareInstallationBody, WaitsForARestartOnBothStepsOutOfBoot) {
       runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
   ASSERT_TRUE(result) << result.error();
 
-  // INIT and BOOT on the way in, INIT and PRE-OP on the way out. The two steps in are ordinary
+  // INIT and BOOT on the way in, INIT and PREOP on the way out. The two steps in are ordinary
   // mailbox round trips. The two steps out each cover a restart: an Integro that got a com binary
-  // restarts its netX at the step to INIT, and every SOMANET drive restarts at the step to PRE-OP.
+  // restarts its netX at the step to INIT, and every SOMANET drive restarts at the step to PREOP.
   // After that reset the netX is off the bus for 6 to 19 s, measured on an ACTILINK-S.
   ASSERT_EQ(bus.driver->timeouts.size(), 4u);
   EXPECT_EQ(bus.driver->timeouts[0], bus.driver->timeouts[1]);

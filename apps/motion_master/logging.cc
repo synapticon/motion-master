@@ -65,7 +65,7 @@ std::filesystem::path applyLoggingConfig(const LogSinks& sinks, const LoggingCon
   // Flushing only on warn+ was the first attempt, on the assumption that a crash is preceded by a
   // warning that checkpoints everything buffered before it. That assumption does not hold here:
   // this codebase's crashes were memory-corruption segfaults inside SOEM (the re-map FMMU
-  // overrun, the BOOT -> SAFE-OP mailbox read), which log nothing at all before dying — so the
+  // overrun, the BOOT -> SAFEOP mailbox read), which log nothing at all before dying — so the
   // policy dropped exactly the trail into the fault it was meant to preserve.
   //
   // Measured, in this three-sink layout: ~610 ns per line against ~240. The ratio is large and the

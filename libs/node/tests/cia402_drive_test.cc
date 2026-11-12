@@ -301,7 +301,7 @@ class Cia402FakeDriver : public FieldbusDriver {
                          std::function<void()>, std::function<bool()>) override {}
 };
 
-// Builds a device with the standard CiA402 objects enumerated, online (PRE-OP) for SDO access.
+// Builds a device with the standard CiA402 objects enumerated, online (PREOP) for SDO access.
 Device makeCia402Device(Cia402FakeDriver& driver) {
   driver.programCia402Objects();
   Device device(1, driver);

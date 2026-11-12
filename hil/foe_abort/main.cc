@@ -15,7 +15,7 @@
 //   5. Send an FoE abort.
 //   6. Read the file again. It works.
 //
-// The drive is left in INIT. It needs a power cycle, or a transition to PRE-OP, to start its
+// The drive is left in INIT. It needs a power cycle, or a transition to PREOP, to start its
 // application again.
 
 #include <soem/soem.h>
@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
     std::cerr << "ecx_init failed on " << options.ifname << "\n";
     return EXIT_FAILURE;
   }
-  // Without this, ecx_config_init asks every slave for PRE-OP, and a bootloader that gets PRE-OP
+  // Without this, ecx_config_init asks every slave for PREOP, and a bootloader that gets PREOP
   // starts the application.
   ctx->manualstatechange = 1;
   const int found = ecx_config_init(ctx.get());

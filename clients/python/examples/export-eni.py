@@ -5,8 +5,8 @@ An ENI (EtherCAT Network Information, ETG.2100) is the configuration that anothe
 replays to bring the same bus up. The server builds it from the live bus. The file goes into the
 git-ignored files/ directory next to the client. Pass --output for a different path.
 
-Opens the fieldbus driver, scans and moves the devices to SAFE-OP first when needed, because the
-FMMUs and the logical addresses of the bus exist only from the SAFE-OP transition on. A device in
+Opens the fieldbus driver, scans and moves the devices to SAFEOP first when needed, because the
+FMMUs and the logical addresses of the bus exist only from the SAFEOP transition on. A device in
 OP stays there.
 
     python export-eni.py
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import SAFE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import SAFEOP, MotionMasterClient, run  # noqa: E402
 
 FILES_DIR = Path(__file__).resolve().parent.parent / "files"
 
@@ -32,7 +32,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(SAFE_OP)
+    client.ensure_state(SAFEOP)
 
     content = client.call("exportEni").content
     out = Path(args.output) if args.output else FILES_DIR / "eni.xml"

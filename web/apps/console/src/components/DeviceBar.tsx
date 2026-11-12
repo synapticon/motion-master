@@ -7,10 +7,10 @@ import { useCia402Status } from '../hooks/useCia402Status'
 
 // The AL state a CiA402 command needs. The drive's state machine only advances while its statusword
 // and controlword are exchanging as process data, which happens in OP and nowhere else — an SDO
-// write to the controlword in PRE-OP lands in the object and is never acted on.
+// write to the controlword in PREOP lands in the object and is never acted on.
 export const OP_STATE = 8
 
-// Mailbox-carrying AL states (PRE-OP, SAFE-OP, OP). Reading the status needs one; INIT has no
+// Mailbox-carrying AL states (PREOP, SAFEOP, OP). Reading the status needs one; INIT has no
 // mailbox and BOOT's is FoE-only. Mirrors the sidebar's own check.
 const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8])
 
@@ -24,7 +24,7 @@ export interface DeviceBarContext {
   productName: string
   isCia402: boolean
   alState: number | undefined
-  /** PRE-OP or above: the drive can answer an SDO, so the status can be read. */
+  /** PREOP or above: the drive can answer an SDO, so the status can be read. */
   mailboxActive: boolean
   status: Cia402Status | undefined
   statusError: unknown

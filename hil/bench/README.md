@@ -36,10 +36,10 @@ A test can compare the device with it, or write it back to the device.
 The run has one bench, and the tests use it one after the other. Each test brings the bench to the
 start it needs with its first lines: `bench.client.reset()` for no state on the server,
 `bench.psu.cycle()` for drives that just booted, followed by `bench.client.init()` and
-`bench.wait_for_devices_on_wire()`, and `bench.client.restart(PRE_OP)` for every drive restarted
-through INIT to PRE-OP. A reset of the server
+`bench.wait_for_devices_on_wire()`, and `bench.client.restart(PREOP)` for every drive restarted
+through INIT to PREOP. A reset of the server
 does not send the drives to any AL state. So a drive keeps the state that the test before left it
-in, or drops to SAFE-OP with an error when its watchdog trips. A test that needs a known state
+in, or drops to SAFEOP with an error when its watchdog trips. A test that needs a known state
 requests it.
 
 ## The motion test
@@ -47,7 +47,7 @@ requests it.
 `tests/test_motion.py` turns the motor of a device in Profile Velocity, the operation mode in which
 the drive ramps to a target velocity. Each device needs its own target velocity, limits and times,
 so each device gets its own test. Only the Integro has one. The test of the Integro finds it in
-`bench.description.toml` by its folder, `integro`. The test restarts every drive to PRE-OP, then
+`bench.description.toml` by its folder, `integro`. The test restarts every drive to PREOP, then
 restarts only the Integro to OP, enables it, holds 1000 rpm for 3 s, and sends a quick stop. A
 monitoring records the velocity actual value (`0x606C`), the target velocity (`0x60FF`) and the
 statusword (`0x6041`) in every cycle. The test then checks the recorded rows:
@@ -83,7 +83,7 @@ turns the option on, and the workflow uploads every dump with `report.xml`.
 ## The bench report
 
 Before the first test, the run reads the version of the server. Then it brings every device to
-PRE-OP and reads what the device says it is: the product code, the revision, the firmware version
+PREOP and reads what the device says it is: the product code, the revision, the firmware version
 from object `0x100A`, and the build descriptor and the serial number from the hardware description.
 In GitHub Actions the run writes this as a table to the job summary.
 
@@ -104,7 +104,7 @@ everything about a run:
 | --- | --- |
 | `server.version` | The version of the server under test |
 | `setup.seconds` | How long the start of the run took: the wait for the server, the reset, the power cycle, the init and the wait for the devices on the wire. JUnit counts this time in the time of the first test |
-| `report.seconds` | How long the bench report took, with the transition to PRE-OP that its reads need. JUnit counts this time in the time of the first test too |
+| `report.seconds` | How long the bench report took, with the transition to PREOP that its reads need. JUnit counts this time in the time of the first test too |
 | `device.<position>.folder` | The folder of the device in `devices/` |
 | `device.<position>.productName` | The product name that `GET /api/devices` reports |
 | `device.<position>.productCode` | The product code, in hexadecimal |

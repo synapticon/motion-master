@@ -5,8 +5,8 @@ The LEDs blink for --duration seconds and stop at the end of the run, or at once
 a fieldbus driver that can blink the LEDs offers the procedure, which today is SPoE. Over SOEM the
 device has no device-locate procedure, and the server refuses the run with 404.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there.
 
     python device-locate.py
     python device-locate.py --duration 30 --slave 2
@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
-    PRE_OP,
+    PREOP,
     MotionMasterClient,
     ProcedureError,
     format_step,
@@ -40,7 +40,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     snapshot = None
     changes = step_changes(client.run_procedure(args.slave, PROCEDURE, body))

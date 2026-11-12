@@ -23,8 +23,8 @@ from motion_master_client import (  # noqa: E402
     BOOT,
     INIT,
     OP,
-    PRE_OP,
-    SAFE_OP,
+    PREOP,
+    SAFEOP,
     STATE_NAMES,
     MotionMasterClient,
     ProcedureError,
@@ -198,8 +198,8 @@ class Session:
         return self.client.call("getDeviceStates", query=query).json()[0]["alState"]
 
     def firmware_running(self):
-        """Return whether the drive runs its firmware, which is so in PRE-OP, SAFE-OP and OP."""
-        return self.al_state() in (PRE_OP, SAFE_OP, OP)
+        """Return whether the drive runs its firmware, which is so in PREOP, SAFEOP and OP."""
+        return self.al_state() in (PREOP, SAFEOP, OP)
 
     def heading(self, title):
         """Show and log the start of a step, numbered in the order the steps run. Returns the
@@ -306,9 +306,9 @@ def ensure_state(s, state):
     """Make sure the drive is at least in the AL state `state`, as the client's ensure_state does.
     A drive above `state` stays where it is.
 
-    A drive with no running firmware does not reach PRE-OP. It goes to BOOT instead, where its
+    A drive with no running firmware does not reach PREOP. It goes to BOOT instead, where its
     bootloader serves the files that the hardware description step reads and the firmware
-    installation writes, and stays there whatever `state` is. A drive that reaches PRE-OP but not
+    installation writes, and stays there whatever `state` is. A drive that reaches PREOP but not
     `state` fails the call.
     """
     heading(f"AL state · at least {STATE_NAMES[state]}")
@@ -318,17 +318,17 @@ def ensure_state(s, state):
 def transition_to_state(s, state):
     """Move the drive to exactly the AL state `state`, down as well as up.
 
-    A drive goes down to PRE-OP or SAFE-OP through INIT. On an Integro, the SoC misses a step down
-    from SAFE-OP or OP, and then refuses every write that only PRE-OP allows
-    (synapticon/somanet_software#5823). INIT followed by PRE-OP is legal on every drive.
+    A drive goes down to PREOP or SAFEOP through INIT. On an Integro, the SoC misses a step down
+    from SAFEOP or OP, and then refuses every write that only PREOP allows
+    (synapticon/somanet_software#5823). INIT followed by PREOP is legal on every drive.
 
     A drive with no running firmware goes to BOOT, as in ensure_state.
     """
     heading(f"AL state · {STATE_NAMES[state]}")
-    ladder = [INIT, PRE_OP, SAFE_OP, OP]
+    ladder = [INIT, PREOP, SAFEOP, OP]
     current = s.al_state()
     down = current in ladder and state in ladder and ladder.index(state) < ladder.index(current)
-    if down and state in (PRE_OP, SAFE_OP):
+    if down and state in (PREOP, SAFEOP):
         say("going down through INIT")
         s.client.ensure_state(INIT, positions=[s.slave], exact=True)
     _reach(s, state, exact=True)
@@ -339,12 +339,12 @@ def _reach(s, state, exact):
         s.client.ensure_state(state, positions=[s.slave], exact=exact)
     else:
         try:
-            s.client.ensure_state(PRE_OP, positions=[s.slave], exact=exact and state == PRE_OP)
+            s.client.ensure_state(PREOP, positions=[s.slave], exact=exact and state == PREOP)
         except StateError as e:
-            say("the drive did not reach PRE-OP: %s", e, style="warning")
+            say("the drive did not reach PREOP: %s", e, style="warning")
             say("moving the drive to BOOT", style="warning")
             s.client.ensure_state(BOOT, positions=[s.slave])
-            s.add("AL state", [f"did not reach PRE-OP: {e}", "moved to BOOT"])
+            s.add("AL state", [f"did not reach PREOP: {e}", "moved to BOOT"])
         else:
             s.client.ensure_state(state, positions=[s.slave], exact=exact)
     say("the drive is in %s", STATE_NAMES[s.al_state()])
@@ -406,7 +406,7 @@ def run_procedure(s, name, params=None):
 
 def firmware_version(s):
     """Return the firmware version from 0x100A, or say that no firmware runs."""
-    # Outside PRE-OP, SAFE-OP and OP the server answers 0x100A from its cache, and the answer does
+    # Outside PREOP, SAFEOP and OP the server answers 0x100A from its cache, and the answer does
     # not say so (#177). The version of a firmware that does not run is not recorded.
     if not s.firmware_running():
         return f"not running (drive in {STATE_NAMES[s.al_state()]})"
@@ -429,7 +429,7 @@ def product_lines(title, part):
 def read_hardware_description_file(s):
     """Read the hardware description, and ask again while the drive refuses the FoE read.
 
-    After a power cycle, an Integro refuses FoE reads for about 2.5 s after it reaches PRE-OP,
+    After a power cycle, an Integro refuses FoE reads for about 2.5 s after it reaches PREOP,
     while SDO works (#175). Each refusal is logged.
     """
     deadline = time.monotonic() + HARDWARE_DESCRIPTION_WAIT_S
@@ -525,7 +525,7 @@ def install_firmware(s):
         headers={"Content-Type": "application/octet-stream"},
     )
     log.info("uploaded %s", package.name)
-    params = {"packageFilename": package.name, "finalState": PRE_OP}
+    params = {"packageFilename": package.name, "finalState": PREOP}
     run_procedure(s, "firmware-installation", params)
     after = firmware_version(s)
     s.firmware_version = after

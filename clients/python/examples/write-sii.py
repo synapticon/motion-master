@@ -8,7 +8,7 @@ image you read from the same kind of device, with read-sii.py --output. The devi
 new SII only after a power cycle.
 
 Opens the fieldbus driver and scans first when needed, and moves no device. The write is most
-reliable in INIT or PRE-OP.
+reliable in INIT or PREOP.
 
     python write-sii.py --file files/sii.bin
 """

@@ -7,7 +7,7 @@ device through every state between, one legal transition at a time
 stops the script with its AL status code.
 
     python transition-state.py --state op
-    python transition-state.py --state pre-op --slave 2
+    python transition-state.py --state preop --slave 2
 """
 
 import argparse

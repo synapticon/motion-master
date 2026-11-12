@@ -41,7 +41,7 @@ _PROPERTIES = (
 
 
 def write_bench_report(bench: Bench, record: Callable[[str, object], None]) -> list[dict]:
-    """Read every device, record it, and write the job summary. Call with every device in PRE-OP.
+    """Read every device, record it, and write the job summary. Call with every device in PREOP.
 
     record is pytest's record_testsuite_property, which puts each property into report.xml.
     """

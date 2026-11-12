@@ -596,7 +596,7 @@ constexpr std::string_view kComFirmwareFoeName = "com_firmware.bin";
 constexpr auto kStateTimeout = std::chrono::seconds(10);
 
 /// Ceiling on each of the two transitions out of BOOT. Far longer than an ordinary one because
-/// neither is an ordinary one. The step to PRE-OP makes the SOMANET bootloader hand over to the
+/// neither is an ordinary one. The step to PREOP makes the SOMANET bootloader hand over to the
 /// application by **restarting the device**, so it has to cover a reboot, plus the drive's own
 /// internal timeout for deciding no valid application started (after which it answers AL status
 /// 0x0014 rather than nothing). The step to INIT restarts the netX of an Integro that got a new
@@ -698,7 +698,7 @@ std::expected<void, std::string> transitionTo(DeviceManager& deviceManager, uint
   const auto& reached = states->front();
   if (reached.alState != static_cast<uint16_t>(target)) {
     // The AL status code is what makes this diagnosable rather than merely disappointing: a device
-    // with no application answers a PRE-OP request with 0x0014, "No valid firmware", which says
+    // with no application answers a PREOP request with 0x0014, "No valid firmware", which says
     // exactly what happened instead of "it did not get there".
     std::string detail =
         std::format("the device reported {} rather than {}",
@@ -784,7 +784,7 @@ std::expected<void, std::string> awaitComRestart(DeviceManager& deviceManager,
 /// Leaves BOOT for @p finalState, one legal AL step at a time.
 ///
 /// The state machine only pairs BOOT with INIT and only climbs one step at a time, so the walk is
-/// fixed: INIT, then PRE-OP, then SAFE-OP, then OP, stopping wherever it was asked to. The first
+/// fixed: INIT, then PREOP, then SAFEOP, then OP, stopping wherever it was asked to. The first
 /// two steps each get the long timeout, because either can restart the device. @p comWritten says
 /// that a com binary waits to be applied, so the step to INIT can restart the netX after it.
 std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_t devicePosition,
@@ -808,7 +808,7 @@ std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_
   // Long: this transition restarts the device into the firmware just written.
   if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::PreOp, kBootExitTimeout);
       !r) {
-    return std::unexpected(std::format("could not reach PRE-OP: {}", r.error()));
+    return std::unexpected(std::format("could not reach PREOP: {}", r.error()));
   }
   if (finalState == EtherCatState::PreOp) {
     return {};
@@ -817,7 +817,7 @@ std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_
   // device's PDO mapping, which the firmware just written can change.
   if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::SafeOp, kStateTimeout);
       !r) {
-    return std::unexpected(std::format("could not reach SAFE-OP: {}", r.error()));
+    return std::unexpected(std::format("could not reach SAFEOP: {}", r.error()));
   }
   if (finalState == EtherCatState::SafeOp) {
     return {};
@@ -839,7 +839,7 @@ std::expected<EtherCatState, std::string> parseFinalState(const nlohmann::json& 
   const auto requested = static_cast<EtherCatState>(value.get<uint16_t>());
   if (std::ranges::find(kStates, requested) == kStates.end()) {
     return std::unexpected(
-        std::format("'finalState' must be 1 (INIT), 2 (PRE-OP), 3 (BOOT), 4 (SAFE-OP) or 8 (OP)"));
+        std::format("'finalState' must be 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP) or 8 (OP)"));
   }
   return requested;
 }
@@ -4725,11 +4725,11 @@ std::vector<ProcedureParameter> firmwareInstallationParameters() {
                        true),
       enumParameter(
           "finalState", "Final state",
-          "Where the device is left. PRE-OP is the confirmation that the install worked: the "
+          "Where the device is left. PREOP is the confirmation that the install worked: the "
           "bootloader hands over to the newly written firmware on this transition, so reaching it "
           "means the new firmware booted. Choose BOOT when no application will be present — after "
           "erasing one, or between two installs — since there is then nothing to hand over to. "
-          "SAFE-OP and OP climb through PRE-OP and re-map the whole bus on the way, briefly "
+          "SAFEOP and OP climb through PREOP and re-map the whole bus on the way, briefly "
           "pausing "
           "every other device. The values are AL state numbers, the same encoding "
           "POST /api/devices/state takes.",
@@ -4740,13 +4740,13 @@ std::vector<ProcedureParameter> firmwareInstallationParameters() {
           static_cast<unsigned>(EtherCatState::PreOp),
           {
               ParameterOption{static_cast<unsigned>(EtherCatState::PreOp),
-                              "PRE-OP — loads and confirms the new firmware"},
+                              "PREOP — loads and confirms the new firmware"},
               ParameterOption{static_cast<unsigned>(EtherCatState::Init),
                               "INIT — still on the bootloader"},
               ParameterOption{static_cast<unsigned>(EtherCatState::Boot),
                               "BOOT — stay in the bootloader"},
               ParameterOption{static_cast<unsigned>(EtherCatState::SafeOp),
-                              "SAFE-OP — re-maps the bus and resumes inputs"},
+                              "SAFEOP — re-maps the bus and resumes inputs"},
               ParameterOption{static_cast<unsigned>(EtherCatState::Op),
                               "OP — re-maps the bus and resumes full exchange"},
           }),

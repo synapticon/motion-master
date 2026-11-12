@@ -226,7 +226,7 @@ class ProfileDevice {
   /// Blocks the calling thread for up to @c settle plus @c retries × @c interval. Intended to run
   /// on the control-plane (HTTP) thread: it sleeps between polls but each poll's bus access takes
   /// the driver's control-plane lock only per transaction, so it never blocks the RT loop or the
-  /// WebSocket. Requires the device's mailbox to be active (PRE-OP/SAFE-OP/OP).
+  /// WebSocket. Requires the device's mailbox to be active (PREOP/SAFEOP/OP).
   ///
   /// @param config  Retry/timing configuration (see @c StoreParametersConfig); the defaults suit a
   ///                normal store.
@@ -269,7 +269,7 @@ class ProfileDevice {
   /// persisted store). Which values it touches, and whether the change takes effect immediately or
   /// after the next reset, is device-specific. Blocks the calling thread and takes the driver's
   /// control-plane lock only per transaction, exactly like @c runStoreParameters; requires the
-  /// mailbox to be active (PRE-OP/SAFE-OP/OP).
+  /// mailbox to be active (PREOP/SAFEOP/OP).
   ///
   /// @param group   Which group of defaults to restore (maps to the 0x1011 sub-entry).
   /// @param config  Retry/timing configuration (see @c RestoreDefaultParametersConfig).

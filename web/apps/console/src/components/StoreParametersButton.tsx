@@ -11,8 +11,8 @@ const PROCEDURE = 'store-parameters'
  *
  * It sits in the device bar, on every device page, because a parameter changes from many places:
  * the Parameters page, Tuning, a procedure, a configuration load, a script. Wherever the change
- * came from, the store is one click away. It needs a mailbox, so it is disabled outside PRE-OP,
- * SAFE-OP and OP.
+ * came from, the store is one click away. It needs a mailbox, so it is disabled outside PREOP,
+ * SAFEOP and OP.
  */
 export default function StoreParametersButton({
   slavePosition,
@@ -67,7 +67,7 @@ export default function StoreParametersButton({
         title={
           mailboxActive
             ? 'Store parameters — the device writes every value it holds to its flash (0x1010:01), as its config.csv, so the values survive a power cycle.'
-            : 'Store parameters — unavailable: the device has no mailbox outside PRE-OP, SAFE-OP and OP.'
+            : 'Store parameters — unavailable: the device has no mailbox outside PREOP, SAFEOP and OP.'
         }
       >
         {running ? 'Storing…' : justStored ? 'Stored' : 'Store parameters'}

@@ -81,7 +81,7 @@ std::optional<RegisterMatch> matchRegister(std::uint16_t ado) {
 }
 
 /// The AL Control and AL Status registers carry a state in their low nibble, so a write or a
-/// retry-until read is really "go to SAFE-OP" or "wait for SAFE-OP" — which is the single most
+/// retry-until read is really "go to SAFEOP" or "wait for SAFEOP" — which is the single most
 /// useful thing to say about an init command.
 std::optional<std::string> alStateName(std::span<const std::uint8_t> data) {
   if (data.empty()) {
@@ -91,11 +91,11 @@ std::optional<std::string> alStateName(std::span<const std::uint8_t> data) {
     case 0x01:
       return "INIT";
     case 0x02:
-      return "PRE-OP";
+      return "PREOP";
     case 0x03:
       return "BOOT";
     case 0x04:
-      return "SAFE-OP";
+      return "SAFEOP";
     case 0x08:
       return "OP";
     default:

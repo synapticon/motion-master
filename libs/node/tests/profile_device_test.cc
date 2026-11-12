@@ -176,7 +176,7 @@ class CommandFakeDriver : public FieldbusDriver {
 };
 
 // Builds a device whose object dictionary holds the generic device type (0x1000) and the command
-// object at (index, subindex), enumerated and online (PRE-OP) for SDO access.
+// object at (index, subindex), enumerated and online (PREOP) for SDO access.
 Device makeDevice(CommandFakeDriver& driver, uint16_t index, uint8_t subindex) {
   driver.programCommandObject(index, subindex);
   Device device(1, driver);

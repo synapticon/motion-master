@@ -23,7 +23,7 @@ info:
     2. **Scan** — `POST /api/scan` discovers the slaves on the bus and configures
        their sync managers and FMMUs. Slaves are left in the `INIT` state.
     3. **Transition** — `POST /api/devices/state` moves the bus to a target AL
-       state (`PreOp`, `SafeOp`, `Op`, …); `GET /api/devices/state` reads where
+       state (`PREOP`, `SAFEOP`, `OP`, …); `GET /api/devices/state` reads where
        each slave currently sits.
     4. **Reset** — `POST /api/reset` tears the driver down and clears the device
        list. `init` must be called again afterwards.
@@ -130,7 +130,7 @@ info:
     `timestampUs` is epoch microseconds and the values are positionally ordered by
     the monitoring's `parameters` (fetch the order, and how each value is sourced,
     via `GET /api/monitorings/{topic}`). A value is `null` while its owning device
-    is not exchanging (SAFE-OP/OP). Otherwise a value is a number for a boolean,
+    is not exchanging (SAFEOP/OP). Otherwise a value is a number for a boolean,
     integer or floating-point object (a boolean is 0 or 1), a string for a
     `VISIBLE_STRING` or `UNICODE_STRING` object, and an array of byte values for
     any other type, such as `OCTET_STRING`. Numbers beyond 2^53 lose precision in a JS
@@ -821,12 +821,12 @@ paths:
         state after this call, and state transitions are driven by subsequent API calls.
 
 
-        An SPoE drive starts in OP. When a scan finds a device already in SAFE-OP or OP, it
+        An SPoE drive starts in OP. When a scan finds a device already in SAFEOP or OP, it
         reads that device's object dictionary and publishes the process image, so the
         exchange starts with no state change. The dictionary comes from the parameter cache
         when the cache has it. Otherwise the first read of a drive model takes several
         seconds. If this step fails, the scan still returns 200 and the server logs a
-        warning. A later state change to SAFE-OP or OP maps the image again.
+        warning. A later state change to SAFEOP or OP maps the image again.
 
 
         An empty bus is a successful scan returning 0 slaves, not an error: the master
@@ -1305,7 +1305,7 @@ paths:
         Enumerates the entire CoE object dictionary of the device at
         `slavePosition` via the SDO Info service ("Get Object List" → "Get Object
         Description" → "Get Entry Description") and rebuilds its parameter map.
-        The device must be in PRE-OP, SAFE-OP, or OP (mailbox communication
+        The device must be in PREOP, SAFEOP, or OP (mailbox communication
         active).  On a fully populated drive the call can take several seconds.
         When `readValues=true` each entry is additionally read via SDO upload and
         the decoded value is stored on the parameter. An entry that fails to read
@@ -1739,7 +1739,7 @@ paths:
         decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC
         registers. This is the configured timeout itself, not the expiration counter exposed by
         `GET /api/devices/diagnostics`. A device in OP that misses process data past this timeout
-        faults itself to SAFE-OP+error; raising it lets a device tolerate the brief PDO pause of a
+        faults itself to SAFEOP+error; raising it lets a device tolerate the brief PDO pause of a
         whole-bus re-map.
       parameters:
         - name: slavePosition
@@ -1854,7 +1854,7 @@ paths:
         of the flat, whole-bus `GET /api/process-image`.
 
 
-        Reads fresh over SDO, so the device's mailbox must be active (PRE-OP, SAFE-OP, or OP); a
+        Reads fresh over SDO, so the device's mailbox must be active (PREOP, SAFEOP, or OP); a
         device in INIT or BOOT yields 409.
       parameters:
         - name: slavePosition
@@ -1898,11 +1898,11 @@ paths:
         clears that sync manager's assignment.
 
 
-        **The device must be in PRE-OP.** The mapping and assignment objects are writable only in
-        PRE-OP; in SAFE-OP/OP the sync managers are active and the slave rejects the write, and
-        INIT/BOOT have no CoE mailbox. This is the "drop to PRE-OP, remap, climb back" flow: take
-        the device to PRE-OP (`POST /api/devices/state`), call this, then transition it back to
-        SAFE-OP/OP — at which point the whole-bus process image is re-mapped from the new mapping.
+        **The device must be in PREOP.** The mapping and assignment objects are writable only in
+        PREOP; in SAFEOP/OP the sync managers are active and the slave rejects the write, and
+        INIT/BOOT have no CoE mailbox. This is the "drop to PREOP, remap, climb back" flow: take
+        the device to PREOP (`POST /api/devices/state`), call this, then transition it back to
+        SAFEOP/OP — at which point the whole-bus process image is re-mapped from the new mapping.
 
 
         The write follows the CoE ordering rule (clear assignment, rewrite each mapping object, then
@@ -1942,7 +1942,7 @@ paths:
           description: No device at the given bus position
         "409":
           description: >
-            The write was rejected — most often because the device is not in PRE-OP, but also a
+            The write was rejected — most often because the device is not in PREOP, but also a
             malformed mapping the device aborted, or a read-back that did not match the request
           headers:
             X-Wire-Us:
@@ -2356,7 +2356,7 @@ paths:
 
         Only one procedure may run on a device at a time; a second start is refused with 409 while
         the first is in flight. Most procedures require an active mailbox, so the device must be in
-        PRE-OP, SAFE-OP or OP. A run the drive answers with an error is not a failure of *this*
+        PREOP, SAFEOP or OP. A run the drive answers with an error is not a failure of *this*
         request — it is reported in the snapshot as a failed run.
       operationId: startProcedure
       parameters:
@@ -2781,7 +2781,7 @@ paths:
       description: >
         Performs a CoE SDO download — writes the raw bytes in the request body to
         object `index:subindex` on the device at `slavePosition`. The byte count must
-        match the object's length. Requires the device to be in PRE-OP, SAFE-OP, or OP
+        match the object's length. Requires the device to be in PREOP, SAFEOP, or OP
         (mailbox communication active). Both `index` and `subindex` accept decimal or
         hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676`).
       parameters:
@@ -2903,7 +2903,7 @@ paths:
         `/api/devices/{slavePosition}/firmware-compatibility`).
 
 
-        **Readable in BOOT as well as PRE-OP and above.** The bootloader deliberately allows this one
+        **Readable in BOOT as well as PREOP and above.** The bootloader deliberately allows this one
         file, which is what lets a compatibility check work on a drive a failed install left
         stranded there — precisely when knowing whether the package was the right one matters most.
       parameters:
@@ -3124,8 +3124,8 @@ paths:
       operationId: foeReadFile
       description: >
         Sends an FoE read request for `filename` to the device at `slavePosition`
-        and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op,
-        and Op states (device-dependent); the caller is responsible for ensuring the
+        and returns the raw file bytes.  FoE is available in BOOT, PREOP, SAFEOP
+        and OP states (device-dependent); the caller is responsible for ensuring the
         device is in a suitable state before calling.  The call blocks until the full
         file has been received. Over EtherCAT it waits up to 6 s for the device's answer
         and tries a read that gets no answer up to 3 times, so a device that never answers
@@ -3182,7 +3182,7 @@ paths:
       description: >
         Sends an FoE write request for `filename` to the device at `slavePosition`,
         streaming the raw request body as the file contents.  FoE is available in
-        Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is
+        BOOT, PREOP, SAFEOP and OP states (device-dependent); the caller is
         responsible for ensuring the device is in a suitable state before calling.
         Over EtherCAT it waits up to 10 s for the device to acknowledge each packet.
         A write that fails without an answer is aborted on the device and is not
@@ -3306,7 +3306,7 @@ paths:
 
 
         EEPROM access is a control-plane operation and is most reliable while the
-        device is in INIT or PRE-OP.  String-index fields in the parsed structure
+        device is in INIT or PREOP.  String-index fields in the parsed structure
         (e.g. `general.nameIdx`) are 1-based references into `category.strings`.
       parameters:
         - name: slavePosition
@@ -3368,7 +3368,7 @@ paths:
         well-formed SII (a guard against bricking the device). **Destructive:** a wrong
         image can leave the device unidentifiable until re-flashed. The device adopts the
         new contents only after a **power cycle**, and the write is most reliable while
-        the device is in INIT or PRE-OP. Intended for restoring a previously downloaded
+        the device is in INIT or PREOP. Intended for restoring a previously downloaded
         image.
       parameters:
         - name: slavePosition
@@ -3859,7 +3859,7 @@ paths:
         (system-time delay 0x0928 and system-time difference 0x092C) via FPRD. The reference clock
         is the first DC-capable slave; every other DC slave continuously corrects its local clock
         toward it, and `systemTimeDifference` is the live deviation in nanoseconds. The figure is
-        meaningful only while the bus is exchanging process data in SAFE-OP/OP (the reference time
+        meaningful only while the bus is exchanging process data in SAFEOP/OP (the reference time
         is distributed in the cyclic frame) and converges toward zero as the slaves' drift loops
         settle — poll this endpoint and watch for a slave whose deviation stays large or grows
         rather than an absolute value. Non-DC slaves report `dcCapable` false with zeroed values.
@@ -4079,8 +4079,8 @@ paths:
                       enum: [0, 1, 2, 3, 4, 8]
                       description: >
                         Current AL state decoded from alStatus (ETG.1000.6 encoding):
-                        1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
-                        0 when the device does not answer (see `reachability`).
+                        0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
+                        UNKNOWN when the device does not answer (see `reachability`).
                       example: 1
                     error:
                       type: boolean
@@ -4121,7 +4121,7 @@ paths:
       description: >
         Commands one EtherCAT Application Layer transition to one or more devices and blocks until
         all targeted devices arrive or the timeout elapses. The transition must be one the AL state
-        machine allows for every targeted device: a climb of one state (INIT, PRE-OP, SAFE-OP,
+        machine allows for every targeted device: a climb of one state (INIT, PREOP, SAFEOP,
         OP), a drop of any number of states, BOOT entered and left only through INIT, or the state
         a device is in, which acknowledges an AL error it holds. Any other request is refused with
         409, and no device is commanded. To reach a state that is more than one transition away,
@@ -4134,7 +4134,7 @@ paths:
         still commanded.
         Omit `positions` or pass an empty array to target all discovered devices.
         State values are the standard AL state register encodings from ETG.1000.6:
-        1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+        1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), 8 (OP).
       requestBody:
         required: true
         content:
@@ -4157,7 +4157,7 @@ paths:
                   enum: [1, 2, 3, 4, 8]
                   description: >
                     Target EtherCAT AL state (ETG.1000.6 AL control register encoding):
-                    1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                    1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
                   example: 8
                 timeout:
                   type: integer
@@ -4202,8 +4202,8 @@ paths:
                           enum: [0, 1, 2, 3, 4, 8]
                           description: >
                             Current AL state decoded from alStatus (ETG.1000.6 encoding):
-                            1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
-                            0 when the device does not answer (see `reachability`).
+                            0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
+                            UNKNOWN when the device does not answer (see `reachability`).
                           example: 2
                         error:
                           type: boolean
@@ -4269,7 +4269,7 @@ paths:
         Brings one or more devices to the requested EtherCAT Application Layer state, one legal
         transition at a time, and blocks until the walk ends. The AL state machine climbs one
         state at a time, may drop any number of states at once, and enters and leaves BOOT only
-        through INIT, so a request for OP takes a device in INIT through PRE-OP and SAFE-OP, and
+        through INIT, so a request for OP takes a device in INIT through PREOP and SAFEOP, and
         a device in BOOT through INIT first. Each device walks from the state it is in. Each step
         waits up to `timeout` for its devices, and the walk stops at the first step a device does
         not reach. A device already in the requested state is commanded there once, which
@@ -4282,7 +4282,7 @@ paths:
         still commanded.
         Omit `positions` or pass an empty array to target all discovered devices.
         State values are the standard AL state register encodings from ETG.1000.6:
-        1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+        1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), 8 (OP).
       requestBody:
         required: true
         content:
@@ -4305,7 +4305,7 @@ paths:
                   enum: [1, 2, 3, 4, 8]
                   description: >
                     Target EtherCAT AL state (ETG.1000.6 AL control register encoding):
-                    1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                    1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
                   example: 8
                 timeout:
                   type: integer
@@ -4350,8 +4350,8 @@ paths:
                           enum: [0, 1, 2, 3, 4, 8]
                           description: >
                             Current AL state decoded from alStatus (ETG.1000.6 encoding):
-                            1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
-                            0 when the device does not answer (see `reachability`).
+                            0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
+                            UNKNOWN when the device does not answer (see `reachability`).
                           example: 2
                         error:
                           type: boolean
@@ -4412,7 +4412,7 @@ paths:
       operationId: restartDevices
       description: >
         Commands one or more devices to INIT and then up to `target` one EtherCAT Application
-        Layer state at a time: PRE-OP, SAFE-OP, OP. A `target` of BOOT is INIT and then BOOT.
+        Layer state at a time: PREOP, SAFEOP, OP. A `target` of BOOT is INIT and then BOOT.
         Each step blocks until every targeted device arrives or the timeout elapses, and the walk
         stops at the first step a device does not reach. `step` is the last state commanded, and
         `devices` holds the settled state of every targeted device after it, each with a `reached`
@@ -4421,7 +4421,7 @@ paths:
         enabled is disabled, and a monitoring reports null for it until it exchanges again.
         The body is optional: no body restarts every discovered device to OP (8).
         State values are the standard AL state register encodings from ETG.1000.6:
-        1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+        1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), 8 (OP).
       requestBody:
         required: false
         content:
@@ -4444,7 +4444,7 @@ paths:
                   default: 8
                   description: >
                     The EtherCAT AL state to end in (ETG.1000.6 AL control register encoding):
-                    1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                    1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
                   example: 8
                 timeout:
                   type: integer
@@ -4496,8 +4496,8 @@ paths:
                           enum: [0, 1, 2, 3, 4, 8]
                           description: >
                             Current AL state decoded from alStatus (ETG.1000.6 encoding):
-                            1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
-                            0 when the device does not answer (see `reachability`).
+                            0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
+                            UNKNOWN when the device does not answer (see `reachability`).
                           example: 2
                         error:
                           type: boolean
@@ -4671,10 +4671,10 @@ paths:
         retained image generations (one per re-map since the last reset), and
         every mapped object resolved to its absolute bit offset. While an image
         is live `configured` is true and the layout describes it. When no image
-        is published (no device is in SAFE-OP/OP) but at least one generation has
+        is published (no device is in SAFEOP/OP) but at least one generation has
         been mapped, `configured` is false and the layout describes the most
         recent retained generation — the last-known mapping — so a bus that has
-        dropped out of SAFE-OP/OP stays inspectable; `lastWkc` then holds the
+        dropped out of SAFEOP/OP stays inspectable; `lastWkc` then holds the
         final exchange value and working-counter health does not apply. The
         object lists are empty only before any image has ever been mapped. Object
         `name` is populated only for devices whose object dictionary has been
@@ -4708,8 +4708,8 @@ paths:
                     type: integer
                     description: >-
                       Working counter expected from the devices currently exchanging. A device
-                      in SAFE-OP or OP counts 2 for mapped outputs and 1 for mapped inputs. A
-                      device below SAFE-OP, or with the AL error flag set, counts 0.
+                      in SAFEOP or OP counts 2 for mapped outputs and 1 for mapped inputs. A
+                      device below SAFEOP, or with the AL error flag set, counts 0.
                     example: 3
                   lastWkc:
                     type: integer
@@ -4730,7 +4730,7 @@ paths:
 
 
                       It spans every re-map rather than resetting per image, because a re-map
-                      happens whenever a device is brought into or out of SAFE-OP/OP — which is
+                      happens whenever a device is brought into or out of SAFEOP/OP — which is
                       exactly when someone is chasing a fault. `generations` says how many images
                       the count spans. Cycles missed while a device was being deliberately
                       commanded out of an exchange state are not counted: the expectation is
@@ -4877,7 +4877,7 @@ paths:
         names and data types where the object dictionary has been enumerated)
         embedded as a header, so the file decodes fully offline with no running
         Motion Master and no live bus. Works in any state: while devices are
-        exchanging (SAFE-OP/OP) it captures tail→head at that moment and ignores
+        exchanging (SAFEOP/OP) it captures tail→head at that moment and ignores
         cycles recorded afterwards; after the bus has left the exchange states it
         uses the most recent retained image layout. The file is written under the
         configured `recorder.dumpDir`, created if absent; by default that is a
@@ -4921,7 +4921,7 @@ paths:
       description: >
         Stages many output (RxPDO) objects at once — the "send all" action of the Process Data
         page. Each value is converted to the object's declared data type and, when the object is
-        output-mapped and its device is exchanging (SAFE-OP/OP), written into the output image so
+        output-mapped and its device is exchanging (SAFEOP/OP), written into the output image so
         it is sent on the next real-time cycle and re-sent every cycle thereafter (set-once,
         sent-continuously). The batch is best-effort atomic: values are staged sequentially, so a
         batch can straddle two consecutive ~1 ms cycles. The request never fails as a whole — each
@@ -5010,7 +5010,7 @@ paths:
 
 
         The bus must be configured. FMMUs and logical addresses come into being at
-        the SAFE-OP transition, so a bus in PRE-OP has no mapping to describe and the
+        the SAFEOP transition, so a bus in PREOP has no mapping to describe and the
         call returns 409.
 
 
@@ -5046,7 +5046,7 @@ paths:
                 format: binary
         "409":
           description: >-
-            The bus has no published process image (bring it to SAFE-OP or OP first),
+            The bus has no published process image (bring it to SAFEOP or OP first),
             or it has no devices. Also: the fieldbus transport has no EtherCAT Slave
             Controller, as over SPoE, so an ENI does not exist for it.
           content:
@@ -5104,7 +5104,7 @@ paths:
         classified once against the published process image: PDO-mapped objects are decoded from
         the live image; the rest are polled over SDO in the background. Create monitorings after
         the bus is operational so PDO objects are recognised as PDO. Monitoring is live-only — a
-        parameter samples `null` while its owning device is not exchanging (SAFE-OP/OP).
+        parameter samples `null` while its owning device is not exchanging (SAFEOP/OP).
       requestBody:
         required: true
         content:
@@ -7515,19 +7515,19 @@ components:
           description: >
             `firmware-installation`: where the device is left, as an AL state number — the same
             ETG.1000.6 encoding `POST /api/devices/state` takes and `alState` reports, so a client
-            holds one way to name a state rather than two. `2` (PRE-OP) is the default and the
+            holds one way to name a state rather than two. `2` (PREOP) is the default and the
             confirmation that the install worked: the bootloader hands over to the newly written
-            firmware on that transition, so reaching PRE-OP means the new firmware booted. No power
+            firmware on that transition, so reaching PREOP means the new firmware booted. No power
             cycle is needed for the firmware (an SII written from the package does need one — the
             ESC reads its EEPROM at reset). Choose `3` (BOOT) when no application will be present,
-            after erasing one or between two installs, since a PRE-OP transition then has nothing to
+            after erasing one or between two installs, since a PREOP transition then has nothing to
             hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8`
-            climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other
+            climb through PREOP and re-map the whole bus on the way, briefly pausing every other
             device. When the package writes a com binary, the step to INIT can restart the netX of
             an Integro about 0.7 s after the drive reports INIT. The install then waits until the
             drive answers again and gives it its station address back, so `1` leaves the drive
             answering in INIT. The state the device was in beforehand is not restored. Over SPoE
-            the drive restarts into the new firmware and comes up in PRE-OP, so `3` cannot keep it
+            the drive restarts into the new firmware and comes up in PREOP, so `3` cannot keep it
             in BOOT.
           example: 2
         angle:
@@ -7959,7 +7959,7 @@ components:
           description: >-
             Signed deviation of the local system time from the reference clock (0x092C), in
             nanoseconds. Positive = local clock ahead of the reference, negative = behind; zero on
-            the reference clock. Meaningful only while exchanging in SAFE-OP/OP; converges toward
+            the reference clock. Meaningful only while exchanging in SAFEOP/OP; converges toward
             zero as the drift-compensation loop settles
           example: 0
     CaptureKindSummary:
@@ -8518,7 +8518,7 @@ components:
           type: integer
           description: >
             ETG.1000.6 ObjAccess bitfield synthesised from the flags — bits 0-2 read in
-            PreOP/SafeOP/OP, 3-5 write, 6 RxPDO-mappable, 7 TxPDO-mappable, 8 backup,
+            PREOP/SAFEOP/OP, 3-5 write, 6 RxPDO-mappable, 7 TxPDO-mappable, 8 backup,
             9 setting. Matches `DeviceParameter.access`.
         description:
           type: string

@@ -174,7 +174,7 @@ function InitCmdTable({ cmds }: { cmds: EniInitCmd[] }) {
       <table className="w-full min-w-[720px] text-xs border-collapse">
         <thead>
           <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
-            <Th hint="When the command is sent: the AL-state transitions of an init command, e.g. IP is INIT to PRE-OP, or the AL states a cyclic command runs in">
+            <Th hint="When the command is sent: the AL-state transitions of an init command, e.g. IP is INIT to PREOP, or the AL states a cyclic command runs in">
               At
             </Th>
             <Th hint="EtherCAT command type. The addressing mode is part of it: AP by ring position, FP by station address, B to every device, L to logical memory">

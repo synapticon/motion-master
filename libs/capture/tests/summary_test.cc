@@ -101,7 +101,7 @@ TEST(SummaryTest, SerialisesWithCamelCaseKeys) {
 }
 
 // Two seconds recorded on the bench Integro while the AL walk ran: the control plane of a
-// PRE-OP, the map of a SAFE-OP and the cyclic frames of an OP. The run had `netem` delay 150 ms
+// PREOP, the map of a SAFEOP and the cyclic frames of an OP. The run had `netem` delay 150 ms
 // on 2 % of the outgoing frames, and the capture shows none of it: a packet tap sits at the driver
 // boundary, and netem is a queue between that boundary and SOEM. So the file pins the parser and
 // the matcher against real frames, and the summary of a clean wire, which is what a capture on a

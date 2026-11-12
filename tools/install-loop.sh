@@ -5,9 +5,9 @@
 # given, so the build changes on every run. With NETEM set, netem makes the bus adapter drop or
 # delay frames during each install, and the rule is off for the recovery.
 #
-# One run is: reset, init, scan, PRE-OP, then N installs with finalState PRE-OP, which is what MMAF
-# asks for. A failed install is followed by one PRE-OP request with a 30 s timeout. The loop stops
-# when the device does not come back to PRE-OP, so the drive can be power-cycled.
+# One run is: reset, init, scan, PREOP, then N installs with finalState PREOP, which is what MMAF
+# asks for. A failed install is followed by one PREOP request with a 30 s timeout. The loop stops
+# when the device does not come back to PREOP, so the drive can be power-cycled.
 #
 # The packages come from the firmware cache, ~/.cache/motion-master/firmwares/ on Linux, and are
 # named by file name. Install the right package for the device: GET /api/devices/<position>/
@@ -65,7 +65,7 @@ state() {
 }
 
 netem_off
-log "== $label: reset, init, scan, PRE-OP on $adapter"
+log "== $label: reset, init, scan, PREOP on $adapter"
 post /api/reset > /dev/null
 post /api/init "{\"adapter\":\"$adapter\"}" | head -c 200
 echo
@@ -120,11 +120,11 @@ for ((i = 1; i <= rounds; i++)); do
   log "round $i: $st in ${secs}s, fw $before -> $after, state $sa${err:+, error: $err}"
 
   if [[ $st != succeeded ]]; then
-    log "round $i: recovery: asking for PRE-OP with a 30 s timeout"
+    log "round $i: recovery: asking for PREOP with a 30 s timeout"
     rec=$(post /api/devices/state "{\"positions\":[$position],\"state\":2,\"timeout\":30000}")
     log "round $i: recovery answer: $rec"
     if [[ $(state | jq -r '.alState') != 2 ]]; then
-      log "round $i: device did not come back to PRE-OP, stopping. Power-cycle, then scan."
+      log "round $i: device did not come back to PREOP, stopping. Power-cycle, then scan."
       break
     fi
     log "round $i: recovered, fw=$(fw)"

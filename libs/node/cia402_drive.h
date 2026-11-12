@@ -116,7 +116,7 @@ void to_json(nlohmann::json& j, const TargetFromActual& t);
 ///        and the standard cyclic setpoints, expressed over a @c Device's parameter access.
 ///
 /// Every method routes through @c Device::readValue / @c writeValue, so it transparently uses
-/// the live PDO image while the device is exchanging (SAFE-OP/OP) and falls back to SDO
+/// the live PDO image while the device is exchanging (SAFEOP/OP) and falls back to SDO
 /// otherwise — the caller never chooses the transport. The view is stateless (see
 /// @c ProfileDevice): the drive's actual state is its statusword, re-read on every query.
 ///

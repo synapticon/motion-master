@@ -7,9 +7,9 @@
 // instead of giving up on the read.
 //
 // Each round:
-//   1. Put the drive into INIT, then into the state of --state, BOOT or PRE-OP. With --via-preop,
-//      the drive goes INIT, PRE-OP, INIT first, because an Integro answers BUSY only on the first
-//      read after it enters BOOT from PRE-OP.
+//   1. Put the drive into INIT, then into the state of --state, BOOT or PREOP. With --via-preop,
+//      the drive goes INIT, PREOP, INIT first, because an Integro answers BUSY only on the first
+//      read after it enters BOOT from PREOP.
 //   2. Wait --delay milliseconds, then send one read request for the file.
 //   3. Print every mailbox message the drive sends, with the time since the request, until the
 //      last data packet, an FoE error, or --wait seconds without the file. Each data packet gets
@@ -23,7 +23,7 @@
 //
 // A round ends with DATA AFTER BUSY when the drive sent BUSY and then the file, with NO BUSY when
 // it sent the file without BUSY, and with NO DATA AFTER BUSY or FAIL for anything else. The drive is
-// left in PRE-OP. It needs raw socket access, and no other master may use the adapter.
+// left in PREOP. It needs raw socket access, and no other master may use the adapter.
 
 #include <soem/soem.h>
 
@@ -147,9 +147,9 @@ bool parseOptions(int argc, char** argv, Options& options) {
 }
 
 // A drive can restart on its way out of BOOT, and the restart clears its station address: a
-// SOMANET drive on the step to PRE-OP, and a Jasper-based drive on the step to INIT after a commit
-// or on the step to PRE-OP without one. So the request is written again every second until
-// kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PRE-OP
+// SOMANET drive on the step to PREOP, and a Jasper-based drive on the step to INIT after a commit
+// or on the step to PREOP without one. So the request is written again every second until
+// kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PREOP
 // its mailbox sync managers too.
 bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
   const auto raw = static_cast<uint16_t>(state);
@@ -326,7 +326,7 @@ int main(int argc, char** argv) {
     std::cerr << "ecx_init failed on " << options.ifname << "\n";
     return EXIT_FAILURE;
   }
-  // Without this, ecx_config_init asks every slave for PRE-OP on its own.
+  // Without this, ecx_config_init asks every slave for PREOP on its own.
   ctx->manualstatechange = 1;
   const int found = ecx_config_init(ctx.get());
   if (found < options.slave) {

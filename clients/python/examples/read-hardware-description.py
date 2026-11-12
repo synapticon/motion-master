@@ -6,8 +6,8 @@ names the device and, when the device is part of one, the assembly, with the bui
 the serial number and the components of each. A device that is not a SOMANET device has no such
 file, and the request fails.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there. A device in BOOT goes through INIT to PRE-OP.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there. A device in BOOT goes through INIT to PREOP.
 
     python read-hardware-description.py
     python read-hardware-description.py --slave 2
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def print_part(title, part):
@@ -39,7 +39,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     hd = client.call("getDeviceHardwareDescription", path={"slavePosition": args.slave}).json()
     print_part("device", hd["device"])

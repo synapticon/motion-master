@@ -54,7 +54,7 @@ constexpr uint16_t kU8 = 0x0005;
 constexpr uint16_t kU32 = 0x0007;
 // ETG.1000-6 object codes (only ARRAY/RECORD are Complete-Access candidates).
 constexpr uint16_t kArray = 0x0008;
-// PRE-OP AL state — used to bring the fake "online" (mailbox available) for SDO tests.
+// PREOP AL state — used to bring the fake "online" (mailbox available) for SDO tests.
 constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
 
 /// FieldbusDriver test double for SDO exchange: readSdo answers from a programmed
@@ -1333,7 +1333,7 @@ TEST(PdoMappingEntryCodec, RoundTripsIgnoringBitOffset) {
 // The fake's readSdo answers from the programmed map, independent of what writeSdo records, so a
 // write test programs the read map to mirror the mapping it intends to write — that read-back is
 // what writePdoMapping verifies against. The shared kPreOp constant (defined near the top) is the
-// only state the write is legal in; the default 0 (INIT) and SAFE-OP exercise the guard.
+// only state the write is legal in; the default 0 (INIT) and SAFEOP exercise the guard.
 
 // A simple one-RxPDO / one-TxPDO CiA402 request: controlword + target position out, statusword +
 // position-actual in.
@@ -1407,12 +1407,12 @@ TEST(DeviceWriteFlatPdoMapping, EmitsCoeSequenceInOrder) {
 
 TEST(DeviceWriteFlatPdoMapping, RejectsWhenNotPreOp) {
   SdoFakeDriver driver;
-  driver.state = 4;  // SAFE-OP: sync managers active, mapping objects not writable
+  driver.state = 4;  // SAFEOP: sync managers active, mapping objects not writable
   Device device(1, driver);
 
   auto result = device.writePdoMapping(cia402Request());
   ASSERT_FALSE(result.has_value());
-  EXPECT_NE(result.error().find("PRE-OP"), std::string::npos);
+  EXPECT_NE(result.error().find("PREOP"), std::string::npos);
   EXPECT_TRUE(driver.writes.empty());  // guarded before any SDO write
 }
 

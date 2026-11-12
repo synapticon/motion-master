@@ -90,8 +90,8 @@ bool Device::mailboxActive() const {
   using mm::comm::EtherCatState;
   const uint16_t status = driver_.slaveState(slavePosition_);
   const EtherCatState state = mm::comm::alState(status);
-  // Mailbox (CoE/SDO) communication is available in PRE-OP and above, per the EtherCAT state
-  // machine — independent of the AL error indicator: a device in SAFE-OP+error still answers
+  // Mailbox (CoE/SDO) communication is available in PREOP and above, per the EtherCAT state
+  // machine — independent of the AL error indicator: a device in SAFEOP+error still answers
   // mailbox requests; the error is surfaced separately via the AL status. INIT has no mailbox,
   // and BOOT's mailbox is FoE-only, so neither counts here.
   return state == EtherCatState::PreOp || state == EtherCatState::SafeOp ||
@@ -1033,7 +1033,7 @@ std::expected<void, std::string> Device::writePdoMapping(const PdoMapping& mappi
   const EtherCatState state = mm::comm::alState(driver_.slaveState(slavePosition_));
   if (state != EtherCatState::PreOp) {
     return std::unexpected(
-        std::format("device {}: PDO mapping can only be written in PRE-OP (device is in {})",
+        std::format("device {}: PDO mapping can only be written in PREOP (device is in {})",
                     slavePosition_, mm::comm::toString(state)));
   }
 
@@ -1315,7 +1315,7 @@ bool Device::readObjectComplete(uint16_t index, std::span<const uint8_t> subindi
     const std::lock_guard<std::mutex> lock(*parametersMutex_);
     CompleteAccessProbe ca(useCompleteAccess, caSupport_);
     // mailboxActive() is part of the decision, not just an optimisation: without it a device below
-    // PRE-OP would fail the upload and recordFailure() would latch caSupport_ to kUnsupported for
+    // PREOP would fail the upload and recordFailure() would latch caSupport_ to kUnsupported for
     // the device's whole lifetime, on evidence that says nothing about whether it supports CA.
     if (!ca.enabled() || !mailboxActive()) {
       return false;

@@ -161,7 +161,7 @@ std::vector<ProgressStep> encoderRegisterSteps();
 /// **The one procedure here that prepares nothing.** OS command 0's only restrictions are that the
 /// addressed encoder is configured and that it is a BiSS encoder — no diagnostics mode, no
 /// Operation Enabled, no brake, and no motion — so there is no preparation to do and nothing to
-/// restore, and it runs from PRE-OP up on a drive that may be exchanging process data. Its single
+/// restore, and it runs from PREOP up on a drive that may be exchanging process data. Its single
 /// step is the access itself.
 ///
 /// A read and a write are one procedure because they are one firmware command, told apart by
@@ -651,7 +651,7 @@ std::vector<ProgressStep> kueblerRegisterSteps();
 /// @brief Reads or writes one Integro internal-encoder register as a procedure body.
 ///
 /// Prepares nothing and moves nothing, like @c runEncoderRegisterProcedure — its BiSS counterpart —
-/// and runs from PRE-OP up on a drive that may be exchanging process data. The step records the
+/// and runs from PREOP up on a drive that may be exchanging process data. The step records the
 /// bytes as they came off the wire, the assembled value, and the register's name when the vendor's
 /// draft documents the address.
 ///
@@ -803,7 +803,7 @@ std::vector<ProgressStep> firmwareLatencySteps();
 ///
 /// Prepares nothing, restores nothing, needs no operation mode, no CiA402 state and no brake, and
 /// moves nothing — the measurement is two timer reads inside a cycle the drive control service was
-/// running anyway. It runs from PRE-OP up on a drive that may be exchanging process data.
+/// running anyway. It runs from PREOP up on a drive that may be exchanging process data.
 ///
 /// **What the figure is worth depends on what the drive was doing while it collected**, which this
 /// procedure does not arrange: measuring an idle drive for two seconds reports the worst case of an
@@ -1075,7 +1075,7 @@ std::vector<ProgressStep> ignoreBissStatusBitsSteps();
 /// @brief Starts or stops ignoring a BiSS encoder's status bits as a procedure body.
 ///
 /// Prepares nothing and moves nothing — the command needs only an active mailbox, and runs from
-/// PRE-OP up on a drive that may be exchanging process data. Like
+/// PREOP up on a drive that may be exchanging process data. Like
 /// @c runIcMuCalibrationModeProcedure it has **no restore**: ignoring is a state the encoder is
 /// left in until another run ends it or the drive is power-cycled.
 ///
@@ -1130,7 +1130,7 @@ std::vector<ProgressStep> skippedCyclesSteps();
 ///
 /// **The most harmless procedure here**: no preparation, no operation mode, no CiA402 state, no
 /// brake, and nothing restored — a pure read, safe on a drive that is enabled and moving. It runs
-/// from PRE-OP up, needing only an active mailbox.
+/// from PREOP up, needing only an active mailbox.
 ///
 /// What it reports is cumulative since the addressed service started, so one run establishes a
 /// baseline and a later run establishes a rate. See @c SomanetDrive::readSkippedCycles.
@@ -1164,7 +1164,7 @@ std::vector<ProgressStep> readObjectDictionarySteps();
 /// reaches two values SDO cannot: 0x1024, which is write-only, and 0x1023:01.
 ///
 /// Harmless: a pure read, no operation mode, no CiA402 state, no brake, and nothing restored. It
-/// runs from PRE-OP up, needing only an active mailbox.
+/// runs from PREOP up, needing only an active mailbox.
 ///
 /// A run that fails on the decode rather than on the wire is still useful information, and the
 /// step's message says which: it means this master's record of the device's object dictionary
@@ -1532,19 +1532,19 @@ inline constexpr std::string_view kFirmwareInstallationProcedure = "firmware-ins
 /// Deliberately @c mm::comm::EtherCatState rather than a firmware-specific enum, and deliberately
 /// the same integer encoding the rest of the API uses (@c POST @c /api/devices/state, and the
 /// @c alState every state read reports): one concept, one spelling. A parallel vocabulary here
-/// would mean a client holding two ways to say PRE-OP.
+/// would mean a client holding two ways to say PREOP.
 ///
 /// **Any AL state is accepted**, and the two worth knowing about are the ends:
 ///   - @c PreOp is the default and the one that confirms the install. The SOMANET bootloader hands
-///     over to the newly written application on the transition out of BOOT, so **reaching PRE-OP is
+///     over to the newly written application on the transition out of BOOT, so **reaching PREOP is
 ///     the new firmware booting and answering**. When no valid application is present the drive
 ///     reports AL status 0x0014 ("No valid firmware") and falls back to INIT — a precise, decodable
 ///     failure rather than a hang.
 ///   - @c Boot leaves the device in the bootloader, which is **the right choice when no application
-///     will be present**: after erasing one, or between two installs, a PRE-OP transition has
+///     will be present**: after erasing one, or between two installs, a PREOP transition has
 ///     nothing to hand over to and would report a failure for an operation that succeeded.
 ///
-/// SAFE-OP and OP climb through PRE-OP and re-map the whole bus on the way, briefly pausing every
+/// SAFEOP and OP climb through PREOP and re-map the whole bus on the way, briefly pausing every
 /// other device. That is a real cost but not a reason to withhold them — the same re-map happens
 /// when a caller reaches those states with @c POST @c /api/devices/state a moment later, so
 /// refusing would only split one operation into two.

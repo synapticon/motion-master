@@ -152,7 +152,7 @@ export default function DataMonitoringsPage() {
       <PageHeader
         eyebrow="Data"
         title="Monitorings"
-        description="Record drive parameters over time. PDO-mapped objects are read live from the process image; others are polled over SDO. Monitoring collects only while a device is in SAFE-OP/OP."
+        description="Record drive parameters over time. PDO-mapped objects are read live from the process image; others are polled over SDO. Monitoring collects only while a device is in SAFEOP/OP."
       />
 
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">

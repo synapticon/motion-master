@@ -73,7 +73,7 @@ device to another AL state changes what the Console shows.
 The AL state (Application Layer state, the EtherCAT state machine of a device) column gives
 the lowest state the script needs. A script moves the device up to that state when the device is
 lower. A device that is already higher stays where it is. The states, from low to high, are INIT,
-PRE-OP, SAFE-OP and OP. BOOT is separate: a device enters and leaves BOOT only through INIT.
+PREOP, SAFEOP and OP. BOOT is separate: a device enters and leaves BOOT only through INIT.
 
 Three values in that column are not states:
 
@@ -100,24 +100,24 @@ Three values in that column are not states:
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `read-parameter.py` | Reads one parameter with its name, data type and decoded value. `--cache` reads no bus. | PRE-OP |
-| `write-parameter.py` | Writes one parameter. It converts the value to the data type, and prints the value before and after. | PRE-OP |
-| `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PRE-OP |
-| `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PRE-OP |
-| `write-sdo.py` | Writes raw bytes to one object with an SDO download. | PRE-OP |
-| `store-parameters.py` | Stores the current parameter values in the flash of the device. | PRE-OP |
-| `restore-default-parameters.py` | Restores the default values of a parameter group. **Values not stored are gone.** | PRE-OP |
+| `read-parameter.py` | Reads one parameter with its name, data type and decoded value. `--cache` reads no bus. | PREOP |
+| `write-parameter.py` | Writes one parameter. It converts the value to the data type, and prints the value before and after. | PREOP |
+| `read-all-parameters.py` | Reads the whole object dictionary of the device with the value of every entry. | PREOP |
+| `read-sdo.py` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PREOP |
+| `write-sdo.py` | Writes raw bytes to one object with an SDO download. | PREOP |
+| `store-parameters.py` | Stores the current parameter values in the flash of the device. | PREOP |
+| `restore-default-parameters.py` | Restores the default values of a parameter group. **Values not stored are gone.** | PREOP |
 
 ### Files and firmware
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `list-files.py` | Lists the files stored on the device with their sizes. | PRE-OP |
-| `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PRE-OP |
-| `write-file.py` | Writes a local file to the device over FoE. A file of the same name is replaced. | PRE-OP |
-| `delete-file.py` | Deletes a file from the flash of a SOMANET device. | PRE-OP |
-| `read-hardware-description.py` | Prints what a SOMANET device says it is: the device, the assembly and their components. | PRE-OP |
-| `check-firmware-compatibility.py` | Says whether a firmware package belongs on the device, from the package filename alone. It installs nothing. | PRE-OP |
+| `list-files.py` | Lists the files stored on the device with their sizes. | PREOP |
+| `read-file.py` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PREOP |
+| `write-file.py` | Writes a local file to the device over FoE. A file of the same name is replaced. | PREOP |
+| `delete-file.py` | Deletes a file from the flash of a SOMANET device. | PREOP |
+| `read-hardware-description.py` | Prints what a SOMANET device says it is: the device, the assembly and their components. | PREOP |
+| `check-firmware-compatibility.py` | Says whether a firmware package belongs on the device, from the package filename alone. It installs nothing. | PREOP |
 | `firmware-installation.py` | Uploads a firmware package to the server and installs it on the device. The device is not controlled while it is off OP. | Scanned |
 
 ### ESC registers and SII
@@ -133,28 +133,28 @@ Three values in that column are not states:
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `read-pdo-mapping.py` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PRE-OP |
-| `write-pdo-mapping.py` | Writes the PDO mapping from a JSON file. It moves the device to PRE-OP for the write, and back to SAFE-OP or OP. | PRE-OP for the write |
+| `read-pdo-mapping.py` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PREOP |
+| `write-pdo-mapping.py` | Writes the PDO mapping from a JSON file. It moves the device to PREOP for the write, and back to SAFEOP or OP. | PREOP for the write |
 | `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
-| `dump-process-data.py` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFE-OP |
+| `dump-process-data.py` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFEOP |
 
 ### Drive
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `cia402-state.py` | Prints the CiA 402 state of the drive with its actual and target values. | PRE-OP |
-| `set-target.py` | Sets the position, velocity or torque target. **An enabled drive moves to it at once.** | PRE-OP |
-| `release-brake.py` | Releases the brake of a SOMANET drive. It releases only while the drive is in Operation Enabled, and stays released. | PRE-OP |
-| `engage-brake.py` | Engages the brake of a SOMANET drive. | PRE-OP |
-| `device-locate.py` | Blinks the LEDs of the device. Only SPoE offers it. | PRE-OP |
+| `cia402-state.py` | Prints the CiA 402 state of the drive with its actual and target values. | PREOP |
+| `set-target.py` | Sets the position, velocity or torque target. **An enabled drive moves to it at once.** | PREOP |
+| `release-brake.py` | Releases the brake of a SOMANET drive. It releases only while the drive is in Operation Enabled, and stays released. | PREOP |
+| `engage-brake.py` | Engages the brake of a SOMANET drive. | PREOP |
+| `device-locate.py` | Blinks the LEDs of the device. Only SPoE offers it. | PREOP |
 
 ### Procedures
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `run-procedure.py` | Lists the procedures of a device. With a name, it runs that procedure with parameters given as `name=value`, and prints each step with its result. `--describe` prints the description, caveats and parameters instead. | PRE-OP, or `--state` |
+| `run-procedure.py` | Lists the procedures of a device. With a name, it runs that procedure with parameters given as `name=value`, and prints each step with its result. `--describe` prints the description, caveats and parameters instead. | PREOP, or `--state` |
 | `offset-detection.py` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |
-| `system-identification.py` | Configures the system identification chirp, and arms it with `--start`. **Once armed, it turns the motor.** | PRE-OP |
+| `system-identification.py` | Configures the system identification chirp, and arms it with `--start`. **Once armed, it turns the motor.** | PREOP |
 | `plant-identification.py` | Identifies the plant model with a chirp, and writes `plant_model.csv`. **It turns the motor in both directions.** | OP |
 
 ### ESI and ENI
@@ -162,7 +162,7 @@ Three values in that column are not states:
 | Script | What it does | AL state |
 | --- | --- | --- |
 | `parse-esi.py` | Parses an ESI (EtherCAT Slave Information) file and lists the devices it describes. | No bus |
-| `export-eni.py` | Saves the bus as an ENI (EtherCAT Network Information) file in `files/`, for another master to replay. | SAFE-OP |
+| `export-eni.py` | Saves the bus as an ENI (EtherCAT Network Information) file in `files/`, for another master to replay. | SAFEOP |
 
 ### Production
 
@@ -172,8 +172,8 @@ decision, and writes a log and a record of the drive. Its steps are in
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `production/integro/commission.py` | Commissions an Integro drive. | PRE-OP |
-| `production/c021/commission.py` | Commissions a C021 drive up to its assigned name. | PRE-OP |
+| `production/integro/commission.py` | Commissions an Integro drive. | PREOP |
+| `production/c021/commission.py` | Commissions a C021 drive up to its assigned name. | PREOP |
 
 ## Calls by operationId
 
@@ -190,7 +190,7 @@ The steps that most scripts begin with are methods on the client:
 ```python
 client = MotionMasterClient.from_config()     # reads config.toml
 client.init()                                 # opens the driver, or accepts the one that is open
-client.ensure_state(PRE_OP, positions=[1])    # scans when needed, then moves device 1 up
+client.ensure_state(PREOP, positions=[1])    # scans when needed, then moves device 1 up
 ```
 
 `ensure_scanned()` scans when needed and moves no device. `init()`, `ensure_scanned()` and

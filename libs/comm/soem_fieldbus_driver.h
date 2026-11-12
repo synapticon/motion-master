@@ -29,7 +29,7 @@ struct SoemFieldbusDriverConfig {
   /// status register (0x080D) into the cyclic image on every mailbox slave, letting the master
   /// notice a waiting mailbox message without a separate read. Motion Master does not use that
   /// optimisation, and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW is fatal (every
-  /// cyclic frame is dropped, SAFE-OP → OP fails). Default false ⇒ the FMMU is deactivated after
+  /// cyclic frame is dropped, SAFEOP → OP fails). Default false ⇒ the FMMU is deactivated after
   /// mapping. Set true only for hardware that both needs and supports it.
   bool mailboxStatusFmmu = false;
 };
@@ -276,8 +276,8 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::size_t slaveStatesSize_ = 0;
   // 1-based positions whose context currently holds BOOT-sized mailbox sync
   // managers (set when we drive a slave into BOOT). ecx_config_init programs the
-  // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan
-  // INIT→PRE-OP needs no reprogramming; only a slave returning from BOOT (e.g.
+  // correct PREOP mailbox SMs for every slave during scan(), so a fresh-scan
+  // INIT→PREOP needs no reprogramming; only a slave returning from BOOT (e.g.
   // after a firmware download) carries stale BOOT SMs that must be reset.
   // Guarded by the bus lock held exclusive. Cleared by scan() (which re-runs ecx_config_init).
   std::set<uint16_t> bootMailboxSlaves_;

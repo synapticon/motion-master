@@ -16,7 +16,7 @@ import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline, btnPrimary } from '../utils/styles'
 
-const AL_PRE_OP = 2
+const AL_PREOP = 2
 
 // ETG.1000.6 object-access (ObjAccess) mapping bits: an object is PDO-mappable in a direction only
 // when the corresponding bit is set. Used to constrain the parameter picker per direction.
@@ -403,7 +403,7 @@ export default function DevicePdoMappingPage() {
 
   // The device's object dictionary drives the parameter picker (name search + PDO-mappability +
   // bit length). Shares the Parameters page's query cache (identical key), so it neither
-  // double-fetches nor drifts. Empty until the OD has been enumerated (device reached PRE-OP).
+  // double-fetches nor drifts. Empty until the OD has been enumerated (device reached PREOP).
   const paramsQuery = useQuery({
     queryKey: ['deviceParameters', slavePosition],
     queryFn: () => api.getDeviceParameters(slavePosition),
@@ -417,7 +417,7 @@ export default function DevicePdoMappingPage() {
     refetchInterval: 2000,
   })
   const state = statesQuery.data?.data.find(s => s.slavePosition === slavePosition)
-  const inPreOp = state?.alState === AL_PRE_OP
+  const inPreOp = state?.alState === AL_PREOP
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [writeError, setWriteError] = useState<string | null>(null)
@@ -484,15 +484,15 @@ export default function DevicePdoMappingPage() {
         <div className="space-y-4">
           <Callout variant="info">
             Rewrites the device's sync-manager PDO assignment (0x1C12 / 0x1C13) and mapping objects
-            (0x16xx / 0x1Axx) over CoE. <strong>The device must be in PRE-OP</strong> — the mapping
-            is writable only there. Take it to PRE-OP on the Control page, write here, then bring it
-            back to SAFE-OP/OP, which re-maps the whole-bus process image. The write is verified
+            (0x16xx / 0x1Axx) over CoE. <strong>The device must be in PREOP</strong> — the mapping
+            is writable only there. Take it to PREOP on the Control page, write here, then bring it
+            back to SAFEOP/OP, which re-maps the whole-bus process image. The write is verified
             against a read-back; it does not change the AL state itself.
           </Callout>
 
           {state && !inPreOp && (
             <Callout variant="warning">
-              The device is not in PRE-OP, so a write will be rejected. Take it to PRE-OP first
+              The device is not in PREOP, so a write will be rejected. Take it to PREOP first
               (Control page) to edit its mapping.
             </Callout>
           )}
@@ -500,7 +500,7 @@ export default function DevicePdoMappingPage() {
           {query.isError && (
             <Callout variant="error">
               Could not read the current mapping: {apiError(query.error)}. The device's mailbox must
-              be active (PRE-OP or higher).
+              be active (PREOP or higher).
             </Callout>
           )}
 

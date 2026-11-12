@@ -44,21 +44,21 @@ namespace mm::etg {
 
 /// @brief An AL-state transition an init command runs on (ENI @c TransitionType).
 ///
-/// Two letters, the state left and the state entered: @c IP is INIT to PRE-OP. The pairs with a
+/// Two letters, the state left and the state entered: @c IP is INIT to PREOP. The pairs with a
 /// repeated letter are the states a command may be re-sent in without a transition.
 enum class EniTransition : std::uint8_t {
   II,  ///< INIT to INIT.
-  IP,  ///< INIT to PRE-OP.
-  PP,  ///< PRE-OP to PRE-OP.
-  PO,  ///< PRE-OP to OP.
-  PS,  ///< PRE-OP to SAFE-OP.
-  PI,  ///< PRE-OP to INIT.
-  SS,  ///< SAFE-OP to SAFE-OP.
-  SP,  ///< SAFE-OP to PRE-OP.
-  SO,  ///< SAFE-OP to OP.
-  SI,  ///< SAFE-OP to INIT.
-  OS,  ///< OP to SAFE-OP.
-  OP,  ///< OP to PRE-OP.
+  IP,  ///< INIT to PREOP.
+  PP,  ///< PREOP to PREOP.
+  PO,  ///< PREOP to OP.
+  PS,  ///< PREOP to SAFEOP.
+  PI,  ///< PREOP to INIT.
+  SS,  ///< SAFEOP to SAFEOP.
+  SP,  ///< SAFEOP to PREOP.
+  SO,  ///< SAFEOP to OP.
+  SI,  ///< SAFEOP to INIT.
+  OS,  ///< OP to SAFEOP.
+  OP,  ///< OP to PREOP.
   OI,  ///< OP to INIT.
   IB,  ///< INIT to BOOT.
   BI,  ///< BOOT to INIT.
@@ -98,8 +98,8 @@ enum class EniRequires : std::uint8_t {
 /// @brief An AL state a cyclic command is sent in (ENI @c Cyclic/Frame/Cmd/State).
 enum class EniState : std::uint8_t {
   Init,    ///< INIT.
-  PreOp,   ///< PRE-OP.
-  SafeOp,  ///< SAFE-OP.
+  PreOp,   ///< PREOP.
+  SafeOp,  ///< SAFEOP.
   Op,      ///< OP.
 };
 
@@ -136,7 +136,7 @@ enum class EniCoeCommandSpecifier : std::uint8_t {
 /// @brief The value a read init command must return before the master goes on (ENI @c Validate).
 ///
 /// A master re-sends the command until the read data matches, or until @c timeoutMs runs out. This
-/// is how an ENI expresses "wait for the device to reach PRE-OP" without a wait primitive.
+/// is how an ENI expresses "wait for the device to reach PREOP" without a wait primitive.
 struct EniValidate {
   std::vector<std::uint8_t> data;      ///< The value the read must return.
   std::vector<std::uint8_t> dataMask;  ///< Bits of @c data that must match; empty compares all.
@@ -169,7 +169,7 @@ struct EniEcatCmd {
 /// @brief One CoE transfer the master runs at a transition (ENI @c CoE/InitCmds/InitCmd).
 ///
 /// This is where a device's own configuration goes: the PDO assignment objects, and any vendor
-/// object a device needs written before it will leave PRE-OP.
+/// object a device needs written before it will leave PREOP.
 struct EniCoeCmd {
   std::vector<EniTransition> transitions;  ///< At least one; the schema requires it.
   std::string comment;                     ///< Free text a master may log.

@@ -35,8 +35,8 @@ struct EniCollection {
 /// @brief Reads the live bus and builds an ENI network from it.
 ///
 /// The document describes the bus as this master has configured it, which is why it needs the bus
-/// configured: FMMUs and logical addresses come into being at the SAFE-OP transition, and before
-/// that there is no mapping to describe. So a bus in PRE-OP is refused rather than guessed at.
+/// configured: FMMUs and logical addresses come into being at the SAFEOP transition, and before
+/// that there is no mapping to describe. So a bus in PREOP is refused rather than guessed at.
 ///
 /// **This drives the bus.** Each device's SII is read for its port layout and bootstrap mailbox,
 /// and its PDO assignment is read over CoE, so the call costs one SII read and a short burst of

@@ -6,8 +6,8 @@ answers that the file is gone. The device answers only after it erased the file,
 seconds. Deleting config.csv discards the stored parameter values, so the drive starts with its
 defaults after the next power cycle. A device that is not a SOMANET device is refused.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there. A device in BOOT goes through INIT to PRE-OP.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there. A device in BOOT goes through INIT to PREOP.
 
     python delete-file.py --filename notes.txt
     python delete-file.py --filename hr_data0.bin --slave 2
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def main():
@@ -31,7 +31,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     r = client.call(
         "deleteDeviceFile",

@@ -66,7 +66,7 @@ struct ProcessData {
   // cleared only by DeviceManager::reset (they run for the life of one bus session).
   //
   // Deliberately not per image: a re-map happens whenever anyone brings a device into or out of
-  // SAFE-OP/OP, so clearing per generation erased the history at the moment someone was chasing
+  // SAFEOP/OP, so clearing per generation erased the history at the moment someone was chasing
   // a fault, and left the figure describing a window nobody chose.
   //
   // A boolean sampled off the RT path cannot see a fault that arrived and cleared between two

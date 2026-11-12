@@ -338,7 +338,7 @@ TEST(DeviceManagerScan, MapsADeviceTheScanFindsInOp) {
 }
 
 TEST(DeviceManagerScan, LeavesADeviceBelowSafeOpUnmapped) {
-  // A SOEM scan leaves every slave below SAFE-OP. The scan then reads nothing more.
+  // A SOEM scan leaves every slave below SAFEOP. The scan then reads nothing more.
   auto bus = mm::node::testing::makeCia402Bus();
   bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   FakeBus* raw = bus.get();
@@ -367,7 +367,7 @@ TEST(DeviceManagerFollowState, DoesNotReMapWhatTheScanMapped) {
 }
 
 TEST(DeviceManagerFollowState, TearsDownWhenNoDeviceExchangesAndReMapsOnReturn) {
-  // The PLC can change the PDO mapping in PRE-OP, so a return to OP reads it again.
+  // The PLC can change the PDO mapping in PREOP, so a return to OP reads it again.
   auto bus = mm::node::testing::makeCia402Bus();
   bus->refusal = "a PLC owns the state";
   FakeBus* raw = bus.get();
@@ -578,7 +578,7 @@ TEST(CycleGuard, IsFalsyBeforeAnImageIsPublished) {
     EXPECT_FALSE(static_cast<bool>(cycle));
   }
   auto bus = makeCia402Bus();
-  // Below SAFE-OP, so the scan publishes no image.
+  // Below SAFEOP, so the scan publishes no image.
   bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
@@ -1020,7 +1020,7 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   const auto kTimeout = std::chrono::milliseconds(10);
   auto bus = makeCia402Bus();
   bus->cannedInputs = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-  // Below SAFE-OP, as a SOEM scan leaves every slave, so the scan publishes no image.
+  // Below SAFEOP, as a SOEM scan leaves every slave, so the scan publishes no image.
   bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   FakeBus* busPtr = bus.get();
 
@@ -1034,7 +1034,7 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
 
   EXPECT_FALSE(dm.processDataConfigured());
 
-  // Entering SAFE-OP auto-configures and publishes the mapping.
+  // Entering SAFEOP auto-configures and publishes the mapping.
   ASSERT_TRUE(dm.transitionToState({}, EtherCatState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   dm.exchangeProcessData();
@@ -1042,15 +1042,15 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   ASSERT_TRUE(dm.readRecord(dm.recorderHead() - 1, rec));
   EXPECT_EQ(rec.inputs.size(), 6u);
 
-  // SAFE-OP -> OP keeps the existing mapping (no re-map).
+  // SAFEOP -> OP keeps the existing mapping (no re-map).
   ASSERT_TRUE(dm.transitionToState({}, EtherCatState::Op, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
 
-  // Leaving the exchanging states (e.g. down to PRE-OP for a firmware download) tears it down.
+  // Leaving the exchanging states (e.g. down to PREOP for a firmware download) tears it down.
   ASSERT_TRUE(dm.transitionToState({}, EtherCatState::PreOp, kTimeout).has_value());
   EXPECT_FALSE(dm.processDataConfigured());
 
-  // Returning to SAFE-OP re-maps the bus, and exchange works again — mapping continues to
+  // Returning to SAFEOP re-maps the bus, and exchange works again — mapping continues to
   // function across a down/up cycle.
   busPtr->lastOutputs.clear();
   ASSERT_TRUE(dm.transitionToState({}, EtherCatState::SafeOp, kTimeout).has_value());
@@ -1091,14 +1091,14 @@ TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 1u);
 
-  // Take device 2 down to PRE-OP. Device 1 stays in OP, so the whole-bus image is kept — no
+  // Take device 2 down to PREOP. Device 1 stays in OP, so the whole-bus image is kept — no
   // teardown, no re-map — and the staying device keeps exchanging. (Before the fix this nulled
   // the single whole-bus image and silently stopped exchange for device 1 too.)
   ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::PreOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 1u);
 
-  // Model device 2 now sitting in PRE-OP, then climb it back to SAFE-OP (PRE-OP -> OP would be an
+  // Model device 2 now sitting in PREOP, then climb it back to SAFEOP (PREOP -> OP would be an
   // illegal AL jump): rejoining from a non-exchange state re-maps the whole bus (a new image
   // generation), since its PDO layout can differ.
   busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
@@ -1142,7 +1142,7 @@ std::unique_ptr<FakeBus> makeTwoAxisOpBusWithCells() {
   return bus;
 }
 
-// The image is one whole-bus layout, so a device below SAFE-OP keeps its region in it. It writes
+// The image is one whole-bus layout, so a device below SAFEOP keeps its region in it. It writes
 // nothing into the frame, so whatever its region holds was not sent by it, and its cells keep the
 // last value it did send.
 TEST(CycleGuard, DecodeSkipsADeviceThatDoesNotExchange) {
@@ -1164,7 +1164,7 @@ TEST(CycleGuard, DecodeSkipsADeviceThatDoesNotExchange) {
   ASSERT_NE(drive2, nullptr);
   ASSERT_EQ(drive2->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{0x11223344});
 
-  // Device 2 drops to PRE-OP while device 1 stays in OP, so the image stays published and the
+  // Device 2 drops to PREOP while device 1 stays in OP, so the image stays published and the
   // frame still carries bytes in device 2's region.
   busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
   busPtr->cannedInputs = {0x27, 0x06, 0x02, 0x00, 0x00, 0x00,   // device 1
@@ -1177,7 +1177,7 @@ TEST(CycleGuard, DecodeSkipsADeviceThatDoesNotExchange) {
   EXPECT_EQ(drive2->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{0x11223344});
 }
 
-// The decode and Device::exchangesProcessData() share one rule, so a device in SAFE-OP with the
+// The decode and Device::exchangesProcessData() share one rule, so a device in SAFEOP with the
 // error flag set is skipped as well.
 TEST(CycleGuard, DecodeSkipsADeviceInSafeOpWithAnError) {
   auto bus = makeTwoAxisOpBusWithCells();
@@ -1239,8 +1239,8 @@ TEST(DeviceManagerProcessData, DroppingOneDeviceIsNotCountedAsABusFault) {
 }
 
 TEST(DeviceManagerProcessData, ADeviceGoingFromOpToSafeOpKeepsItsShare) {
-  // One call can carry both: {1, 2} -> SAFE-OP with device 1 in OP and device 2 in PRE-OP. A device
-  // in SAFE-OP still takes its outputs, so device 1 keeps answering 3 for the whole transition.
+  // One call can carry both: {1, 2} -> SAFEOP with device 1 in OP and device 2 in PREOP. A device
+  // in SAFEOP still takes its outputs, so device 1 keeps answering 3 for the whole transition.
   // Device 2 answers nothing until it arrives, so the expectation takes the lower of where it is
   // and where it is going.
   const auto kTimeout = std::chrono::milliseconds(10);
@@ -1256,7 +1256,7 @@ TEST(DeviceManagerProcessData, ADeviceGoingFromOpToSafeOpKeepsItsShare) {
   dm.exchangeProcessData();
   ASSERT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
 
-  // Device 1 reaches SAFE-OP at once and device 2 is not there yet, so the bus answers 3 for most
+  // Device 1 reaches SAFEOP at once and device 2 is not there yet, so the bus answers 3 for most
   // of the transition. Device 2 arrives at the end.
   busPtr->whileTransitioning = [&] {
     busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
@@ -1270,13 +1270,13 @@ TEST(DeviceManagerProcessData, ADeviceGoingFromOpToSafeOpKeepsItsShare) {
   busPtr->whileTransitioning = nullptr;
   EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
 
-  // With both in SAFE-OP, each counts its outputs and its inputs, as in OP.
+  // With both in SAFEOP, each counts its outputs and its inputs, as in OP.
   EXPECT_EQ(dm.processImageInfo().expectedWkc, 6);
 }
 
 TEST(DeviceManagerProcessData, FailedObjectDictionaryReadIsAttemptedOncePerScan) {
-  // The CoE mailbox is live from PRE-OP up, so the automatic read is reached on entry to PRE-OP,
-  // SAFE-OP and OP alike. A bus that cannot answer the enumeration will not answer it three
+  // The CoE mailbox is live from PREOP up, so the automatic read is reached on entry to PREOP,
+  // SAFEOP and OP alike. A bus that cannot answer the enumeration will not answer it three
   // times, and on a large chain each pass costs minutes — so a failure latches, and the explicit
   // read is the deliberate way back.
   const auto kTimeout = std::chrono::milliseconds(10);
@@ -1341,7 +1341,7 @@ TEST(DeviceManagerProcessData, CountsCyclesTheBusDidNotFullyAnswer) {
   EXPECT_GE(dm.processImageInfo().lastShortWkcUs, dm.processImageInfo().firstShortWkcUs);
 
   // A re-map does not erase it. Re-mapping happens whenever a device is brought into or out of
-  // SAFE-OP/OP, which is exactly when someone is chasing a fault — clearing per image generation
+  // SAFEOP/OP, which is exactly when someone is chasing a fault — clearing per image generation
   // erased the record at the moment it was most wanted.
   ASSERT_TRUE(dm.configureProcessData().has_value());
   ASSERT_EQ(dm.processImageInfo().generations, 2u);
@@ -1357,7 +1357,7 @@ TEST(DeviceManagerProcessData, CountsCyclesTheBusDidNotFullyAnswer) {
 
 TEST(DeviceManagerProcessData, CommandsOnlyLegalAlStateTransitions) {
   // Motion Master walks the EtherCAT AL state machine and never commands a transition it does not
-  // allow. The critical case is BOOT -> SAFE-OP/OP: entering an exchange state re-maps by reading
+  // allow. The critical case is BOOT -> SAFEOP/OP: entering an exchange state re-maps by reading
   // PDO mappings over the CoE mailbox, which a device in BOOT cannot serve — that read segfaults
   // inside SOEM. So a device in BOOT is sent to INIT first. This bus never changes state, so each
   // walk stops after its first step, and that step is what each case checks.
@@ -1392,7 +1392,7 @@ TEST(DeviceManagerProcessData, CommandsOnlyLegalAlStateTransitions) {
 }
 
 TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {
-  // Two devices share one whole-bus mapping, but device 1 stays in PRE-OP while device 2 is
+  // Two devices share one whole-bus mapping, but device 1 stays in PREOP while device 2 is
   // in OP. Device 2's params come from the process image; device 1's must come over SDO, not
   // from its stale (never-filled) region of the snapshot.
   auto bus = std::make_unique<FakeBus>();
@@ -1436,12 +1436,12 @@ TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {
   ASSERT_TRUE(s2.has_value());
   EXPECT_EQ(std::get<uint16_t>(*s2), 0x1234);
 
-  // Device 1 (PRE-OP) reads over SDO — the live mailbox value, not its stale 0x9999 region.
+  // Device 1 (PREOP) reads over SDO — the live mailbox value, not its stale 0x9999 region.
   auto s1 = dm.deviceAt(1)->readParameter(0x6041, 0x00);
   ASSERT_TRUE(s1.has_value());
   EXPECT_EQ(std::get<uint16_t>(*s1), 0xABCD);
 
-  // Only device 2 (OP, outputs + inputs) contributes to the expected WKC; device 1 (PRE-OP)
+  // Only device 2 (OP, outputs + inputs) contributes to the expected WKC; device 1 (PREOP)
   // contributes nothing, so the partially-operational bus expects 3, not 6.
   EXPECT_EQ(dm.expectedWorkingCounter(), 3);
 }
@@ -1531,7 +1531,7 @@ TEST(DeviceManagerSampling, PdoSampleSpecResolvesInputAndOutputObjects) {
 
 TEST(DeviceManagerSampling, PdoSampleSpecRejectsUnmappedAndUnconfigured) {
   auto bus = makeCia402Bus();
-  // Below SAFE-OP, so the scan publishes no image.
+  // Below SAFEOP, so the scan publishes no image.
   bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());

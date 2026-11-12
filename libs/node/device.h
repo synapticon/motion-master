@@ -178,11 +178,11 @@ class Device {
   /// clients can gate CiA402-only UI without duplicating the object indices.
   bool isCia402() const;
 
-  /// @brief Whether the device's CoE/SDO mailbox is currently active (AL state PRE-OP,
-  ///        SAFE-OP, or OP).
+  /// @brief Whether the device's CoE/SDO mailbox is currently active (AL state PREOP,
+  ///        SAFEOP, or OP).
   ///
-  /// Mailbox communication is available in PRE-OP and above per the EtherCAT state machine,
-  /// independent of the AL error indicator — a device in SAFE-OP+error still answers mailbox
+  /// Mailbox communication is available in PREOP and above per the EtherCAT state machine,
+  /// independent of the AL error indicator — a device in SAFEOP+error still answers mailbox
   /// requests. INIT has no mailbox and BOOT's is FoE-only, so both report @c false. Derived
   /// live from the fieldbus driver's cached AL status (@c FieldbusDriver::slaveState) — no
   /// copy is stored here. When @c false, @c readParameter / @c writeParameter operate on the
@@ -224,10 +224,10 @@ class Device {
   std::expected<mm::comm::FieldbusDriver::FirmwareActivation, std::string> activateFirmware(
       std::chrono::steady_clock::duration timeout) const;
 
-  /// @brief Whether the device is in a process-data-exchanging state (SAFE-OP or OP, error
+  /// @brief Whether the device is in a process-data-exchanging state (SAFEOP or OP, error
   ///        bit clear).
   ///
-  /// Derived live from the driver's cached AL status. When @c false (INIT / PRE-OP / BOOT)
+  /// Derived live from the driver's cached AL status. When @c false (INIT / PREOP / BOOT)
   /// the device does not participate in the LRW cycle, so its region of the process image is
   /// stale — PDO-mapped parameter access must use SDO, not the shared buffers. Lets a
   /// partially-operational bus route each device correctly.
@@ -255,7 +255,7 @@ class Device {
   /// @brief Writes an object dictionary entry to the device (CoE SDO download).
   ///
   /// Raw SDO write with no cache or PDO awareness — for the typed, PDO-aware path use
-  /// @c writeParameter instead. Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox
+  /// @c writeParameter instead. Requires the device to be in PREOP, SAFEOP, or OP (mailbox
   /// communication active).
   ///
   /// @param index     CoE object index.
@@ -308,7 +308,7 @@ class Device {
   ///
   /// Delegates to the fieldbus driver's @c readSii using this device's slave position. Decode the
   /// returned bytes with @c mm::comm::parseSii. EEPROM access is most reliable while the device is
-  /// in INIT or PRE-OP.
+  /// in INIT or PREOP.
   ///
   /// @return The raw SII image on success, or an error string on failure.
   std::expected<std::vector<uint8_t>, std::string> readSii() const;
@@ -318,7 +318,7 @@ class Device {
   /// Delegates to the fieldbus driver's @c writeSii using this device's slave position.
   /// Destructive: a malformed image can leave the device unidentifiable until re-flashed. The
   /// device adopts the new contents only after a power cycle. Most reliable while the device is in
-  /// INIT or PRE-OP.
+  /// INIT or PREOP.
   ///
   /// @param data  Raw SII image to write (even length).
   /// @return Void on success, or an error string on failure.
@@ -326,7 +326,7 @@ class Device {
 
   /// @brief Enumerates the device's CoE object dictionary and populates @c parameters().
   ///
-  /// Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication
+  /// Requires the device to be in PREOP, SAFEOP, or OP (mailbox communication
   /// active). One @c DeviceParameter is created per @c (index, subindex) pair returned
   /// by the SDO Info service, with @c value pre-initialised to a type-appropriate zero.
   /// When @p readValues is @c true each entry is additionally read and the decoded value stored on
@@ -352,8 +352,8 @@ class Device {
   /// Walks the PDO assignment objects (@c 0x1C12 for outputs/RxPDO, @c 0x1C13 for
   /// inputs/TxPDO) and the mapping objects they reference (@c 0x16xx / @c 0x1Axx) via SDO
   /// upload, producing one @c PdoMappingEntry per mapped object with its bit offset and
-  /// width within the slave's process-data window.  Requires the device to be in PRE-OP,
-  /// SAFE-OP, or OP (mailbox communication active).
+  /// width within the slave's process-data window.  Requires the device to be in PREOP,
+  /// SAFEOP, or OP (mailbox communication active).
   ///
   /// A direction whose assignment object is absent or assigns nothing yields an empty list
   /// for that direction (the device simply has no PDOs in it) and is not an error.  Calling
@@ -371,7 +371,7 @@ class Device {
   /// The grouped counterpart of @c readFlatPdoMapping: instead of one flat list per direction, each
   /// mapping object keeps its @c pdoIndex and its own entries (with derived @c bitOffset), so the
   /// result round-trips into @c writePdoMapping. Reads fresh over SDO; does not touch the cached
-  /// @c flatPdoMapping(). Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox active).
+  /// @c flatPdoMapping(). Requires the device to be in PREOP, SAFEOP, or OP (mailbox active).
   ///
   /// @return The grouped mapping, or an error string if a referenced mapping object cannot be read.
   std::expected<PdoMapping, std::string> readPdoMapping();
@@ -388,10 +388,10 @@ class Device {
   /// @p mapping is simply left unassigned — its contents are irrelevant once it is off the sync
   /// manager, so it needs no explicit clear.
   ///
-  /// **Requires the device to be in PRE-OP.** The mapping and assignment objects are writable only
-  /// in PRE-OP — INIT/BOOT have no CoE mailbox, and in SAFE-OP/OP the sync managers are active and
-  /// the slave aborts the write. This is the "drop to PRE-OP, remap, climb back" flow: the caller
-  /// takes the device to PRE-OP, calls this, then transitions it back to SAFE-OP/OP, at which point
+  /// **Requires the device to be in PREOP.** The mapping and assignment objects are writable only
+  /// in PREOP — INIT/BOOT have no CoE mailbox, and in SAFEOP/OP the sync managers are active and
+  /// the slave aborts the write. This is the "drop to PREOP, remap, climb back" flow: the caller
+  /// takes the device to PREOP, calls this, then transitions it back to SAFEOP/OP, at which point
   /// @c DeviceManager re-reads the mapping and rebuilds the whole-bus process image.
   ///
   /// After writing, the mapping is read back (via @c readFlatPdoMapping, which also refreshes
@@ -403,7 +403,7 @@ class Device {
   /// @param mapping  The desired output (RxPDO) and input (TxPDO) mapping objects, in assignment
   ///                 order. An empty direction clears that sync manager's assignment.
   /// @return Void on success (the device's mapping matches @p mapping), or an error string if the
-  ///         device is not in PRE-OP, an entry is malformed (bit length or count out of range), an
+  ///         device is not in PREOP, an entry is malformed (bit length or count out of range), an
   ///         SDO write/read-back fails after all retries, or the read-back does not match.
   std::expected<void, std::string> writePdoMapping(const PdoMapping& mapping);
 
@@ -494,7 +494,7 @@ class Device {
   /// @brief Reads a parameter value, keeping the cached store in sync.
   ///
   /// Routing, in order:
-  /// - When the device is exchanging (SAFE-OP/OP) and process-image access was injected, the
+  /// - When the device is exchanging (SAFEOP/OP) and process-image access was injected, the
   ///   live PDO value is taken from the process image (if the object is PDO-mapped and the bus is
   ///   healthy), decoded, stored (marking it @c SyncState::Synced) and returned — no bus I/O.
   /// - Otherwise, when @c mailboxActive(), uploads via SDO, decodes, stores and returns it.
@@ -559,7 +559,7 @@ class Device {
   ///
   /// @p value is coerced into the parameter's declared data type and stored in the cache
   /// (the cache is the source of truth). Then, in order:
-  /// - exchanging (SAFE-OP/OP) with process-image access injected and the object output-mapped:
+  /// - exchanging (SAFEOP/OP) with process-image access injected and the object output-mapped:
   ///   the value is staged into the output image (sent next cycle), marked @c SyncState::Synced,
   ///   and the call returns — no SDO download.
   /// - online: the value is encoded and downloaded via SDO. On success the parameter is
@@ -1003,15 +1003,15 @@ void to_json(nlohmann::json& j, const Device& d);
 /// slot in the Detected Module Ident List (@c 0xF050) it writes the detected ident into
 /// the matching subindex of the Configured Module Ident List (@c 0xF030). A drive whose
 /// configured and detected lists disagree reports a module mismatch and refuses to leave
-/// PRE-OP; copying detected into configured clears it.
+/// PREOP; copying detected into configured clears it.
 ///
-/// The device must be in PRE-OP or higher (SDO mailbox active) — @c 0xF030 is writable
-/// in PRE-OP. Vendor-neutral: keyed only on the standard MDP objects, never on vendor ID.
+/// The device must be in PREOP or higher (SDO mailbox active) — @c 0xF030 is writable
+/// in PREOP. Vendor-neutral: keyed only on the standard MDP objects, never on vendor ID.
 /// Best-effort and idempotent: a device that does not implement @c 0xF050 (i.e. is not
 /// modular) is treated as success with zero slots written, and slots whose configured
 /// entry already matches the detected one are left untouched.
 ///
-/// @param device  Target device; must have mailbox communication active (PRE-OP+).
+/// @param device  Target device; must have mailbox communication active (PREOP+).
 /// @return The number of configured-list subindices written, or an error string naming
 ///         the slot(s) whose write to @c 0xF030 failed.
 std::expected<int, std::string> reconcileDetectedModules(const Device& device);

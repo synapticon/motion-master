@@ -82,7 +82,7 @@ function valueToInputString(v: number | string | number[] | undefined): string {
   return v.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
 }
 
-// ETG.1000.6 ObjAccess: write bits 3-5 (Wr PreOp/SafeOp/Op). Writable iff any is set.
+// ETG.1000.6 ObjAccess: write bits 3-5 (Wr PREOP/SAFEOP/OP). Writable iff any is set.
 // The number a value input holds, for the range warning: hex as the toggle writes it, else decimal.
 // Anything else (text, a byte list) has no range to check.
 function inputNumber(s: string): number | null {
@@ -107,7 +107,7 @@ function isWritable(access: number): boolean {
   return (access & 0x38) !== 0
 }
 
-// ETG.1000.6 ObjAccess: read bits 0-2 (Rd PreOp/SafeOp/Op). Readable iff any is set.
+// ETG.1000.6 ObjAccess: read bits 0-2 (Rd PREOP/SAFEOP/OP). Readable iff any is set.
 function isReadable(access: number): boolean {
   return (access & 0x07) !== 0
 }
@@ -126,7 +126,7 @@ function valuesEqual(
 }
 
 function formatAccess(a: number): string {
-  // ETG.1000.6: bit 0=Rd PreOp, 1=Rd SafeOp, 2=Rd Op, 3=Wr PreOp, 4=Wr SafeOp, 5=Wr Op
+  // ETG.1000.6: bit 0=Rd PREOP, 1=Rd SAFEOP, 2=Rd OP, 3=Wr PREOP, 4=Wr SAFEOP, 5=Wr OP
   const r = (a & 0x07) !== 0
   const w = isWritable(a)
   if (r && w) return 'RW'
@@ -561,13 +561,13 @@ export default function DeviceParametersPage() {
     queryFn: () => api.getDeviceParameters(slavePosition),
     staleTime: Infinity,
     retry: false,
-    // The OD is read automatically when the device reaches PRE-OP, which can land after this
+    // The OD is read automatically when the device reaches PREOP, which can land after this
     // query's first (empty) fetch; staleTime: Infinity would otherwise pin that empty list. Poll
     // while empty so the list appears once the backend has enumerated it, then stop.
     refetchInterval: (query) => ((query.state.data?.data?.length ?? 0) > 0 ? false : 2000),
   })
 
-  // The device carries parametersUnavailable — whether the automatic read on reaching PRE-OP has
+  // The device carries parametersUnavailable — whether the automatic read on reaching PREOP has
   // failed. Without it an empty list is ambiguous: a device that could not answer looks exactly
   // like one that has not been asked yet, and the automatic read is attempted only once, so
   // waiting for it to appear is waiting for something that will never happen. Polled on the same
@@ -749,7 +749,7 @@ export default function DeviceParametersPage() {
             list below is PDO-aware: it uses the live process image (or stages an output, for an
             RxPDO like a target) while the device is exchanging, and falls back to SDO over the
             mailbox otherwise. The manual Upload/Download tool below is always raw SDO and works
-            from PRE-OP up.
+            from PREOP up.
           </>
         }
       />
@@ -1042,12 +1042,12 @@ export default function DeviceParametersPage() {
               <Callout variant="warning">
                 <p>
                   This device's object dictionary could not be read. The automatic read on reaching
-                  PRE-OP failed, and it is attempted only once per scan — so nothing further will
+                  PREOP failed, and it is attempted only once per scan — so nothing further will
                   happen on its own.
                 </p>
                 <p className="mt-1.5 text-grey-600">
                   Click <em>Initialize</em> above to try again. If it keeps failing, the device is
-                  not answering its CoE mailbox: check that it is in PRE-OP or higher, and look at
+                  not answering its CoE mailbox: check that it is in PREOP or higher, and look at
                   the server log, which names the reason for each failed read.
                 </p>
               </Callout>
@@ -1056,7 +1056,7 @@ export default function DeviceParametersPage() {
             {params.length === 0 && !initMutation.isPending && !parametersUnavailable && (
               <p className="text-xs text-grey-500">
                 No parameters loaded. Click <em>Initialize</em> to enumerate the device's object dictionary
-                (requires the device to be in PRE-OP or higher).
+                (requires the device to be in PREOP or higher).
               </p>
             )}
           </div>

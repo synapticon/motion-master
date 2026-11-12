@@ -5,8 +5,8 @@ POST /api/devices/{slavePosition}/parameters/init?readValues=true reads the obje
 through the SDO Information service. With readValues=true it also reads and decodes the value of
 every entry in the same call. On a drive with a full dictionary this takes several seconds.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed, because the
-mailbox is live from PRE-OP up. A device in SAFE-OP or OP stays there.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed, because the
+mailbox is live from PREOP up. A device in SAFEOP or OP stays there.
 
     python read-all-parameters.py
     python read-all-parameters.py --slave 2
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def decode_value(param):
@@ -55,7 +55,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     print(f"reading the object dictionary of slave {args.slave}...")
     params = client.call(

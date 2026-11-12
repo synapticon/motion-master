@@ -147,11 +147,11 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
-  // ecx_config_init reprograms every slave's mailbox SMs to PRE-OP sizes and hands
+  // ecx_config_init reprograms every slave's mailbox SMs to PREOP sizes and hands
   // EEPROM back to the PDI, so any prior BOOT-SM tracking is now stale.
   bootMailboxSlaves_.clear();
   // Take full manual control of AL state transitions. With the default (0), SOEM's config/map
-  // helpers auto-request state changes (e.g. driving slaves toward PRE-OP) as a side effect. In
+  // helpers auto-request state changes (e.g. driving slaves toward PREOP) as a side effect. In
   // Motion Master, AL state is the user's job (POST /api/devices/state →
   // DeviceManager::transitionToState), so we never want SOEM moving slaves on its own — every
   // ecx_writestate is issued explicitly.
@@ -459,7 +459,7 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
     // input/mailbox mappers run with FMMUc == EC_MAXFMMU (4) and write past the end of the
     // EC_MAXFMMU-sized FMMU[] array — corrupting the adjacent FMMU*func/mbx_*/…/PO2SOconfig fields
     // of ec_slavet. That OOB write is the likely root cause behind the duplicate-Outputs-FMMU
-    // symptom, the broken mailbox sizes that make a subsequent SAFE-OP fail, and the stray non-null
+    // symptom, the broken mailbox sizes that make a subsequent SAFEOP fail, and the stray non-null
     // PO2SOconfig guarded above. Zero the in-memory array + counter so SOEM re-derives FMMU0/1/2
     // from scratch exactly as a clean scan would, and clear all EC_MAXFMMU FMMU registers on the
     // ESC so a slave already carrying a stale duplicate from a pre-fix re-map self-heals once SOEM
@@ -534,7 +534,7 @@ std::expected<void, std::string> SoemFieldbusDriver::deactivateMailboxStatusFmmu
   // never read slavelist[].mbxstatus; SDO/FoE poll the mailbox directly. On TI PRU-ICSS ESCs
   // (ESC type 0x90) a register-space FMMU inside an LRW is unsupported: every cyclic frame dies in
   // the processing unit (error counter 0x030C saturates at 255), the working counter stays 0, and
-  // SAFE-OP -> OP fails with AL status 0x001B (SM watchdog). Deactivating this one FMMU restores
+  // SAFEOP -> OP fails with AL status 0x001B (SM watchdog). Deactivating this one FMMU restores
   // cyclic exchange; it is harmless on every other ESC because nothing consumes it. Gated off only
   // when the config keeps it active for hardware that both needs and supports it.
   if (mailboxStatusFmmu_) {
@@ -1985,7 +1985,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   // out the timeout. The exception is a slave this driver sent to BOOT and now asks to leave it,
   // because either step out of BOOT can restart the device. Such a slave gets its address back
   // before the first request, on each resend, and before it counts as having reached the target.
-  // The step to PRE-OP makes a SOMANET bootloader hand over to the application by a restart. The
+  // The step to PREOP makes a SOMANET bootloader hand over to the application by a restart. The
   // step to INIT restarts the netX of an Integro that got a new com binary: its boot code asks the
   // netX for a reset 500 ms away and only then reports INIT, so the device can be gone before the
   // master reads INIT (somanet_software, AppECS_Functions_Boot.c,
@@ -2063,7 +2063,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   }
 
   std::set<uint16_t> pending;
-  // Slaves that leave INIT here. Reaching PRE-OP from INIT is what resets the mailbox counter.
+  // Slaves that leave INIT here. Reaching PREOP from INIT is what resets the mailbox counter.
   std::set<uint16_t> leavingInit;
   {
     const auto lock = controlPlane_.lockBus();
@@ -2074,9 +2074,9 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
       if (!requiredState || stateClean == static_cast<uint16_t>(*requiredState)) {
         // Mailbox sync managers only need reprogramming when leaving INIT, and only in
         // two cases: entering BOOT (which uses larger BOOT-specific mailbox SMs), or
-        // entering PRE-OP from a slave that still holds stale BOOT SMs (i.e. one we drove
+        // entering PREOP from a slave that still holds stale BOOT SMs (i.e. one we drove
         // into BOOT earlier, e.g. for a firmware download). On a plain fresh-scan
-        // INIT→PRE-OP the SMs ecx_config_init already programmed are correct, and touching
+        // INIT→PREOP the SMs ecx_config_init already programmed are correct, and touching
         // them here is both redundant and harmful (it seizes EEPROM from the slave's PDI).
         if (stateClean == static_cast<uint16_t>(EtherCatState::Init)) {
           leavingInit.insert(pos);
@@ -2084,12 +2084,12 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
             updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::Boot);
             bootMailboxSlaves_.insert(pos);
           } else if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos)) {
-            // Deliberately NOT erased here. Leaving BOOT for PRE-OP makes a SOMANET bootloader
+            // Deliberately NOT erased here. Leaving BOOT for PREOP makes a SOMANET bootloader
             // hand over to the application by **restarting the device**, and the restart wipes the
             // sync managers programmed a moment ago. Striking the slave off the list on the
             // attempt meant nothing could ever reprogram them afterwards: the slave came back in
             // INIT with unusable mailbox config, ignored every resend, and sat there until the
-            // timeout with no AL error to explain it. It is erased once PRE-OP is actually
+            // timeout with no AL error to explain it. It is erased once PREOP is actually
             // reached; until then the resend path below reprograms as often as it needs to.
             updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
           }
@@ -2116,7 +2116,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
       break;
     }
 
-    // When a tick is provided (e.g. SAFE-OP → OP), call it at ~1 ms intervals
+    // When a tick is provided (e.g. SAFEOP → OP), call it at ~1 ms intervals
     // so process data keeps flowing and the SM watchdog does not fire.
     if (tick) {
       auto pollEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
@@ -2142,7 +2142,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
       uint16_t pos = *it;
       // A slave that can restart counts as there only when it answers at its station address. One
       // that answers at its wire position only gets the address back at once rather than at the
-      // next resend. On the step to PRE-OP it also needs its sync managers again. When the read at
+      // next resend. On the step to PREOP it also needs its sync managers again. When the read at
       // the address gets no answer, the state reads as 0, and the slave stays pending.
       if (ctx_->slavelist[pos].state == targetRaw && mayRestart(pos)) {
         if (restoreStationAddress(ctx_.get(), pos) == AddressState::Reassigned &&
@@ -2172,10 +2172,10 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
       if (state == targetRaw) {
         spdlog::info("Device {}: reached state 0x{:02X}", pos, targetRaw);
         if (targetState == EtherCatState::PreOp) {
-          // Confirmed out of the BOOT mailbox; a later plain INIT->PRE-OP must not touch the SMs.
+          // Confirmed out of the BOOT mailbox; a later plain INIT->PREOP must not touch the SMs.
           bootMailboxSlaves_.erase(pos);
-          // Under the same lock as the state read that saw PRE-OP, so this is the first mailbox
-          // request the slave gets in PRE-OP.
+          // Under the same lock as the state read that saw PREOP, so this is the first mailbox
+          // request the slave gets in PREOP.
           const uint32_t vendorId = ctx_->slavelist[pos].eep_man;
           if (leavingInit.contains(pos) && isSomanetDevice(vendorId) &&
               !resetMailboxCounter(ctx_.get(), pos)) {
@@ -2209,7 +2209,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
         // and the mailbox sync managers it programmed. So for a slave we drove into BOOT, check
         // the address on every resend of either step out, and reprogram the sync managers if it
         // turns out to have restarted. A slave asked for INIT gets its address back and nothing
-        // else: it stays in the boot set, so the step to PRE-OP programs its sync managers.
+        // else: it stays in the boot set, so the step to PREOP programs its sync managers.
         //
         // Keyed on whether the slave answers, never on its cached AL status: the cache holds
         // whatever the master last wrote into it when the slave stops answering — the very target

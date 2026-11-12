@@ -5,8 +5,8 @@
 match the length of the object. write-parameter.py converts a value to the data type instead,
 which is the easier way for most objects.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed, because the
-mailbox is live from PRE-OP up. A device in SAFE-OP or OP stays there.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed, because the
+mailbox is live from PREOP up. A device in SAFEOP or OP stays there.
 
     python write-sdo.py --index 0x6060 --subindex 0 --data 8
     python write-sdo.py --index 0x607a --subindex 0 --data 0x10,0x27,0,0 --slave 2
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def auto_int(text):
@@ -38,7 +38,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     path = {"slavePosition": args.slave, "index": args.index, "subindex": args.subindex}
     r = client.call("sdoDownload", path=path, body={"data": data}, check=False)

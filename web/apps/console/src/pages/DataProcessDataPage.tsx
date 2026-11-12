@@ -139,7 +139,7 @@ export default function DataProcessDataPage() {
       <div>
         <PageHeader eyebrow="Data" title="Process Data" />
         <p className="p-4 sm:px-8 sm:py-7 text-sm text-grey-600">
-          Connect and scan the bus, then bring devices to SAFE-OP or OP to view and write process
+          Connect and scan the bus, then bring devices to SAFEOP or OP to view and write process
           data.
         </p>
       </div>
@@ -172,7 +172,7 @@ export default function DataProcessDataPage() {
 
         {idle && (
           <p className="text-xs text-grey-600">
-            No process image is published. Bring a device to SAFE-OP or OP to map process data.
+            No process image is published. Bring a device to SAFEOP or OP to map process data.
           </p>
         )}
 
@@ -180,9 +180,9 @@ export default function DataProcessDataPage() {
           <>
             {!img.configured && (
               <Callout variant="warning">
-                Not currently exchanging — all devices have left SAFE-OP/OP. Showing the most recent
+                Not currently exchanging — all devices have left SAFEOP/OP. Showing the most recent
                 published layout (generation {img.generations}); live values are unavailable and
-                writes are not cyclically sent until a device re-enters SAFE-OP/OP.
+                writes are not cyclically sent until a device re-enters SAFEOP/OP.
               </Callout>
             )}
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-grey-600">

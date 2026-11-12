@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Restart devices through INIT up to an AL state (POST /api/devices/state/restart).
 
-The server commands each device to INIT, and then up one state at a time to --state: PRE-OP,
-SAFE-OP, OP. A --state of BOOT goes from INIT to BOOT. The walk stops at the first state that a
+The server commands each device to INIT, and then up one state at a time to --state: PREOP,
+SAFEOP, OP. A --state of BOOT goes from INIT to BOOT. The walk stops at the first state that a
 device does not reach. A restart drops every device it restarts out of the process data exchange,
 so a drive that was enabled is disabled.
 
@@ -10,7 +10,7 @@ Opens the fieldbus driver and scans first when needed. The script exits with 1 w
 not reach --state.
 
     python restart-devices.py
-    python restart-devices.py --state pre-op --slave 2
+    python restart-devices.py --state preop --slave 2
 """
 
 import argparse

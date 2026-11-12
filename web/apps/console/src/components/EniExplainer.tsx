@@ -33,9 +33,9 @@ export default function EniExplainer() {
       </p>
       <p>
         <strong>The bus has to be mapped.</strong> FMMUs and logical addresses come into being at
-        the <strong>SAFE-OP</strong> transition. Before that there is no mapping to describe, so a
-        bus in PRE-OP is refused rather than guessed at. Use{' '}
-        <strong>Fieldbus → Control</strong> to reach SAFE-OP or OP first.
+        the <strong>SAFEOP</strong> transition. Before that there is no mapping to describe, so a
+        bus in PREOP is refused rather than guessed at. Use{' '}
+        <strong>Fieldbus → Control</strong> to reach SAFEOP or OP first.
       </p>
       <p>
         <strong>Exporting drives the bus.</strong> Each device's SII is read for its port layout and

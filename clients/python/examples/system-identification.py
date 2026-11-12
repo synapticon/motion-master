@@ -11,8 +11,8 @@ resolution data recording to begin, which is how the response gets recorded.
 The amplitude is a torque command, and neither the server nor the drive checks it. The server
 checks the frequency and time bounds before it writes anything. Ctrl-C cancels the run.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there.
 
     python system-identification.py --start-frequency 1000 --target-frequency 100000 \
         --amplitude 50 --time 5000
@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
-    PRE_OP,
+    PREOP,
     MotionMasterClient,
     ProcedureError,
     format_step,
@@ -62,7 +62,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     snapshot = None
     changes = step_changes(client.run_procedure(args.slave, PROCEDURE, body))

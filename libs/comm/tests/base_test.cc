@@ -27,7 +27,7 @@ TEST(IsMacAddressTest, AcceptsDashSeparated) {
 // workingCounterContribution
 
 TEST(WorkingCounterContributionTest, SafeOpCountsOutputsAndInputsLikeOp) {
-  // The output Sync Manager stays enabled in SAFE-OP, so the slave still counts the write.
+  // The output Sync Manager stays enabled in SAFEOP, so the slave still counts the write.
   for (const EtherCatState state : {EtherCatState::SafeOp, EtherCatState::Op}) {
     const auto status = static_cast<uint16_t>(state);
     EXPECT_EQ(workingCounterContribution(status, true, true), 3);

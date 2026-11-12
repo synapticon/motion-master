@@ -39,7 +39,7 @@ namespace mm::node {
 ///   which polls it in the background, and the sampler reads the cached value. See *Why a refresher
 ///   exists at all* below.
 ///
-/// Monitoring is live-only: a parameter whose owning device is not exchanging (SAFE-OP/OP) samples
+/// Monitoring is live-only: a parameter whose owning device is not exchanging (SAFEOP/OP) samples
 /// @c null. Topics are unique.
 ///
 /// **Why a refresher exists at all.** The sampler must never touch the bus: it serves a lossless

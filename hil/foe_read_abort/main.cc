@@ -6,7 +6,7 @@
 // when a frame does not come back.
 //
 // Steps:
-//   1. Put the drive into PRE-OP and read the file in full. This gives the size the drive serves.
+//   1. Put the drive into PREOP and read the file in full. This gives the size the drive serves.
 //   2. Start a new read of the same file, acknowledge the first packets, and stop with one data
 //      packet unacknowledged. That is where the driver stands when the frame of a data packet
 //      comes back too late.
@@ -18,7 +18,7 @@
 // The program ends with WEDGED when the last read gets FoE error 0x800B "File System is busy",
 // with WRONG BYTES when it gets a file whose bytes are not those of step 1, with OK when it gets
 // the file of step 1, and with FAIL for anything else. A wedged drive needs a
-// power cycle. The drive is left in PRE-OP.
+// power cycle. The drive is left in PREOP.
 //
 // The sequence of issue #131, seen on a Circulo under late frames. Measured on a Circulo with
 // firmware v5.6.11: with the last packet of the file unacknowledged (--packets 4 for a file of five
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
     std::cerr << "ecx_init failed on " << options.ifname << "\n";
     return EXIT_FAILURE;
   }
-  // Without this, ecx_config_init asks every slave for PRE-OP on its own.
+  // Without this, ecx_config_init asks every slave for PREOP on its own.
   ctx->manualstatechange = 1;
   const int found = ecx_config_init(ctx.get());
   if (found < options.slave) {
@@ -256,12 +256,12 @@ int main(int argc, char** argv) {
 
   if (!requestState(ctx.get(), slave, EtherCatState::Init) ||
       !requestState(ctx.get(), slave, EtherCatState::PreOp)) {
-    std::cerr << "the slave did not reach PRE-OP\n";
+    std::cerr << "the slave did not reach PREOP\n";
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }
   const ec_slavet& device = ctx->slavelist[slave];
-  std::cout << std::format("slave {} ({}, product 0x{:08X}, revision 0x{:08X}) is in PRE-OP\n",
+  std::cout << std::format("slave {} ({}, product 0x{:08X}, revision 0x{:08X}) is in PREOP\n",
                            slave, device.name, device.eep_id, device.eep_rev);
 
   const ReadResult baseline = readFile(ctx.get(), slave, options.file);

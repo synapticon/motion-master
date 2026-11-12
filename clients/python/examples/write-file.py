@@ -7,8 +7,8 @@ values, so a write to it changes the drive after the next power cycle. An Integr
 only to a file name on its whitelist. It answers another name with FoE error 0x8001, "Path not
 found".
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there. A device in BOOT goes through INIT to PRE-OP.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there. A device in BOOT goes through INIT to PREOP.
 
     python write-file.py --file notes.txt
     python write-file.py --file files/config.csv --filename config.csv --slave 2
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def main():
@@ -37,7 +37,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     r = client.call(
         "foeWriteFile",

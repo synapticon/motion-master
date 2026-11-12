@@ -107,7 +107,7 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
     onSuccess: (r) => queryClient.setQueryData(cia402StatusKey(slavePosition), r.data),
   })
 
-  // Writing 0x6060 is an SDO, so it needs a mailbox — PRE-OP or above. It does not need OP, unlike
+  // Writing 0x6060 is an SDO, so it needs a mailbox — PREOP or above. It does not need OP, unlike
   // anything that moves the state machine: the drive adopts a requested mode without advancing.
   const canSetMode = isCia402 && mailboxActive
   const modes = modesQuery.data?.modes ?? []

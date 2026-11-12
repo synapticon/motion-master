@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Walks one drive INIT, PRE-OP, SAFE-OP, OP, INIT for N rounds against a running Motion Master,
+# Walks one drive INIT, PREOP, SAFEOP, OP, INIT for N rounds against a running Motion Master,
 # with a netem rule on the bus adapter during the rounds, and counts in the server log how often
-# the step to SAFE-OP mapped the process data short or had to map again.
+# the step to SAFEOP mapped the process data short or had to map again.
 #
-# One run is: reset, init, scan, PRE-OP, then N rounds of the five state requests. The netem rule
+# One run is: reset, init, scan, PREOP, then N rounds of the five state requests. The netem rule
 # is removed for the bring-up, added for the rounds, and removed at the end. See NEXTGEN.md,
 # Session 2026-10-22, for what each count should show.
 #
@@ -51,7 +51,7 @@ post() {
 }
 
 netem_off
-echo "== $label: reset, init, scan, PRE-OP"
+echo "== $label: reset, init, scan, PREOP"
 post /api/reset > /dev/null
 post /api/init "{\"adapter\":\"$adapter\"}" | head -c 200
 echo

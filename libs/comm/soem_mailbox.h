@@ -76,7 +76,7 @@ void abortFoeTransfer(ecx_contextt* ctx, uint16_t slavePosition);
 /// delayed by 25 ms, one such frame on a datagram that waited one EC_TIMEOUTRET did two things to
 /// an Integro firmware installation (#115): a read of the AL status made a device that had just
 /// reached INIT read as absent, and a sync manager write that left the host after the state
-/// request made the slave refuse PRE-OP with AL status 0x0016. A register datagram is safe to send
+/// request made the slave refuse PREOP with AL status 0x0016. A register datagram is safe to send
 /// again, so SOEM sends it again every EC_TIMEOUTRET until this expires, and a late answer to an
 /// earlier copy is accepted because it carries the same datagram header. The figure is
 /// EC_TIMEOUTLATE of ports/soem, the wait a mailbox transfer gives a late frame. A device that is
@@ -86,7 +86,7 @@ constexpr int kLateFrameTimeoutUs = 100'000;
 /// @brief Programs the mailbox sync managers of a slave for @p targetState.
 ///
 /// BOOT uses the bootstrap mailbox from the SII, which is larger than the standard one, and
-/// PRE-OP uses the standard mailbox. Call before the transition out of INIT. Any other target
+/// PREOP uses the standard mailbox. Call before the transition out of INIT. Any other target
 /// state leaves the sync managers unchanged.
 ///
 /// Call with the driver's control-plane mutex held.

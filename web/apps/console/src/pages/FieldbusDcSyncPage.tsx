@@ -101,7 +101,7 @@ export default function FieldbusDcSyncPage() {
             (system-time delay 0x0928, system-time difference 0x092C). The reference clock — the
             first DC-capable slave — defines bus time; every other DC slave continuously corrects
             its local clock toward it. The difference converges toward zero once the bus has been
-            exchanging in SAFE-OP/OP long enough for the drift loops to settle — watch for a slave
+            exchanging in SAFEOP/OP long enough for the drift loops to settle — watch for a slave
             whose deviation stays large or grows rather than the absolute value. Refreshes every 2
             seconds.
           </>

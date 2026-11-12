@@ -344,7 +344,7 @@ vcpkg_replace_string(
 # ETG.1000.5 defines BUSY only for a write, and ecx_FOEread takes it for a packet it does not
 # expect: it returns -EC_ERR_TYPE_PACKET_ERROR, and the caller gives up on the read. A SOMANET
 # Integro answers a read with BUSY when the file is not ready 0.5 s after the request: the first read
-# after it enters BOOT from PRE-OP, and the reads in the first 2 s of PRE-OP after power-on. The
+# after it enters BOOT from PREOP, and the reads in the first 2 s of PREOP after power-on. The
 # Beckhoff slave stack code answers its own BUSY on a read the same way and then waits for an ACK of
 # the last packet (ecatfoe.c, change V5.11 FOE1). Measured with hil/foe_read_busy on an Integro with
 # firmware v5.6.11: after an ACK of packet 0 the drive sends the file for the same request, 0.99 s
@@ -611,7 +611,7 @@ vcpkg_replace_string(
 # SOMANET firmware detects a repeated mailbox counter and ignores the message. It returns before it
 # reads the message, so the ESC never clears the mailbox-full bit of SM0. The firmware then finds
 # the same message on every pass of its main loop and ignores it again. Every later mailbox write is
-# refused, and only INIT followed by PRE-OP frees the mailbox. ETG.1000.4 Table 29 allows a master
+# refused, and only INIT followed by PREOP frees the mailbox. ETG.1000.4 Table 29 allows a master
 # to repeat a write with the same counter, and upstream SOEM does: ecx_FPWR sends the datagram again
 # when no frame comes back within EC_TIMEOUTRET, and ecx_mbxsend writes again after a failed write.
 # When the first write did reach the slave, the slave gets a second copy with the same counter.

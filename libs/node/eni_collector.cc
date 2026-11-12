@@ -326,7 +326,7 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
   if (!image.configured) {
     return std::unexpected(
         "the bus has no published process image, so there is no mapping to describe — bring it to "
-        "SAFE-OP or OP first");
+        "SAFEOP or OP first");
   }
 
   const std::vector<SlaveConfigInfo> busConfig = manager.busConfig();
@@ -497,9 +497,9 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
       slave.mailbox = mailbox;
     }
 
-    // Init commands. The mailbox Sync Managers are programmed before PRE-OP, because the mailbox
-    // has to work in PRE-OP for the CoE downloads above to reach the device. The process-data ones
-    // and the FMMUs wait for SAFE-OP, which is when the process image starts to exist.
+    // Init commands. The mailbox Sync Managers are programmed before PREOP, because the mailbox
+    // has to work in PREOP for the CoE downloads above to reach the device. The process-data ones
+    // and the FMMUs wait for SAFEOP, which is when the process image starts to exist.
     slave.initCmds.push_back(registerWrite(EniTransition::IP, EniCmd::Apwr, autoInc, kRegAlControl,
                                            {kAlStateInit, 0x00}, "request INIT"));
     slave.initCmds.push_back(
@@ -519,9 +519,9 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
           std::format("set sync manager {}", syncManager.index)));
     }
     slave.initCmds.push_back(registerWrite(EniTransition::IP, EniCmd::Fpwr, station, kRegAlControl,
-                                           {kAlStatePreOp, 0x00}, "request PRE-OP"));
+                                           {kAlStatePreOp, 0x00}, "request PREOP"));
     slave.initCmds.push_back(
-        stateCheck(EniTransition::IP, EniCmd::Fprd, station, kAlStatePreOp, "wait for PRE-OP"));
+        stateCheck(EniTransition::IP, EniCmd::Fprd, station, kAlStatePreOp, "wait for PREOP"));
 
     for (const mm::comm::FmmuConfig& fmmu : config.fmmus) {
       if (fmmu.active == 0) {
@@ -534,9 +534,9 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
           toVector(mm::comm::encodeFmmu(fmmu)), std::format("set FMMU {}", fmmu.index)));
     }
     slave.initCmds.push_back(registerWrite(EniTransition::PS, EniCmd::Fpwr, station, kRegAlControl,
-                                           {kAlStateSafeOp, 0x00}, "request SAFE-OP"));
+                                           {kAlStateSafeOp, 0x00}, "request SAFEOP"));
     slave.initCmds.push_back(
-        stateCheck(EniTransition::PS, EniCmd::Fprd, station, kAlStateSafeOp, "wait for SAFE-OP"));
+        stateCheck(EniTransition::PS, EniCmd::Fprd, station, kAlStateSafeOp, "wait for SAFEOP"));
     slave.initCmds.push_back(registerWrite(EniTransition::SO, EniCmd::Fpwr, station, kRegAlControl,
                                            {kAlStateOp, 0x00}, "request OP"));
     slave.initCmds.push_back(

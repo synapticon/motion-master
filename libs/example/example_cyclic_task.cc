@@ -121,7 +121,7 @@ void ExampleCyclicTask::execute(const mm::core::CycleContext& /*ctx*/) noexcept 
   // Then the CiA402 state machine. This is exactly the kind of work a cyclic task exists for:
   // controlword out, statusword in, both in the process image, so the climb costs one write per
   // cycle and no waiting at all. (What must stay off this thread is the *EtherCAT* AL state —
-  // INIT/PRE-OP/SAFE-OP/OP — which is seconds of mailbox and register traffic. A task runs in OP
+  // INIT/PREOP/SAFEOP/OP — which is seconds of mailbox and register traffic. A task runs in OP
   // and never touches it.)
   if (state != cia402::State::kOperationEnabled) {
     if (const auto command = commandTowardsOperationEnabled(state, controlword)) {

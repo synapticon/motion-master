@@ -93,7 +93,7 @@ TEST(EniWriterTest, WritesSyncManagersInIndexOrderWhateverOrderTheCallerSupplied
 TEST(EniWriterTest, WritesPayloadBytesAsHexBinaryInWireOrder) {
   const auto eni = writeEni(referenceNetwork());
   ASSERT_TRUE(eni.has_value()) << eni.error();
-  // The AL Control write of PRE-OP: the register is little-endian, so 0x0002 is "0200".
+  // The AL Control write of PREOP: the register is little-endian, so 0x0002 is "0200".
   EXPECT_NE(eni->find("<Data>0200</Data>"), std::string::npos);
   // The PDO assignment writes 0x1600 to 0x1C12:01, little-endian again.
   EXPECT_NE(eni->find("<Data>0016</Data>"), std::string::npos);

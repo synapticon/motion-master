@@ -4,8 +4,8 @@
 The size is what the file list of the device reports. A file name the device reports with no size
 is shown without one.
 
-Opens the fieldbus driver, scans and moves the device to PRE-OP first when needed. A device in
-SAFE-OP or OP stays there. A device in BOOT goes through INIT to PRE-OP.
+Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
+SAFEOP or OP stays there. A device in BOOT goes through INIT to PREOP.
 
     python list-files.py
     python list-files.py --slave 2
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PRE_OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
 
 
 def main():
@@ -28,7 +28,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PRE_OP, positions=[args.slave])
+    client.ensure_state(PREOP, positions=[args.slave])
 
     files = client.call("listDeviceFiles", path={"slavePosition": args.slave}).json()
     for f in files:

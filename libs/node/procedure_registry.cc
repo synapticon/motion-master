@@ -103,7 +103,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "slot is not configured, is refused by the drive as OS error 251 (\"command not allowed\").",
       "The iC-MU soft reset (0x07 into register 0x75) restarts the chip and is acknowledged "
       "without a value, so that one access reports no reading.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above — but it need not be "
+      "The mailbox must be active, so the device has to be in PREOP or above — but it need not be "
       "enabled, in any particular mode of operation, or exchanging process data.",
   };
   encoderRegister.movesMotor = false;
@@ -133,9 +133,9 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
   firmware.description =
       "Installs a SOMANET firmware package. The device is taken to BOOT, where its bootloader "
       "accepts the package's application and communication binaries over FoE and its SII image "
-      "into the EEPROM, and is then returned to the state you choose. PRE-OP is the default and is "
+      "into the EEPROM, and is then returned to the state you choose. PREOP is the default and is "
       "the confirmation that it worked: the bootloader hands over to the newly written firmware on "
-      "that transition, so reaching PRE-OP means the new firmware booted and answered. The "
+      "that transition, so reaching PREOP means the new firmware booted and answered. The "
       "binaries and the SII are always written. Another entry of the package, such as the ESI or "
       "the stack image, is written only when you name it in the extra files.";
   firmware.caveats = {
@@ -147,7 +147,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "If the package writes an SII, that part does need a power cycle: the ESC reads its EEPROM "
       "at reset, unlike the firmware, which loads on the transition out of BOOT.",
       "Choose BOOT as the final state when no application will be present — after erasing one, or "
-      "between two installs — because a PRE-OP transition then has nothing to hand over to and the "
+      "between two installs — because a PREOP transition then has nothing to hand over to and the "
       "drive answers AL status 0x0014, \"No valid firmware\".",
       "Nothing here checks that the package matches the device. A package built for other hardware "
       "is written as readily as the right one.",
@@ -248,7 +248,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "Cancelling stops the recording on the drive and discards whatever it had buffered but not "
       "yet written — up to about 250 samples. What reached the files stays, so the recording is a "
       "short one rather than none.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   hrdStreaming.movesMotor = false;
   hrdStreaming.requiresEnabled = false;
@@ -291,7 +291,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "encoder counts as an iC-MU only when register 0x74 names an iC-MU part, and it has no state "
       "otherwise. Another chip can hold a matching value in register 0x74.",
       "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuEncoderStatus.movesMotor = false;
   icMuEncoderStatus.requiresEnabled = false;
@@ -336,7 +336,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "register writes, which can leave the encoder half configured. Run it again to finish.",
       "Jasper firmware takes only the singleturn path, because it has no iC-PVL. Firmware older "
       "than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuEncoderConfiguration.movesMotor = false;
   icMuEncoderConfiguration.requiresEnabled = false;
@@ -374,7 +374,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "An iC-MU whose BANKSEL (0x40) is not 0 is refused, because 0x00-0x18 then reach another "
       "bank.",
       "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuKeyRegisters.movesMotor = false;
   icMuKeyRegisters.requiresEnabled = false;
@@ -408,7 +408,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "Enabled is refused. The BiSS status bits are ignored during the run and turned on again at "
       "the end, a failed or cancelled run included.",
       "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuEepromExport.movesMotor = false;
   icMuEepromExport.requiresEnabled = false;
@@ -447,7 +447,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "Enabled is refused. The BiSS status bits are ignored during the run and turned on again at "
       "the end, a failed or cancelled run included.",
       "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuI2cRegister.movesMotor = false;
   icMuI2cRegister.requiresEnabled = false;
@@ -487,7 +487,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "An iC-MU whose BANKSEL (0x40) is not 0 is refused, because 0x00-0x18 then reach another "
       "bank.",
       "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuRestoreFile.movesMotor = false;
   icMuRestoreFile.requiresEnabled = false;
@@ -530,7 +530,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "Enabled is refused. The BiSS status bits are ignored during the run and turned on again at "
       "the end, a failed or cancelled run included.",
       "Firmware older than 5.0.0-rc.5 is refused, apart from calibration firmware from 0.4.0.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuEepromErase.movesMotor = false;
   icMuEepromErase.requiresEnabled = false;
@@ -626,7 +626,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "configuration mode if raw mode is to follow.",
       "The command works only on a configured Circulo internal encoder. Anything else is refused "
       "by the drive as OS error 251 (\"command not allowed\").",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   icMuCalibrationMode.movesMotor = false;
   icMuCalibrationMode.requiresEnabled = false;
@@ -907,7 +907,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       // Vendor ID, deliberately, and not createSomanetDrive: that also requires the device's object
       // dictionary to be enumerated first (its CiA402 check looks for controlword/statusword in
       // the parameter map), and enumeration is opportunistic — it happens when a device is first
-      // seen at PRE-OP. Binding applicability to it would report a genuine drive as having *no*
+      // seen at PREOP. Binding applicability to it would report a genuine drive as having *no*
       // procedures merely because nothing read its OD yet, which is a wrong answer rather than
       // a late one. The vendor ID comes from SII at scan time and is always known. Whether the
       // device is also a conformant CiA402 drive stays the body's business, where it fails with a
@@ -942,7 +942,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "splits them up by the widths it read from the device's object dictionary. When the two "
       "disagree the run fails and says so, rather than reporting values that have been shifted.",
       "The device's object dictionary must have been read first. That happens when the device is "
-      "first seen at PRE-OP, so a drive that has not reached PRE-OP yet has nothing to decode "
+      "first seen at PREOP, so a drive that has not reached PREOP yet has nothing to decode "
       "against.",
       "Reports two values SDO cannot read: 0x1024, which is write-only, and 0x1023:01.",
       "Reports the values the drive holds right now. A value the drive is still computing reads as "
@@ -1352,7 +1352,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "follows, and some devices apply them only after a reset or power cycle.",
       "Cancelling stops the wait, not the restore: the command has already been written, so the "
       "device may complete it anyway.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   restoreDefaults.movesMotor = false;
   restoreDefaults.requiresEnabled = false;
@@ -1461,7 +1461,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "store — there is no selecting what to keep.",
       "Cancelling stops the wait, not the store: the command has already been written, so the "
       "device may complete it anyway.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+      "The mailbox must be active, so the device has to be in PREOP or above.",
   };
   storeParameters.movesMotor = false;
   storeParameters.requiresEnabled = false;

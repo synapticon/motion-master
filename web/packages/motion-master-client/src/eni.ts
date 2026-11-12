@@ -16,7 +16,7 @@ export interface EniExport {
 
 /// Exports the bus as an ENI document (`GET /api/eni`). `baseUrl` is the HTTP API origin (e.g.
 /// `https://host:61447`). Throws on a non-OK response, with the response body's `error` message
-/// when there is one — a bus that has not reached SAFE-OP or OP answers 409, because before that
+/// when there is one — a bus that has not reached SAFEOP or OP answers 409, because before that
 /// there is no mapping to describe. Pass `fetch` to inject an implementation (Node, request
 /// logging).
 export async function fetchEni(

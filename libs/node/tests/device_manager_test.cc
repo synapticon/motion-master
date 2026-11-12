@@ -434,7 +434,7 @@ TEST(DeviceManagerStateWalk, CommandsADeviceAlreadyThereOnce) {
 }
 
 TEST(DeviceManagerStateWalk, DevicesInDifferentStatesTakeTheLowestStepFirst) {
-  // Device 1 needs a mailbox before device 2's step to SAFE-OP maps the bus.
+  // Device 1 needs a mailbox before device 2's step to SAFEOP maps the bus.
   auto [dm, driver] = busInStates({EtherCatState::Init, EtherCatState::PreOp});
 
   const auto result = dm->transitionToState({}, EtherCatState::SafeOp, std::chrono::seconds(1));
@@ -489,7 +489,7 @@ TEST(DeviceManagerChangeState, NeverTakesADeviceInBootToAnExchangeState) {
   EXPECT_TRUE(driver->commanded.empty());
 }
 
-// Scans a bus of @p slaves devices, all in PRE-OP, with as many on the wire.
+// Scans a bus of @p slaves devices, all in PREOP, with as many on the wire.
 std::pair<std::unique_ptr<DeviceManager>, FakeDriver*> scannedBus(int slaves) {
   auto driver = std::make_unique<FakeDriver>(true, slaves);
   driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
@@ -572,7 +572,7 @@ TEST(DeviceManagerState, NoRefusalWithoutADriver) {
 }
 
 TEST(DeviceManagerMailbox, ErrorIndicatorDoesNotDisableMailbox) {
-  // A device in SAFE-OP with the AL error bit set still answers mailbox requests, so the
+  // A device in SAFEOP with the AL error bit set still answers mailbox requests, so the
   // mailbox must report active — the error is surfaced separately via the AL status.
   auto driver = std::make_unique<FakeDriver>(true, 1);
   driver->reportState =
@@ -617,7 +617,7 @@ TEST(DeviceManagerDelegates, AFreshReadWithoutAMailboxIsRefused) {
   ASSERT_TRUE(dm.scan().has_value());
   ASSERT_TRUE(dm.deviceStates({}).has_value());
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
-  // In PRE-OP the fresh read goes to the bus. The fake answers an SDO read with no bytes, so it
+  // In PREOP the fresh read goes to the bus. The fake answers an SDO read with no bytes, so it
   // fails as a transfer, which is not the refusal below.
   const auto preOp = dm.deviceParameterView(1, 0x2001, 0, /*refreshFromBus=*/true);
   ASSERT_FALSE(preOp.has_value());

@@ -23,6 +23,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - **AL state changes have three routes under `/api/devices/state`.** `POST /api/devices/state` commands one legal AL transition, as before, and now answers 409 instead of 500 for one the AL state machine does not allow; its operationId is `changeState`. `POST /api/devices/state/transition` (operationId `transitionToState`) walks to the state from where each device is: a climb goes one state at a time, a drop is one step, and BOOT is entered and left only through INIT, with `timeout` for each step. `POST /api/devices/restart` moves to `POST /api/devices/state/restart`. A client that calls `transitionToState` now walks, and the Console's AL state buttons and per-device select walk too.
 
+- **The AL states are written `PREOP` and `SAFEOP`, the way ETG.1000.6, TwinCAT and the IgH master write them.** Every log line, error message, API text and Console label that said `PRE-OP` or `SAFE-OP` now says `PREOP` or `SAFEOP`, and the Console writes all five states in capitals. `requestsState` and `waitsForState` of `POST /api/eni/parse` change with them. The Python client names its constants `PREOP` and `SAFEOP`, and its example scripts take `preop` and `safeop`. The C++ enumerators stay `PreOp` and `SafeOp` (#213).
+
 ## [6.0.0-alpha.122] - 2026-11-10
 
 ### Fixed

@@ -19,41 +19,41 @@ type TransitionTarget = {
 }
 // The targets of a restart, the end state first. A restart always starts at INIT.
 const RESTART_TARGETS: { value: 1 | 2 | 3 | 4 | 8; label: string }[] = [
-  { value: 8, label: 'Op' },
-  { value: 4, label: 'SafeOp' },
-  { value: 2, label: 'PreOp' },
-  { value: 3, label: 'Boot' },
-  { value: 1, label: 'Init' },
+  { value: 8, label: 'OP' },
+  { value: 4, label: 'SAFEOP' },
+  { value: 2, label: 'PREOP' },
+  { value: 3, label: 'BOOT' },
+  { value: 1, label: 'INIT' },
 ]
 
 const TRANSITION_TARGETS: TransitionTarget[] = [
   {
     value: 3,
-    label: 'Boot',
+    label: 'BOOT',
     cls: 'bg-status-warn text-grey-900 hover:brightness-95',
     hint: 'Firmware-download state, reachable only from INIT (and only returns to INIT). Just the FoE mailbox is available — no CoE/SDO, no process data. Its mailbox uses larger SyncManagers sized for firmware payloads.',
   },
   {
     value: 1,
-    label: 'Init',
+    label: 'INIT',
     cls: 'bg-grey-700 text-white hover:bg-grey-800',
     hint: 'No mailbox and no process data. Reachable directly from any state.',
   },
   {
     value: 2,
-    label: 'PreOp',
+    label: 'PREOP',
     cls: 'bg-ocean text-white hover:bg-ocean-dark',
     hint: 'Mailbox communication (CoE/SDO) is available. No process data yet.',
   },
   {
     value: 4,
-    label: 'SafeOp',
+    label: 'SAFEOP',
     cls: 'bg-status-info text-white hover:brightness-110',
     hint: 'Inputs (TxPDO) are exchanged and the mailbox stays active; outputs are held in their safe state, not applied.',
   },
   {
     value: 8,
-    label: 'Op',
+    label: 'OP',
     cls: 'bg-green-600 text-white hover:brightness-110',
     hint: 'Everything active: inputs, outputs, and mailbox. The drive enters it only once valid outputs are already being sent.',
   },
@@ -106,7 +106,7 @@ const SPOE_MODES: { value: SpoeMode; title: string; description: string }[] = [
 export default function FieldbusControlPage() {
   const queryClient = useQueryClient()
   const { api, driver, setDriver, adapter, setAdapter, ipAddresses, setIpAddresses, spoeMode, setSpoeMode, spoePort, setSpoePort, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
-  const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
+  const AL_STATE_LABEL: Record<number, string> = { 1: 'INIT', 2: 'PREOP', 3: 'BOOT', 4: 'SAFEOP', 8: 'OP' }
 
   const alStatusCodesQuery = useQuery({
     queryKey: ['alStatusCodes'],
@@ -141,7 +141,7 @@ export default function FieldbusControlPage() {
 
   // Non-destructive refresh: re-read the device list and current AL states.
   // Unlike Scan this issues no bus reconfiguration, so slaves
-  // keep their state (e.g. PRE-OP / OP). States are read off the freshly
+  // keep their state (e.g. PREOP / OP). States are read off the freshly
   // re-fetched list so a refresh right after a scan reflects the new devices.
   async function refreshDevices() {
     const res = await devicesQuery.refetch()
@@ -730,7 +730,7 @@ export default function FieldbusControlPage() {
               </p>
               <p className="text-xs text-grey-600">
                 The server takes each slave there one legal step at a time. Going up is step by
-                step — INIT → PRE-OP → SAFE-OP → OP — a drop of several states is one step (e.g.
+                step — INIT → PREOP → SAFEOP → OP — a drop of several states is one step (e.g.
                 OP → INIT), and BOOT is entered and left only through INIT. The walk stops at the
                 first step a slave does not reach, and its AL status code says why.
               </p>
@@ -754,7 +754,7 @@ export default function FieldbusControlPage() {
               {transitionMutation.isSuccess && transitionMutation.variables !== undefined && transitionMutation.data && (() => {
                 // The request returns HTTP 200 whenever the bus was commanded — it does NOT mean
                 // the devices arrived. The server reports per-device truth in `ok` / `devices[].reached`
-                // (a device commanded to PreOp can stay in Init with AL status code "No error"), so
+                // (a device commanded to PREOP can stay in INIT with AL status code "No error"), so
                 // branch on that here rather than treating any 200 as a successful transition.
                 const target = transitionMutation.variables
                 const body = transitionMutation.data.res.data

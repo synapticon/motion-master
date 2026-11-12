@@ -205,9 +205,9 @@ The source lives in the app, not in `DeviceManager`, because a log warning is a 
 **Thread 7 — the state follower.** With SPoE in Monitor mode, a PLC owns the drive's state, and
 Motion Master sends no state change. But a state change is where `transitionToState` publishes the
 process image, so without this thread the image is never published and monitoring never sees the
-TxPDO. `followObservedStates()` reads every state, re-maps when a device enters SAFE-OP or OP, and
+TxPDO. `followObservedStates()` reads every state, re-maps when a device enters SAFEOP or OP, and
 tears down when no device exchanges. A re-map reads the PDO mapping again, because the PLC can
-change it in PRE-OP. The method is one pass with no thread of its own, for the same reason as
+change it in PREOP. The method is one pass with no thread of its own, for the same reason as
 above, and the thread lives in `main.cc`. It checks the driver on every pass, because
 `POST /api/init` can replace the driver.
 

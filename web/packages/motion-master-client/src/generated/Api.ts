@@ -578,7 +578,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Scans the fieldbus for slaves and configures their sync managers and FMMUs. Must be called after a successful POST /api/init. With SOEM, slaves remain in INIT state after this call, and state transitions are driven by subsequent API calls. An SPoE drive starts in OP. When a scan finds a device already in SAFE-OP or OP, it reads that device's object dictionary and publishes the process image, so the exchange starts with no state change. The dictionary comes from the parameter cache when the cache has it. Otherwise the first read of a drive model takes several seconds. If this step fails, the scan still returns 200 and the server logs a warning. A later state change to SAFE-OP or OP maps the image again. An empty bus is a successful scan returning 0 slaves, not an error: the master cannot distinguish a bus with no devices powered from a disconnected one, and the user recovers by powering devices on and scanning again. A 500 is returned only on a genuine driver failure (e.g. no driver initialised). A scan does not wait for work already in flight. A procedure that is running keeps running against the devices it started on, and fails at its next bus transfer. Retained procedure snapshots are discarded, because a position may name different hardware after a scan. A scan frees the recording, the retained process images and the previous device set, so it first waits up to 200 ms for the real-time loop to leave the cycle it is in. If the loop is stalled — a cyclic task that overruns, or severe CPU contention — the scan fails with 500 and changes nothing, rather than freeing memory the loop is still reading. `GET /api/game-loop` shows the stall. The same applies to `POST /api/process-data`, which re-allocates the recorder. `POST /api/reset` never fails this way: it holds the memory back instead and reclaims it later.
+   * @description Scans the fieldbus for slaves and configures their sync managers and FMMUs. Must be called after a successful POST /api/init. With SOEM, slaves remain in INIT state after this call, and state transitions are driven by subsequent API calls. An SPoE drive starts in OP. When a scan finds a device already in SAFEOP or OP, it reads that device's object dictionary and publishes the process image, so the exchange starts with no state change. The dictionary comes from the parameter cache when the cache has it. Otherwise the first read of a drive model takes several seconds. If this step fails, the scan still returns 200 and the server logs a warning. A later state change to SAFEOP or OP maps the image again. An empty bus is a successful scan returning 0 slaves, not an error: the master cannot distinguish a bus with no devices powered from a disconnected one, and the user recovers by powering devices on and scanning again. A 500 is returned only on a genuine driver failure (e.g. no driver initialised). A scan does not wait for work already in flight. A procedure that is running keeps running against the devices it started on, and fails at its next bus transfer. Retained procedure snapshots are discarded, because a position may name different hardware after a scan. A scan frees the recording, the retained process images and the previous device set, so it first waits up to 200 ms for the real-time loop to leave the cycle it is in. If the loop is stalled — a cyclic task that overruns, or severe CPU contention — the scan fails with 500 and changes nothing, rather than freeing memory the loop is still reading. `GET /api/game-loop` shows the stall. The same applies to `POST /api/process-data`, which re-allocates the recorder. `POST /api/reset` never fails this way: it holds the memory back instead and reclaims it later.
    *
    * @name Scan
    * @summary Scan the bus for slaves
@@ -861,7 +861,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Enumerates the entire CoE object dictionary of the device at `slavePosition` via the SDO Info service ("Get Object List" → "Get Object Description" → "Get Entry Description") and rebuilds its parameter map. The device must be in PRE-OP, SAFE-OP, or OP (mailbox communication active).  On a fully populated drive the call can take several seconds. When `readValues=true` each entry is additionally read via SDO upload and the decoded value is stored on the parameter. An entry that fails to read keeps the value of an earlier read with `syncState` `stale`, or the type-appropriate default with `syncState` `unknown`, and the call still succeeds. Check `syncState` to find the entries that were not read.
+   * @description Enumerates the entire CoE object dictionary of the device at `slavePosition` via the SDO Info service ("Get Object List" → "Get Object Description" → "Get Entry Description") and rebuilds its parameter map. The device must be in PREOP, SAFEOP, or OP (mailbox communication active).  On a fully populated drive the call can take several seconds. When `readValues=true` each entry is additionally read via SDO upload and the decoded value is stored on the parameter. An entry that fails to read keeps the value of an earlier read with `syncState` `stale`, or the type-appropriate default with `syncState` `unknown`, and the call still succeeds. Check `syncState` to find the entries that were not read.
    *
    * @name InitializeDeviceParameters
    * @summary Initialise the parameter list for a device by enumerating its object dictionary
@@ -1097,7 +1097,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reads the process-data watchdog timeout the slave at `slavePosition` is configured with, decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC registers. This is the configured timeout itself, not the expiration counter exposed by `GET /api/devices/diagnostics`. A device in OP that misses process data past this timeout faults itself to SAFE-OP+error; raising it lets a device tolerate the brief PDO pause of a whole-bus re-map.
+   * @description Reads the process-data watchdog timeout the slave at `slavePosition` is configured with, decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC registers. This is the configured timeout itself, not the expiration counter exposed by `GET /api/devices/diagnostics`. A device in OP that misses process data past this timeout faults itself to SAFEOP+error; raising it lets a device tolerate the brief PDO pause of a whole-bus re-map.
    *
    * @name GetProcessDataWatchdog
    * @summary Read the process-data (sync-manager) watchdog configuration
@@ -1168,7 +1168,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reads the PDO mapping of the slave at `slavePosition` over CoE, grouped by mapping object: the sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and, for each assigned mapping object (0x16xx / 0x1Axx), its `pdoIndex` and ordered entries. `outputs` are RxPDO objects (master→slave), `inputs` are TxPDO objects (slave→master). Each entry carries its derived `bitOffset` within the direction's window. This is the grouped, round-trippable counterpart of the flat, whole-bus `GET /api/process-image`. Reads fresh over SDO, so the device's mailbox must be active (PRE-OP, SAFE-OP, or OP); a device in INIT or BOOT yields 409.
+   * @description Reads the PDO mapping of the slave at `slavePosition` over CoE, grouped by mapping object: the sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and, for each assigned mapping object (0x16xx / 0x1Axx), its `pdoIndex` and ordered entries. `outputs` are RxPDO objects (master→slave), `inputs` are TxPDO objects (slave→master). Each entry carries its derived `bitOffset` within the direction's window. This is the grouped, round-trippable counterpart of the flat, whole-bus `GET /api/process-image`. Reads fresh over SDO, so the device's mailbox must be active (PREOP, SAFEOP, or OP); a device in INIT or BOOT yields 409.
    *
    * @name GetDevicePdoMapping
    * @summary Read a device's PDO mapping grouped by object (CoE)
@@ -1191,7 +1191,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reconfigures the PDO mapping of the slave at `slavePosition` over CoE: both directions' sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and the referenced mapping objects (0x16xx / 0x1Axx). `outputs` are RxPDO objects (master→slave), `inputs` are TxPDO objects (slave→master); the array order is the sync-manager assignment order, which fixes each object's position in the process image. Both directions must be present — an empty array clears that sync manager's assignment. **The device must be in PRE-OP.** The mapping and assignment objects are writable only in PRE-OP; in SAFE-OP/OP the sync managers are active and the slave rejects the write, and INIT/BOOT have no CoE mailbox. This is the "drop to PRE-OP, remap, climb back" flow: take the device to PRE-OP (`POST /api/devices/state`), call this, then transition it back to SAFE-OP/OP — at which point the whole-bus process image is re-mapped from the new mapping. The write follows the CoE ordering rule (clear assignment, rewrite each mapping object, then re-assign), is read back and verified, and is retried a few times so a dropped mailbox frame cannot leave the object dictionary half-configured. The response is the device's grouped read-back mapping (same shape as GET), whose `bitOffset` values are derived by the device (the request omits them). This endpoint does not itself change the AL state or re-map the process image.
+   * @description Reconfigures the PDO mapping of the slave at `slavePosition` over CoE: both directions' sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and the referenced mapping objects (0x16xx / 0x1Axx). `outputs` are RxPDO objects (master→slave), `inputs` are TxPDO objects (slave→master); the array order is the sync-manager assignment order, which fixes each object's position in the process image. Both directions must be present — an empty array clears that sync manager's assignment. **The device must be in PREOP.** The mapping and assignment objects are writable only in PREOP; in SAFEOP/OP the sync managers are active and the slave rejects the write, and INIT/BOOT have no CoE mailbox. This is the "drop to PREOP, remap, climb back" flow: take the device to PREOP (`POST /api/devices/state`), call this, then transition it back to SAFEOP/OP — at which point the whole-bus process image is re-mapped from the new mapping. The write follows the CoE ordering rule (clear assignment, rewrite each mapping object, then re-assign), is read back and verified, and is retried a few times so a dropped mailbox frame cannot leave the object dictionary half-configured. The response is the device's grouped read-back mapping (same shape as GET), whose `bitOffset` values are derived by the device (the request omits them). This endpoint does not itself change the AL state or re-map the process image.
    *
    * @name WriteDevicePdoMapping
    * @summary Rewrite a device's PDO mapping (CoE)
@@ -1416,7 +1416,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Starts the named procedure and returns as soon as the run is under way — this does **not** wait for it to finish. Poll `GET` on the same path for its outcome, or `DELETE` to cancel it. The request body carries the procedure's parameters, and each descriptor from `GET /api/devices/{slavePosition}/procedures` reports its own in `parameters` — name, type, bounds, default, and whether it is required — which is enough to build a form for any procedure without hard-coding one per name. A procedure that takes no parameters may be started with no body. Only one procedure may run on a device at a time; a second start is refused with 409 while the first is in flight. Most procedures require an active mailbox, so the device must be in PRE-OP, SAFE-OP or OP. A run the drive answers with an error is not a failure of *this* request — it is reported in the snapshot as a failed run.
+   * @description Starts the named procedure and returns as soon as the run is under way — this does **not** wait for it to finish. Poll `GET` on the same path for its outcome, or `DELETE` to cancel it. The request body carries the procedure's parameters, and each descriptor from `GET /api/devices/{slavePosition}/procedures` reports its own in `parameters` — name, type, bounds, default, and whether it is required — which is enough to build a form for any procedure without hard-coding one per name. A procedure that takes no parameters may be started with no body. Only one procedure may run on a device at a time; a second start is refused with 409 while the first is in flight. Most procedures require an active mailbox, so the device must be in PREOP, SAFEOP or OP. A run the drive answers with an error is not a failure of *this* request — it is reported in the snapshot as a failed run.
    *
    * @name StartProcedure
    * @summary Start a procedure on a device
@@ -1613,7 +1613,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Performs a CoE SDO download — writes the raw bytes in the request body to object `index:subindex` on the device at `slavePosition`. The byte count must match the object's length. Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication active). Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676`).
+   * @description Performs a CoE SDO download — writes the raw bytes in the request body to object `index:subindex` on the device at `slavePosition`. The byte count must match the object's length. Requires the device to be in PREOP, SAFEOP, or OP (mailbox communication active). Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676`).
    *
    * @name SdoDownload
    * @summary Download an object dictionary entry to a device (CoE SDO download)
@@ -1667,7 +1667,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reads and decodes the device's `.hardware_description` file over FoE — its product id and revision, serial number, the components it is built from, and the assembly it was packaged into. It is also the only source of the descriptor that decides which firmware belongs on the device, which is what most callers want it for (see `/api/devices/{slavePosition}/firmware-compatibility`). **Readable in BOOT as well as PRE-OP and above.** The bootloader deliberately allows this one file, which is what lets a compatibility check work on a drive a failed install left stranded there — precisely when knowing whether the package was the right one matters most.
+   * @description Reads and decodes the device's `.hardware_description` file over FoE — its product id and revision, serial number, the components it is built from, and the assembly it was packaged into. It is also the only source of the descriptor that decides which firmware belongs on the device, which is what most callers want it for (see `/api/devices/{slavePosition}/firmware-compatibility`). **Readable in BOOT as well as PREOP and above.** The bootloader deliberately allows this one file, which is what lets a compatibility check work on a drive a failed install left stranded there — precisely when knowing whether the package was the right one matters most.
    *
    * @name GetDeviceHardwareDescription
    * @summary Read what a device says it is
@@ -1782,7 +1782,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received. Over EtherCAT it waits up to 6 s for the device's answer and tries a read that gets no answer up to 3 times, so a device that never answers takes about 18 s to fail. A refusal from the device is not tried again, except FoE error 0x8004 Illegal and 0x800B Program error, which a SOMANET drive sends for a file it can serve a moment later; those count as attempts. A device that answers the read with FoE BUSY gets an acknowledgement, and Motion Master keeps waiting for the file for up to 6 s. After a failure without an answer, Motion Master aborts the transfer on the device, so that the next request works. Over SPoE it waits the configured file timeout for each packet. When the device refuses the read, the error names the FoE error code it sent and its meaning, and the device's error text when that adds anything, e.g. `FOEread slave 1 'x.bin' failed (FoE error 0x8001: Not found)`. A device that never answered gives `(no response)`.
+   * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in BOOT, PREOP, SAFEOP and OP states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received. Over EtherCAT it waits up to 6 s for the device's answer and tries a read that gets no answer up to 3 times, so a device that never answers takes about 18 s to fail. A refusal from the device is not tried again, except FoE error 0x8004 Illegal and 0x800B Program error, which a SOMANET drive sends for a file it can serve a moment later; those count as attempts. A device that answers the read with FoE BUSY gets an acknowledgement, and Motion Master keeps waiting for the file for up to 6 s. After a failure without an answer, Motion Master aborts the transfer on the device, so that the next request works. Over SPoE it waits the configured file timeout for each packet. When the device refuses the read, the error names the FoE error code it sent and its meaning, and the device's error text when that adds anything, e.g. `FOEread slave 1 'x.bin' failed (FoE error 0x8001: Not found)`. A device that never answered gives `(no response)`.
    *
    * @name FoeReadFile
    * @summary Read a file from a device via FoE (File over EtherCAT)
@@ -1808,7 +1808,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Sends an FoE write request for `filename` to the device at `slavePosition`, streaming the raw request body as the file contents.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling. Over EtherCAT it waits up to 10 s for the device to acknowledge each packet. A write that fails without an answer is aborted on the device and is not tried again.
+   * @description Sends an FoE write request for `filename` to the device at `slavePosition`, streaming the raw request body as the file contents.  FoE is available in BOOT, PREOP, SAFEOP and OP states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling. Over EtherCAT it waits up to 10 s for the device to acknowledge each packet. A write that fails without an answer is aborted on the device and is not tried again.
    *
    * @name FoeWriteFile
    * @summary Write a file to a device via FoE (File over EtherCAT)
@@ -1870,7 +1870,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reads the raw SII EEPROM image of the device at `slavePosition` through the ESC's EEPROM-control registers and returns either the parsed structure or the raw bytes, selected by the `Accept` request header. With `Accept: application/json` (or `*\/*`, or no `Accept` header) the parsed `SlaveInformationInterface` is returned — the 128-byte fixed header plus the decoded category section (strings, general info, FMMU/Sync-Manager and PDO defaults, distributed-clock settings).  With `Accept: application/octet-stream` the raw EEPROM image is returned unparsed, suitable for a hex dump or archival. EEPROM access is a control-plane operation and is most reliable while the device is in INIT or PRE-OP.  String-index fields in the parsed structure (e.g. `general.nameIdx`) are 1-based references into `category.strings`.
+   * @description Reads the raw SII EEPROM image of the device at `slavePosition` through the ESC's EEPROM-control registers and returns either the parsed structure or the raw bytes, selected by the `Accept` request header. With `Accept: application/json` (or `*\/*`, or no `Accept` header) the parsed `SlaveInformationInterface` is returned — the 128-byte fixed header plus the decoded category section (strings, general info, FMMU/Sync-Manager and PDO defaults, distributed-clock settings).  With `Accept: application/octet-stream` the raw EEPROM image is returned unparsed, suitable for a hex dump or archival. EEPROM access is a control-plane operation and is most reliable while the device is in INIT or PREOP.  String-index fields in the parsed structure (e.g. `general.nameIdx`) are 1-based references into `category.strings`.
    *
    * @name ReadSii
    * @summary Read a device's SII (Slave Information Interface / EEPROM)
@@ -1897,7 +1897,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Writes the raw SII image in the request body to the device's EEPROM, one 16-bit word at a time. The image is parse-validated first and rejected if it is not a well-formed SII (a guard against bricking the device). **Destructive:** a wrong image can leave the device unidentifiable until re-flashed. The device adopts the new contents only after a **power cycle**, and the write is most reliable while the device is in INIT or PRE-OP. Intended for restoring a previously downloaded image.
+   * @description Writes the raw SII image in the request body to the device's EEPROM, one 16-bit word at a time. The image is parse-validated first and rejected if it is not a well-formed SII (a guard against bricking the device). **Destructive:** a wrong image can leave the device unidentifiable until re-flashed. The device adopts the new contents only after a **power cycle**, and the write is most reliable while the device is in INIT or PREOP. Intended for restoring a previously downloaded image.
    *
    * @name WriteSii
    * @summary Write a raw SII (EEPROM) image to a device
@@ -2181,7 +2181,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reads each slave's distributed-clock unit live from its EtherCAT Slave Controller (system-time delay 0x0928 and system-time difference 0x092C) via FPRD. The reference clock is the first DC-capable slave; every other DC slave continuously corrects its local clock toward it, and `systemTimeDifference` is the live deviation in nanoseconds. The figure is meaningful only while the bus is exchanging process data in SAFE-OP/OP (the reference time is distributed in the cyclic frame) and converges toward zero as the slaves' drift loops settle — poll this endpoint and watch for a slave whose deviation stays large or grows rather than an absolute value. Non-DC slaves report `dcCapable` false with zeroed values. Omit `positions` to query all discovered devices. Returns 500 for transports without an ESC (e.g. SPoE).
+   * @description Reads each slave's distributed-clock unit live from its EtherCAT Slave Controller (system-time delay 0x0928 and system-time difference 0x092C) via FPRD. The reference clock is the first DC-capable slave; every other DC slave continuously corrects its local clock toward it, and `systemTimeDifference` is the live deviation in nanoseconds. The figure is meaningful only while the bus is exchanging process data in SAFEOP/OP (the reference time is distributed in the cyclic frame) and converges toward zero as the slaves' drift loops settle — poll this endpoint and watch for a slave whose deviation stays large or grows rather than an absolute value. Non-DC slaves report `dcCapable` false with zeroed values. Omit `positions` to query all discovered devices. Returns 500 for transports without an ESC (e.g. SPoE).
    *
    * @name GetDcSync
    * @summary Read live distributed-clock synchronisation status for devices
@@ -2318,7 +2318,7 @@ export class Api<
          */
         alStatus: number;
         /**
-         * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op. 0 when the device does not answer (see `reachability`).
+         * Current AL state decoded from alStatus (ETG.1000.6 encoding): 0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP. UNKNOWN when the device does not answer (see `reachability`).
          * @example 1
          */
         alState: 0 | 1 | 2 | 3 | 4 | 8;
@@ -2353,7 +2353,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Commands one EtherCAT Application Layer transition to one or more devices and blocks until all targeted devices arrive or the timeout elapses. The transition must be one the AL state machine allows for every targeted device: a climb of one state (INIT, PRE-OP, SAFE-OP, OP), a drop of any number of states, BOOT entered and left only through INIT, or the state a device is in, which acknowledges an AL error it holds. Any other request is refused with 409, and no device is commanded. To reach a state that is more than one transition away, use POST /api/devices/state/transition, which walks. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+   * @description Commands one EtherCAT Application Layer transition to one or more devices and blocks until all targeted devices arrive or the timeout elapses. The transition must be one the AL state machine allows for every targeted device: a climb of one state (INIT, PREOP, SAFEOP, OP), a drop of any number of states, BOOT entered and left only through INIT, or the state a device is in, which acknowledges an AL error it holds. Any other request is refused with 409, and no device is commanded. To reach a state that is more than one transition away, use POST /api/devices/state/transition, which walks. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), 8 (OP).
    *
    * @name ChangeState
    * @summary Change the AL state of devices by one transition
@@ -2367,7 +2367,7 @@ export class Api<
        */
       positions?: number[];
       /**
-       * Target EtherCAT AL state (ETG.1000.6 AL control register encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+       * Target EtherCAT AL state (ETG.1000.6 AL control register encoding): 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
        * @example 8
        */
       state: 1 | 2 | 3 | 4 | 8;
@@ -2400,7 +2400,7 @@ export class Api<
            */
           alStatus: number;
           /**
-           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op. 0 when the device does not answer (see `reachability`).
+           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP. UNKNOWN when the device does not answer (see `reachability`).
            * @example 2
            */
           alState: 0 | 1 | 2 | 3 | 4 | 8;
@@ -2447,7 +2447,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Brings one or more devices to the requested EtherCAT Application Layer state, one legal transition at a time, and blocks until the walk ends. The AL state machine climbs one state at a time, may drop any number of states at once, and enters and leaves BOOT only through INIT, so a request for OP takes a device in INIT through PRE-OP and SAFE-OP, and a device in BOOT through INIT first. Each device walks from the state it is in. Each step waits up to `timeout` for its devices, and the walk stops at the first step a device does not reach. A device already in the requested state is commanded there once, which acknowledges an AL error it holds. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+   * @description Brings one or more devices to the requested EtherCAT Application Layer state, one legal transition at a time, and blocks until the walk ends. The AL state machine climbs one state at a time, may drop any number of states at once, and enters and leaves BOOT only through INIT, so a request for OP takes a device in INIT through PREOP and SAFEOP, and a device in BOOT through INIT first. Each device walks from the state it is in. Each step waits up to `timeout` for its devices, and the walk stops at the first step a device does not reach. A device already in the requested state is commanded there once, which acknowledges an AL error it holds. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), 8 (OP).
    *
    * @name TransitionToState
    * @summary Walk devices to an EtherCAT AL state
@@ -2461,7 +2461,7 @@ export class Api<
        */
       positions?: number[];
       /**
-       * Target EtherCAT AL state (ETG.1000.6 AL control register encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+       * Target EtherCAT AL state (ETG.1000.6 AL control register encoding): 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
        * @example 8
        */
       state: 1 | 2 | 3 | 4 | 8;
@@ -2494,7 +2494,7 @@ export class Api<
            */
           alStatus: number;
           /**
-           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op. 0 when the device does not answer (see `reachability`).
+           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP. UNKNOWN when the device does not answer (see `reachability`).
            * @example 2
            */
           alState: 0 | 1 | 2 | 3 | 4 | 8;
@@ -2541,7 +2541,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Commands one or more devices to INIT and then up to `target` one EtherCAT Application Layer state at a time: PRE-OP, SAFE-OP, OP. A `target` of BOOT is INIT and then BOOT. Each step blocks until every targeted device arrives or the timeout elapses, and the walk stops at the first step a device does not reach. `step` is the last state commanded, and `devices` holds the settled state of every targeted device after it, each with a `reached` flag. `ok` is true only when `step` is `target` and every device reached it. A restart drops every targeted device out of process data exchange, so a drive that was enabled is disabled, and a monitoring reports null for it until it exchanges again. The body is optional: no body restarts every discovered device to OP (8). State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+   * @description Commands one or more devices to INIT and then up to `target` one EtherCAT Application Layer state at a time: PREOP, SAFEOP, OP. A `target` of BOOT is INIT and then BOOT. Each step blocks until every targeted device arrives or the timeout elapses, and the walk stops at the first step a device does not reach. `step` is the last state commanded, and `devices` holds the settled state of every targeted device after it, each with a `reached` flag. `ok` is true only when `step` is `target` and every device reached it. A restart drops every targeted device out of process data exchange, so a drive that was enabled is disabled, and a monitoring reports null for it until it exchanges again. The body is optional: no body restarts every discovered device to OP (8). State values are the standard AL state register encodings from ETG.1000.6: 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP), 8 (OP).
    *
    * @name RestartDevices
    * @summary Restart devices through INIT up to an AL state
@@ -2555,7 +2555,7 @@ export class Api<
        */
       positions?: number[];
       /**
-       * The EtherCAT AL state to end in (ETG.1000.6 AL control register encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+       * The EtherCAT AL state to end in (ETG.1000.6 AL control register encoding): 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP.
        * @default 8
        * @example 8
        */
@@ -2594,7 +2594,7 @@ export class Api<
            */
           alStatus: number;
           /**
-           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op. 0 when the device does not answer (see `reachability`).
+           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 0 = UNKNOWN, 1 = INIT, 2 = PREOP, 3 = BOOT, 4 = SAFEOP, 8 = OP. UNKNOWN when the device does not answer (see `reachability`).
            * @example 2
            */
           alState: 0 | 1 | 2 | 3 | 4 | 8;
@@ -2734,7 +2734,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Returns the whole-bus process image: the byte sizes of each direction, the expected and last working counters and overall health, the number of retained image generations (one per re-map since the last reset), and every mapped object resolved to its absolute bit offset. While an image is live `configured` is true and the layout describes it. When no image is published (no device is in SAFE-OP/OP) but at least one generation has been mapped, `configured` is false and the layout describes the most recent retained generation — the last-known mapping — so a bus that has dropped out of SAFE-OP/OP stays inspectable; `lastWkc` then holds the final exchange value and working-counter health does not apply. The object lists are empty only before any image has ever been mapped. Object `name` is populated only for devices whose object dictionary has been enumerated.
+   * @description Returns the whole-bus process image: the byte sizes of each direction, the expected and last working counters and overall health, the number of retained image generations (one per re-map since the last reset), and every mapped object resolved to its absolute bit offset. While an image is live `configured` is true and the layout describes it. When no image is published (no device is in SAFEOP/OP) but at least one generation has been mapped, `configured` is false and the layout describes the most recent retained generation — the last-known mapping — so a bus that has dropped out of SAFEOP/OP stays inspectable; `lastWkc` then holds the final exchange value and working-counter health does not apply. The object lists are empty only before any image has ever been mapped. Object `name` is populated only for devices whose object dictionary has been enumerated.
    *
    * @name GetProcessImage
    * @summary Inspect the published EtherCAT process image
@@ -2759,7 +2759,7 @@ export class Api<
          */
         inputBytes: number;
         /**
-         * Working counter expected from the devices currently exchanging. A device in SAFE-OP or OP counts 2 for mapped outputs and 1 for mapped inputs. A device below SAFE-OP, or with the AL error flag set, counts 0.
+         * Working counter expected from the devices currently exchanging. A device in SAFEOP or OP counts 2 for mapped outputs and 1 for mapped inputs. A device below SAFEOP, or with the AL error flag set, counts 0.
          * @example 3
          */
         expectedWkc: number;
@@ -2776,7 +2776,7 @@ export class Api<
         /**
          * Cycles that answered with a working counter below the value expected at the time, counted since `POST /api/init` and cleared only by `POST /api/reset`. `healthy` is a sample of the most recent cycle and so cannot see a fault that has already cleared; this count can.
          *
-         * It spans every re-map rather than resetting per image, because a re-map happens whenever a device is brought into or out of SAFE-OP/OP — which is exactly when someone is chasing a fault. `generations` says how many images the count spans. Cycles missed while a device was being deliberately commanded out of an exchange state are not counted: the expectation is lowered before the transition is commanded.
+         * It spans every re-map rather than resetting per image, because a re-map happens whenever a device is brought into or out of SAFEOP/OP — which is exactly when someone is chasing a fault. `generations` says how many images the count spans. Cycles missed while a device was being deliberately commanded out of an exchange state are not counted: the expectation is lowered before the transition is commanded.
          * @format int64
          * @example 0
          */
@@ -2877,7 +2877,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Serialises the process-data recorder's current span — every cycle from the oldest still in the ring up to the newest at the instant of the call — to a `.mmpd` file and returns its path. Each cycle's full raw input and output images, sequence, and epoch-nanosecond timestamp are written, with the process image (per-device identity and PDO object layout, including object names and data types where the object dictionary has been enumerated) embedded as a header, so the file decodes fully offline with no running Motion Master and no live bus. Works in any state: while devices are exchanging (SAFE-OP/OP) it captures tail→head at that moment and ignores cycles recorded afterwards; after the bus has left the exchange states it uses the most recent retained image layout. The file is written under the configured `recorder.dumpDir`, created if absent; by default that is a `dumps` subdirectory of the user-cache root, so the written file is also reachable through the `/api/user-cache` endpoints — list it, download it, or delete it there. Only the path is returned here. (Setting an explicit `recorder.dumpDir` outside the cache root opts out of that; the file is then only reachable from a shell on the server.)
+   * @description Serialises the process-data recorder's current span — every cycle from the oldest still in the ring up to the newest at the instant of the call — to a `.mmpd` file and returns its path. Each cycle's full raw input and output images, sequence, and epoch-nanosecond timestamp are written, with the process image (per-device identity and PDO object layout, including object names and data types where the object dictionary has been enumerated) embedded as a header, so the file decodes fully offline with no running Motion Master and no live bus. Works in any state: while devices are exchanging (SAFEOP/OP) it captures tail→head at that moment and ignores cycles recorded afterwards; after the bus has left the exchange states it uses the most recent retained image layout. The file is written under the configured `recorder.dumpDir`, created if absent; by default that is a `dumps` subdirectory of the user-cache root, so the written file is also reachable through the `/api/user-cache` endpoints — list it, download it, or delete it there. Only the path is returned here. (Setting an explicit `recorder.dumpDir` outside the cache root opts out of that; the file is then only reachable from a shell on the server.)
    *
    * @name DumpProcessData
    * @summary Dump the recorder ring to a binary .mmpd file
@@ -2906,7 +2906,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Stages many output (RxPDO) objects at once — the "send all" action of the Process Data page. Each value is converted to the object's declared data type and, when the object is output-mapped and its device is exchanging (SAFE-OP/OP), written into the output image so it is sent on the next real-time cycle and re-sent every cycle thereafter (set-once, sent-continuously). The batch is best-effort atomic: values are staged sequentially, so a batch can straddle two consecutive ~1 ms cycles. The request never fails as a whole — each object gets its own result, so the client can flag any object that was not cyclically staged (unknown device, a value the data type cannot hold, object not output-mapped, or bus not exchanging; in the last two cases the value is still written via SDO/cache, just not cyclically driven). A value the data type cannot hold is refused in its own result and nothing is written for it, by the same rule as `writeParameter`.
+   * @description Stages many output (RxPDO) objects at once — the "send all" action of the Process Data page. Each value is converted to the object's declared data type and, when the object is output-mapped and its device is exchanging (SAFEOP/OP), written into the output image so it is sent on the next real-time cycle and re-sent every cycle thereafter (set-once, sent-continuously). The batch is best-effort atomic: values are staged sequentially, so a batch can straddle two consecutive ~1 ms cycles. The request never fails as a whole — each object gets its own result, so the client can flag any object that was not cyclically staged (unknown device, a value the data type cannot hold, object not output-mapped, or bus not exchanging; in the last two cases the value is still written via SDO/cache, just not cyclically driven). A value the data type cannot hold is refused in its own result and nothing is written for it, by the same rule as `writeParameter`.
    *
    * @name StageProcessDataOutputs
    * @summary Stage a batch of output values into the process image
@@ -2943,7 +2943,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Returns the bus as an ENI document, the vendor-neutral configuration a third-party master (acontis EC-Master, TwinCAT, CODESYS) replays to bring the same bus up. Where an ESI file describes one device family, an ENI describes one assembled network, and it is imperative rather than declarative: every configuration step is an EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs to. The document carries each device's identity and addresses, its Sync Manager and FMMU register writes, its mailbox windows, its PDO assignment as CoE downloads, the AL-state walk with a read that holds the master until the device arrives, the cyclic frame, and the named process image. Conforms to ENI Schema 1.7 (ETG.2100). The bus must be configured. FMMUs and logical addresses come into being at the SAFE-OP transition, so a bus in PRE-OP has no mapping to describe and the call returns 409. **This drives the bus.** Each device's SII is read for its port layout and bootstrap mailbox, and its PDO assignment is read over CoE, so the call costs one EEPROM read and a short burst of SDO uploads per device. It is an export action, not an accessor. Distributed clocks are left out, so the generated configuration runs in free-run — which is how Motion Master runs the bus itself. The `DC` element needs an `AssignActivate` word, and a SOMANET drive does not carry the SII category that holds one. `X-Eni-Warnings` counts the parts that were asked for and not answered; each is also logged. A warning costs one optional element, never the document: a device whose SII will not read keeps every init command.
+   * @description Returns the bus as an ENI document, the vendor-neutral configuration a third-party master (acontis EC-Master, TwinCAT, CODESYS) replays to bring the same bus up. Where an ESI file describes one device family, an ENI describes one assembled network, and it is imperative rather than declarative: every configuration step is an EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs to. The document carries each device's identity and addresses, its Sync Manager and FMMU register writes, its mailbox windows, its PDO assignment as CoE downloads, the AL-state walk with a read that holds the master until the device arrives, the cyclic frame, and the named process image. Conforms to ENI Schema 1.7 (ETG.2100). The bus must be configured. FMMUs and logical addresses come into being at the SAFEOP transition, so a bus in PREOP has no mapping to describe and the call returns 409. **This drives the bus.** Each device's SII is read for its port layout and bootstrap mailbox, and its PDO assignment is read over CoE, so the call costs one EEPROM read and a short burst of SDO uploads per device. It is an export action, not an accessor. Distributed clocks are left out, so the generated configuration runs in free-run — which is how Motion Master runs the bus itself. The `DC` element needs an `AssignActivate` word, and a SOMANET drive does not carry the SII category that holds one. `X-Eni-Warnings` counts the parts that were asked for and not answered; each is also logged. A warning costs one optional element, never the document: a device whose SII will not read keeps every init command.
    *
    * @name ExportEni
    * @summary Export the bus as an EtherCAT Network Information (ENI) file
@@ -2983,7 +2983,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Registers a monitoring and starts sampling it off the real-time thread. Each parameter is classified once against the published process image: PDO-mapped objects are decoded from the live image; the rest are polled over SDO in the background. Create monitorings after the bus is operational so PDO objects are recognised as PDO. Monitoring is live-only — a parameter samples `null` while its owning device is not exchanging (SAFE-OP/OP).
+   * @description Registers a monitoring and starts sampling it off the real-time thread. Each parameter is classified once against the published process image: PDO-mapped objects are decoded from the live image; the rest are polled over SDO in the background. Create monitorings after the bus is operational so PDO objects are recognised as PDO. Monitoring is live-only — a parameter samples `null` while its owning device is not exchanging (SAFEOP/OP).
    *
    * @name CreateMonitoring
    * @summary Create a monitoring

@@ -102,7 +102,7 @@ struct EsiEntry {
 
   /// @brief ETG.1000.6 @c ObjAccess bitfield synthesised from the resolved flags.
   ///
-  /// Bits 0-2 readable in PreOP/SafeOP/OP, 3-5 writable in PreOP/SafeOP/OP, 6 RxPDO-mappable,
+  /// Bits 0-2 readable in PREOP/SAFEOP/OP, 3-5 writable in PREOP/SAFEOP/OP, 6 RxPDO-mappable,
   /// 7 TxPDO-mappable, 8 backup, 9 setting. Provided so an entry drops straight into
   /// @c mm::node::DeviceParameter::access and its @c isReadable() without a second conversion.
   uint16_t objAccess = 0;

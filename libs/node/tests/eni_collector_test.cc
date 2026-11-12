@@ -143,7 +143,7 @@ const mm::etg::EniEcatCmd* findWrite(const mm::etg::EniSlave& slave, mm::etg::En
 TEST(EniCollectorTest, RefusesABusWithNoPublishedImage) {
   DeviceManager manager;
   auto bus = circuloBus();
-  // Below SAFE-OP, so the scan publishes no image.
+  // Below SAFEOP, so the scan publishes no image.
   bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   ASSERT_TRUE(manager.init(std::move(bus)).has_value());
   ASSERT_TRUE(manager.scan().has_value());
@@ -237,8 +237,8 @@ TEST(EniCollectorTest, ProgramsMailboxSyncManagersBeforePreOpAndProcessDataOnesA
   ASSERT_TRUE(collected.has_value()) << collected.error();
   const mm::etg::EniSlave& slave = collected->network.slaves[0];
 
-  // The mailbox has to work in PRE-OP for the CoE downloads to reach the device, so SM0 and SM1 go
-  // in at the INIT-to-PRE-OP transition and SM2 and SM3 wait for PRE-OP to SAFE-OP.
+  // The mailbox has to work in PREOP for the CoE downloads to reach the device, so SM0 and SM1 go
+  // in at the INIT-to-PREOP transition and SM2 and SM3 wait for PREOP to SAFEOP.
   EXPECT_NE(findWrite(slave, mm::etg::EniTransition::IP, kRegSyncManager0), nullptr);
   EXPECT_NE(findWrite(slave, mm::etg::EniTransition::IP, kRegSyncManager0 + 8), nullptr);
   EXPECT_NE(findWrite(slave, mm::etg::EniTransition::PS, kRegSyncManager0 + 16), nullptr);

@@ -19,6 +19,7 @@
 #include "api/router.h"
 #include "api/web_api.h"
 #include "auto_tuning/status.h"  // Status (returned by the GET /api/auto-tuning callback)
+#include "capture_runner.h"      // CaptureError (returned by the capture callbacks)
 #include "config.h"              // FieldbusConfig (the body of POST /api/init)
 #include "game_loop.h"           // GameLoopHealth (returned by the GET /api/game-loop callback)
 #include "net/http_client.h"     // net::Response (an auto-tuning reply, passed through verbatim)
@@ -121,8 +122,17 @@ class HttpServer {
   ///
   /// Runs the capture program on @p adapter for @p seconds and returns the pcap file it wrote,
   /// under the user cache. Lives in main.cc so the server never names the program or its path.
-  using RunCaptureFn = std::function<std::expected<std::filesystem::path, std::string>(
+  using RunCaptureFn = std::function<std::expected<std::filesystem::path, mm::CaptureError>(
       const std::string& adapter, int seconds)>;
+
+  /// @brief Callback type for `POST /api/captures/start`: starts a capture of @p adapter that runs
+  ///        until it is stopped, and at most @p maxSeconds. Returns the file it writes.
+  using StartCaptureFn = std::function<std::expected<std::filesystem::path, mm::CaptureError>(
+      const std::string& adapter, int maxSeconds)>;
+
+  /// @brief Callback type for `POST /api/captures/stop`: ends the started capture and returns its
+  ///        file.
+  using StopCaptureFn = std::function<std::expected<std::filesystem::path, mm::CaptureError>()>;
 
   /// @brief Server configuration.
   struct Config {
@@ -146,8 +156,10 @@ class HttpServer {
     AutoTuningStatusFn
         autoTuningStatus;             ///< Handler for `GET /api/auto-tuning`; the startup snapshot.
     AutoTuningSpecFn autoTuningSpec;  ///< Handler for `GET /api/auto-tuning/swagger.yml`.
-    EniOptionsFn eniOptions;  ///< Supplies the non-bus half of `GET /api/eni`; required for it.
-    RunCaptureFn runCapture;  ///< Handler for `POST /api/captures`; runs the capture program.
+    EniOptionsFn eniOptions;      ///< Supplies the non-bus half of `GET /api/eni`; required for it.
+    RunCaptureFn runCapture;      ///< Handler for `POST /api/captures`; runs the capture program.
+    StartCaptureFn startCapture;  ///< Handler for `POST /api/captures/start`.
+    StopCaptureFn stopCapture;    ///< Handler for `POST /api/captures/stop`.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };
@@ -214,7 +226,6 @@ class HttpServer {
   /// drain alone is not enough and why the store has to happen there rather than here.
   std::atomic<bool> stopping_{false};
   /// One capture at a time: a second raw socket on the adapter would record every frame twice.
-  std::atomic<bool> captureRunning_{false};
   /// Workers for handlers that would otherwise block the event loop.
   ///
   /// uWebSockets runs every handler on the app's single loop thread, so a handler that blocks

@@ -5320,3 +5320,30 @@ ESI, and `FIRMWARE_DEFECTS.md` records the difference from CiA 301.
 
 **A namespace alias is allowed in a `.cc` file and never in a header,** now written in `CLAUDE.md`.
 It was already the practice, and this change added aliases to tests.
+
+## Session 2026-11-12 — A capture that is started and stopped (#219)
+
+**A capture of a fixed length cannot cover a test.** `POST /api/captures` records for 1 to 300 s and
+blocks for that long, and a test has no fixed length. So the server can now start a capture and stop
+it later, and the bench records one capture per test that asks for it, the way it saves a
+process-data dump.
+
+**SIGTERM ends the capture program, and it still writes everything.** The program sets a flag in its
+signal handler, both capture loops read it at least every 100 ms, and the program then closes the
+file and prints the summary as on a normal end. Measured in a user namespace: 16 ms from the signal
+to the exit, with a complete file.
+
+**The file is the sign that the capture runs.** A stop that arrived before the program had installed
+its handler killed it with no file, which a test with a stand-in program showed at once. So the
+program creates its file only once the adapter is open, and the start waits for the file or for the
+program to exit. A stop after a start then always gets a complete file, and a refused adapter fails
+the start with the program's own message rather than failing the stop later.
+
+**Linux and macOS only.** Windows has no signal for a program without a console, and a kill would cut
+the file off with no summary. A stop file that the program polls would work everywhere, but it is a
+second mechanism to keep. On Windows the start answers 501, and the Console falls back to a capture
+of a fixed length there.
+
+**The capture is a program of its own, on an adapter the request may name.** The bench resets the
+server at the start of each test, and a reset closes the bus, so a capture tied to the bus would end
+with it. The fixture names the adapter from `bench.description.toml` and starts before the reset.

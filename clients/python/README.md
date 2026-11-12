@@ -201,6 +201,9 @@ Other methods:
 
 - `reset()` closes the fieldbus driver and forgets every device. It commands no AL state.
 - `scan()` scans the bus every time and returns the number of devices it found.
+- `start_capture(adapter, seconds)` starts a capture of the EtherCAT frames that runs until
+  `stop_capture()`, which returns the path of the pcap file in the user cache and the summary of
+  late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
 - `run_procedure()` runs a procedure to its end.
 - `monitor(topic)` streams the batches of a monitoring from the WebSocket.
 - `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,

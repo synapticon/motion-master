@@ -1,4 +1,6 @@
 #include <CLI/CLI.hpp>
+#include <atomic>
+#include <csignal>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
@@ -10,10 +12,25 @@
 #include "capture/pcap.h"
 #include "capture/summary.h"
 
+namespace {
+
+// Set by SIGTERM or SIGINT. A lock-free atomic is safe to write from a signal handler.
+std::atomic<bool> stopRequested{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+
+extern "C" void requestStop(int /*signal*/) { stopRequested.store(true); }
+
+}  // namespace
+
 // Records every EtherCAT frame on an adapter for a number of seconds, writes them to a pcap file,
-// prints a summary of how late each frame came back, and exits. With --summarise it reads a pcap
-// instead of capturing, so a file from tcpdump on another host gets the same summary.
+// prints a summary of how late each frame came back, and exits. SIGTERM or SIGINT ends the capture
+// early, and the program still writes the whole file and the summary, so the server can stop a
+// capture that has no fixed length. With --summarise it reads a pcap instead of capturing, so a
+// file from tcpdump on another host gets the same summary.
 int main(int argc, char** argv) {
+  std::signal(SIGTERM, requestStop);
+  std::signal(SIGINT, requestStop);
+
   CLI::App app{"Records EtherCAT frames and says how late they come back", "motion-master-capture"};
   std::string adapter;
   int seconds = 30;
@@ -39,11 +56,10 @@ int main(int argc, char** argv) {
     return 2;
   }
 
+  // The file is created only once the adapter is open, so a file that exists tells the server
+  // that the capture runs and that this program handles SIGTERM.
   mm::capture::PcapWriter writer;
-  if (auto r = writer.open(out); !r) {
-    std::cerr << r.error() << "\n";
-    return 1;
-  }
+  const auto ready = [&]() { return writer.open(out); };
   // Kept in memory for the summary as well as written, so the file is complete whatever happens
   // to the summary, and the summary needs no second read of it.
   std::vector<mm::capture::Record> records;
@@ -55,7 +71,9 @@ int main(int argc, char** argv) {
     records.push_back(mm::capture::Record{timestampNs, {bytes.begin(), bytes.end()}});
   };
   std::cerr << "capturing on " << adapter << " for " << seconds << " s into " << out << "\n";
-  if (auto r = mm::capture::captureFrames(adapter, std::chrono::seconds{seconds}, sink); !r) {
+  if (auto r = mm::capture::captureFrames(adapter, std::chrono::seconds{seconds}, sink,
+                                          stopRequested, ready);
+      !r) {
     std::cerr << r.error() << "\n";
     return 1;
   }

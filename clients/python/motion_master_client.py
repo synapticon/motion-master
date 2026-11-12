@@ -161,6 +161,18 @@ class ProcedureError(Exception):
     """The server refuses to start a procedure. The message is the server's reason."""
 
 
+class CaptureError(Exception):
+    """The server refuses to start or stop a capture. The message is the server's reason."""
+
+
+def _reason(response):
+    """Return the server's reason for a refused request: the error of its JSON body, or its text."""
+    try:
+        return response.json()["error"]
+    except (ValueError, KeyError, TypeError):
+        return response.text.strip()
+
+
 def _satisfied(current, target, exact):
     """Return whether a device in current already meets target."""
     if current == target:
@@ -350,6 +362,45 @@ class MotionMasterClient:
         found = self.call("scan").json()["slaves"]
         log.info("found %d device(s)", found)
         return found
+
+    def start_capture(self, adapter=None, seconds=None):
+        """Start a capture of the EtherCAT frames that runs until stop_capture() (startCapture).
+
+        Returns once the capture records, with the path of its pcap file in the user cache. The
+        capture runs as a program of its own, so a reset, an init or a scan in between does not end
+        it. `adapter` defaults to the adapter of the bus, so name it when no bus is up. `seconds`
+        is the upper limit for a capture that is never stopped, 600 when not given.
+
+        Raises CaptureError with the server's reason when it refuses, for example while another
+        capture runs (409) or on Windows (501).
+        """
+        body = {}
+        if adapter:
+            body["adapter"] = adapter
+        if seconds is not None:
+            body["seconds"] = seconds
+        r = self.call("startCapture", body=body, check=False)
+        if not r.ok:
+            raise CaptureError(f"the capture did not start: {_reason(r)} (HTTP {r.status_code})")
+        started = r.json()
+        log.info("capturing on %s into %s", started["adapter"], started["path"])
+        return started["path"]
+
+    def stop_capture(self):
+        """Stop the started capture and return its path and summary (stopCapture).
+
+        The result is the body of POST /api/captures/stop: `path`, the pcap file in the user cache,
+        and `summary`. Raises CaptureError with the server's reason when no capture was started or
+        the capture failed.
+        """
+        r = self.call("stopCapture", check=False)
+        if not r.ok:
+            raise CaptureError(
+                f"the capture did not stop cleanly: {_reason(r)} (HTTP {r.status_code})"
+            )
+        stopped = r.json()
+        log.info("stopped the capture into %s", stopped["path"])
+        return stopped
 
     def devices(self):
         """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).

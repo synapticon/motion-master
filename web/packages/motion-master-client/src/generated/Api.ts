@@ -2218,7 +2218,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Runs the capture program `motion-master-capture`, which ships beside the server binary, on the adapter the bus is on, waits for it to exit, and answers the summary. The program records every EtherCAT frame that leaves or enters the adapter with a kernel timestamp and writes them as a pcap file under `captures/` in the user cache, so the file is listed, downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark. The summary matches each frame the master sent to the frame that came back for it, by the index and the header of its first datagram, and reports per kind of frame how late the returns were. The cyclic process-data frame is one kind; mailbox and register datagrams, the control plane, are the other. The bands are the three waits the driver uses, 2 ms, 20 ms and 100 ms, and they are cumulative: a frame later than 100 ms counts in all three. A frame sent again with the same index and header while its first copy had no answer counts once, as `resent`, and its return is timed from the first copy. The time is the kernel's, taken at the boundary to the NIC driver on both sides: when the frame is handed to the driver, and when the driver hands its return back. So the number covers the NIC, the wire and the device, and not the host's own queues and scheduling between that boundary and Motion Master. A capture that shows late frames puts the delay on the wire or in the device. A clean capture beside the server's own warnings, "mailbox write(s) got no frame back", puts it inside the host. Read the two together. One capture at a time. The capture adds no frame to the bus and runs on a thread of its own, so the bus is not touched. The program needs `CAP_NET_RAW`, which the packages grant it at install.
+   * @description Runs the capture program `motion-master-capture`, which ships beside the server binary, on the adapter the bus is on, waits for it to exit, and answers the summary. The program records every EtherCAT frame that leaves or enters the adapter with a kernel timestamp and writes them as a pcap file under `captures/` in the user cache, so the file is listed, downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark. The summary matches each frame the master sent to the frame that came back for it, by the index and the header of its first datagram, and reports per kind of frame how late the returns were. The cyclic process-data frame is one kind; mailbox and register datagrams, the control plane, are the other. The bands are the three waits the driver uses, 2 ms, 20 ms and 100 ms, and they are cumulative: a frame later than 100 ms counts in all three. A frame sent again with the same index and header while its first copy had no answer counts once, as `resent`, and its return is timed from the first copy. The time is the kernel's, taken at the boundary to the NIC driver on both sides: when the frame is handed to the driver, and when the driver hands its return back. So the number covers the NIC, the wire and the device, and not the host's own queues and scheduling between that boundary and Motion Master. A capture that shows late frames puts the delay on the wire or in the device. A clean capture beside the server's own warnings, "mailbox write(s) got no frame back", puts it inside the host. Read the two together. One capture at a time, including one started with `POST /api/captures/start`. The capture adds no frame to the bus and runs on a thread of its own, so the bus is not touched. The program needs `CAP_NET_RAW`, which the packages grant it at install.
    *
    * @name RunCapture
    * @summary Record the EtherCAT frames of the bus adapter for a number of seconds
@@ -2263,6 +2263,70 @@ export class Api<
       method: "POST",
       body: data,
       type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Starts the capture program `motion-master-capture` on an adapter and answers once it records, so that a client can record exactly a span of work: start the capture, do the work, stop it with `POST /api/captures/stop`. The bench tests record one capture per test this way. The capture runs as a program of its own, so nothing the server does to the bus ends it: a reset, an init, a scan or an AL state change in between is recorded, not interrupted. Name the adapter when the bus is not up yet, because with no bus there is no adapter to default to. `seconds` is an upper limit, for a client that never stops the capture. The program then ends by itself, and its file stays under `captures/` in the user cache. A start after that is not refused. One capture at a time: this answers 409 while a capture runs, whether it was started here or by `POST /api/captures`. Linux and macOS only. Windows has no signal that ends a program without a console, so this answers 501 there; use `POST /api/captures` with a number of seconds instead.
+   *
+   * @name StartCapture
+   * @summary Start a capture of the EtherCAT frames that runs until it is stopped
+   * @request POST:/api/captures/start
+   */
+  startCapture = (
+    data?: {
+      /** The adapter to record. Defaults to the adapter of the bus. */
+      adapter?: string;
+      /**
+       * The longest the capture runs when nobody stops it.
+       * @min 1
+       * @max 3600
+       * @default 600
+       */
+      seconds?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        /** The pcap file the capture writes, relative to the user-cache root */
+        path: string;
+        adapter: string;
+        /** The upper limit of the capture */
+        seconds: number;
+      },
+      void | {
+        error: string;
+      }
+    >({
+      path: `/api/captures/start`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Ends the capture that `POST /api/captures/start` started, waits for the program to write its file, and answers the path and the summary, as `POST /api/captures` does. The program ends within 100 ms of the request. The file stays under `captures/` in the user cache, where the `/api/user-cache` routes download and delete it.
+   *
+   * @name StopCapture
+   * @summary Stop the started capture and answer its summary
+   * @request POST:/api/captures/stop
+   */
+  stopCapture = (params: RequestParams = {}) =>
+    this.request<
+      {
+        /** The pcap file, relative to the user-cache root */
+        path: string;
+        /** How late the frames of a capture came back. See `POST /api/captures`. */
+        summary: CaptureSummary;
+      },
+      {
+        error: string;
+      } | void
+    >({
+      path: `/api/captures/stop`,
+      method: "POST",
       format: "json",
       ...params,
     });

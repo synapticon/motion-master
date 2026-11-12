@@ -3932,7 +3932,8 @@ paths:
         on the wire or in the device. A clean capture beside the server's own warnings, "mailbox
         write(s) got no frame back", puts it inside the host. Read the two together.
 
-        One capture at a time. The capture adds no frame to the bus and runs on a thread of its
+        One capture at a time, including one started with `POST /api/captures/start`. The capture
+        adds no frame to the bus and runs on a thread of its
         own, so the bus is not touched. The program needs `CAP_NET_RAW`, which the packages grant
         it at install.
       requestBody:
@@ -3990,6 +3991,141 @@ paths:
                     type: string
         "500":
           description: The capture program is not installed, could not open the adapter, or failed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "501":
+          description: The server was built without the capture runner
+  /api/captures/start:
+    post:
+      summary: Start a capture of the EtherCAT frames that runs until it is stopped
+      operationId: startCapture
+      description: >
+        Starts the capture program `motion-master-capture` on an adapter and answers once it
+        records, so that a client can record exactly a span of work: start the capture, do the
+        work, stop it with `POST /api/captures/stop`. The bench tests record one capture per test
+        this way.
+
+        The capture runs as a program of its own, so nothing the server does to the bus ends it:
+        a reset, an init, a scan or an AL state change in between is recorded, not interrupted.
+        Name the adapter when the bus is not up yet, because with no bus there is no adapter to
+        default to.
+
+        `seconds` is an upper limit, for a client that never stops the capture. The program then
+        ends by itself, and its file stays under `captures/` in the user cache. A start after that
+        is not refused.
+
+        One capture at a time: this answers 409 while a capture runs, whether it was started here
+        or by `POST /api/captures`. Linux and macOS only. Windows has no signal that ends a program
+        without a console, so this answers 501 there; use `POST /api/captures` with a number of
+        seconds instead.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adapter:
+                  type: string
+                  description: The adapter to record. Defaults to the adapter of the bus.
+                seconds:
+                  type: integer
+                  minimum: 1
+                  maximum: 3600
+                  default: 600
+                  description: The longest the capture runs when nobody stops it.
+      responses:
+        "200":
+          description: The capture records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, adapter, seconds]
+                properties:
+                  path:
+                    type: string
+                    description: The pcap file the capture writes, relative to the user-cache root
+                  adapter:
+                    type: string
+                  seconds:
+                    type: integer
+                    description: The upper limit of the capture
+        "400":
+          description: "`seconds` is out of range, or the body is not a JSON object"
+        "409":
+          description: >
+            No adapter to capture on (no bus is up and none was named, or the transport is SPoE),
+            or a capture is already running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: The capture program is not installed, could not open the adapter, or did not start
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "501":
+          description: The platform is Windows, or the server was built without the capture runner
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+  /api/captures/stop:
+    post:
+      summary: Stop the started capture and answer its summary
+      operationId: stopCapture
+      description: >
+        Ends the capture that `POST /api/captures/start` started, waits for the program to write
+        its file, and answers the path and the summary, as `POST /api/captures` does. The program
+        ends within 100 ms of the request. The file stays under `captures/` in the user cache,
+        where the `/api/user-cache` routes download and delete it.
+      responses:
+        "200":
+          description: The capture is done and summarised
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, summary]
+                properties:
+                  path:
+                    type: string
+                    description: The pcap file, relative to the user-cache root
+                  summary:
+                    $ref: "#/components/schemas/CaptureSummary"
+        "409":
+          description: No capture was started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: The capture program failed, so its file is missing or incomplete
           content:
             application/json:
               schema:

@@ -8,11 +8,12 @@ supplies the drives. The tests switch the output of the power supply through the
 The tests use the Python reference client in [`clients/python`](../../clients/python). So a run
 also checks that client.
 
-The recording below shows a run. The steps are in [Run the tests](#run-the-tests).
-[VHS](https://github.com/charmbracelet/vhs) records it from `demo.tape`. To record it again, run
-`vhs demo.tape` on the computer of the bench. The tape builds and starts the server in Docker
-itself, from its own clone of the repository, and stops it at the end. Nothing else may use the
-server ports or the bench while it records.
+The recording below shows a run by hand on the computer of the bench. It clones the repository,
+builds Motion Master in Docker and starts it, prepares the Python environment with
+`source setup.sh`, shows the adapter and the devices of the bench, and runs `pytest`. The steps are in
+[Run the tests](#run-the-tests). A run with the Bench Tests workflow
+([Run the tests in GitHub Actions](#run-the-tests-in-github-actions)) does all of this itself, so
+you do not need these steps for it.
 
 ![A run of the bench tests](demo.gif)
 

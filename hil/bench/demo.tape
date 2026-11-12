@@ -34,16 +34,28 @@ Wait@300s
 Show
 Sleep 1s
 
-# The server: built from the clone, started with the capabilities SOEM and the RT loop need, and
-# ready once it answers.
+# The server, Motion Master: built from the clone and started the way the Bench Tests workflow
+# starts it, with the capabilities SOEM and the RT loop need. The build and the wait for the server
+# to answer run hidden, so the GIF shows the commands but not the wait.
+Type "cd motion-master" Sleep 500ms Enter
 Hide
-# The step is hidden, so its output stays out of the GIF, and it has no ">", which Wait would take
-# for the prompt if the long line wrapped there.
-Type "cd motion-master && docker rm -f motion-master-bench; docker build -q -t motion-master-bench . && docker run -d --rm --name motion-master-bench --network host --cap-add NET_RAW --cap-add NET_ADMIN --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 motion-master-bench && until curl -ksf -o /dev/null https://127.0.0.1:61447/api/version; do sleep 1; done; cd .. && clear" Enter
+Type "docker rm -f motion-master-bench; clear" Enter
+Wait@60s
+Show
+Type "docker build -q -t motion-master-bench ." Sleep 500ms Enter
+Hide
 Wait@3600s
 Show
+Sleep 1s
+# A command with no ">", which Wait would take for the prompt if the long line wrapped there.
+Type "docker run -d --rm --name motion-master-bench --network host --cap-add NET_RAW --cap-add NET_ADMIN --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 motion-master-bench" Sleep 500ms Enter
+Type "until curl -ksf -o /dev/null https://127.0.0.1:61447/api/version; do sleep 1; done" Sleep 500ms Enter
+Hide
+Wait@300s
+Show
+Sleep 1s
 
-Type "cd motion-master/hil/bench" Sleep 500ms Enter
+Type "cd hil/bench" Sleep 500ms Enter
 Sleep 500ms
 
 Type "source setup.sh" Sleep 500ms Enter

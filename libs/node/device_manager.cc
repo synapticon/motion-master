@@ -829,6 +829,7 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
   // enumerated), in image order.
   DumpHeader header;
   header.flags = incompleteStart ? kDumpFlagIncompleteStart : 0;
+  header.span = range;
   header.inputBytes = image->inputBytes;
   header.outputBytes = image->outputBytes;
 

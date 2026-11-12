@@ -313,6 +313,8 @@ struct DumpPrefix {
   uint16_t flags = 0;
   uint64_t startSequence = 0;
   uint64_t rowCount = 0;
+  uint64_t spanFromNs = 0;
+  uint64_t spanToNs = 0;
 };
 
 DumpPrefix readPrefix(const std::string& dump) {
@@ -320,6 +322,8 @@ DumpPrefix readPrefix(const std::string& dump) {
   std::memcpy(&p.flags, dump.data() + 6, sizeof(p.flags));
   std::memcpy(&p.startSequence, dump.data() + 8, sizeof(p.startSequence));
   std::memcpy(&p.rowCount, dump.data() + 16, sizeof(p.rowCount));
+  std::memcpy(&p.spanFromNs, dump.data() + 36, sizeof(p.spanFromNs));
+  std::memcpy(&p.spanToNs, dump.data() + 44, sizeof(p.spanToNs));
   return p;
 }
 
@@ -347,6 +351,8 @@ TEST(DeviceManagerProcessData, ADumpFromAMarkHoldsOnlyTheCyclesAfterIt) {
   EXPECT_EQ(prefix.startSequence, 3u);
   EXPECT_EQ(prefix.rowCount, 4u);
   EXPECT_EQ(prefix.flags, 0u);
+  EXPECT_EQ(prefix.spanFromNs, mark);  // the file says which span it was asked for
+  EXPECT_EQ(prefix.spanToNs, 0u);
 
   // With no range, the dump is the whole ring.
   auto whole = dm->dumpProcessDataBuffer();

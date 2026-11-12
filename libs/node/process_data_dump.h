@@ -20,7 +20,7 @@ namespace mm::node {
 ///
 /// Layout (all multi-byte integers little-endian):
 ///
-///   File prefix (fixed 36 bytes — @c rowCount sits at a fixed offset so it can be patched after
+///   File prefix (fixed 52 bytes — @c rowCount sits at a fixed offset so it can be patched after
 ///   the rows are streamed):
 ///     0   char  magic[4]      = 'M','M','P','D'
 ///     4   u16   formatVersion = kDumpFormatVersion
@@ -30,6 +30,8 @@ namespace mm::node {
 ///     24  u32   inputBytes    (per-row input region size)
 ///     28  u32   outputBytes   (per-row output region size)
 ///     32  u32   deviceCount
+///     36  u64   spanFromNs    (the start of the span the dump asked for, epoch ns; 0 = none)
+///     44  u64   spanToNs      (the end of the span the dump asked for, epoch ns; 0 = none)
 ///   Device table (deviceCount entries):
 ///     u16 slavePosition
 ///     u32 vendorId · u32 productCode · u32 revisionNumber · u32 serialNumber
@@ -45,13 +47,15 @@ namespace mm::node {
 /// A row's input/output regions are padded with zeros (or truncated) to the header sizes, so the
 /// stride is fixed and a reader can index any cycle directly. The timestamp keeps full epoch-ns
 /// precision (unlike the live monitoring row, which reduces it to microseconds for JavaScript).
+///
+/// Version 1 has no span: its prefix ends at @c deviceCount, 36 bytes. A reader accepts both.
 
 /// @brief Magic at the very start of every dump file.
 inline constexpr std::array<char, 4> kDumpMagic = {'M', 'M', 'P', 'D'};
 
 /// @brief Current dump format version. A reader rejects an unknown major shape; bump on layout
 ///        changes so old files stay identifiable.
-inline constexpr uint16_t kDumpFormatVersion = 1;
+inline constexpr uint16_t kDumpFormatVersion = 2;
 
 /// @brief A flag bit: the dump is of a span, and the ring no longer holds every cycle of that span
 ///        right after its start. A re-map or a reset discarded some, or the ring overwrote them.
@@ -84,19 +88,20 @@ struct DumpDevice {
   std::vector<DumpPdoEntry> entries;
 };
 
-/// @brief The embedded process-image header: everything needed to decode the rows offline.
-struct DumpHeader {
-  uint16_t flags = 0;        ///< @c kDumpFlag* bits.
-  uint32_t inputBytes = 0;   ///< Per-row input region size (the published image's input size).
-  uint32_t outputBytes = 0;  ///< Per-row output region size.
-  std::vector<DumpDevice> devices;
-};
-
 /// @brief The span of a dump, in epoch nanoseconds of @c recorderClockNs, both ends included. An
 ///        end that is not set is open, so the default is the whole ring.
 struct DumpRange {
   std::optional<uint64_t> fromNs;
   std::optional<uint64_t> toNs;
+};
+
+/// @brief The embedded process-image header: everything needed to decode the rows offline.
+struct DumpHeader {
+  uint16_t flags = 0;        ///< @c kDumpFlag* bits.
+  DumpRange span;            ///< The span the dump asked for. Unset ends are written as 0.
+  uint32_t inputBytes = 0;   ///< Per-row input region size (the published image's input size).
+  uint32_t outputBytes = 0;  ///< Per-row output region size.
+  std::vector<DumpDevice> devices;
 };
 
 /// @brief Reads the record for @p seq into @p out; returns @c false if it is no longer available

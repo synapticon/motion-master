@@ -95,12 +95,13 @@ DumpHeader makeHeader(uint32_t inputBytes, uint32_t outputBytes) {
   return h;
 }
 
-TEST(ProcessDataDumpTest, WritesTheFlagsOfTheHeader) {
+TEST(ProcessDataDumpTest, WritesTheFlagsAndTheSpanOfTheHeader) {
   ProcessDataRing ring;
   ring.allocate(4, 4, 8);
   writeSeq(ring, 0, 4, 4);
   DumpHeader header = makeHeader(4, 4);
   header.flags = mm::node::kDumpFlagIncompleteStart;
+  header.span = {.fromNs = 1000, .toNs = std::nullopt};
   std::ostringstream out(std::ios::binary);
   auto written = writeProcessDataDump(
       out, header, 0, 1,
@@ -110,6 +111,9 @@ TEST(ProcessDataDumpTest, WritesTheFlagsOfTheHeader) {
   r.getBytes(4);
   r.getLE<uint16_t>();  // formatVersion
   EXPECT_EQ(r.getLE<uint16_t>(), mm::node::kDumpFlagIncompleteStart);
+  r.skip(8 + 8 + 4 + 4 + 4);              // startSequence..deviceCount
+  EXPECT_EQ(r.getLE<uint64_t>(), 1000u);  // spanFromNs
+  EXPECT_EQ(r.getLE<uint64_t>(), 0u);     // spanToNs: open
 }
 
 TEST(ProcessDataDumpTest, RoundTripsHeaderAndRows) {
@@ -138,6 +142,8 @@ TEST(ProcessDataDumpTest, RoundTripsHeaderAndRows) {
   EXPECT_EQ(r.getLE<uint32_t>(), kIn);   // inputBytes
   EXPECT_EQ(r.getLE<uint32_t>(), kOut);  // outputBytes
   ASSERT_EQ(r.getLE<uint32_t>(), 1u);    // deviceCount
+  EXPECT_EQ(r.getLE<uint64_t>(), 0u);    // spanFromNs: no span
+  EXPECT_EQ(r.getLE<uint64_t>(), 0u);    // spanToNs
 
   // Device record.
   EXPECT_EQ(r.getLE<uint16_t>(), 1u);           // slavePosition
@@ -216,6 +222,7 @@ TEST(ProcessDataDumpTest, PadsAndTruncatesRegionsToHeaderSizes) {
   EXPECT_EQ(r.getLE<uint32_t>(), 4u);   // inputBytes
   EXPECT_EQ(r.getLE<uint32_t>(), 12u);  // outputBytes
   ASSERT_EQ(r.getLE<uint32_t>(), 1u);   // deviceCount
+  r.skip(16);                           // spanFromNs, spanToNs
   // Walk past the one device record (slavePosition, four u32 ids, name, entries).
   r.getLE<uint16_t>();  // slavePosition
   r.skip(16);           // vendorId, productCode, revisionNumber, serialNumber

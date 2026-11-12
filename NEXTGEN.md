@@ -5382,5 +5382,10 @@ the usual case: the cycles of the test before, recorded after the mark, are disc
 the start of the test. They are under the layout of another test, so nothing that test needs is lost,
 and the fixture logs the flag at INFO.
 
+**The file says which span it was asked for.** A dump sent in without the server log must still say
+what it holds and what was asked. So the prefix gets `spanFromNs` and `spanToNs` after `deviceCount`,
+0 for an end that was not given, and the format becomes version 2. The fields go at the end of the
+prefix, so every offset a version 1 reader knows stays where it was. The parser reads both versions.
+
 **A dump never holds two layouts.** One ring is one layout, and a span is read from the current ring
 only. So a mark from before a re-map gives the cycles after the re-map, with the flag set.

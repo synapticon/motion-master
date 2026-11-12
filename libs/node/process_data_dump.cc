@@ -43,6 +43,8 @@ void writeHeader(std::ostream& o, const DumpHeader& header, uint64_t startSeq) {
   putLE<uint32_t>(o, header.inputBytes);
   putLE<uint32_t>(o, header.outputBytes);
   putLE<uint32_t>(o, static_cast<uint32_t>(header.devices.size()));
+  putLE<uint64_t>(o, header.span.fromNs.value_or(0));
+  putLE<uint64_t>(o, header.span.toNs.value_or(0));
 
   for (const DumpDevice& d : header.devices) {
     putLE<uint16_t>(o, d.slavePosition);

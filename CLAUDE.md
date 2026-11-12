@@ -1066,17 +1066,25 @@ Rationale: `NEXTGEN.md`, Session 2026-09-02.
 
 Three headers carry one `ObjectAddress<T>` constant per SOMANET dictionary entry:
 `profile_device_objects.h` (0x1xxx and standard MDP), `cia402_drive_objects.h` (0x6xxx),
-`somanet_drive_objects.h` (0x2xxx and FSoE).
+`somanet_drive_objects.h` (0x2xxx and FSoE). **The same run writes the same list for the two
+clients**: `clients/python/motion_master_objects.py` and
+`web/packages/motion-master-client/src/objects.ts`, in the classes `Profile`, `Cia402` and
+`Somanet`. A client name is the C++ name without `k`, in capitals with an underscore between words:
+`kStatusword` is `Cia402.STATUSWORD` in both clients. So C++, Python and TypeScript cannot hold
+different lists or different names.
 
 Generated from the pinned `libs/etg/tests/data/somanet-v5.6.6.xml`:
 
 ```bash
-motion-master generate-object-addresses --esi <file> --out libs/node
-./tools/format.sh   # required — clang-format wraps declarations over 100 columns
+./tools/generate-object-addresses.sh   # runs the generator, then clang-format on the headers
 ```
 
-There is deliberately **no CI drift check**. The ESI is pinned and regenerated on request, so a
-check would fail exactly when the lag is intentional. Regenerate only when asked.
+**CI checks that the five files match the pinned ESI** (`tools/generate-object-addresses.sh
+--check`, in the Linux x64 build). It compares the headers with whitespace removed, so the
+clang-format version does not matter. It reads the pinned file in the repository, not the newest
+ESI, so a new ESI that is not wanted yet does not fail it. It fails on a hand edit, and on a
+generator change regenerated for one language only. Replace the pinned ESI only when asked, and
+regenerate in the same commit.
 
 **One header per index range rests on a vendor convention.** The generator merges every device
 into one table keyed by `(index, subindex)`, which is sound only if an address names the same
@@ -1284,7 +1292,9 @@ config tokens, filenames, and namespaces.
 **AL state spelling:** `INIT`, `PREOP`, `BOOT`, `SAFEOP`, `OP` in prose, logs, messages, API
 text, the Console and Python or TypeScript names. Never `PRE-OP` or `PRE_OP`: a name with no
 hyphen is valid in every language, so a reader never has to guess the form. C++ enumerators keep
-PascalCase, `EtherCatState::PreOp`. The long forms are `Pre-Operational` and `Safe-Operational`.
+PascalCase, `AlState::PreOp`. The type is `AlState` in C++, Python and TypeScript, never
+`EtherCatState`: SPoE reports the same states. The long forms are `Pre-Operational` and
+`Safe-Operational`.
 ESI values such as `WriteRestrictions="PreOP"` are ETG.2000 data and keep their spelling. See #213.
 
 **Class names encode the base only for polymorphic interface implementations.** A class held

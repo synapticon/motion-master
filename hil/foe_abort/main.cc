@@ -36,7 +36,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 
 constexpr int kReadTimeoutUs = 6'000'000;
 constexpr int kStateTimeoutUs = 10'000'000;
@@ -115,7 +115,7 @@ void printRead(std::string_view step, const ReadResult& result) {
   std::cout << "\n";
 }
 
-bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
+bool requestState(ecx_contextt* ctx, uint16_t slave, AlState state) {
   const auto raw = static_cast<uint16_t>(state);
   ctx->slavelist[slave].state = raw;
   ecx_writestate(ctx, slave);
@@ -149,13 +149,13 @@ int main(int argc, char** argv) {
   }
   const uint16_t slave = options.slave;
 
-  if (!requestState(ctx.get(), slave, EtherCatState::Init)) {
+  if (!requestState(ctx.get(), slave, AlState::Init)) {
     std::cerr << "the slave did not reach INIT\n";
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }
-  mm::comm::soem::updateMailboxSyncManagers(ctx.get(), slave, EtherCatState::Boot);
-  if (!requestState(ctx.get(), slave, EtherCatState::Boot)) {
+  mm::comm::soem::updateMailboxSyncManagers(ctx.get(), slave, AlState::Boot);
+  if (!requestState(ctx.get(), slave, AlState::Boot)) {
     std::cerr << "the slave did not reach BOOT\n";
     ecx_close(ctx.get());
     return EXIT_FAILURE;
@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
   printRead("1. read", baseline);
   if (baseline.wkc <= 0) {
     std::cout << "   FAIL: the bootloader does not answer a normal read, so the test cannot run\n";
-    requestState(ctx.get(), slave, EtherCatState::Init);
+    requestState(ctx.get(), slave, AlState::Init);
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }
@@ -205,7 +205,7 @@ int main(int argc, char** argv) {
     passed = false;
   }
 
-  requestState(ctx.get(), slave, EtherCatState::Init);
+  requestState(ctx.get(), slave, AlState::Init);
   ecx_close(ctx.get());
   std::cout << (passed ? "PASS\n" : "FAIL\n");
   return passed ? EXIT_SUCCESS : EXIT_FAILURE;

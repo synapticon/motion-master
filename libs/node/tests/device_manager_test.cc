@@ -21,7 +21,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
@@ -58,7 +58,7 @@ class FakeDriver : public FieldbusDriver {
   std::map<uint16_t, uint16_t> refuses;
 
   /// Every transitionToState() call, as the commanded positions and the target state.
-  std::vector<std::pair<std::vector<uint16_t>, EtherCatState>> commanded;
+  std::vector<std::pair<std::vector<uint16_t>, AlState>> commanded;
 
   /// Slaves that readStates() reports as not answering, with the reason. Every other slave answers.
   std::map<uint16_t, mm::comm::Reachability> unreachable;
@@ -202,8 +202,8 @@ class FakeDriver : public FieldbusDriver {
     return watchdogConfig;
   }
 
-  void transitionToState(const std::vector<uint16_t>& positions, std::optional<EtherCatState>,
-                         EtherCatState target, std::chrono::steady_clock::duration,
+  void transitionToState(const std::vector<uint16_t>& positions, std::optional<AlState>,
+                         AlState target, std::chrono::steady_clock::duration,
                          std::chrono::steady_clock::duration, std::function<void()>,
                          std::function<bool()>) override {
     ++transitions;
@@ -287,7 +287,7 @@ TEST(DeviceManagerInit, SecondInitWhileInitialisedIsRejected) {
 
 TEST(DeviceManagerMailbox, PreOpStateMarksMailboxActive) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
-  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->reportState = static_cast<uint16_t>(AlState::PreOp);
   FakeDriver* raw = driver.get();  // dm keeps ownership; raw stays valid
 
   DeviceManager dm;
@@ -299,7 +299,7 @@ TEST(DeviceManagerMailbox, PreOpStateMarksMailboxActive) {
   EXPECT_TRUE(mailboxActive(dm, 1));
 
   // Dropping back to INIT must flip the mailbox inactive again.
-  raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  raw->reportState = static_cast<uint16_t>(AlState::Init);
   ASSERT_TRUE(dm.deviceStates({}).has_value());
   EXPECT_FALSE(mailboxActive(dm, 1));
 }
@@ -308,7 +308,7 @@ TEST(DeviceManagerState, ADriverThatRefusesStateChangesIsNeverCommanded) {
   // SPoE in Monitor mode refuses every state change, because a PLC owns the state. The reason must
   // reach the caller as the error, and the driver must not be asked to transition at all.
   auto driver = std::make_unique<FakeDriver>(true, 1);
-  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->reportState = static_cast<uint16_t>(AlState::PreOp);
   driver->refusal = "the PLC owns the state";
   FakeDriver* raw = driver.get();
 
@@ -317,7 +317,7 @@ TEST(DeviceManagerState, ADriverThatRefusesStateChangesIsNeverCommanded) {
   ASSERT_TRUE(dm.scan().has_value());
   EXPECT_EQ(dm.stateChangeRefusal(), std::optional<std::string>("the PLC owns the state"));
 
-  const auto result = dm.transitionToState({}, EtherCatState::SafeOp, std::chrono::seconds(1));
+  const auto result = dm.transitionToState({}, AlState::SafeOp, std::chrono::seconds(1));
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), "the PLC owns the state");
   EXPECT_EQ(raw->transitions, 0);
@@ -325,7 +325,7 @@ TEST(DeviceManagerState, ADriverThatRefusesStateChangesIsNeverCommanded) {
 
 TEST(DeviceManagerState, ReportsADeviceThatDoesNotAnswer) {
   auto driver = std::make_unique<FakeDriver>(true, 2);
-  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->reportState = static_cast<uint16_t>(AlState::PreOp);
   driver->unreachable[2] = mm::comm::Reachability::AddressLost;
 
   DeviceManager dm;
@@ -336,7 +336,7 @@ TEST(DeviceManagerState, ReportsADeviceThatDoesNotAnswer) {
   ASSERT_TRUE(states.has_value());
   ASSERT_EQ(states->size(), 2U);
   EXPECT_EQ((*states)[0].reachability, mm::comm::Reachability::Answering);
-  EXPECT_EQ((*states)[0].alState, static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ((*states)[0].alState, static_cast<uint16_t>(AlState::PreOp));
   EXPECT_EQ((*states)[1].reachability, mm::comm::Reachability::AddressLost);
   EXPECT_EQ((*states)[1].alState, 0);
 
@@ -348,7 +348,7 @@ TEST(DeviceManagerState, ADeviceThatDoesNotAnswerDoesNotFailTheOthers) {
   // A device that does not answer has no state to validate. Validating its zeroed state anyway
   // would refuse the whole request as an illegal transition.
   auto driver = std::make_unique<FakeDriver>(true, 2);
-  driver->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  driver->reportState = static_cast<uint16_t>(AlState::Init);
   driver->unreachable[2] = mm::comm::Reachability::NotAnswering;
   FakeDriver* raw = driver.get();
 
@@ -356,7 +356,7 @@ TEST(DeviceManagerState, ADeviceThatDoesNotAnswerDoesNotFailTheOthers) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  const auto result = dm.transitionToState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+  const auto result = dm.transitionToState({}, AlState::PreOp, std::chrono::seconds(1));
   ASSERT_TRUE(result.has_value()) << result.error();
   EXPECT_EQ(raw->transitions, 1);
   ASSERT_EQ(result->size(), 2U);
@@ -366,7 +366,7 @@ TEST(DeviceManagerState, ADeviceThatDoesNotAnswerDoesNotFailTheOthers) {
 
 // A bus of @p initial.size() devices, scanned, each in the AL state given for it.
 std::pair<std::unique_ptr<DeviceManager>, FakeDriver*> busInStates(
-    const std::vector<EtherCatState>& initial) {
+    const std::vector<AlState>& initial) {
   auto driver = std::make_unique<FakeDriver>(true, static_cast<int>(initial.size()));
   for (std::size_t i = 0; i < initial.size(); ++i) {
     driver->states[static_cast<uint16_t>(i + 1)] = static_cast<uint16_t>(initial[i]);
@@ -379,99 +379,96 @@ std::pair<std::unique_ptr<DeviceManager>, FakeDriver*> busInStates(
   return {std::move(dm), raw};
 }
 
-using Commanded = std::vector<std::pair<std::vector<uint16_t>, EtherCatState>>;
+using Commanded = std::vector<std::pair<std::vector<uint16_t>, AlState>>;
 
 TEST(DeviceManagerStateWalk, ClimbsOneStateAtATime) {
-  auto [dm, driver] = busInStates({EtherCatState::Init, EtherCatState::Init});
+  auto [dm, driver] = busInStates({AlState::Init, AlState::Init});
 
-  const auto result = dm->transitionToState({}, EtherCatState::Op, std::chrono::seconds(1));
+  const auto result = dm->transitionToState({}, AlState::Op, std::chrono::seconds(1));
 
   ASSERT_TRUE(result.has_value()) << result.error();
-  EXPECT_EQ(driver->commanded, (Commanded{{{1, 2}, EtherCatState::PreOp},
-                                          {{1, 2}, EtherCatState::SafeOp},
-                                          {{1, 2}, EtherCatState::Op}}));
+  EXPECT_EQ(
+      driver->commanded,
+      (Commanded{{{1, 2}, AlState::PreOp}, {{1, 2}, AlState::SafeOp}, {{1, 2}, AlState::Op}}));
   for (const auto& info : *result) {
-    EXPECT_EQ(info.alState, static_cast<uint16_t>(EtherCatState::Op));
+    EXPECT_EQ(info.alState, static_cast<uint16_t>(AlState::Op));
   }
 }
 
 TEST(DeviceManagerStateWalk, LeavesBootThroughInit) {
-  auto [dm, driver] = busInStates({EtherCatState::Boot});
+  auto [dm, driver] = busInStates({AlState::Boot});
 
-  const auto result = dm->transitionToState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+  const auto result = dm->transitionToState({}, AlState::PreOp, std::chrono::seconds(1));
 
   ASSERT_TRUE(result.has_value()) << result.error();
-  EXPECT_EQ(driver->commanded,
-            (Commanded{{{1}, EtherCatState::Init}, {{1}, EtherCatState::PreOp}}));
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, AlState::Init}, {{1}, AlState::PreOp}}));
 }
 
 TEST(DeviceManagerStateWalk, EntersBootThroughInit) {
-  auto [dm, driver] = busInStates({EtherCatState::PreOp});
+  auto [dm, driver] = busInStates({AlState::PreOp});
 
-  const auto result = dm->transitionToState({}, EtherCatState::Boot, std::chrono::seconds(1));
+  const auto result = dm->transitionToState({}, AlState::Boot, std::chrono::seconds(1));
 
   ASSERT_TRUE(result.has_value()) << result.error();
-  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::Init}, {{1}, EtherCatState::Boot}}));
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, AlState::Init}, {{1}, AlState::Boot}}));
 }
 
 TEST(DeviceManagerStateWalk, DropsInOneStep) {
-  auto [dm, driver] = busInStates({EtherCatState::SafeOp});
+  auto [dm, driver] = busInStates({AlState::SafeOp});
 
-  const auto result = dm->transitionToState({}, EtherCatState::Init, std::chrono::seconds(1));
+  const auto result = dm->transitionToState({}, AlState::Init, std::chrono::seconds(1));
 
   ASSERT_TRUE(result.has_value()) << result.error();
-  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::Init}}));
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, AlState::Init}}));
 }
 
 TEST(DeviceManagerStateWalk, CommandsADeviceAlreadyThereOnce) {
   // As a single transition always did, so that an error the device holds is acknowledged.
-  auto [dm, driver] = busInStates({EtherCatState::PreOp});
+  auto [dm, driver] = busInStates({AlState::PreOp});
 
-  const auto result = dm->transitionToState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+  const auto result = dm->transitionToState({}, AlState::PreOp, std::chrono::seconds(1));
 
   ASSERT_TRUE(result.has_value()) << result.error();
-  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::PreOp}}));
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, AlState::PreOp}}));
 }
 
 TEST(DeviceManagerStateWalk, DevicesInDifferentStatesTakeTheLowestStepFirst) {
   // Device 1 needs a mailbox before device 2's step to SAFEOP maps the bus.
-  auto [dm, driver] = busInStates({EtherCatState::Init, EtherCatState::PreOp});
+  auto [dm, driver] = busInStates({AlState::Init, AlState::PreOp});
 
-  const auto result = dm->transitionToState({}, EtherCatState::SafeOp, std::chrono::seconds(1));
-
-  ASSERT_TRUE(result.has_value()) << result.error();
-  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::PreOp},
-                                          {{2}, EtherCatState::SafeOp},
-                                          {{1}, EtherCatState::SafeOp}}));
-}
-
-TEST(DeviceManagerStateWalk, StopsAtTheFirstStepADeviceDoesNotReach) {
-  auto [dm, driver] = busInStates({EtherCatState::Init});
-  driver->refuses[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
-
-  const auto result = dm->transitionToState({}, EtherCatState::Op, std::chrono::seconds(1));
+  const auto result = dm->transitionToState({}, AlState::SafeOp, std::chrono::seconds(1));
 
   ASSERT_TRUE(result.has_value()) << result.error();
   EXPECT_EQ(driver->commanded,
-            (Commanded{{{1}, EtherCatState::PreOp}, {{1}, EtherCatState::SafeOp}}));
+            (Commanded{{{1}, AlState::PreOp}, {{2}, AlState::SafeOp}, {{1}, AlState::SafeOp}}));
+}
+
+TEST(DeviceManagerStateWalk, StopsAtTheFirstStepADeviceDoesNotReach) {
+  auto [dm, driver] = busInStates({AlState::Init});
+  driver->refuses[1] = static_cast<uint16_t>(AlState::SafeOp);
+
+  const auto result = dm->transitionToState({}, AlState::Op, std::chrono::seconds(1));
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, AlState::PreOp}, {{1}, AlState::SafeOp}}));
   ASSERT_EQ(result->size(), 1U);
-  EXPECT_EQ((*result)[0].alState, static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ((*result)[0].alState, static_cast<uint16_t>(AlState::PreOp));
 }
 
 TEST(DeviceManagerChangeState, CommandsOneLegalTransition) {
-  auto [dm, driver] = busInStates({EtherCatState::Init});
+  auto [dm, driver] = busInStates({AlState::Init});
 
-  const auto result = dm->changeState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+  const auto result = dm->changeState({}, AlState::PreOp, std::chrono::seconds(1));
 
   ASSERT_TRUE(result.has_value()) << result.error().message;
-  EXPECT_EQ(driver->commanded, (Commanded{{{1}, EtherCatState::PreOp}}));
+  EXPECT_EQ(driver->commanded, (Commanded{{{1}, AlState::PreOp}}));
 }
 
 TEST(DeviceManagerChangeState, RefusesAnIllegalTransitionAndCommandsNothing) {
   // One device that cannot take the step refuses the whole request, so no device moves.
-  auto [dm, driver] = busInStates({EtherCatState::PreOp, EtherCatState::Init});
+  auto [dm, driver] = busInStates({AlState::PreOp, AlState::Init});
 
-  const auto result = dm->changeState({}, EtherCatState::SafeOp, std::chrono::seconds(1));
+  const auto result = dm->changeState({}, AlState::SafeOp, std::chrono::seconds(1));
 
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().kind, mm::node::StateChangeError::Kind::kIllegalTransition);
@@ -479,9 +476,9 @@ TEST(DeviceManagerChangeState, RefusesAnIllegalTransitionAndCommandsNothing) {
 }
 
 TEST(DeviceManagerChangeState, NeverTakesADeviceInBootToAnExchangeState) {
-  auto [dm, driver] = busInStates({EtherCatState::Boot});
+  auto [dm, driver] = busInStates({AlState::Boot});
 
-  for (const auto target : {EtherCatState::PreOp, EtherCatState::SafeOp, EtherCatState::Op}) {
+  for (const auto target : {AlState::PreOp, AlState::SafeOp, AlState::Op}) {
     const auto result = dm->changeState({}, target, std::chrono::seconds(1));
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().kind, mm::node::StateChangeError::Kind::kIllegalTransition);
@@ -492,7 +489,7 @@ TEST(DeviceManagerChangeState, NeverTakesADeviceInBootToAnExchangeState) {
 // Scans a bus of @p slaves devices, all in PREOP, with as many on the wire.
 std::pair<std::unique_ptr<DeviceManager>, FakeDriver*> scannedBus(int slaves) {
   auto driver = std::make_unique<FakeDriver>(true, slaves);
-  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->reportState = static_cast<uint16_t>(AlState::PreOp);
   driver->devicesOnWire = slaves;
   FakeDriver* raw = driver.get();
   auto dm = std::make_unique<DeviceManager>();
@@ -576,7 +573,7 @@ TEST(DeviceManagerMailbox, ErrorIndicatorDoesNotDisableMailbox) {
   // mailbox must report active — the error is surfaced separately via the AL status.
   auto driver = std::make_unique<FakeDriver>(true, 1);
   driver->reportState =
-      static_cast<uint16_t>(EtherCatState::SafeOp) | 0x0010u;  // bit 4 = AL error indicator
+      static_cast<uint16_t>(AlState::SafeOp) | 0x0010u;  // bit 4 = AL error indicator
 
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
@@ -602,7 +599,7 @@ TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
 
 TEST(DeviceManagerDelegates, AFreshReadWithoutAMailboxIsRefused) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
-  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->reportState = static_cast<uint16_t>(AlState::PreOp);
   mm::comm::OdEntry entry;
   entry.index = 0x2001;
   entry.objectCode = 7;
@@ -625,7 +622,7 @@ TEST(DeviceManagerDelegates, AFreshReadWithoutAMailboxIsRefused) {
 
   // The device drops to INIT, where it has no mailbox. The cached value is the last one read, so a
   // fresh read is refused rather than served as if it were live.
-  raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  raw->reportState = static_cast<uint16_t>(AlState::Init);
   ASSERT_TRUE(dm.deviceStates({}).has_value());
   const auto fresh = dm.deviceParameterView(1, 0x2001, 0, /*refreshFromBus=*/true);
   ASSERT_FALSE(fresh.has_value());
@@ -728,7 +725,7 @@ TEST(DeviceManagerWatchdog, UnknownDeviceAndNoDriverError) {
 
 TEST(DeviceManagerMailbox, InitStateKeepsMailboxInactive) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
-  driver->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  driver->reportState = static_cast<uint16_t>(AlState::Init);
 
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
@@ -902,7 +899,7 @@ TEST(DeviceManagerPositions, BulkMethodsRejectUnknownPosition) {
   EXPECT_FALSE(dm.deviceDiagnostics({99}).has_value());
   EXPECT_FALSE(dm.dcSync({99}).has_value());
   EXPECT_FALSE(
-      dm.transitionToState({99}, EtherCatState::PreOp, std::chrono::milliseconds(0)).has_value());
+      dm.transitionToState({99}, AlState::PreOp, std::chrono::milliseconds(0)).has_value());
 
   // A mix of valid and invalid is still rejected — the whole request fails on the unknown one.
   EXPECT_FALSE(dm.deviceStates({1, 99}).has_value());

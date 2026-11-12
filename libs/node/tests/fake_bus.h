@@ -25,7 +25,7 @@
 
 namespace mm::node::testing {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
@@ -151,7 +151,7 @@ class FakeBus : public FieldbusDriver {
   bool mailboxWriteOnce = false;
   void stop() override {}
   /// The target of every transitionToState() call, in order. The states do not change with it.
-  std::vector<EtherCatState> commandedStates;
+  std::vector<AlState> commandedStates;
 
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& p) override {
@@ -198,10 +198,9 @@ class FakeBus : public FieldbusDriver {
   // working-counter expectation has to already be correct.
   std::function<void()> whileTransitioning;
 
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>,
-                         EtherCatState target, std::chrono::steady_clock::duration,
-                         std::chrono::steady_clock::duration, std::function<void()>,
-                         std::function<bool()>) override {
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState target,
+                         std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
+                         std::function<void()>, std::function<bool()>) override {
     commandedStates.push_back(target);
     if (whileTransitioning) {
       whileTransitioning();
@@ -238,7 +237,7 @@ inline std::unique_ptr<FakeBus> makeCia402Bus() {
   bus->layout.slaves = {SlaveIo{
       .slavePosition = 1, .outputOffset = 0, .outputBytes = 6, .inputOffset = 0, .inputBytes = 6}};
   // Report OP so the device counts as exchanging and PDO-mapped access uses the buffers.
-  bus->state = static_cast<uint16_t>(EtherCatState::Op);
+  bus->state = static_cast<uint16_t>(AlState::Op);
   return bus;
 }
 

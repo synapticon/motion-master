@@ -21,7 +21,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
@@ -41,7 +41,7 @@ using mm::node::runStoreParametersProcedure;
 using mm::node::StoreParametersConfig;
 using mm::node::storeParametersSteps;
 
-constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
+constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
 // Zero settle and interval, so the confirmation walk runs without real waiting — the reason the
 // bodies take a config at all.
@@ -162,7 +162,7 @@ class CommandFakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 };

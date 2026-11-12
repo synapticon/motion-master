@@ -8,6 +8,7 @@ import { Api } from './generated/Api'
 import type { ApiConfig } from './generated/http-client'
 import { API_BASE_URL, WS_URL } from './constants'
 import { fetchProcessDataDump, type MmpdFile } from './mmpd'
+import type { ObjectAddress } from './objects'
 import { WebSocketConnection, type WebSocketConstructor } from './web-socket-connection'
 
 export interface MotionMasterClientOptions {
@@ -52,6 +53,13 @@ export class MotionMasterClient {
       WebSocket: options.WebSocket,
       protocolsOrOptions: options.webSocketOptions,
     })
+  }
+
+  /// Reads one object of a device and returns its value, decoded by the server. The address gives
+  /// the type of the value: `readValue(1, Cia402.STATUSWORD)` is a `Promise<number>`.
+  async readValue<T>(slavePosition: number, address: ObjectAddress<T>): Promise<T> {
+    const response = await this.api.readParameter(slavePosition, address.index, address.subindex)
+    return response.data.value as T
   }
 
   /// Fetches and parses the live recorder dump (`GET /api/process-data/dump`) as an `MmpdFile`.

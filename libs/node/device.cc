@@ -87,15 +87,14 @@ bool Device::isCia402() const {
 }
 
 bool Device::mailboxActive() const {
-  using mm::comm::EtherCatState;
+  using mm::comm::AlState;
   const uint16_t status = driver_.slaveState(slavePosition_);
-  const EtherCatState state = mm::comm::alState(status);
+  const AlState state = mm::comm::alState(status);
   // Mailbox (CoE/SDO) communication is available in PREOP and above, per the EtherCAT state
   // machine — independent of the AL error indicator: a device in SAFEOP+error still answers
   // mailbox requests; the error is surfaced separately via the AL status. INIT has no mailbox,
   // and BOOT's mailbox is FoE-only, so neither counts here.
-  return state == EtherCatState::PreOp || state == EtherCatState::SafeOp ||
-         state == EtherCatState::Op;
+  return state == AlState::PreOp || state == AlState::SafeOp || state == AlState::Op;
 }
 
 bool Device::supportsCoe() const {
@@ -124,7 +123,7 @@ bool Device::isOutputMapped(uint16_t index, uint8_t subindex) const {
          processData_->isOutputMapped(slavePosition_, index, subindex);
 }
 
-mm::comm::EtherCatState Device::alState() const {
+mm::comm::AlState Device::alState() const {
   return mm::comm::alState(driver_.slaveState(slavePosition_));
 }
 
@@ -1029,9 +1028,9 @@ std::expected<void, std::string> writePdoDirection(const Device& device, uint16_
 }  // namespace
 
 std::expected<void, std::string> Device::writePdoMapping(const PdoMapping& mapping) {
-  using mm::comm::EtherCatState;
-  const EtherCatState state = mm::comm::alState(driver_.slaveState(slavePosition_));
-  if (state != EtherCatState::PreOp) {
+  using mm::comm::AlState;
+  const AlState state = mm::comm::alState(driver_.slaveState(slavePosition_));
+  if (state != AlState::PreOp) {
     return std::unexpected(
         std::format("device {}: PDO mapping can only be written in PREOP (device is in {})",
                     slavePosition_, mm::comm::toString(state)));

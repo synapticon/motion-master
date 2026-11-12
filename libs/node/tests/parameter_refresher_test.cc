@@ -24,7 +24,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
@@ -33,7 +33,7 @@ using mm::node::DeviceManager;
 using mm::node::ParameterRefresher;
 
 constexpr uint16_t kU32 = 0x0007;
-constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
+constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
 std::vector<uint8_t> u32le(uint32_t v) {
   return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
@@ -179,7 +179,7 @@ class FakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 

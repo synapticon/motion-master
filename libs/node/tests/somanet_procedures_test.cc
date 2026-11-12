@@ -44,7 +44,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
@@ -128,7 +128,7 @@ using mm::node::velocitySourceSteps;
 namespace somanet = mm::node::somanet;
 using mm::node::cia402::Object;
 
-constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
+constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 constexpr auto kNoDelay = std::chrono::milliseconds(0);
 
 /// Drive double answering OS command response reads from a scripted sequence — the same shape the
@@ -371,7 +371,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 };
@@ -2378,7 +2378,7 @@ TEST(FirmwareInstallationRequest, DefaultsMatchTheDescriptor) {
   auto request = parseFirmwareInstallationRequest(requestWithPackage());
   ASSERT_TRUE(request) << request.error();
   EXPECT_TRUE(request->cachePackage);
-  EXPECT_EQ(request->finalState, EtherCatState::PreOp);
+  EXPECT_EQ(request->finalState, AlState::PreOp);
   EXPECT_TRUE(request->extraFiles.empty());
 }
 
@@ -2405,8 +2405,8 @@ TEST(FirmwareInstallationRequest, RefusesAnExtraFileThatIsNotAnExtraFileOfThePac
 
 // The AL state numbers POST /api/devices/state uses, not a vocabulary of this procedure's own.
 TEST(FirmwareInstallationRequest, ReadsEveryFinalState) {
-  for (const auto state : {EtherCatState::Init, EtherCatState::PreOp, EtherCatState::Boot,
-                           EtherCatState::SafeOp, EtherCatState::Op}) {
+  for (const auto state :
+       {AlState::Init, AlState::PreOp, AlState::Boot, AlState::SafeOp, AlState::Op}) {
     nlohmann::json body = requestWithPackage();
     body["finalState"] = static_cast<unsigned>(state);
     auto request = parseFirmwareInstallationRequest(body);
@@ -2520,8 +2520,8 @@ class FirmwareFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{alStatus_, 0});
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>,
-                         EtherCatState target, std::chrono::steady_clock::duration timeout,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState target,
+                         std::chrono::steady_clock::duration timeout,
                          std::chrono::steady_clock::duration, std::function<void()>,
                          std::function<bool()>) override {
     alStatus_ = static_cast<uint16_t>(target);
@@ -2581,7 +2581,7 @@ class FirmwareFakeDriver : public FieldbusDriver {
   }
 
  private:
-  uint16_t alStatus_ = static_cast<uint16_t>(EtherCatState::PreOp);
+  uint16_t alStatus_ = static_cast<uint16_t>(AlState::PreOp);
 };
 
 /// Points mm::core::userCacheDir (and so firmwareCacheDir) at a throwaway directory, so a test that
@@ -2707,10 +2707,9 @@ TEST(FirmwareInstallationBody, WritesThePackageAndReturnsToPreOp) {
   // INIT and BOOT on the way in, INIT and PREOP on the way out — BOOT is only ever paired with
   // INIT, which is what the AL state machine allows.
   EXPECT_EQ(bus.driver->commanded,
-            (std::vector<uint16_t>{static_cast<uint16_t>(EtherCatState::Init),
-                                   static_cast<uint16_t>(EtherCatState::Boot),
-                                   static_cast<uint16_t>(EtherCatState::Init),
-                                   static_cast<uint16_t>(EtherCatState::PreOp)}));
+            (std::vector<uint16_t>{
+                static_cast<uint16_t>(AlState::Init), static_cast<uint16_t>(AlState::Boot),
+                static_cast<uint16_t>(AlState::Init), static_cast<uint16_t>(AlState::PreOp)}));
 
   for (const auto& step : reporter.steps()) {
     EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
@@ -2743,11 +2742,11 @@ TEST(FirmwareInstallationBody, StaysInBootWhenAsked) {
   std::stop_source source;
 
   auto request = installRequest();
-  request.finalState = EtherCatState::Boot;
+  request.finalState = AlState::Boot;
   auto result = runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), request);
   ASSERT_TRUE(result) << result.error();
 
-  EXPECT_EQ(bus.driver->commanded.back(), static_cast<uint16_t>(EtherCatState::Boot));
+  EXPECT_EQ(bus.driver->commanded.back(), static_cast<uint16_t>(AlState::Boot));
   EXPECT_EQ(stepNamed(reporter.steps(), "final-state").status, ProgressStatus::kSucceeded);
 }
 
@@ -2788,7 +2787,7 @@ TEST(FirmwareInstallationBody, AbortsOnAPermanentFoeFailureButStillLeavesBoot) {
       runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
   ASSERT_FALSE(result);
   EXPECT_EQ(stepNamed(reporter.steps(), "app-firmware").status, ProgressStatus::kFailed);
-  EXPECT_EQ(bus.driver->commanded.back(), static_cast<uint16_t>(EtherCatState::PreOp))
+  EXPECT_EQ(bus.driver->commanded.back(), static_cast<uint16_t>(AlState::PreOp))
       << "a failed install must not strand the device in BOOT";
 }
 
@@ -4398,7 +4397,7 @@ TEST(RunIcMuEncoderConfigurationProcedure, FailsWhenWriteAllReportsAnI2cError) {
 Device makeOpenLoopDevice(OsCommandFakeDriver& driver, uint8_t polePairs) {
   driver.programDrive();
   driver.programObject(0x2003, 0x01, ObjectDataType::UNSIGNED8, {polePairs});  // pole pairs
-  driver.alStatus = static_cast<uint16_t>(mm::comm::EtherCatState::Op);
+  driver.alStatus = static_cast<uint16_t>(mm::comm::AlState::Op);
   Device device(1, driver);
   EXPECT_TRUE(device.initializeParameters().has_value());
   return device;

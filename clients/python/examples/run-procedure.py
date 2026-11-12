@@ -37,7 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
-    STATE_NAMES,
+    AlState,
     MotionMasterClient,
     ProcedureError,
     format_step,
@@ -45,7 +45,7 @@ from motion_master_client import (  # noqa: E402
     step_changes,
 )
 
-STATES = {name.lower(): value for value, name in STATE_NAMES.items() if value != 0}
+STATES = {s.name.lower(): s for s in AlState if s}
 
 
 def convert(param, text):

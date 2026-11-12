@@ -1,0 +1,19 @@
+{
+  "about": "Statuswords (0x6041) and the CiA402 state each one reports, by the name the API uses. The server's cia402::decodeState, the Python client's Cia402.state() and the TypeScript client's Cia402.state() are each tested against this one table, so the three cannot decode differently.",
+  "cases": [
+    { "statusword": 0, "state": "NotReadyToSwitchOn" },
+    { "statusword": 1, "state": "NotReadyToSwitchOn" },
+    { "statusword": 64, "state": "SwitchOnDisabled" },
+    { "statusword": 96, "state": "SwitchOnDisabled" },
+    { "statusword": 592, "state": "SwitchOnDisabled" },
+    { "statusword": 33, "state": "ReadyToSwitchOn" },
+    { "statusword": 35, "state": "SwitchedOn" },
+    { "statusword": 39, "state": "OperationEnabled" },
+    { "statusword": 61607, "state": "OperationEnabled" },
+    { "statusword": 4663, "state": "OperationEnabled" },
+    { "statusword": 7, "state": "QuickStopActive" },
+    { "statusword": 15, "state": "FaultReactionActive" },
+    { "statusword": 8, "state": "Fault" },
+    { "statusword": 536, "state": "Fault" }
+  ]
+}

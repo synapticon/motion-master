@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import OP, PREOP, SAFEOP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
 
 def request_objects(objects):
@@ -64,7 +64,8 @@ def main():
     # aborts with 0x08000000 after SAFEOP -> PREOP or OP -> PREOP, and passes after
     # INIT -> PREOP. The firmware source points at its application processor, which learns only
     # of a transition upwards and so checks the write against the rights of the state before.
-    restart = client.call("restartDevices", body={"positions": [args.slave], "target": PREOP})
+    body = {"positions": [args.slave], "target": AlState.PREOP}
+    restart = client.call("restartDevices", body=body)
     if not restart.json()["ok"]:
         sys.exit(f"slave {args.slave} did not reach PREOP through INIT")
 
@@ -78,7 +79,7 @@ def main():
     read_back = r.json()
 
     # A device that came from below PREOP stays in PREOP, which is where its mapping applies.
-    if previous in (SAFEOP, OP):
+    if previous in (AlState.SAFEOP, AlState.OP):
         client.ensure_state(previous, positions=[args.slave], exact=True)
 
     for direction in ("outputs", "inputs"):

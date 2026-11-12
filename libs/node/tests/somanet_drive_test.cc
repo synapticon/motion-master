@@ -24,7 +24,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
@@ -42,7 +42,7 @@ using mm::node::kSynapticonVendorId;
 using mm::node::removeDeviceFile;
 using mm::node::cia402::Object;
 
-constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
+constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
 /// Minimal driver double: reports a configurable vendor ID and a configurable set of OD entries.
 /// Enough to exercise createSomanetDrive's vendor + CiA402-object validation (no bus I/O needed).
@@ -111,7 +111,7 @@ class IdentityFakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 };
@@ -341,7 +341,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 };

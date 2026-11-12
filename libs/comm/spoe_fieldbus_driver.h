@@ -132,7 +132,7 @@ class SpoeFieldbusDriver : public FieldbusDriver {
                                                  std::span<const uint8_t> data) override;
 
   void transitionToState(const std::vector<uint16_t>& positions,
-                         std::optional<EtherCatState> requiredState, EtherCatState targetState,
+                         std::optional<AlState> requiredState, AlState targetState,
                          std::chrono::steady_clock::duration timeout,
                          std::chrono::steady_clock::duration resendInterval,
                          std::function<void()> tick, std::function<bool()> shouldAbort) override;

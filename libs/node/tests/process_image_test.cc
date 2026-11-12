@@ -36,7 +36,7 @@ using mm::node::testing::u16le;
 using mm::node::testing::u32le;
 using mm::node::testing::u8le;
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::PdoLayout;
@@ -293,7 +293,7 @@ TEST(DeviceManagerFollowState, PublishesTheImageWhenAnotherMasterReachesOp) {
   // SPoE in Monitor mode: a PLC moves the drive, and nothing calls transitionToState.
   auto bus = mm::node::testing::makeCia402Bus();
   bus->refusal = "a PLC owns the state";
-  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->state = static_cast<uint16_t>(AlState::PreOp);
   FakeBus* raw = bus.get();
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
@@ -303,7 +303,7 @@ TEST(DeviceManagerFollowState, PublishesTheImageWhenAnotherMasterReachesOp) {
   EXPECT_FALSE(dm.processDataConfigured());
   EXPECT_EQ(raw->configureCalls, 0);
 
-  raw->state = static_cast<uint16_t>(EtherCatState::Op);
+  raw->state = static_cast<uint16_t>(AlState::Op);
   ASSERT_TRUE(dm.followObservedStates().has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(raw->configureCalls, 1);
@@ -340,7 +340,7 @@ TEST(DeviceManagerScan, MapsADeviceTheScanFindsInOp) {
 TEST(DeviceManagerScan, LeavesADeviceBelowSafeOpUnmapped) {
   // A SOEM scan leaves every slave below SAFEOP. The scan then reads nothing more.
   auto bus = mm::node::testing::makeCia402Bus();
-  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->state = static_cast<uint16_t>(AlState::PreOp);
   FakeBus* raw = bus.get();
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
@@ -377,11 +377,11 @@ TEST(DeviceManagerFollowState, TearsDownWhenNoDeviceExchangesAndReMapsOnReturn) 
   ASSERT_TRUE(dm.followObservedStates().has_value());
   ASSERT_TRUE(dm.processDataConfigured());
 
-  raw->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  raw->state = static_cast<uint16_t>(AlState::PreOp);
   ASSERT_TRUE(dm.followObservedStates().has_value());
   EXPECT_FALSE(dm.processDataConfigured());
 
-  raw->state = static_cast<uint16_t>(EtherCatState::Op);
+  raw->state = static_cast<uint16_t>(AlState::Op);
   ASSERT_TRUE(dm.followObservedStates().has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(raw->configureCalls, 2);
@@ -534,7 +534,7 @@ std::unique_ptr<FakeBus> makeSubByteBus() {
   bus->layout.expectedWkc = 2;
   bus->layout.slaves = {SlaveIo{
       .slavePosition = 1, .outputOffset = 0, .outputBytes = 1, .inputOffset = 0, .inputBytes = 0}};
-  bus->state = static_cast<uint16_t>(EtherCatState::Op);
+  bus->state = static_cast<uint16_t>(AlState::Op);
   return bus;
 }
 
@@ -579,7 +579,7 @@ TEST(CycleGuard, IsFalsyBeforeAnImageIsPublished) {
   }
   auto bus = makeCia402Bus();
   // Below SAFEOP, so the scan publishes no image.
-  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->state = static_cast<uint16_t>(AlState::PreOp);
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
   const DeviceManager::CycleGuard cycle(dm);  // scanned, but not yet mapped
@@ -1021,7 +1021,7 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   auto bus = makeCia402Bus();
   bus->cannedInputs = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
   // Below SAFEOP, as a SOEM scan leaves every slave, so the scan publishes no image.
-  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->state = static_cast<uint16_t>(AlState::PreOp);
   FakeBus* busPtr = bus.get();
 
   DeviceManager dm;
@@ -1030,12 +1030,12 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
   // The fake reports one state and does not follow a transition. From OP every step below passes
   // the transition check.
-  busPtr->state = static_cast<uint16_t>(EtherCatState::Op);
+  busPtr->state = static_cast<uint16_t>(AlState::Op);
 
   EXPECT_FALSE(dm.processDataConfigured());
 
   // Entering SAFEOP auto-configures and publishes the mapping.
-  ASSERT_TRUE(dm.transitionToState({}, EtherCatState::SafeOp, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({}, AlState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   dm.exchangeProcessData();
   ProcessDataRing::Record rec;
@@ -1043,17 +1043,17 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   EXPECT_EQ(rec.inputs.size(), 6u);
 
   // SAFEOP -> OP keeps the existing mapping (no re-map).
-  ASSERT_TRUE(dm.transitionToState({}, EtherCatState::Op, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({}, AlState::Op, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
 
   // Leaving the exchanging states (e.g. down to PREOP for a firmware download) tears it down.
-  ASSERT_TRUE(dm.transitionToState({}, EtherCatState::PreOp, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({}, AlState::PreOp, kTimeout).has_value());
   EXPECT_FALSE(dm.processDataConfigured());
 
   // Returning to SAFEOP re-maps the bus, and exchange works again — mapping continues to
   // function across a down/up cycle.
   busPtr->lastOutputs.clear();
-  ASSERT_TRUE(dm.transitionToState({}, EtherCatState::SafeOp, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({}, AlState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   dm.exchangeProcessData();
   EXPECT_EQ(busPtr->lastOutputs.size(), 6u);
@@ -1079,8 +1079,8 @@ TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
                                 .outputBytes = 6,
                                 .inputOffset = 6,
                                 .inputBytes = 6}};
-  bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::Op);
-  bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->slaveStates[1] = static_cast<uint16_t>(AlState::Op);
+  bus->slaveStates[2] = static_cast<uint16_t>(AlState::Op);
   bus->wkc = 6;
   FakeBus* busPtr = bus.get();
 
@@ -1094,15 +1094,15 @@ TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
   // Take device 2 down to PREOP. Device 1 stays in OP, so the whole-bus image is kept — no
   // teardown, no re-map — and the staying device keeps exchanging. (Before the fix this nulled
   // the single whole-bus image and silently stopped exchange for device 1 too.)
-  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::PreOp, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({2}, AlState::PreOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 1u);
 
   // Model device 2 now sitting in PREOP, then climb it back to SAFEOP (PREOP -> OP would be an
   // illegal AL jump): rejoining from a non-exchange state re-maps the whole bus (a new image
   // generation), since its PDO layout can differ.
-  busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
-  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::SafeOp, kTimeout).has_value());
+  busPtr->slaveStates[2] = static_cast<uint16_t>(AlState::PreOp);
+  ASSERT_TRUE(dm.transitionToState({2}, AlState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 2u);
 }
@@ -1125,8 +1125,8 @@ std::unique_ptr<FakeBus> makeTwoAxisOpBus() {
                                 .outputBytes = 6,
                                 .inputOffset = 6,
                                 .inputBytes = 6}};
-  bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::Op);
-  bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->slaveStates[1] = static_cast<uint16_t>(AlState::Op);
+  bus->slaveStates[2] = static_cast<uint16_t>(AlState::Op);
   bus->wkc = 6;
   return bus;
 }
@@ -1166,7 +1166,7 @@ TEST(CycleGuard, DecodeSkipsADeviceThatDoesNotExchange) {
 
   // Device 2 drops to PREOP while device 1 stays in OP, so the image stays published and the
   // frame still carries bytes in device 2's region.
-  busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
+  busPtr->slaveStates[2] = static_cast<uint16_t>(AlState::PreOp);
   busPtr->cannedInputs = {0x27, 0x06, 0x02, 0x00, 0x00, 0x00,   // device 1
                           0x00, 0x00, 0x00, 0x00, 0x00, 0x00};  // device 2: not sent by it
   dm.exchangeProcessData();
@@ -1195,7 +1195,7 @@ TEST(CycleGuard, DecodeSkipsADeviceInSafeOpWithAnError) {
   const Device* drive2 = dm.findDevice(2);
   ASSERT_NE(drive2, nullptr);
 
-  busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::SafeOp) | 0x0010u;
+  busPtr->slaveStates[2] = static_cast<uint16_t>(AlState::SafeOp) | 0x0010u;
   busPtr->cannedInputs = {0x37, 0x02, 0x01, 0x00, 0x00, 0x00,   // device 1
                           0x00, 0x00, 0x00, 0x00, 0x00, 0x00};  // device 2
   dm.exchangeProcessData();
@@ -1224,12 +1224,12 @@ TEST(DeviceManagerProcessData, DroppingOneDeviceIsNotCountedAsABusFault) {
   // Device 2 leaves as soon as it is commanded, so the bus answers 3 for the rest of the
   // transition — exactly what the RT loop sees while the driver drives the AL state.
   busPtr->whileTransitioning = [&] {
-    busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
+    busPtr->slaveStates[2] = static_cast<uint16_t>(AlState::PreOp);
     busPtr->wkc = 3;
     dm.exchangeProcessData();
     dm.exchangeProcessData();
   };
-  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::PreOp, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({2}, AlState::PreOp, kTimeout).has_value());
   busPtr->whileTransitioning = nullptr;
 
   EXPECT_TRUE(dm.processDataConfigured());
@@ -1245,7 +1245,7 @@ TEST(DeviceManagerProcessData, ADeviceGoingFromOpToSafeOpKeepsItsShare) {
   // and where it is going.
   const auto kTimeout = std::chrono::milliseconds(10);
   auto bus = makeTwoAxisOpBus();
-  bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->slaveStates[2] = static_cast<uint16_t>(AlState::PreOp);
   bus->wkc = 3;  // only device 1 is exchanging
   FakeBus* busPtr = bus.get();
 
@@ -1259,14 +1259,14 @@ TEST(DeviceManagerProcessData, ADeviceGoingFromOpToSafeOpKeepsItsShare) {
   // Device 1 reaches SAFEOP at once and device 2 is not there yet, so the bus answers 3 for most
   // of the transition. Device 2 arrives at the end.
   busPtr->whileTransitioning = [&] {
-    busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
+    busPtr->slaveStates[1] = static_cast<uint16_t>(AlState::SafeOp);
     busPtr->wkc = 3;
     dm.exchangeProcessData();
     dm.exchangeProcessData();
-    busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::SafeOp);
+    busPtr->slaveStates[2] = static_cast<uint16_t>(AlState::SafeOp);
     busPtr->wkc = 6;
   };
-  ASSERT_TRUE(dm.transitionToState({1, 2}, EtherCatState::SafeOp, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({1, 2}, AlState::SafeOp, kTimeout).has_value());
   busPtr->whileTransitioning = nullptr;
   EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
 
@@ -1281,7 +1281,7 @@ TEST(DeviceManagerProcessData, FailedObjectDictionaryReadIsAttemptedOncePerScan)
   // read is the deliberate way back.
   const auto kTimeout = std::chrono::milliseconds(10);
   auto bus = makeCia402Bus();
-  bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::Init);
+  bus->slaveStates[1] = static_cast<uint16_t>(AlState::Init);
   bus->odError = "the slave did not answer";
   FakeBus* busPtr = bus.get();
 
@@ -1289,14 +1289,14 @@ TEST(DeviceManagerProcessData, FailedObjectDictionaryReadIsAttemptedOncePerScan)
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::PreOp);
-  ASSERT_TRUE(dm.transitionToState({1}, EtherCatState::PreOp, kTimeout).has_value());
+  busPtr->slaveStates[1] = static_cast<uint16_t>(AlState::PreOp);
+  ASSERT_TRUE(dm.transitionToState({1}, AlState::PreOp, kTimeout).has_value());
   EXPECT_EQ(busPtr->odReadCalls, 1);
 
   // Climbing further must not pay for the same failure again.
-  ASSERT_TRUE(dm.transitionToState({1}, EtherCatState::SafeOp, kTimeout).has_value());
-  busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
-  ASSERT_TRUE(dm.transitionToState({1}, EtherCatState::Op, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({1}, AlState::SafeOp, kTimeout).has_value());
+  busPtr->slaveStates[1] = static_cast<uint16_t>(AlState::SafeOp);
+  ASSERT_TRUE(dm.transitionToState({1}, AlState::Op, kTimeout).has_value());
   EXPECT_EQ(busPtr->odReadCalls, 1);
 
   // The device says so, which is the only way a client can tell it apart from one that genuinely
@@ -1368,27 +1368,27 @@ TEST(DeviceManagerProcessData, CommandsOnlyLegalAlStateTransitions) {
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  const auto firstStep = [&](EtherCatState from, EtherCatState to) {
+  const auto firstStep = [&](AlState from, AlState to) {
     busPtr->state = static_cast<uint16_t>(from);
     busPtr->commandedStates.clear();
     EXPECT_TRUE(dm.transitionToState({}, to, kNow).has_value());
     return busPtr->commandedStates;
   };
-  using Steps = std::vector<EtherCatState>;
+  using Steps = std::vector<AlState>;
 
   // BOOT leaves only through INIT.
-  EXPECT_EQ(firstStep(EtherCatState::Boot, EtherCatState::Op), Steps{EtherCatState::Init});
-  EXPECT_EQ(firstStep(EtherCatState::Boot, EtherCatState::PreOp), Steps{EtherCatState::Init});
+  EXPECT_EQ(firstStep(AlState::Boot, AlState::Op), Steps{AlState::Init});
+  EXPECT_EQ(firstStep(AlState::Boot, AlState::PreOp), Steps{AlState::Init});
 
   // A climb goes one state at a time.
-  EXPECT_EQ(firstStep(EtherCatState::Init, EtherCatState::Op), Steps{EtherCatState::PreOp});
-  EXPECT_EQ(firstStep(EtherCatState::PreOp, EtherCatState::Op), Steps{EtherCatState::SafeOp});
+  EXPECT_EQ(firstStep(AlState::Init, AlState::Op), Steps{AlState::PreOp});
+  EXPECT_EQ(firstStep(AlState::PreOp, AlState::Op), Steps{AlState::SafeOp});
 
   // BOOT is entered only from INIT.
-  EXPECT_EQ(firstStep(EtherCatState::PreOp, EtherCatState::Boot), Steps{EtherCatState::Init});
+  EXPECT_EQ(firstStep(AlState::PreOp, AlState::Boot), Steps{AlState::Init});
 
   // A drop may skip states: OP -> INIT is one step.
-  EXPECT_EQ(firstStep(EtherCatState::Op, EtherCatState::Init), Steps{EtherCatState::Init});
+  EXPECT_EQ(firstStep(AlState::Op, AlState::Init), Steps{AlState::Init});
 }
 
 TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {
@@ -1419,8 +1419,8 @@ TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {
   // statusword (bytes 6..7) holds the live value 0x1234.
   bus->cannedInputs = {0x99, 0x99, 0, 0, 0, 0, 0x34, 0x12, 0, 0, 0, 0};
   bus->program(0x6041, 0x00, u16le(0xABCD));  // distinct SDO value for device 1's statusword
-  bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::PreOp);
-  bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->slaveStates[1] = static_cast<uint16_t>(AlState::PreOp);
+  bus->slaveStates[2] = static_cast<uint16_t>(AlState::Op);
   bus->wkc = 3;  // only device 2 (OP) contributes, so 3 == expected: a healthy bus
 
   DeviceManager dm;
@@ -1532,7 +1532,7 @@ TEST(DeviceManagerSampling, PdoSampleSpecResolvesInputAndOutputObjects) {
 TEST(DeviceManagerSampling, PdoSampleSpecRejectsUnmappedAndUnconfigured) {
   auto bus = makeCia402Bus();
   // Below SAFEOP, so the scan publishes no image.
-  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->state = static_cast<uint16_t>(AlState::PreOp);
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
@@ -1572,7 +1572,7 @@ TEST(DeviceManagerSampling, ValueReturnsCachedValueWithoutBus) {
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
 
   // Seed the cache via an offline write (no bus), then read it back through value().
-  busPtr->state = static_cast<uint16_t>(EtherCatState::Init);  // offline → cache-only write
+  busPtr->state = static_cast<uint16_t>(AlState::Init);  // offline → cache-only write
   ASSERT_TRUE(
       dm.writeDeviceParameter(1, 0x6041, 0x00, DeviceParameterValue{uint16_t{0xBEEF}}).has_value());
 

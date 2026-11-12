@@ -32,7 +32,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
@@ -55,7 +55,7 @@ constexpr uint16_t kU32 = 0x0007;
 // ETG.1000-6 object codes (only ARRAY/RECORD are Complete-Access candidates).
 constexpr uint16_t kArray = 0x0008;
 // PREOP AL state — used to bring the fake "online" (mailbox available) for SDO tests.
-constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
+constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
 /// FieldbusDriver test double for SDO exchange: readSdo answers from a programmed
 /// map keyed by (index, subindex); writeSdo records every download and can be told
@@ -200,7 +200,7 @@ class SdoFakeDriver : public FieldbusDriver {
     return {};
   }
 
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 };

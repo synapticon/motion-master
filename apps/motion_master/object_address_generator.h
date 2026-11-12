@@ -33,6 +33,17 @@ struct ObjectAddressGeneratorSummary {
 std::string objectIdentifier(std::string_view objectName, std::string_view entryName,
                              uint8_t subindex, bool composite);
 
+/// @brief Builds the name the Python and TypeScript clients use from a C++ identifier.
+///
+/// The name is the C++ identifier without its @c k, in capitals, with an underscore between words,
+/// so a line reads the same in the two clients. A word starts at a capital that follows a small
+/// letter or a digit, at the last capital of a run when a small letter follows it, and at a digit
+/// that follows a letter: @c kStatusword is @c STATUSWORD, @c kIdentityObjectVendorID is
+/// @c IDENTITY_OBJECT_VENDOR_ID, and @c kEncoder1Configuration is @c ENCODER_1_CONFIGURATION.
+///
+/// @param cxxIdentifier  An identifier that @c objectIdentifier built.
+std::string clientIdentifier(std::string_view cxxIdentifier);
+
 /// @brief Generates the object-address headers from a vendor's ESI file.
 ///
 /// Parses @p esiPath and merges every device's dictionary — the profile dictionary plus each
@@ -60,10 +71,18 @@ std::string objectIdentifier(std::string_view objectName, std::string_view entry
 /// it holds (@c EsiEntry::valueKind), including the width cross-check that keeps an
 /// @c "ARRAY [0..24] OF BYTE" from being emitted as a @c uint8_t.
 ///
-/// @param esiPath  Path to the vendor's ESI XML.
-/// @param outDir   Directory to write the headers into; must exist.
+/// **The same run writes the addresses for the Python and TypeScript clients.** Both files hold the
+/// same entries as the headers, in three classes, @c Profile, @c Cia402 and @c Somanet, with the
+/// names that @c clientIdentifier builds. One run writes all five files, so the three languages
+/// cannot hold different lists.
+///
+/// @param esiPath         Path to the vendor's ESI XML.
+/// @param outDir          Directory to write the headers into; must exist.
+/// @param pythonPath      Path of the Python module to write.
+/// @param typescriptPath  Path of the TypeScript module to write.
 /// @return A summary, or an error string if the ESI cannot be parsed or a file cannot be written.
 std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresses(
-    const std::string& esiPath, const std::string& outDir);
+    const std::string& esiPath, const std::string& outDir, const std::string& pythonPath,
+    const std::string& typescriptPath);
 
 }  // namespace mm

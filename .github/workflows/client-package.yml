@@ -67,3 +67,23 @@ jobs:
               throw new Error('require() of the package is incomplete')
             }
           "
+
+      # The server's cia402::decodeState and the Python client are tested against the same table.
+      - name: Cia402.state() of the installed package decodes the shared statusword table
+        working-directory: ${{ runner.temp }}/consumer
+        env:
+          TABLE: ${{ github.workspace }}/libs/node/tests/data/cia402_statusword_states.json
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs'
+            import { AlState, Cia402 } from '@synapticon/motion-master-client'
+            const table = JSON.parse(readFileSync(process.env.TABLE, 'utf8'))
+            const wrong = table.cases.filter((c) => Cia402.state(c.statusword) !== c.state)
+            if (wrong.length > 0) {
+              throw new Error('Cia402.state() decodes differently from the table: ' + JSON.stringify(wrong))
+            }
+            if (Cia402.STATUSWORD.index !== 0x6041 || AlState.PREOP !== 2) {
+              throw new Error('the addresses or the AL states are wrong')
+            }
+            console.log(table.cases.length + ' statuswords decode as the table says')
+          "

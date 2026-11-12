@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from motion_master_client import PREOP
+from motion_master_client import AlState
 
 from bench import Bench
 from report import append_to_job_summary, test_results_markdown, write_bench_report
@@ -51,7 +51,7 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
         # is logged and named in report.xml and the job summary, and the tests still run. The
         # report brings every device to PREOP first, because its reads go over the mailbox.
         try:
-            bench.client.ensure_state(PREOP, exact=True)
+            bench.client.ensure_state(AlState.PREOP, exact=True)
             write_bench_report(bench, record)
         except Exception as error:
             log.exception("the bench report failed")

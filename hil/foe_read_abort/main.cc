@@ -47,7 +47,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 
 constexpr int kReadTimeoutUs = 6'000'000;
 constexpr int kStateTimeoutUs = 10'000'000;
@@ -151,7 +151,7 @@ void printRead(std::string_view step, const ReadResult& result,
   std::cout << "\n";
 }
 
-bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
+bool requestState(ecx_contextt* ctx, uint16_t slave, AlState state) {
   const auto raw = static_cast<uint16_t>(state);
   ctx->slavelist[slave].state = raw;
   ecx_writestate(ctx, slave);
@@ -254,8 +254,8 @@ int main(int argc, char** argv) {
   // The same rule as the driver: a SOMANET device gets each mailbox request once.
   ctx->slavelist[slave].mbxwriteonce = mm::comm::isSomanetDevice(ctx->slavelist[slave].eep_man);
 
-  if (!requestState(ctx.get(), slave, EtherCatState::Init) ||
-      !requestState(ctx.get(), slave, EtherCatState::PreOp)) {
+  if (!requestState(ctx.get(), slave, AlState::Init) ||
+      !requestState(ctx.get(), slave, AlState::PreOp)) {
     std::cerr << "the slave did not reach PREOP\n";
     ecx_close(ctx.get());
     return EXIT_FAILURE;
@@ -275,8 +275,8 @@ int main(int argc, char** argv) {
   std::cout << std::format("2. read again, acknowledge {} packet(s), stop\n", options.packets);
   if (!readPartOfFile(ctx.get(), slave, options.file, options.packets)) {
     std::cout << "   FAIL: the partial read did not get that far\n";
-    requestState(ctx.get(), slave, EtherCatState::Init);
-    requestState(ctx.get(), slave, EtherCatState::PreOp);
+    requestState(ctx.get(), slave, AlState::Init);
+    requestState(ctx.get(), slave, AlState::PreOp);
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }

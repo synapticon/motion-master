@@ -22,7 +22,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
@@ -36,7 +36,7 @@ using mm::node::OperationModeKind;
 using mm::node::OperationModes;
 using mm::node::cia402::Object;
 
-constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
+constexpr uint16_t kPreOp = static_cast<uint16_t>(AlState::PreOp);
 
 // The value a SOMANET Integro actually reports (its EDS default, 197549): pp, pv, tq, hm, csp, csv
 // and cst supported; vl, ip and cstca not; manufacturer bits 16 and 17 set.
@@ -138,7 +138,7 @@ class ModesFakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 };

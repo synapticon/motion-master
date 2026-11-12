@@ -19,9 +19,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import STATE_NAMES, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
-STATES = {name.lower(): value for value, name in STATE_NAMES.items() if value != 0}
+STATES = {s.name.lower(): s for s in AlState if s}
 
 
 def main():
@@ -41,9 +41,9 @@ def main():
     result = client.call("restartDevices", body=body).json()
     for d in result["devices"]:
         mark = "" if d["reached"] else f"  not reached, alStatusCode 0x{d['alStatusCode']:04x}"
-        print(f"  {d['slavePosition']:3d}  {STATE_NAMES.get(d['alState'], d['alState'])}{mark}")
+        print(f"  {d['slavePosition']:3d}  {AlState(d['alState']).name}{mark}")
     if not result["ok"]:
-        sys.exit(f"the restart stopped at {STATE_NAMES.get(result['step'], result['step'])}")
+        sys.exit(f"the restart stopped at {AlState(result['step']).name}")
 
 
 if __name__ == "__main__":

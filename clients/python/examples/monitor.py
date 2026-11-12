@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import OP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
 TOPIC = "python-example"
 
@@ -46,7 +46,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(OP, positions=[args.slave])
+    client.ensure_state(AlState.OP, positions=[args.slave])
 
     # A monitoring with this topic can remain from a run that was killed, and the server refuses
     # a second create of one topic with 409.

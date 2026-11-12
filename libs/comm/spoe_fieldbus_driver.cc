@@ -268,8 +268,8 @@ void SpoeFieldbusDriver::connectAndIdentify(Drive& drive) {
   }
   drive.state.store(state->data[0]);
 
-  const EtherCatState current = alState(state->data[0]);
-  if (current == EtherCatState::Init || current == EtherCatState::Boot) {
+  const AlState current = alState(state->data[0]);
+  if (current == AlState::Init || current == AlState::Boot) {
     spdlog::info(
         "SPoE {}: the identity is not readable in {}, because the firmware refuses SDO "
         "access there",
@@ -915,8 +915,8 @@ std::expected<void, std::string> SpoeFieldbusDriver::writeRegister(
 }
 
 void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& positions,
-                                           std::optional<EtherCatState> requiredState,
-                                           EtherCatState targetState,
+                                           std::optional<AlState> requiredState,
+                                           AlState targetState,
                                            std::chrono::steady_clock::duration timeout,
                                            std::chrono::steady_clock::duration /*resendInterval*/,
                                            std::function<void()> /*tick*/,

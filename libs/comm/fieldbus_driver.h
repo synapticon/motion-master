@@ -42,7 +42,7 @@ inline constexpr std::chrono::milliseconds kFoeReadTimeout{6000};
 ///
 /// Numeric values match the EtherCAT standard AL control/status register
 /// encoding (ETG.1000.6 §6.4.1).
-enum class EtherCatState : uint16_t {
+enum class AlState : uint16_t {
   Init = 0x01,    ///< INIT — reset state, no communication.
   PreOp = 0x02,   ///< Pre-Operational — mailbox communication active.
   Boot = 0x03,    ///< BOOT — firmware download mode.
@@ -54,26 +54,24 @@ enum class EtherCatState : uint16_t {
 ///
 /// The single place the AL Status register layout is decoded: the low nibble is the current
 /// state, bit 4 is the error indicator (see @c alHasError). Callers compare the result against
-/// @c EtherCatState rather than re-masking the raw register.
-inline EtherCatState alState(uint16_t alStatus) {
-  return static_cast<EtherCatState>(alStatus & 0x000Fu);
-}
+/// @c AlState rather than re-masking the raw register.
+inline AlState alState(uint16_t alStatus) { return static_cast<AlState>(alStatus & 0x000Fu); }
 
 /// @brief Returns whether the AL Status error indicator (bit 4 of register 0x0130) is set.
 inline bool alHasError(uint16_t alStatus) { return (alStatus & 0x0010u) != 0; }
 
 /// @brief Human-readable name of an AL state, for log and error messages.
-inline std::string_view toString(EtherCatState state) {
+inline std::string_view toString(AlState state) {
   switch (state) {
-    case EtherCatState::Init:
+    case AlState::Init:
       return "INIT";
-    case EtherCatState::PreOp:
+    case AlState::PreOp:
       return "PREOP";
-    case EtherCatState::Boot:
+    case AlState::Boot:
       return "BOOT";
-    case EtherCatState::SafeOp:
+    case AlState::SafeOp:
       return "SAFEOP";
-    case EtherCatState::Op:
+    case AlState::Op:
       return "OP";
   }
   return "UNKNOWN";
@@ -133,8 +131,8 @@ inline int workingCounterContribution(uint16_t alStatus, bool hasOutputs, bool h
     return 0;
   }
   switch (alState(alStatus)) {
-    case EtherCatState::SafeOp:
-    case EtherCatState::Op:
+    case AlState::SafeOp:
+    case AlState::Op:
       return (hasOutputs ? 2 : 0) + (hasInputs ? 1 : 0);
     default:
       return 0;
@@ -151,8 +149,8 @@ inline int workingCounterContribution(uint16_t alStatus, bool hasOutputs, bool h
 ///
 /// @param alStatus  AL status of the slave: the state in the low four bits, and the error flag.
 inline bool exchangesProcessData(uint16_t alStatus) {
-  const EtherCatState state = alState(alStatus);
-  return !alHasError(alStatus) && (state == EtherCatState::SafeOp || state == EtherCatState::Op);
+  const AlState state = alState(alStatus);
+  return !alHasError(alStatus) && (state == AlState::SafeOp || state == AlState::Op);
 }
 
 /// @brief Immutable identity fields read from a slave's EEPROM during configuration.
@@ -934,13 +932,13 @@ class FieldbusDriver {
   /// @param timeout         Maximum time to wait for all devices.
   /// @param resendInterval  How often to re-send the command to lagging devices.
   /// @param tick            Optional callback invoked at ~1 ms intervals while waiting.
-  ///                        Pass a PDO sender when targeting @c EtherCatState::Op so the
+  ///                        Pass a PDO sender when targeting @c AlState::Op so the
   ///                        sync-manager watchdog does not fire during the wait.
   /// @param shouldAbort     Optional predicate; when it returns @c true the wait is abandoned
   ///                        early without logging failures for pending devices.
   virtual void transitionToState(
-      const std::vector<uint16_t>& positions, std::optional<EtherCatState> requiredState,
-      EtherCatState targetState, std::chrono::steady_clock::duration timeout,
+      const std::vector<uint16_t>& positions, std::optional<AlState> requiredState,
+      AlState targetState, std::chrono::steady_clock::duration timeout,
       std::chrono::steady_clock::duration resendInterval = std::chrono::seconds(2),
       std::function<void()> tick = nullptr, std::function<bool()> shouldAbort = nullptr) = 0;
 

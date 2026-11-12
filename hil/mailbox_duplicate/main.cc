@@ -44,7 +44,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using Clock = std::chrono::steady_clock;
 
 constexpr int kStateTimeoutUs = 10'000'000;
@@ -179,7 +179,7 @@ int readDeviceType(ecx_contextt* ctx, uint16_t slave) {
 // or on the step to PREOP without one. So the request is written again every second until
 // kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PREOP
 // its mailbox sync managers too.
-bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
+bool requestState(ecx_contextt* ctx, uint16_t slave, AlState state) {
   const auto raw = static_cast<uint16_t>(state);
   const auto deadline = Clock::now() + std::chrono::microseconds(kStateTimeoutUs);
   for (;;) {
@@ -193,8 +193,8 @@ bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
     }
     if (mm::comm::soem::restoreStationAddress(ctx, slave) ==
             mm::comm::soem::AddressState::Reassigned &&
-        state == EtherCatState::PreOp) {
-      mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::PreOp);
+        state == AlState::PreOp) {
+      mm::comm::soem::updateMailboxSyncManagers(ctx, slave, AlState::PreOp);
     }
   }
 }
@@ -224,12 +224,12 @@ int receiveAndDescribe(ecx_contextt* ctx, uint16_t slave, int timeoutUs, std::st
 }
 
 int runBoot(ecx_contextt* ctx, uint16_t slave, const std::string& file) {
-  if (!requestState(ctx, slave, EtherCatState::Init)) {
+  if (!requestState(ctx, slave, AlState::Init)) {
     std::cerr << "the slave did not reach INIT\n";
     return EXIT_FAILURE;
   }
-  mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::Boot);
-  if (!requestState(ctx, slave, EtherCatState::Boot)) {
+  mm::comm::soem::updateMailboxSyncManagers(ctx, slave, AlState::Boot);
+  if (!requestState(ctx, slave, AlState::Boot)) {
     std::cerr << "the slave did not reach BOOT\n";
     return EXIT_FAILURE;
   }
@@ -272,9 +272,9 @@ int runBoot(ecx_contextt* ctx, uint16_t slave, const std::string& file) {
   ec_errort err{};
   while (ecx_poperror(ctx, &err)) {
   }
-  const bool init = requestState(ctx, slave, EtherCatState::Init);
-  mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::PreOp);
-  const bool preOp = init && requestState(ctx, slave, EtherCatState::PreOp);
+  const bool init = requestState(ctx, slave, AlState::Init);
+  mm::comm::soem::updateMailboxSyncManagers(ctx, slave, AlState::PreOp);
+  const bool preOp = init && requestState(ctx, slave, AlState::PreOp);
   const bool counterReset = preOp && resetCounter(ctx, slave);
   std::cout << "3. INIT, then PREOP, then read 0x1000:00";
   const int read = counterReset ? readDeviceType(ctx, slave) : 0;
@@ -315,8 +315,8 @@ int main(int argc, char** argv) {
     return result;
   }
 
-  if (!requestState(ctx.get(), slave, EtherCatState::Init) ||
-      !requestState(ctx.get(), slave, EtherCatState::PreOp)) {
+  if (!requestState(ctx.get(), slave, AlState::Init) ||
+      !requestState(ctx.get(), slave, AlState::PreOp)) {
     std::cerr << "the slave did not reach PREOP\n";
     ecx_close(ctx.get());
     return EXIT_FAILURE;
@@ -386,8 +386,8 @@ int main(int argc, char** argv) {
     passed = false;
   }
 
-  const bool recoveredState = requestState(ctx.get(), slave, EtherCatState::Init) &&
-                              requestState(ctx.get(), slave, EtherCatState::PreOp);
+  const bool recoveredState = requestState(ctx.get(), slave, AlState::Init) &&
+                              requestState(ctx.get(), slave, AlState::PreOp);
   const bool recoveredCounter = recoveredState && resetCounter(ctx.get(), slave);
   std::cout << "6. INIT, then PREOP, then read 0x1000:00";
   const int recovered = recoveredCounter ? readDeviceType(ctx.get(), slave) : 0;

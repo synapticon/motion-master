@@ -26,7 +26,7 @@ from common import (  # noqa: E402
     transition_to_state,
     identify_plant,
 )
-from motion_master_client import OP, PREOP, run  # noqa: E402
+from motion_master_client import AlState, run  # noqa: E402
 
 # The rotating method, which needs no tuning and holds the load.
 OFFSET_DETECTION_METHOD = 0
@@ -56,12 +56,12 @@ def main():
 
     with Session(args.slave, LOGS_DIR) as s:
         connect(s)
-        transition_to_state(s, PREOP)
+        transition_to_state(s, AlState.PREOP)
         read_hardware_description(s)
         install_firmware(s)
         load_configuration(s, CONFIG_FILE)
         set_assigned_name(s)
-        transition_to_state(s, OP)
+        transition_to_state(s, AlState.OP)
         detect_offset(s, OFFSET_DETECTION_METHOD)
         identify_plant(s, PLANT_IDENTIFICATION_CHIRP)
         tune_controller(s, "velocity", VELOCITY_TUNING)

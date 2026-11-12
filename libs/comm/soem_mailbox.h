@@ -90,6 +90,6 @@ constexpr int kLateFrameTimeoutUs = 100'000;
 /// state leaves the sync managers unchanged.
 ///
 /// Call with the driver's control-plane mutex held.
-void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState targetState);
+void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, AlState targetState);
 
 }  // namespace mm::comm::soem

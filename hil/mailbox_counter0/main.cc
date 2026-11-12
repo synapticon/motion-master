@@ -47,7 +47,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 
 constexpr int kStateTimeoutUs = 10'000'000;
 // Bit 3 of the SyncManager status: the mailbox holds a message that the slave has not taken.
@@ -150,7 +150,7 @@ int sm0Status(ecx_contextt* ctx, uint16_t slave) {
 
 bool sm0Full(int status) { return status >= 0 && (status & kMailboxFull) != 0; }
 
-bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
+bool requestState(ecx_contextt* ctx, uint16_t slave, AlState state) {
   const auto raw = static_cast<uint16_t>(state);
   ctx->slavelist[slave].state = raw;
   ecx_writestate(ctx, slave);
@@ -199,8 +199,7 @@ uint8_t nextCounter(ecx_contextt* ctx, uint16_t slave) {
 }
 
 bool cycleToPreOp(ecx_contextt* ctx, uint16_t slave) {
-  return requestState(ctx, slave, EtherCatState::Init) &&
-         requestState(ctx, slave, EtherCatState::PreOp);
+  return requestState(ctx, slave, AlState::Init) && requestState(ctx, slave, AlState::PreOp);
 }
 
 // Frees a stuck mailbox, so the next round starts from a drive that answers.

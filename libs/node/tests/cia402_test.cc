@@ -2,6 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <string>
+
 namespace {
 
 using mm::node::cia402::decodeState;
@@ -32,6 +36,20 @@ TEST(Cia402DecodeState, IgnoresDontCareBits) {
   EXPECT_EQ(decodeState(0x0040 | 0x0020), State::kSwitchOnDisabled);
   // A real SOMANET statusword in OP with warning + internal-limit-active bits set.
   EXPECT_EQ(decodeState(0x1237 & ~0x0008), State::kOperationEnabled);
+}
+
+// The table the two clients are tested against too, so the server and the clients decode alike.
+TEST(Cia402DecodeState, MatchesTheTableSharedWithTheClients) {
+  std::ifstream file(std::string(MM_NODE_TEST_DATA_DIR) + "/cia402_statusword_states.json");
+  ASSERT_TRUE(file.is_open());
+  const auto table = nlohmann::json::parse(file, nullptr, false);
+  ASSERT_FALSE(table.is_discarded());
+  ASSERT_FALSE(table["cases"].empty());
+  for (const auto& row : table["cases"]) {
+    const auto statusword = row["statusword"].get<uint16_t>();
+    EXPECT_EQ(toString(decodeState(statusword)), row["state"].get<std::string>())
+        << "statusword " << statusword;
+  }
 }
 
 TEST(Cia402DecodeState, FaultPredicate) {

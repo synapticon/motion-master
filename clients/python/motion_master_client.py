@@ -29,8 +29,10 @@ monitor() and notifications() stream from the WebSocket. monitoring() creates a
 monitoring, records its rows while a with block runs, and deletes it at the
 end, so a script can check the rows afterwards. read_value() reads one object,
 decoded by the server, and wait_for_value() reads it until a condition holds.
-Constants such as STATUSWORD name the CiA402 objects as (index, subindex), and
-cia402_state() names the state a statusword reports.
+Profile, Cia402 and Somanet name every object of a SOMANET device as an address,
+such as Cia402.STATUSWORD, generated in motion_master_objects.py. AlState names the
+AL states, Cia402State the CiA402 states, and Cia402.state() names the state a
+statusword reports.
 devices() lists the scanned devices, and parameters() and hardware_description()
 read one device. restart() restarts devices through INIT up to an AL state, and
 set_operation_mode(), set_target(), enable(), disable() and quick_stop() drive
@@ -41,6 +43,7 @@ a server that is not running, into one line on stderr.
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import os
@@ -53,10 +56,17 @@ import urllib.parse
 import uuid
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Callable, TypeVar
 
 import requests
 import urllib3
 import yaml
+
+# The generated addresses. A script imports them from here, with the rest of the client.
+from motion_master_objects import Cia402 as _Cia402Objects
+from motion_master_objects import ObjectAddress, Profile, Somanet  # noqa: F401
+
+_T = TypeVar("_T")
 
 # OpenAPI path-item keys that denote an operation (as opposed to parameters,
 # summary, etc.); each maps operationId -> (method, path template).
@@ -64,61 +74,67 @@ _HTTP_METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "tr
 
 log = logging.getLogger("motion_master_client")
 
-# EtherCAT AL states, in the AL control register encoding the API uses.
-INIT = 1
-PREOP = 2
-BOOT = 3
-SAFEOP = 4
-OP = 8
+class AlState(enum.IntEnum):
+    """An AL state, in the encoding of the AL control register that the API uses.
 
-STATE_NAMES = {0: "UNKNOWN", INIT: "INIT", PREOP: "PREOP", BOOT: "BOOT", SAFEOP: "SAFEOP", OP: "OP"}
-
-# CiA402 objects, as (index, subindex). The names follow libs/node/cia402_drive_objects.h. A
-# monitoring parameter is (position, *VELOCITY_ACTUAL_VALUE).
-CONTROLWORD = (0x6040, 0)
-STATUSWORD = (0x6041, 0)
-QUICK_STOP_OPTION_CODE = (0x605A, 0)
-MODES_OF_OPERATION = (0x6060, 0)
-MODES_OF_OPERATION_DISPLAY = (0x6061, 0)
-POSITION_ACTUAL_VALUE = (0x6064, 0)
-VELOCITY_ACTUAL_VALUE = (0x606C, 0)
-TARGET_TORQUE = (0x6071, 0)
-TORQUE_ACTUAL_VALUE = (0x6077, 0)
-TARGET_POSITION = (0x607A, 0)
-PROFILE_ACCELERATION = (0x6083, 0)
-PROFILE_DECELERATION = (0x6084, 0)
-QUICK_STOP_DECELERATION = (0x6085, 0)
-SI_UNIT_VELOCITY = (0x60A9, 0)
-TARGET_VELOCITY = (0x60FF, 0)
-
-
-def cia402_state(statusword):
-    """Return the CiA402 state that a statusword (0x6041) reports, by the name the API uses.
-
-    The same masks as cia402::decodeState on the server, so a state decoded here from a recorded
-    row has the name that GET /api/devices/{slavePosition}/cia402 gives. A pattern that matches no
-    state is NotReadyToSwitchOn.
+    It is an int, so a member goes into a request body as it is, and AlState(value) converts an
+    alState from a response. The name is the label, such as PREOP. The server reports UNKNOWN for a
+    device that does not answer.
     """
-    if statusword & 0x4F == 0x40:
-        return "SwitchOnDisabled"
-    if statusword & 0x6F == 0x21:
-        return "ReadyToSwitchOn"
-    if statusword & 0x6F == 0x23:
-        return "SwitchedOn"
-    if statusword & 0x6F == 0x27:
-        return "OperationEnabled"
-    if statusword & 0x6F == 0x07:
-        return "QuickStopActive"
-    if statusword & 0x4F == 0x0F:
-        return "FaultReactionActive"
-    if statusword & 0x4F == 0x08:
-        return "Fault"
-    return "NotReadyToSwitchOn"
+
+    UNKNOWN = 0
+    INIT = 1
+    PREOP = 2
+    BOOT = 3
+    SAFEOP = 4
+    OP = 8
+
+
+class Cia402State(enum.StrEnum):
+    """A CiA402 state, by the name the API uses. A member equals its name: OPERATION_ENABLED ==
+    "OperationEnabled"."""
+
+    NOT_READY_TO_SWITCH_ON = "NotReadyToSwitchOn"
+    SWITCH_ON_DISABLED = "SwitchOnDisabled"
+    READY_TO_SWITCH_ON = "ReadyToSwitchOn"
+    SWITCHED_ON = "SwitchedOn"
+    OPERATION_ENABLED = "OperationEnabled"
+    QUICK_STOP_ACTIVE = "QuickStopActive"
+    FAULT_REACTION_ACTIVE = "FaultReactionActive"
+    FAULT = "Fault"
+
+
+class Cia402(_Cia402Objects):
+    """The CiA402 objects (0x6xxx) as addresses, and the decode of a statusword."""
+
+    @staticmethod
+    def state(statusword: int) -> Cia402State:
+        """Return the CiA402 state that a statusword (0x6041) reports.
+
+        The same masks as cia402::decodeState on the server, so a state decoded here from a
+        recorded row has the name that GET /api/devices/{slavePosition}/cia402 gives. A pattern
+        that matches no state is NOT_READY_TO_SWITCH_ON.
+        """
+        if statusword & 0x4F == 0x40:
+            return Cia402State.SWITCH_ON_DISABLED
+        if statusword & 0x6F == 0x21:
+            return Cia402State.READY_TO_SWITCH_ON
+        if statusword & 0x6F == 0x23:
+            return Cia402State.SWITCHED_ON
+        if statusword & 0x6F == 0x27:
+            return Cia402State.OPERATION_ENABLED
+        if statusword & 0x6F == 0x07:
+            return Cia402State.QUICK_STOP_ACTIVE
+        if statusword & 0x4F == 0x0F:
+            return Cia402State.FAULT_REACTION_ACTIVE
+        if statusword & 0x4F == 0x08:
+            return Cia402State.FAULT
+        return Cia402State.NOT_READY_TO_SWITCH_ON
 
 
 # The states a device climbs through, from the bottom. BOOT is not on it, because BOOT is
 # reachable only from INIT. _satisfied() orders the states with it.
-_LADDER = [INIT, PREOP, SAFEOP, OP]
+_LADDER = [AlState.INIT, AlState.PREOP, AlState.SAFEOP, AlState.OP]
 
 
 def _path(position, **more):
@@ -129,12 +145,12 @@ def _path(position, **more):
 def _not_reached(result, step):
     """Say which devices of a state change did not reach `step`, and why."""
     failed = ", ".join(
-        f"device {d['slavePosition']} in {STATE_NAMES.get(d['alState'], d['alState'])}"
+        f"device {d['slavePosition']} in {AlState(d['alState']).name}"
         f" with alStatusCode 0x{d['alStatusCode']:04x}"
         for d in result["devices"]
         if not d["reached"]
     )
-    return f"not every device reached {STATE_NAMES.get(step, step)}: {failed}"
+    return f"not every device reached {AlState(step).name}: {failed}"
 
 
 class StateError(Exception):
@@ -149,7 +165,7 @@ def _satisfied(current, target, exact):
     """Return whether a device in current already meets target."""
     if current == target:
         return True
-    if exact or BOOT in (current, target):
+    if exact or AlState.BOOT in (current, target):
         return False
     return _LADDER.index(current) > _LADDER.index(target)
 
@@ -354,24 +370,32 @@ class MotionMasterClient:
         """Return the .hardware_description of a device, parsed (getDeviceHardwareDescription)."""
         return self.call("getDeviceHardwareDescription", path=_path(position)).json()
 
-    def read_value(self, position, obj):
+    def read_value(self, position: int, obj: ObjectAddress[_T]) -> _T:
         """Read one object of a device and return its value, decoded by the server.
 
-        `obj` is (index, subindex), for example STATUSWORD. The server takes the value from the
-        process data when the device exchanges it, and reads it over SDO otherwise. It decodes the
-        value with the data type from the object dictionary, so the caller needs no type.
+        `obj` is an address, for example Cia402.STATUSWORD, or (index, subindex). The server takes
+        the value from the process data when the device exchanges it, and reads it over SDO
+        otherwise. It decodes the value with the data type from the object dictionary, so the
+        caller needs no type. With an address, a type checker knows the type of the value.
         """
         index, subindex = obj
         path = _path(position, index=index, subindex=subindex)
         return self.call("readParameter", path=path).json()["value"]
 
-    def wait_for_value(self, position, obj, predicate, timeout=1.0, interval=0.05):
+    def wait_for_value(
+        self,
+        position: int,
+        obj: ObjectAddress[_T],
+        predicate: Callable[[_T], object],
+        timeout: float = 1.0,
+        interval: float = 0.05,
+    ) -> _T:
         """Read an object until `predicate(value)` is true, and return that value.
 
-        `obj` is (index, subindex), for example STATUSWORD. Each read is read_value(), so a
-        PDO-mapped object of an exchanging device costs no bus transfer.
+        `obj` is an address, for example Cia402.STATUSWORD, or (index, subindex). Each read is
+        read_value(), so a PDO-mapped object of an exchanging device costs no bus transfer.
 
-            client.wait_for_value(1, STATUSWORD, lambda sw: sw & 0x0400)  # target reached
+            client.wait_for_value(1, Cia402.STATUSWORD, lambda sw: sw & 0x0400)  # target reached
 
         Raises TimeoutError with the last value when the predicate is still false after `timeout`
         seconds.
@@ -425,7 +449,7 @@ class MotionMasterClient:
         group = [d["slavePosition"] for d in devices if not _satisfied(d["alState"], state, exact)]
         if not group:
             return
-        log.info("device(s) %s -> %s", group, STATE_NAMES[state])
+        log.info("device(s) %s -> %s", group, AlState(state).name)
         result = self.call("transitionToState", body={"state": state, "positions": group}).json()
         if not result["ok"]:
             raise StateError(_not_reached(result, state))
@@ -444,7 +468,7 @@ class MotionMasterClient:
         body = {"target": target}
         if positions:
             body["positions"] = list(positions)
-        log.info("restart device(s) %s -> %s", positions or "all", STATE_NAMES[target])
+        log.info("restart device(s) %s -> %s", positions or "all", AlState(target).name)
         result = self.call("restartDevices", body=body).json()
         if not result["ok"]:
             raise StateError(_not_reached(result, result["step"]))
@@ -473,11 +497,11 @@ class MotionMasterClient:
         The server walks the CiA402 state machine (transitionToCia402State), and it leaves a quick
         stop. The device must exchange process data.
         """
-        return self._to_cia402_state(position, "OperationEnabled")
+        return self._to_cia402_state(position, Cia402State.OPERATION_ENABLED)
 
     def disable(self, position):
         """Bring a drive to Switch On Disabled, and return its CiA402 snapshot."""
-        return self._to_cia402_state(position, "SwitchOnDisabled")
+        return self._to_cia402_state(position, Cia402State.SWITCH_ON_DISABLED)
 
     def quick_stop(self, position):
         """Send a quick stop to a drive (runCia402Command), and return its CiA402 snapshot.
@@ -590,9 +614,9 @@ class MotionMasterClient:
         are in SAFEOP or OP, because the server decides once, at creation, whether each object
         comes from the process data or from SDO reads. Without `topic`, a unique one is chosen.
 
-            with client.monitoring([(1, *VELOCITY_ACTUAL_VALUE)]) as m:
+            with client.monitoring([(1, *Cia402.VELOCITY_ACTUAL_VALUE)]) as m:
                 ...  # the move
-            velocity = m.column(1, VELOCITY_ACTUAL_VALUE)
+            velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE)
         """
         topic = topic or f"py-{uuid.uuid4().hex[:12]}"
         return Monitoring(self, parameters, interval_ms, topic, name)
@@ -639,7 +663,7 @@ class Monitoring:
     def column(self, position, obj):
         """Return [(timestampUs, value), ...] of one object, in the order the cycles ran.
 
-        `obj` is (index, subindex), for example STATUSWORD.
+        `obj` is an address, for example Cia402.STATUSWORD, or (index, subindex).
         """
         index, subindex = obj
         for i, p in enumerate(self.parameters):

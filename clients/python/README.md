@@ -216,9 +216,10 @@ Other methods:
 - `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,
   keeps every row while the block runs, and deletes the monitoring at the end. Then `column()`
   returns the values of one object with their timestamps, `values()` returns the values in a time
-  window, `first()` returns the time of the first value that meets a condition, and
-  `write_csv(path)` writes every row to a CSV file, with one column per object named like
-  `1:STATUSWORD`.
+  window, `first()` returns the time of the first value that meets a condition,
+  `print_table()` prints one row every `every_ms`, with the CiA402 state beside a statusword, and
+  `write_csv(path)` writes every row to a CSV file. Both name a column like `1:STATUSWORD`, as
+  `names` lists them.
 - `notifications()` streams the notifications from the WebSocket.
 - `devices()` returns the scanned devices in bus order, as `GET /api/devices` gives them.
 - `parameters(position)` returns every parameter of a device, with its value and metadata.

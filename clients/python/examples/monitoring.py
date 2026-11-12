@@ -13,10 +13,11 @@ In CSV the drive takes the target velocity of every cycle as it is, with no prof
 own, so the target steps from 0 to --velocity and back. The velocity is in the units of 0x60FF.
 
 client.monitoring() records every cycle while the with block runs, also the cycles between two
-flushes: an object in the process data gives one value per cycle. The script prints a summary and
-one line for every --every ms, and writes every row to a CSV file with m.write_csv(): the time in
-seconds from the first row, the row timestamp in epoch microseconds, then one column per object,
-named after the device position and the object, such as 1:VELOCITY_ACTUAL_VALUE.
+flushes: an object in the process data gives one value per cycle. After the move, the Monitoring
+shows its rows: m.print_table() prints one row every --every ms, with the CiA402 state beside the
+statusword, and m.write_csv() writes every row to a CSV file. Both name a column after the device
+position and the object, such as 1:VELOCITY_ACTUAL_VALUE. The script also prints how fast the
+velocity reached the target and how close it held it, from m.first() and m.values().
 
 Two clocks are in each row. The row timestamp is the time on the server when the cycle ran.
 Timestamp (0x20F0) is the clock of the drive, which it sends in the process data. It wraps, so a
@@ -41,15 +42,15 @@ FILES_DIR = Path(__file__).resolve().parent.parent / "files"
 
 CYCLIC_SYNC_VELOCITY = 9
 
-# The monitored objects, in the order of the monitoring, with the name the printout uses.
-COLUMNS = [
-    ("drive_timestamp", Somanet.TIMESTAMP),
-    ("statusword", Cia402.STATUSWORD),
-    ("mode_display", Cia402.MODES_OF_OPERATION_DISPLAY),
-    ("target_velocity", Cia402.TARGET_VELOCITY),
-    ("velocity_actual", Cia402.VELOCITY_ACTUAL_VALUE),
-    ("position_actual", Cia402.POSITION_ACTUAL_VALUE),
-    ("torque_actual", Cia402.TORQUE_ACTUAL_VALUE),
+# The monitored objects, in the order of the columns.
+OBJECTS = [
+    Somanet.TIMESTAMP,
+    Cia402.STATUSWORD,
+    Cia402.MODES_OF_OPERATION_DISPLAY,
+    Cia402.TARGET_VELOCITY,
+    Cia402.VELOCITY_ACTUAL_VALUE,
+    Cia402.POSITION_ACTUAL_VALUE,
+    Cia402.TORQUE_ACTUAL_VALUE,
 ]
 
 # How long the recording goes on after the target is back at 0, so that it holds the stop.
@@ -70,7 +71,7 @@ def main():
     client.init()
     client.ensure_state(AlState.OP, positions=[args.slave])
 
-    parameters = [(args.slave, *address) for _, address in COLUMNS]
+    parameters = [(args.slave, *address) for address in OBJECTS]
     try:
         with client.monitoring(parameters, interval_ms=50) as m:
             client.set_operation_mode(args.slave, CYCLIC_SYNC_VELOCITY)
@@ -87,11 +88,11 @@ def main():
         with contextlib.suppress(Exception):
             client.disable(args.slave)
 
-    for (name, _), parameter in zip(COLUMNS, m.parameters):
-        if parameter["source"] != "pdo":
+    for name, source in zip(m.names, m.sources):
+        if source != "pdo":
             print(f"note: {name} is not in the process data, so it has one value per flush")
 
-    print_rows(m, args.every)
+    m.print_table(every_ms=args.every)
     print_summary(m, args.slave, args.velocity)
 
     if args.output:
@@ -100,24 +101,6 @@ def main():
         out = FILES_DIR / f"monitoring-{datetime.now():%Y%m%d-%H%M%S}.csv"
     m.write_csv(out)
     print(f"saved {len(m.rows)} row(s) -> {out}")
-
-
-def print_rows(m, every_ms):
-    """Print the target, the actual velocity and the CiA402 state, one line every `every_ms`."""
-    start = m.rows[0][0]
-    next_us = start
-    print(f"{'time s':>7}  {'drive ts':>10}  {'target':>7}  {'actual':>7}  {'torque':>7}  state")
-    for row in m.rows:
-        if row[0] < next_us:
-            continue
-        next_us = row[0] + every_ms * 1000
-        values = dict(zip((name for name, _ in COLUMNS), row[1:]))
-        state = Cia402.state(values["statusword"]) if values["statusword"] is not None else "-"
-        print(
-            f"{(row[0] - start) / 1e6:7.3f}  {fmt(values['drive_timestamp'], 10)}  "
-            f"{fmt(values['target_velocity'])}  "
-            f"{fmt(values['velocity_actual'])}  {fmt(values['torque_actual'])}  {state}"
-        )
 
 
 def print_summary(m, slave, velocity):
@@ -143,10 +126,6 @@ def print_summary(m, slave, velocity):
         f"95 % of the target after {reached}; second half of the hold: mean {mean:.1f}, "
         f"min {min(settled)}, max {max(settled)} over {len(settled)} cycles"
     )
-
-
-def fmt(value, width=7):
-    return f"{'-' if value is None else value:>{width}}"
 
 
 if __name__ == "__main__":

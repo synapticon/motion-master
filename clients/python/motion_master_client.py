@@ -813,31 +813,74 @@ class Monitoring:
                 return t
         return None
 
+    @property
+    def names(self):
+        """The name of each parameter's column, in order: its device position and its object.
+
+        The object is its generated name, 1:STATUSWORD, or 1:0x2110:03 for an object with no
+        generated name. write_csv() and print_table() name their columns with these.
+        """
+        return [
+            f"{p['devicePosition']}:{_object_name(p['index'], p['subindex'])}"
+            for p in self.parameters
+        ]
+
     def write_csv(self, path):
         """Write every row to a CSV file at `path`, and create its folder when it is missing.
 
         The columns are time_s, the seconds from the first row; timestamp_us, the time on the
-        server when the cycle ran, in epoch microseconds; then one column per parameter, in order.
-        A parameter's column is named after its device position and its object, 1:STATUSWORD, or
-        1:0x2110:03 for an object with no generated name. A value is empty in a cycle where its
-        device did not exchange process data.
+        server when the cycle ran, in epoch microseconds; then one column per parameter, named as
+        in `names`. A value is empty in a cycle where its device did not exchange process data.
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             rows = list(self.rows)
         start = rows[0][0] if rows else 0
-        header = ["time_s", "timestamp_us"]
-        header += [
-            f"{p['devicePosition']}:{_object_name(p['index'], p['subindex'])}"
-            for p in self.parameters
-        ]
         with path.open("w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(header)
+            writer.writerow(["time_s", "timestamp_us", *self.names])
             for timestamp_us, *values in rows:
                 times = [f"{(timestamp_us - start) / 1e6:.6f}", timestamp_us]
                 writer.writerow(times + ["" if v is None else v for v in values])
+
+    def print_table(self, every_ms=100, file=None):
+        """Print the rows as a table: the first row, then one row every `every_ms`.
+
+        The columns are time_s, the seconds from the first row, then one column per parameter,
+        named as in `names`. A Statusword (0x6041) is printed in hex, and its column is followed by
+        a column with the CiA402 state it reports. A value is - in a cycle where its device did not exchange
+        process data. `file` is where the table goes, sys.stdout by default.
+        """
+        file = file or sys.stdout
+        with self._lock:
+            rows = list(self.rows)
+        statusword = (Cia402.STATUSWORD.index, Cia402.STATUSWORD.subindex)
+        is_statusword = [(p["index"], p["subindex"]) == statusword for p in self.parameters]
+        header = ["time_s"]
+        for name, sw, p in zip(self.names, is_statusword, self.parameters):
+            header.append(name)
+            if sw:
+                header.append(f"{p['devicePosition']}:CIA402_STATE")
+        lines = []
+        start = rows[0][0] if rows else 0
+        next_us = start
+        for timestamp_us, *values in rows:
+            if timestamp_us < next_us:
+                continue
+            next_us = timestamp_us + every_ms * 1000
+            line = [f"{(timestamp_us - start) / 1e6:.3f}"]
+            for value, sw in zip(values, is_statusword):
+                if value is None:
+                    line += ["-", "-"] if sw else ["-"]
+                elif sw:
+                    line += [f"0x{value:04X}", str(Cia402.state(value))]
+                else:
+                    line.append(str(value))
+            lines.append(line)
+        widths = [max(len(c) for c in column) for column in zip(header, *lines)]
+        for line in [header, *lines]:
+            print("  ".join(c.rjust(w) for c, w in zip(line, widths)), file=file)
 
     def __enter__(self):
         body = {"topic": self.topic, "interval": self._interval_ms, "parameters": self._request}

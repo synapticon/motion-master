@@ -153,11 +153,11 @@ jobs:
           print(f"{len(table['cases'])} statuswords decode as the table says")
           PY
 
-      - name: Monitoring.write_csv() writes the rows with named columns
+      - name: Monitoring writes and prints its rows with named columns
         working-directory: clients/python
         run: |
           python - <<'PY'
-          import csv, pathlib, tempfile
+          import csv, io, pathlib, tempfile
           from motion_master_client import Monitoring
 
           m = Monitoring(None, [], 50, "ci", None)
@@ -176,7 +176,18 @@ jobs:
           ]
           if rows != expected:
               raise SystemExit(f"::error::write_csv() wrote {rows}, expected {expected}")
-          print("write_csv() writes the rows as expected")
+
+          out = io.StringIO()
+          m.print_table(every_ms=1, file=out)
+          table = [line.split() for line in out.getvalue().splitlines()]
+          expected = [
+              ["time_s", "1:STATUSWORD", "1:CIA402_STATE", "2:0x9999:03"],
+              ["0.000", "0x0237", "OperationEnabled", "7"],
+              ["0.001", "-", "-", "8"],
+          ]
+          if table != expected:
+              raise SystemExit(f"::error::print_table() printed {table}, expected {expected}")
+          print("write_csv() and print_table() give the rows as expected")
           PY
 
       # Guard against swagger drift: every operationId the client and the

@@ -10,7 +10,9 @@ also checks that client.
 
 The recording below shows a run. The steps are in [Run the tests](#run-the-tests).
 [VHS](https://github.com/charmbracelet/vhs) records it from `demo.tape`. To record it again, run
-`vhs demo.tape` on the computer of the bench.
+`vhs demo.tape` on the computer of the bench. The tape builds and starts the server in Docker
+itself, from its own clone of the repository, and stops it at the end. Nothing else may use the
+server ports or the bench while it records.
 
 ![A run of the bench tests](demo.gif)
 

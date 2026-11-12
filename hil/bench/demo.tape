@@ -2,16 +2,19 @@
 #
 #     vhs demo.tape
 #
-# Record it on the computer of the bench, because the tests need the bus and the P 1535. A Motion
-# Master server must run on that computer, on the default ports, with nothing else connected to it.
-# The tests reset that server and switch the drives off. The recording clones the repository from
-# GitHub into a temporary directory. The slow commands run hidden, so the GIF shows their output
-# but not the wait.
+# Record it on the computer of the bench, because the tests need the bus and the P 1535. The
+# recording clones the repository from GitHub into a temporary directory, builds the Docker image of
+# the server from that clone, and runs it the way the Bench Tests workflow does, so the server
+# matches the tests. Nothing else may use port 61447 or 62281, and no Bench Tests run may use the
+# bench at the same time. The tests reset that server and switch the drives off. The slow commands
+# run hidden, so the GIF shows their output but not the wait. The first build takes many minutes.
 
 Output demo.gif
 
 Require git
 Require python3
+Require docker
+Require curl
 
 Set Shell bash
 Set FontSize 16
@@ -30,6 +33,15 @@ Hide
 Wait@300s
 Show
 Sleep 1s
+
+# The server: built from the clone, started with the capabilities SOEM and the RT loop need, and
+# ready once it answers.
+Hide
+# The step is hidden, so its output stays out of the GIF, and it has no ">", which Wait would take
+# for the prompt if the long line wrapped there.
+Type "cd motion-master && docker rm -f motion-master-bench; docker build -q -t motion-master-bench . && docker run -d --rm --name motion-master-bench --network host --cap-add NET_RAW --cap-add NET_ADMIN --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 motion-master-bench && until curl -ksf -o /dev/null https://127.0.0.1:61447/api/version; do sleep 1; done; cd .. && clear" Enter
+Wait@3600s
+Show
 
 Type "cd motion-master/hil/bench" Sleep 500ms Enter
 Sleep 500ms
@@ -54,3 +66,7 @@ Hide
 Wait@900s
 Show
 Sleep 8s
+
+Hide
+Type "docker stop motion-master-bench" Enter
+Wait@60s

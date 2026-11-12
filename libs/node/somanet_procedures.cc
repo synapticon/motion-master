@@ -570,7 +570,7 @@ std::expected<void, std::string> runMeasurementProcedure(Device& device, Progres
 
 // ── Firmware installation helpers ──────────────────────────────────────────────────────────────
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FoeError;
 using mm::comm::Retry;
 
@@ -686,7 +686,7 @@ std::expected<void, std::string> writeFileWithRetry(DeviceManager& deviceManager
 }
 
 std::expected<void, std::string> transitionTo(DeviceManager& deviceManager, uint16_t devicePosition,
-                                              EtherCatState target,
+                                              AlState target,
                                               std::chrono::steady_clock::duration timeout) {
   auto states = deviceManager.transitionToState({devicePosition}, target, timeout);
   if (!states) {
@@ -702,7 +702,7 @@ std::expected<void, std::string> transitionTo(DeviceManager& deviceManager, uint
     // exactly what happened instead of "it did not get there".
     std::string detail =
         std::format("the device reported {} rather than {}",
-                    toString(static_cast<EtherCatState>(reached.alState)), toString(target));
+                    toString(static_cast<AlState>(reached.alState)), toString(target));
     if (reached.alStatusCode != 0) {
       detail += std::format(" (AL status 0x{:04X}: {})", reached.alStatusCode,
                             mm::comm::alStatusCodeName(reached.alStatusCode));
@@ -717,12 +717,10 @@ std::expected<void, std::string> transitionTo(DeviceManager& deviceManager, uint
 std::expected<void, std::string> enterBoot(DeviceManager& deviceManager, uint16_t devicePosition,
                                            std::chrono::milliseconds warmUp,
                                            const std::stop_token& stop) {
-  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Init, kStateTimeout);
-      !r) {
+  if (auto r = transitionTo(deviceManager, devicePosition, AlState::Init, kStateTimeout); !r) {
     return std::unexpected(std::format("could not reach INIT: {}", r.error()));
   }
-  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Boot, kStateTimeout);
-      !r) {
+  if (auto r = transitionTo(deviceManager, devicePosition, AlState::Boot, kStateTimeout); !r) {
     return std::unexpected(std::format("could not reach BOOT: {}", r.error()));
   }
   // A freshly entered bootloader takes a moment before it services file operations. A first FoE
@@ -778,7 +776,7 @@ std::expected<void, std::string> awaitComRestart(DeviceManager& deviceManager,
     }
     std::this_thread::sleep_for(kComRestartPoll);
   }
-  return transitionTo(deviceManager, devicePosition, EtherCatState::Init, kStateTimeout);
+  return transitionTo(deviceManager, devicePosition, AlState::Init, kStateTimeout);
 }
 
 /// Leaves BOOT for @p finalState, one legal AL step at a time.
@@ -788,13 +786,12 @@ std::expected<void, std::string> awaitComRestart(DeviceManager& deviceManager,
 /// two steps each get the long timeout, because either can restart the device. @p comWritten says
 /// that a com binary waits to be applied, so the step to INIT can restart the netX after it.
 std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_t devicePosition,
-                                           EtherCatState finalState, bool comWritten) {
-  if (finalState == EtherCatState::Boot) {
+                                           AlState finalState, bool comWritten) {
+  if (finalState == AlState::Boot) {
     return {};
   }
   // Long: on an Integro that got a com binary, this transition restarts the netX.
-  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Init, kBootExitTimeout);
-      !r) {
+  if (auto r = transitionTo(deviceManager, devicePosition, AlState::Init, kBootExitTimeout); !r) {
     return std::unexpected(std::format("could not reach INIT: {}", r.error()));
   }
   if (comWritten) {
@@ -802,41 +799,38 @@ std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_
       return std::unexpected(std::format("could not reach INIT after the restart: {}", r.error()));
     }
   }
-  if (finalState == EtherCatState::Init) {
+  if (finalState == AlState::Init) {
     return {};
   }
   // Long: this transition restarts the device into the firmware just written.
-  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::PreOp, kBootExitTimeout);
-      !r) {
+  if (auto r = transitionTo(deviceManager, devicePosition, AlState::PreOp, kBootExitTimeout); !r) {
     return std::unexpected(std::format("could not reach PREOP: {}", r.error()));
   }
-  if (finalState == EtherCatState::PreOp) {
+  if (finalState == AlState::PreOp) {
     return {};
   }
   // Climbing further re-maps the whole bus, which DeviceManager handles — including re-reading this
   // device's PDO mapping, which the firmware just written can change.
-  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::SafeOp, kStateTimeout);
-      !r) {
+  if (auto r = transitionTo(deviceManager, devicePosition, AlState::SafeOp, kStateTimeout); !r) {
     return std::unexpected(std::format("could not reach SAFEOP: {}", r.error()));
   }
-  if (finalState == EtherCatState::SafeOp) {
+  if (finalState == AlState::SafeOp) {
     return {};
   }
-  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Op, kStateTimeout); !r) {
+  if (auto r = transitionTo(deviceManager, devicePosition, AlState::Op, kStateTimeout); !r) {
     return std::unexpected(std::format("could not reach OP: {}", r.error()));
   }
   return {};
 }
 
-std::expected<EtherCatState, std::string> parseFinalState(const nlohmann::json& value) {
+std::expected<AlState, std::string> parseFinalState(const nlohmann::json& value) {
   if (!value.is_number_unsigned()) {
     return std::unexpected(
         "'finalState' must be an AL state number — the same encoding POST /api/devices/state uses");
   }
-  constexpr std::array<EtherCatState, 5> kStates = {EtherCatState::Init, EtherCatState::PreOp,
-                                                    EtherCatState::Boot, EtherCatState::SafeOp,
-                                                    EtherCatState::Op};
-  const auto requested = static_cast<EtherCatState>(value.get<uint16_t>());
+  constexpr std::array<AlState, 5> kStates = {AlState::Init, AlState::PreOp, AlState::Boot,
+                                              AlState::SafeOp, AlState::Op};
+  const auto requested = static_cast<AlState>(value.get<uint16_t>());
   if (std::ranges::find(kStates, requested) == kStates.end()) {
     return std::unexpected(
         std::format("'finalState' must be 1 (INIT), 2 (PREOP), 3 (BOOT), 4 (SAFEOP) or 8 (OP)"));
@@ -4737,17 +4731,17 @@ std::vector<ProcedureParameter> firmwareInstallationParameters() {
           // `int` as *signed*, and the validator checks is_number_unsigned() because that is what a
           // parsed request carries. A signed default would be a value the descriptor advertises and
           // the server then rejects.
-          static_cast<unsigned>(EtherCatState::PreOp),
+          static_cast<unsigned>(AlState::PreOp),
           {
-              ParameterOption{static_cast<unsigned>(EtherCatState::PreOp),
+              ParameterOption{static_cast<unsigned>(AlState::PreOp),
                               "PREOP — loads and confirms the new firmware"},
-              ParameterOption{static_cast<unsigned>(EtherCatState::Init),
+              ParameterOption{static_cast<unsigned>(AlState::Init),
                               "INIT — still on the bootloader"},
-              ParameterOption{static_cast<unsigned>(EtherCatState::Boot),
+              ParameterOption{static_cast<unsigned>(AlState::Boot),
                               "BOOT — stay in the bootloader"},
-              ParameterOption{static_cast<unsigned>(EtherCatState::SafeOp),
+              ParameterOption{static_cast<unsigned>(AlState::SafeOp),
                               "SAFEOP — re-maps the bus and resumes inputs"},
-              ParameterOption{static_cast<unsigned>(EtherCatState::Op),
+              ParameterOption{static_cast<unsigned>(AlState::Op),
                               "OP — re-maps the bus and resumes full exchange"},
           }),
   };
@@ -5533,7 +5527,7 @@ std::expected<void, std::string> runOpenLoopFieldControlProcedure(
   reporter.start(kOpenLoopFieldValidateStep);
   // The drive enters Operation Enabled only while EtherCAT is in OP (somanet_software,
   // state_machine.xc, transition 4), so the run is refused before anything is written.
-  if (const auto al = device.alState(); al != mm::comm::EtherCatState::Op) {
+  if (const auto al = device.alState(); al != mm::comm::AlState::Op) {
     return fail(
         kOpenLoopFieldValidateStep,
         std::format("the device is in {}, and the drive enters Operation Enabled only in OP",

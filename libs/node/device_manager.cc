@@ -79,24 +79,22 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
 // asked to jump straight from BOOT (firmware-sized mailbox, no CoE) into an exchange state would
 // reach that mailbox read while still in BOOT and segfault inside SOEM before the slave ever sees
 // the request. Validating here keeps the bad jump away from the mapper entirely.
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 // The only throw this static initialisation can produce is bad_alloc, allocating a five-entry
 // table before main runs; a process that cannot afford that has nothing to fall back to. The map
 // is what makes the rule above readable, and a constexpr array would trade that for nothing.
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization)
-const std::map<EtherCatState, std::set<EtherCatState>> kValidStateTransitions = {
-    {EtherCatState::Init, {EtherCatState::Init, EtherCatState::PreOp, EtherCatState::Boot}},
-    {EtherCatState::PreOp, {EtherCatState::PreOp, EtherCatState::Init, EtherCatState::SafeOp}},
-    {EtherCatState::SafeOp,
-     {EtherCatState::SafeOp, EtherCatState::PreOp, EtherCatState::Init, EtherCatState::Op}},
-    {EtherCatState::Op,
-     {EtherCatState::Op, EtherCatState::SafeOp, EtherCatState::PreOp, EtherCatState::Init}},
-    {EtherCatState::Boot, {EtherCatState::Boot, EtherCatState::Init}},
+const std::map<AlState, std::set<AlState>> kValidStateTransitions = {
+    {AlState::Init, {AlState::Init, AlState::PreOp, AlState::Boot}},
+    {AlState::PreOp, {AlState::PreOp, AlState::Init, AlState::SafeOp}},
+    {AlState::SafeOp, {AlState::SafeOp, AlState::PreOp, AlState::Init, AlState::Op}},
+    {AlState::Op, {AlState::Op, AlState::SafeOp, AlState::PreOp, AlState::Init}},
+    {AlState::Boot, {AlState::Boot, AlState::Init}},
 };
 
 // Whether the EtherCAT AL state machine permits a direct transition from currentState to
 // targetState. An unrecognised current state (e.g. a lost device reporting 0) permits nothing.
-bool isValidStateTransition(EtherCatState currentState, EtherCatState targetState) {
+bool isValidStateTransition(AlState currentState, AlState targetState) {
   const auto allowed = kValidStateTransitions.find(currentState);
   return allowed != kValidStateTransitions.end() && allowed->second.contains(targetState);
 }
@@ -108,8 +106,8 @@ StateChangeError stateChangeError(StateChangeError::Kind kind, std::string messa
 // The steps from @p current to @p target, each one transition the AL state machine allows: a climb
 // is one step per state, a drop is one step, and BOOT is entered and left only through INIT. An
 // unknown current state, such as a device that does not answer, gets the target as its one step.
-std::vector<EtherCatState> alSteps(EtherCatState current, EtherCatState target) {
-  using enum EtherCatState;
+std::vector<AlState> alSteps(AlState current, AlState target) {
+  using enum AlState;
   static constexpr std::array kLadder = {Init, PreOp, SafeOp, Op};
   if (current == target) {
     return {};
@@ -117,7 +115,7 @@ std::vector<EtherCatState> alSteps(EtherCatState current, EtherCatState target) 
   if (target == Boot) {
     return current == Init ? std::vector{Boot} : std::vector{Init, Boot};
   }
-  std::vector<EtherCatState> steps;
+  std::vector<AlState> steps;
   if (current == Boot) {
     steps.push_back(Init);
     current = Init;
@@ -944,7 +942,7 @@ std::expected<std::vector<uint16_t>, std::string> DeviceManager::resolveTargets(
 }
 
 int DeviceManager::expectedWkcDuring(std::span<const uint16_t> transitioning,
-                                     std::optional<mm::comm::EtherCatState> target) const {
+                                     std::optional<mm::comm::AlState> target) const {
   const std::shared_ptr<DeviceSet> set = deviceSet();
   // Sum each device's working-counter contribution for its AL status and PDO presence. The protocol
   // rule (how outputs, inputs, AL state and the error flag map to a WKC increment) lives in the
@@ -977,7 +975,7 @@ void DeviceManager::updateExpectedWkc() {
 }
 
 void DeviceManager::lowerExpectedWkc(std::span<const uint16_t> positions,
-                                     mm::comm::EtherCatState target) {
+                                     mm::comm::AlState target) {
   // expectedWkcDuring already never predicts a rise, so this can only go down; the comparison is
   // here so that stays true of the *store* even if the live figure is recomputed in between.
   const int duringTransition = expectedWkcDuring(positions, target);
@@ -992,13 +990,13 @@ bool DeviceManager::supportsEsc() const {
 }
 
 std::expected<RestartOutcome, std::string> DeviceManager::restartToState(
-    const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+    const std::vector<uint16_t>& positions, mm::comm::AlState targetState,
     std::chrono::steady_clock::duration timeout) {
-  using mm::comm::EtherCatState;
-  std::vector<EtherCatState> steps = {EtherCatState::Init};
-  std::ranges::copy(alSteps(EtherCatState::Init, targetState), std::back_inserter(steps));
+  using mm::comm::AlState;
+  std::vector<AlState> steps = {AlState::Init};
+  std::ranges::copy(alSteps(AlState::Init, targetState), std::back_inserter(steps));
   RestartOutcome outcome;
-  for (const EtherCatState step : steps) {
+  for (const AlState step : steps) {
     auto states = changeState(positions, step, timeout);
     if (!states) {
       return std::unexpected(std::format("restart stopped at {}: {}", mm::comm::toString(step),
@@ -1073,9 +1071,9 @@ std::expected<void, std::string> DeviceManager::followObservedStates() {
 }
 
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
-    const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+    const std::vector<uint16_t>& positions, mm::comm::AlState targetState,
     std::chrono::steady_clock::duration timeout) {
-  using mm::comm::EtherCatState;
+  using mm::comm::AlState;
   const std::shared_ptr<DeviceSet> set = deviceSet();
   if (!set->driver) {
     return std::unexpected("no driver — call init() first");
@@ -1105,7 +1103,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
     // std::map orders the steps by state value, so the lowest step goes first: a device climbing
     // to PREOP has a mailbox before another one's step to SAFEOP re-maps the bus.
-    std::map<EtherCatState, std::vector<uint16_t>> stepGroups;
+    std::map<AlState, std::vector<uint16_t>> stepGroups;
     for (std::size_t i = 0; i < targets.size(); ++i) {
       const auto& raw = (*current)[i];
       if (raw.reachability != mm::comm::Reachability::Answering) {
@@ -1146,7 +1144,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
 }
 
 std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::changeState(
-    const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+    const std::vector<uint16_t>& positions, mm::comm::AlState targetState,
     std::chrono::steady_clock::duration timeout) {
   // busOperationMutex_ only, and this is the operation the split exists for. Driving AL state
   // blocks for seconds (the driver polls each slave to the target with a timeout), and holding a
@@ -1209,7 +1207,7 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
   // PREOP) while the devices staying in SAFEOP/OP keep exchanging; a device rejoining triggers
   // a re-map because its firmware may carry a different PDO layout.
   const bool exchangeState =
-      targetState == mm::comm::EtherCatState::SafeOp || targetState == mm::comm::EtherCatState::Op;
+      targetState == mm::comm::AlState::SafeOp || targetState == mm::comm::AlState::Op;
   if (exchangeState) {
     // Entering an exchange state. Re-map when there is no image yet, or when any targeted device
     // is (re)joining from a non-exchange state — it must be added to the whole-bus image and its
@@ -1235,7 +1233,7 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
       for (const Device& d : set->devices) {
         const bool targeted = std::ranges::find(targets, d.slavePosition()) != targets.end();
         if (!targeted && mm::comm::alState(set->driver->slaveState(d.slavePosition())) ==
-                             mm::comm::EtherCatState::Op) {
+                             mm::comm::AlState::Op) {
           opStayers.push_back(d.slavePosition());
         }
       }
@@ -1246,9 +1244,8 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
             opStayers.size());
         // These devices keep exchanging as they drop, so the expectation has to come down with
         // them or the drop we just chose to perform is counted against the bus.
-        lowerExpectedWkc(opStayers, mm::comm::EtherCatState::SafeOp);
-        set->driver->transitionToState(opStayers, std::nullopt, mm::comm::EtherCatState::SafeOp,
-                                       timeout);
+        lowerExpectedWkc(opStayers, mm::comm::AlState::SafeOp);
+        set->driver->transitionToState(opStayers, std::nullopt, mm::comm::AlState::SafeOp, timeout);
       }
 
       // Already holding busOperationMutex_ — call the mapping primitive directly, not the public
@@ -1261,8 +1258,8 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
       // Restore the staying devices to OP. The freshly published image already describes them, so
       // no further re-map is needed; the running GameLoop feeds PDO during the wait.
       if (!opStayers.empty()) {
-        set->driver->transitionToState(opStayers, mm::comm::EtherCatState::SafeOp,
-                                       mm::comm::EtherCatState::Op, timeout);
+        set->driver->transitionToState(opStayers, mm::comm::AlState::SafeOp, mm::comm::AlState::Op,
+                                       timeout);
       }
     }
   } else if (processDataConfigured()) {
@@ -1317,9 +1314,9 @@ std::expected<std::vector<DeviceStateInfo>, StateChangeError> DeviceManager::cha
   // reports a mismatch and refuses to leave PREOP; copying detected into configured
   // clears it. SDO mailbox is only available in PREOP+, so this is the earliest point
   // the write is possible. Best-effort: failures are logged, never fatal to the transition.
-  if (targetState == mm::comm::EtherCatState::PreOp) {
+  if (targetState == mm::comm::AlState::PreOp) {
     for (const auto& info : result) {
-      if (info.error || info.alState != static_cast<uint16_t>(mm::comm::EtherCatState::PreOp)) {
+      if (info.error || info.alState != static_cast<uint16_t>(mm::comm::AlState::PreOp)) {
         continue;
       }
       const Device* device = set->find(info.slavePosition);

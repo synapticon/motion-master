@@ -240,7 +240,7 @@ class Device {
   bool isOutputMapped(uint16_t index, uint8_t subindex) const;
 
   /// @brief The AL state of the device, from the driver's cached AL status.
-  mm::comm::EtherCatState alState() const;
+  mm::comm::AlState alState() const;
 
   /// @brief Reads an object dictionary entry from the device (CoE SDO upload).
   ///

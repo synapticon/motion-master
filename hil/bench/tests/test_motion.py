@@ -11,18 +11,7 @@ import logging
 import time
 
 import pytest
-from motion_master_client import (
-    INIT,
-    OP,
-    PREOP,
-    PROFILE_ACCELERATION,
-    QUICK_STOP_DECELERATION,
-    QUICK_STOP_OPTION_CODE,
-    STATUSWORD,
-    TARGET_VELOCITY,
-    VELOCITY_ACTUAL_VALUE,
-    cia402_state,
-)
+from motion_master_client import AlState, Cia402
 
 from bench import Bench
 
@@ -60,12 +49,12 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     # in INIT does not answer (#208).
     bench.client.reset()
     client.init()
-    client.restart(PREOP)
-    client.restart(OP, positions=[integro.position])
+    client.restart(AlState.PREOP)
+    client.restart(AlState.OP, positions=[integro.position])
 
-    acceleration = client.read_value(integro.position, PROFILE_ACCELERATION)
-    deceleration = client.read_value(integro.position, QUICK_STOP_DECELERATION)
-    option_code = client.read_value(integro.position, QUICK_STOP_OPTION_CODE)
+    acceleration = client.read_value(integro.position, Cia402.PROFILE_ACCELERATION)
+    deceleration = client.read_value(integro.position, Cia402.QUICK_STOP_DECELERATION)
+    option_code = client.read_value(integro.position, Cia402.QUICK_STOP_OPTION_CODE)
     settings = f"0x6083 {acceleration} rpm/s, 0x6085 {deceleration} rpm/s, 0x605A {option_code}"
     log.info("%s", settings)
     end_state = END_STATE_AFTER_QUICK_STOP.get(option_code)
@@ -75,9 +64,9 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
         )
 
     parameters = [
-        (integro.position, *VELOCITY_ACTUAL_VALUE),
-        (integro.position, *TARGET_VELOCITY),
-        (integro.position, *STATUSWORD),
+        (integro.position, *Cia402.VELOCITY_ACTUAL_VALUE),
+        (integro.position, *Cia402.TARGET_VELOCITY),
+        (integro.position, *Cia402.STATUSWORD),
     ]
     try:
         with client.monitoring(parameters, interval_ms=50) as monitoring:
@@ -97,16 +86,16 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
         with contextlib.suppress(Exception):
             client.disable(integro.position)
         with contextlib.suppress(Exception):
-            client.restart(INIT, positions=[integro.position])
+            client.restart(AlState.INIT, positions=[integro.position])
 
     m = monitoring
     position = integro.position
 
     def is_fault(sw):
-        return cia402_state(sw) == "Fault"
+        return Cia402.state(sw) == "Fault"
 
     def left_operation_enabled(sw):
-        return cia402_state(sw) != "OperationEnabled"
+        return Cia402.state(sw) != "OperationEnabled"
 
     def near_target(v):
         return abs(v - TARGET_RPM) <= TARGET_RPM * MEAN_TOLERANCE
@@ -118,21 +107,21 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     assert all(None not in row[1:] for row in m.rows), "a row has no value"
 
     # 2. No fault in the whole recording.
-    faults = [sw for sw in m.values(position, STATUSWORD) if is_fault(sw)]
+    faults = [sw for sw in m.values(position, Cia402.STATUSWORD) if is_fault(sw)]
     assert not faults, f"the drive was in Fault in {len(faults)} cycle(s)"
 
-    t_target = m.first(position, TARGET_VELOCITY, lambda v: v == TARGET_RPM)
+    t_target = m.first(position, Cia402.TARGET_VELOCITY, lambda v: v == TARGET_RPM)
     assert t_target is not None, f"0x60FF never read {TARGET_RPM}"
-    t_stop = m.first(position, STATUSWORD, left_operation_enabled, after=t_target)
+    t_stop = m.first(position, Cia402.STATUSWORD, left_operation_enabled, after=t_target)
     assert t_stop is not None, "the drive never left Operation Enabled after the target"
     assert t_stop - t_target >= WINDOW_US, (
         f"the quick stop came {(t_stop - t_target) / 1000:.0f} ms after the target"
     )
 
-    t_reached = m.first(position, VELOCITY_ACTUAL_VALUE, near_target, after=t_target)
+    t_reached = m.first(position, Cia402.VELOCITY_ACTUAL_VALUE, near_target, after=t_target)
     ramp = f"{(t_reached - t_target) / 1000:.0f} ms" if t_reached is not None else "never"
 
-    window = m.values(position, VELOCITY_ACTUAL_VALUE, start=t_stop - WINDOW_US, end=t_stop)
+    window = m.values(position, Cia402.VELOCITY_ACTUAL_VALUE, start=t_stop - WINDOW_US, end=t_stop)
     assert window, "no sample in the window before the quick stop"
     mean = sum(window) / len(window)
     summary = (
@@ -148,14 +137,14 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
     assert not outside, f"{len(outside)} sample(s) outside ±{SAMPLE_TOLERANCE:.0%}; {summary}"
 
     # 5. The quick stop brings the motor to a stop in time.
-    t_stopped = m.first(position, VELOCITY_ACTUAL_VALUE, stopped, after=t_stop)
+    t_stopped = m.first(position, Cia402.VELOCITY_ACTUAL_VALUE, stopped, after=t_stop)
     assert t_stopped is not None, f"the velocity never fell below {STOPPED_RPM} rpm; {summary}"
     stop_time_us = t_stopped - t_stop
     summary += f"; stopped in {stop_time_us / 1000:.0f} ms"
     assert stop_time_us <= STOP_DEADLINE_US, summary
 
     # 6. The drive ends in the state that 0x605A names.
-    last_state = cia402_state(m.values(position, STATUSWORD)[-1])
+    last_state = Cia402.state(m.values(position, Cia402.STATUSWORD)[-1])
     assert last_state == end_state, f"the drive ended in {last_state}, not {end_state}; {summary}"
 
     record_property("message", summary)

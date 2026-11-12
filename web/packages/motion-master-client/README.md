@@ -79,6 +79,24 @@ try {
 
 The server serves its OpenAPI specification at `GET /api/swagger.yml`. The Motion Master Console shows the same specification under API Docs. Your editor also shows the types and the descriptions of every method.
 
+## Objects and states
+
+`Profile`, `Cia402` and `Somanet` name every object of a SOMANET device as an address: an index, a subindex and the type of the value. `Profile` holds the CiA 301 communication area (0x1xxx) and the standard MDP objects, `Cia402` the CiA 402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area (0x2xxx) and FSoE. The names are the same as in the Python client, and the C++ names of the server without their `k`, in capitals. `readValue` takes an address and returns a value of its type:
+
+```ts
+import { AlState, Cia402, Somanet } from '@synapticon/motion-master-client'
+
+const statusword = await client.readValue(1, Cia402.STATUSWORD)  // number
+const state = Cia402.state(statusword)                          // 'OperationEnabled', ...
+const temperature = await client.readValue(1, Somanet.CORE_TEMPERATURE_MEASURED_TEMPERATURE)
+
+await client.api.transitionToState({ state: AlState.PREOP })
+```
+
+The list holds every object of every device in the ESI, so an address can name an object that the drive does not have. A read of it then fails. A 64-bit value is exact only up to 2^53, because JavaScript reads a JSON integer as a `number`.
+
+`AlState` names the AL states, `INIT`, `PREOP`, `BOOT`, `SAFEOP` and `OP`, with the numbers that the API uses. The server reports `UNKNOWN`, 0, for a device that does not answer. `Cia402State` is the type of a CiA402 state name. `Cia402.state()` returns the state that a statusword reports, which is useful for a recorded row, where the server sends the raw statusword.
+
 ## Monitoring
 
 A monitoring is a list of objects that the server samples in every cycle and sends over the WebSocket. You create it over HTTP, then you subscribe to its topic.

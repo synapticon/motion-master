@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import STATE_NAMES, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
 
     states = {d["slavePosition"]: d for d in client.call("getDeviceStates").json()}
     for d in client.call("getDevices").json():
-        state = STATE_NAMES.get(states[d["slavePosition"]]["alState"], "?")
+        state = AlState(states[d["slavePosition"]]["alState"]).name
         print(
             f"  {d['slavePosition']:3d}  {d['productName']:<30}  serial {d['serialNumber']:<12}"
             f"  revision 0x{d['revisionNumber']:08x}  {state}"

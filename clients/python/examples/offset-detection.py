@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
-    OP,
+    AlState,
     MotionMasterClient,
     ProcedureError,
     format_step,
@@ -45,7 +45,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(OP, positions=[args.slave])
+    client.ensure_state(AlState.OP, positions=[args.slave])
 
     snapshot = None
     changes = step_changes(client.run_procedure(args.slave, PROCEDURE))

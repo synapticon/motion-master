@@ -99,8 +99,8 @@ void abortFoeTransfer(ecx_contextt* ctx, uint16_t slavePosition) {
   drainMailbox(ctx, slavePosition);
 }
 
-void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState targetState) {
-  if (targetState == EtherCatState::Boot) {
+void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, AlState targetState) {
+  if (targetState == AlState::Boot) {
     uint32_t data = ecx_readeeprom(ctx, slave, ECT_SII_BOOTRXMBX, EC_TIMEOUTEEP);
     ctx->slavelist[slave].SM[0].StartAddr = static_cast<uint16_t>(LO_WORD(data));
     ctx->slavelist[slave].SM[0].SMlength = static_cast<uint16_t>(HI_WORD(data));
@@ -138,7 +138,7 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
     // first FoE exchange failed, and later reads failed with wkc 0x5, then 0x0 or 0x3 ("unexpected
     // mailbox"). The firmware source does not explain that failure, so its cause is not confirmed.
     ctx->slavelist[slave].mbx_cnt = 0;
-  } else if (targetState == EtherCatState::PreOp) {
+  } else if (targetState == AlState::PreOp) {
     // PREOP SMs come from the standard SII mailbox entries, not the BOOT entries.
     ecx_readeeprom1(ctx, slave, ECT_SII_RXMBXADR);
     uint32_t eedat = ecx_readeeprom2(ctx, slave, EC_TIMEOUTEEP);

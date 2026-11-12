@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import PREOP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
 FILES_DIR = Path(__file__).resolve().parent.parent / "files"
 
@@ -33,7 +33,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(PREOP, positions=[args.slave])
+    client.ensure_state(AlState.PREOP, positions=[args.slave])
 
     content = client.call(
         "foeReadFile", path={"slavePosition": args.slave, "filename": args.filename}

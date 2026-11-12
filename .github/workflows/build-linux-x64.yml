@@ -45,3 +45,8 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build/x64-linux-debug --output-on-failure
+
+      # The C++, Python and TypeScript object addresses come from one run of the generator over the
+      # pinned ESI. This fails when one of them was edited by hand or not regenerated.
+      - name: Object addresses match the pinned ESI
+        run: tools/generate-object-addresses.sh x64-linux-debug --check

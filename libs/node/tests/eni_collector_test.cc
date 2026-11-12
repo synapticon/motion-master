@@ -19,7 +19,7 @@
 namespace mm::node {
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FmmuConfig;
 using mm::comm::SlaveConfig;
 using mm::comm::SyncManagerConfig;
@@ -144,7 +144,7 @@ TEST(EniCollectorTest, RefusesABusWithNoPublishedImage) {
   DeviceManager manager;
   auto bus = circuloBus();
   // Below SAFEOP, so the scan publishes no image.
-  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->state = static_cast<uint16_t>(AlState::PreOp);
   ASSERT_TRUE(manager.init(std::move(bus)).has_value());
   ASSERT_TRUE(manager.scan().has_value());
 

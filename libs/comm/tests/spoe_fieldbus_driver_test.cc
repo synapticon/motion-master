@@ -16,7 +16,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::spoe::SpoeFieldbusDriver;
 using mm::comm::spoe::SpoeFieldbusDriverConfig;
 using mm::comm::spoe::SpoeMode;
@@ -78,7 +78,7 @@ TEST(SpoeFieldbusDriver, ScanReadsTheIdentityAndTheState) {
   EXPECT_EQ(info.revisionNumber, 0x0A0CU);
   EXPECT_EQ(info.serialNumber, 12345U);
   EXPECT_EQ(info.name, "Integro");
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::PreOp));
 }
 
 TEST(SpoeFieldbusDriver, ScanIdentifiesAProtocolVersion100Drive) {
@@ -88,7 +88,7 @@ TEST(SpoeFieldbusDriver, ScanIdentifiesAProtocolVersion100Drive) {
   SpoeFieldbusDriver driver(configFor(server));
   ASSERT_EQ(driver.scan().value_or(0), 1);
   EXPECT_EQ(driver.slaveInfo(1).vendorId, 0x22D2U);
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::PreOp));
 }
 
 TEST(SpoeFieldbusDriver, ScanRefusesAnUnknownProtocolVersion) {
@@ -109,7 +109,7 @@ TEST(SpoeFieldbusDriver, ScanLeavesTheIdentityEmptyInInit) {
   SpoeFieldbusDriver driver(configFor(server));
   ASSERT_EQ(driver.scan().value_or(0), 1);
   EXPECT_EQ(driver.slaveInfo(1).vendorId, 0U);
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::Init));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::Init));
 }
 
 TEST(SpoeFieldbusDriver, AnUnreachableDriveKeepsItsPosition) {
@@ -158,9 +158,9 @@ TEST(SpoeFieldbusDriver, ReadStatesReadsTheDrive) {
   server.setState(mm::comm::testing::kSpoeStateSafeOp);
   const auto states = driver.readStates({1});
   ASSERT_TRUE(states.has_value());
-  EXPECT_EQ((*states)[0].alStatus, static_cast<uint16_t>(EtherCatState::SafeOp));
+  EXPECT_EQ((*states)[0].alStatus, static_cast<uint16_t>(AlState::SafeOp));
   EXPECT_EQ((*states)[0].reachability, mm::comm::Reachability::Answering);
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::SafeOp));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::SafeOp));
 }
 
 TEST(SpoeFieldbusDriver, ReadStatesReportsADriveThatDoesNotAnswer) {
@@ -184,7 +184,7 @@ TEST(SpoeFieldbusDriver, DoesNotCommandADriveThatDidNotAnswer) {
   server.setReplyDelay(milliseconds{0});
   // A command would wait out the timeout against a silent drive, so it is not sent at all.
   const auto start = std::chrono::steady_clock::now();
-  driver.transitionToState({1}, std::nullopt, EtherCatState::SafeOp, milliseconds{2000},
+  driver.transitionToState({1}, std::nullopt, AlState::SafeOp, milliseconds{2000},
                            milliseconds{2000}, nullptr, nullptr);
   EXPECT_LT(std::chrono::steady_clock::now() - start, milliseconds{100});
   EXPECT_NE(server.state(), mm::comm::testing::kSpoeStateSafeOp);
@@ -195,10 +195,10 @@ TEST(SpoeFieldbusDriver, ChangesTheStateInControlMode) {
   SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
   ASSERT_TRUE(driver.scan().has_value());
   EXPECT_FALSE(driver.stateChangeRefusal().has_value());
-  driver.transitionToState({1}, std::nullopt, EtherCatState::SafeOp, milliseconds{500},
+  driver.transitionToState({1}, std::nullopt, AlState::SafeOp, milliseconds{500},
                            milliseconds{2000}, nullptr, nullptr);
   EXPECT_EQ(server.state(), mm::comm::testing::kSpoeStateSafeOp);
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::SafeOp));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::SafeOp));
 }
 
 TEST(SpoeFieldbusDriver, KeepsTheStateTheDriveReportsWhenItRefuses) {
@@ -206,9 +206,9 @@ TEST(SpoeFieldbusDriver, KeepsTheStateTheDriveReportsWhenItRefuses) {
   server.setRefuseStateChanges(true);
   SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
   ASSERT_TRUE(driver.scan().has_value());
-  driver.transitionToState({1}, std::nullopt, EtherCatState::SafeOp, milliseconds{500},
+  driver.transitionToState({1}, std::nullopt, AlState::SafeOp, milliseconds{500},
                            milliseconds{2000}, nullptr, nullptr);
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::PreOp));
 }
 
 TEST(SpoeFieldbusDriver, RefusesEveryStateChangeInMonitorMode) {
@@ -219,7 +219,7 @@ TEST(SpoeFieldbusDriver, RefusesEveryStateChangeInMonitorMode) {
   ASSERT_TRUE(driver.scan().has_value());
   ASSERT_TRUE(driver.stateChangeRefusal().has_value());
   const int before = server.requestCount();
-  driver.transitionToState({1}, std::nullopt, EtherCatState::SafeOp, milliseconds{500},
+  driver.transitionToState({1}, std::nullopt, AlState::SafeOp, milliseconds{500},
                            milliseconds{2000}, nullptr, nullptr);
   EXPECT_EQ(server.requestCount(), before);
   EXPECT_EQ(server.state(), mm::comm::testing::kSpoeStatePreOp);
@@ -234,7 +234,7 @@ TEST(SpoeFieldbusDriver, AClosedConnectionClearsTheState) {
   EXPECT_EQ(driver.slaveState(1), 0);
   // A rescan reconnects.
   ASSERT_TRUE(driver.scan().has_value());
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::PreOp));
 }
 
 TEST(SpoeFieldbusDriver, ReadsTheObjectDictionary) {
@@ -613,7 +613,7 @@ TEST(SpoeFieldbusDriver, AStateChangeWaitsForARunningScan) {
   server.setReplyDelay(milliseconds{50});
   std::jthread rescan([&] { (void)driver.scan(); });
   std::this_thread::sleep_for(milliseconds{20});
-  driver.transitionToState({1}, std::nullopt, EtherCatState::Init, std::chrono::seconds(1),
+  driver.transitionToState({1}, std::nullopt, AlState::Init, std::chrono::seconds(1),
                            milliseconds{100}, nullptr, nullptr);
   rescan.join();
   EXPECT_EQ(server.state(), mm::comm::testing::kSpoeStateInit);
@@ -644,7 +644,7 @@ TEST(SpoeFieldbusDriver, ActivatingFirmwareWaitsForTheRestart) {
   // It returned after the restart, not after the answer that came before it.
   EXPECT_GE(std::chrono::steady_clock::now() - started, milliseconds{1300});
   EXPECT_EQ(server.firmwareUpdates(), 1);
-  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::PreOp));
 }
 
 TEST(SpoeParameterEntries, DecodesTheFirmwareLayout) {

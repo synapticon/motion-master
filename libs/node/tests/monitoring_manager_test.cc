@@ -24,7 +24,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
@@ -141,7 +141,7 @@ class FakeBus : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 };
@@ -171,7 +171,7 @@ std::unique_ptr<FakeBus> makeBus() {
   bus->layout.expectedWkc = 3;
   bus->layout.slaves = {SlaveIo{
       .slavePosition = 1, .outputOffset = 0, .outputBytes = 6, .inputOffset = 0, .inputBytes = 6}};
-  bus->state = static_cast<uint16_t>(EtherCatState::Op);
+  bus->state = static_cast<uint16_t>(AlState::Op);
   bus->wkc = 3;
   bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
   return bus;
@@ -410,7 +410,7 @@ TEST(MonitoringManagerTest, RemapResyncsCursorPastHeadInsteadOfUnderflowing) {
 TEST(MonitoringManagerTest, NonExchangingDeviceSamplesNull) {
   DeviceManager dm;
   FakeBus* bus = setUp(dm);
-  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);  // not exchanging → live gate closes
+  bus->state = static_cast<uint16_t>(AlState::PreOp);  // not exchanging → live gate closes
 
   MonitoringManager manager(dm);
   std::vector<nlohmann::json> published;

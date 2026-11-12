@@ -136,6 +136,23 @@ jobs:
       - name: Byte-compile
         run: python -m py_compile clients/python/*.py clients/python/examples/*.py clients/python/examples/production/*.py clients/python/examples/production/*/*.py
 
+      # The server's cia402::decodeState and the TypeScript client are tested against the same table.
+      - name: Cia402.state() decodes the shared statusword table
+        working-directory: clients/python
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          from motion_master_client import AlState, Cia402
+
+          table = json.loads(pathlib.Path("../../libs/node/tests/data/cia402_statusword_states.json").read_text())
+          wrong = [c for c in table["cases"] if Cia402.state(c["statusword"]) != c["state"]]
+          if wrong:
+              raise SystemExit(f"::error::Cia402.state() decodes differently from the table: {wrong}")
+          assert (1, *Cia402.STATUSWORD) == (1, 0x6041, 0)
+          assert AlState(0) is AlState.UNKNOWN and AlState.PREOP == 2
+          print(f"{len(table['cases'])} statuswords decode as the table says")
+          PY
+
       # Guard against swagger drift: every operationId the client and the
       # examples call must still exist in swagger.yml (mirrors the
       # api-client-drift job for the generated TS client). The client's own

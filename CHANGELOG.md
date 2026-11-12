@@ -25,6 +25,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - **The AL states are written `PREOP` and `SAFEOP`, the way ETG.1000.6, TwinCAT and the IgH master write them.** Every log line, error message, API text and Console label that said `PRE-OP` or `SAFE-OP` now says `PREOP` or `SAFEOP`, and the Console writes all five states in capitals. `requestsState` and `waitsForState` of `POST /api/eni/parse` change with them. The Python client names its constants `PREOP` and `SAFEOP`, and its example scripts take `preop` and `safeop`. The C++ enumerators stay `PreOp` and `SafeOp` (#213).
 
+- **The Python and TypeScript clients name every object of a SOMANET device, the AL states and the CiA402 states.** `Profile`, `Cia402` and `Somanet` hold an address for every object, such as `Cia402.STATUSWORD`, with the same names in both clients and the type of the value. `AlState` names the AL states with `UNKNOWN` for 0, and `Cia402.state()` decodes a statusword in both clients. In Python, `Cia402State` names the CiA402 states, and the flat constants such as `STATUSWORD` and `PREOP`, `STATE_NAMES` and `cia402_state()` are gone. In TypeScript, `client.readValue()` returns the type of the address. The C++ type `EtherCatState` is now `AlState`, because the SPoE driver reports the same states (#215).
+
 ## [6.0.0-alpha.122] - 2026-11-10
 
 ### Fixed

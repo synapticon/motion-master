@@ -190,7 +190,7 @@ The steps that most scripts begin with are methods on the client:
 ```python
 client = MotionMasterClient.from_config()     # reads config.toml
 client.init()                                 # opens the driver, or accepts the one that is open
-client.ensure_state(PREOP, positions=[1])    # scans when needed, then moves device 1 up
+client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then moves device 1 up
 ```
 
 `ensure_scanned()` scans when needed and moves no device. `init()`, `ensure_scanned()` and
@@ -223,11 +223,28 @@ Other methods:
   traceback. An example is a server that is not running. Set `MM_TRACEBACK=1` to get the
   traceback.
 
-The module also has CiA402 helpers. Constants such as `STATUSWORD` and `VELOCITY_ACTUAL_VALUE` give
-an object as `(index, subindex)`, so `read_value(1, STATUSWORD)` and the monitoring parameter
-`(1, *STATUSWORD)` name it the same way. `cia402_state(statusword)` returns the state that a
-statusword reports, by the name that `GET /api/devices/{slavePosition}/cia402` uses. It is meant for
-recorded rows, where the server sends the raw statusword.
+The module names objects and states with classes:
+
+- `Profile`, `Cia402` and `Somanet` name every object of a SOMANET device as an address, for example
+  `Cia402.STATUSWORD`. `Profile` holds the CiA 301 communication area (0x1xxx) and the standard MDP
+  objects, `Cia402` the CiA 402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area
+  (0x2xxx) and FSoE. An address unpacks to `(index, subindex)`, so `read_value(1, Cia402.STATUSWORD)`
+  and the monitoring parameter `(1, *Cia402.STATUSWORD)` name the object the same way. An address
+  also carries the type of the value, for a type checker. The names are the same as in the
+  TypeScript client, and the C++ names of the server without their `k`, in capitals. The list holds
+  every object of every device in the ESI, so an address can name an object that the drive does not
+  have. A read of it then fails.
+- `AlState` names the AL states, `INIT`, `PREOP`, `BOOT`, `SAFEOP` and `OP`. It is an `IntEnum`, so
+  a member goes into a request body as a number, and `AlState(value)` converts an `alState` from a
+  response. The name of a member is its label. The server reports `UNKNOWN`, 0, for a device that
+  does not answer.
+- `Cia402State` names the CiA402 states. It is a `StrEnum` whose members equal the names that the
+  API uses: `Cia402State.OPERATION_ENABLED == "OperationEnabled"`. `Cia402.state(statusword)`
+  returns the state that a statusword reports. It is meant for recorded rows, where the server
+  sends the raw statusword.
+
+`motion_master_objects.py` holds the addresses. The server's `generate-object-addresses` command
+writes it from the ESI, with the C++ headers and the TypeScript file, so do not edit it.
 
 ## TLS
 

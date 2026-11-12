@@ -22,7 +22,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
@@ -46,9 +46,7 @@ class CountingFakeDriver : public FieldbusDriver {
   std::expected<void, std::string> init() override { return {}; }
   std::expected<int, std::string> scan() override { return slaves_; }
   SlaveInfo slaveInfo(uint16_t) const override { return SlaveInfo{}; }
-  uint16_t slaveState(uint16_t) const override {
-    return static_cast<uint16_t>(EtherCatState::PreOp);
-  }
+  uint16_t slaveState(uint16_t) const override { return static_cast<uint16_t>(AlState::PreOp); }
   std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override { return OdRead{}; }
 
   // --- unused stubs ---------------------------------------------------------
@@ -82,7 +80,7 @@ class CountingFakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 
@@ -445,8 +443,8 @@ TEST(ProcedureManagerBody, CanChangeAlStateWithoutDeadlocking) {
         // A body may change AL state while holding its device, because holding it holds no lock —
         // the property this test pins.
         const uint16_t position = ctx.devicePosition;
-        auto transition = ctx.manager.transitionToState({position}, EtherCatState::Init,
-                                                        std::chrono::milliseconds(50));
+        auto transition =
+            ctx.manager.transitionToState({position}, AlState::Init, std::chrono::milliseconds(50));
         transitioned.store(true);
         // Recorded rather than asserted on: the fake driver reports no meaningful AL state, so the
         // transition may well be refused. Reaching this line at all is the property under test.

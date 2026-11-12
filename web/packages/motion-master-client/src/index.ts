@@ -12,6 +12,13 @@ export * from './constants'
 export * from './web-socket-connection'
 export * from './client'
 
+// The objects of a SOMANET device as addresses (generated, see `objects.ts`), the AL states and the
+// CiA402 states. `Cia402` comes from `cia402.ts`, which adds the statusword decode to the generated
+// addresses.
+export { type ObjectAddress, Profile, Somanet } from './objects'
+export { Cia402, type Cia402State } from './cia402'
+export * from './al-state'
+
 // Pure, framework-agnostic helpers (no DOM/React): hex formatting, CoE SDO value
 // encode/decode, SOMANET file-list parsing, the ENI export, and the LAN hostname mapping that lets
 // a browser reach a server on another machine under a name the bundled certificate covers.

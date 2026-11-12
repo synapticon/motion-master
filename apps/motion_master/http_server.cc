@@ -172,7 +172,7 @@ std::optional<mm::api::Response> unknownPosition(mm::node::DeviceManager& device
 
 // The body that POST /api/devices/state and POST /api/devices/state/transition share.
 struct StateRequest {
-  mm::comm::EtherCatState state;
+  mm::comm::AlState state;
   std::vector<uint16_t> positions;
   std::chrono::milliseconds timeout{5000};
 };
@@ -186,7 +186,7 @@ std::expected<StateRequest, mm::api::Response> parseStateRequest(
     return std::unexpected(mm::api::badRequest(R"(body must be {"state": <AL state>, ...})"));
   }
   const auto requested = body["state"].get<uint16_t>();
-  using S = mm::comm::EtherCatState;
+  using S = mm::comm::AlState;
   if (requested != static_cast<uint16_t>(S::Init) && requested != static_cast<uint16_t>(S::PreOp) &&
       requested != static_cast<uint16_t>(S::Boot) &&
       requested != static_cast<uint16_t>(S::SafeOp) && requested != static_cast<uint16_t>(S::Op)) {
@@ -220,7 +220,7 @@ std::expected<StateRequest, mm::api::Response> parseStateRequest(
 // Each device's settled state, with whether it reached the target, and "ok" only when every device
 // did, so a client never reads success while a device is stuck short of the target.
 nlohmann::json stateChangeResult(const std::vector<mm::node::DeviceStateInfo>& states,
-                                 mm::comm::EtherCatState target) {
+                                 mm::comm::AlState target) {
   bool allReached = true;
   nlohmann::json devices = nlohmann::json::array();
   for (const auto& info : states) {
@@ -2227,7 +2227,7 @@ void HttpServer::run() {
             return mm::api::badRequest(R"(body must be {"target": <AL state>, ...} or empty)");
           }
         }
-        using S = mm::comm::EtherCatState;
+        using S = mm::comm::AlState;
         auto target = static_cast<uint16_t>(S::Op);
         if (body.contains("target")) {
           if (!body["target"].is_number_unsigned()) {

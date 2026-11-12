@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import SAFEOP, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
 FILES_DIR = Path(__file__).resolve().parent.parent / "files"
 
@@ -35,7 +35,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(SAFEOP)
+    client.ensure_state(AlState.SAFEOP)
 
     content = client.call(
         "streamProcessDataDump", headers={"Accept": "application/octet-stream"}

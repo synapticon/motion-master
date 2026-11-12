@@ -12,13 +12,15 @@ add_executable(
   cycle_rate_source_test.cc
   plant_model_fit_test.cc
   controller_tuning_call_test.cc
+  object_address_generator_test.cc
   ../monitoring_api.cc
   ../plant_model_fit.cc
   ../controller_tuning_call.cc
   ../config.cc
   ../cert_info.cc
   ../game_loop.cc
-  ../cycle_rate_source.cc)
+  ../cycle_rate_source.cc
+  ../object_address_generator.cc)
 
 # App headers are included unprefixed (e.g. "ring_log_sink.h"), matching main.cc.
 target_include_directories(mm_app_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)

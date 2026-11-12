@@ -28,7 +28,7 @@ TEST(IsMacAddressTest, AcceptsDashSeparated) {
 
 TEST(WorkingCounterContributionTest, SafeOpCountsOutputsAndInputsLikeOp) {
   // The output Sync Manager stays enabled in SAFEOP, so the slave still counts the write.
-  for (const EtherCatState state : {EtherCatState::SafeOp, EtherCatState::Op}) {
+  for (const AlState state : {AlState::SafeOp, AlState::Op}) {
     const auto status = static_cast<uint16_t>(state);
     EXPECT_EQ(workingCounterContribution(status, true, true), 3);
     EXPECT_EQ(workingCounterContribution(status, true, false), 2);
@@ -38,15 +38,14 @@ TEST(WorkingCounterContributionTest, SafeOpCountsOutputsAndInputsLikeOp) {
 }
 
 TEST(WorkingCounterContributionTest, BelowSafeOpNothingCounts) {
-  for (const EtherCatState state :
-       {EtherCatState::Init, EtherCatState::PreOp, EtherCatState::Boot}) {
+  for (const AlState state : {AlState::Init, AlState::PreOp, AlState::Boot}) {
     EXPECT_EQ(workingCounterContribution(static_cast<uint16_t>(state), true, true), 0);
   }
 }
 
 TEST(WorkingCounterContributionTest, TheErrorFlagCountsNothing) {
   constexpr uint16_t kErrorFlag = 0x0010;
-  for (const EtherCatState state : {EtherCatState::SafeOp, EtherCatState::Op}) {
+  for (const AlState state : {AlState::SafeOp, AlState::Op}) {
     EXPECT_EQ(workingCounterContribution(static_cast<uint16_t>(state) | kErrorFlag, true, true), 0);
   }
 }

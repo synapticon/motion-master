@@ -661,7 +661,7 @@ The key is bundled alongside the binary in every release (effectively public). T
 ```cpp
 std::expected<void, std::string> transitionToState(
     const std::vector<uint16_t>& positions,
-    mm::comm::EtherCatState targetState,
+    mm::comm::AlState targetState,
     std::chrono::steady_clock::duration timeout);
 ```
 
@@ -955,7 +955,7 @@ Cycling a device INIT → BOOT → INIT → PREOP → SAFEOP (and the deliberate
 
 **Crash 1 — duplicate Outputs FMMU + out-of-bounds write.** SOEM's FMMU mappers (`ecx_config_create_{output,input}_mappings` + the mailbox-status mapper) start at `slavelist[i].FMMUunused` and *append*, trusting that `ecx_config_init`'s memset zeroed `FMMUunused` and the `FMMU[]` array. A re-map never memsets, so `FMMUunused` stayed at 3 from the prior map: the output mapper wrote a byte-identical duplicate Outputs FMMU at `FMMU[3]`, then the input/mailbox mappers ran at index 4. With `EC_MAXFMMU == 4` that wrote a 16-byte `ec_fmmut` past the end of the array, smashing the adjacent `ec_slavet` fields (`FMMU*func`, `mbx_*`, … and on repeated re-maps marching toward `PO2SOconfig`). This is the long-unconfirmed root corruptor behind the earlier `PO2SOconfig` segfault. **Fix:** in `configureProcessData()`'s pre-map reset loop, `memset` each slave's `FMMU[]` + `FMMUunused = 0` so SOEM re-derives FMMU0/1/2 from scratch like a clean scan, and FPWR-clear all `EC_MAXFMMU` ESC FMMU registers so a slave already carrying a stale duplicate self-heals on the next map. (Sits alongside the existing `outputs`/`inputs`/`PO2SOconfig` resets, all there for the same "a re-map doesn't memset the slavelist" reason.)
 
-**Crash 2 — illegal AL transition reads SDO over a dead CoE mailbox.** Entering SAFEOP/OP re-maps, and the re-map reads each slave's PDO mapping over the **CoE mailbox** (`ecx_readPDOmap → ecx_SDOread → ecx_mbxreceive → memcpy`), which is only live from PREOP up. A device commanded straight from BOOT (firmware-sized mailbox SMs, no CoE) reached that mailbox read while still in BOOT and segfaulted in `ecx_mbxreceive` — *before* the slave could reject the illegal jump with AL status 0x0011. **Fix:** enforce the EtherCAT AL state machine in `DeviceManager::transitionToState` before any re-map, via a `kValidStateTransitions` map (current state → allowed targets: single-step climbs `INIT → PREOP → SAFEOP → OP`, multi-step drops, BOOT only paired with INIT; self-transitions allowed). Validated against a fresh `readStates` (authoritative; an AL-status register read works in any state). Lives in the node layer on purpose — re-mapping is a Motion Master concern, not the fieldbus's, so direct `FieldbusDriver` use is the caller's own risk. Added `toString(EtherCatState)` next to `alState`/`alHasError` for the messages. The PWA's Control page already taught these rules in its inline AL-state hints; the backend now actually enforces them rather than trusting the slave (which it never reaches in the crashing case).
+**Crash 2 — illegal AL transition reads SDO over a dead CoE mailbox.** Entering SAFEOP/OP re-maps, and the re-map reads each slave's PDO mapping over the **CoE mailbox** (`ecx_readPDOmap → ecx_SDOread → ecx_mbxreceive → memcpy`), which is only live from PREOP up. A device commanded straight from BOOT (firmware-sized mailbox SMs, no CoE) reached that mailbox read while still in BOOT and segfaulted in `ecx_mbxreceive` — *before* the slave could reject the illegal jump with AL status 0x0011. **Fix:** enforce the EtherCAT AL state machine in `DeviceManager::transitionToState` before any re-map, via a `kValidStateTransitions` map (current state → allowed targets: single-step climbs `INIT → PREOP → SAFEOP → OP`, multi-step drops, BOOT only paired with INIT; self-transitions allowed). Validated against a fresh `readStates` (authoritative; an AL-status register read works in any state). Lives in the node layer on purpose — re-mapping is a Motion Master concern, not the fieldbus's, so direct `FieldbusDriver` use is the caller's own risk. Added `toString(AlState)` next to `alState`/`alHasError` for the messages. The PWA's Control page already taught these rules in its inline AL-state hints; the backend now actually enforces them rather than trusting the slave (which it never reaches in the crashing case).
 
 ---
 
@@ -2131,7 +2131,7 @@ The `BusProcedureBody` designed on 2026-08-02 was built, and with it the procedu
 
 **The final state is a parameter, and the reason is the factory-reset case.** "Return to PREOP" was the plan and it is the right *default* — but a device whose application has been erased has nothing to reach PREOP with, so a hard-coded transition would report a failure for an operation that succeeded. Restoring the *previous* state was considered and rejected: it described a device running the old firmware, and "previous" is a snapshot nothing protects, since the body holds no lock between steps and a user can change state underneath it.
 
-**`finalState` is an AL state number, and getting there took two corrections worth recording.** The first cut was a string enum of this procedure's own — `"preop" | "init" | "boot"` — which is a second vocabulary for a concept the API already names: `POST /api/devices/state` takes `state: 1|2|3|4|8` and every state read reports `alState` in the same ETG.1000.6 encoding, and no string form of an AL state exists anywhere on the wire (`toString(EtherCatState)` is for log lines). It is now `mm::comm::EtherCatState` end to end, integer on the wire, with the descriptor's `enum` options carrying the titles so the Console still reads "PREOP — loads and confirms the new firmware". **The general rule: a procedure parameter may invent a vocabulary (`group`, `mode`, `data` do) only where the API has none; where one exists, use it.** The second correction was the restriction to three states. It was justified by "SAFEOP and OP re-map the whole bus", which does not survive scrutiny — the caller's own follow-up `POST /api/devices/state` performs the identical re-map, so refusing split one operation into two and bought nothing. The original argument had leaned on a power cycle being required first, which turned out to be false. Every AL state is accepted; PREOP is the default.
+**`finalState` is an AL state number, and getting there took two corrections worth recording.** The first cut was a string enum of this procedure's own — `"preop" | "init" | "boot"` — which is a second vocabulary for a concept the API already names: `POST /api/devices/state` takes `state: 1|2|3|4|8` and every state read reports `alState` in the same ETG.1000.6 encoding, and no string form of an AL state exists anywhere on the wire (`toString(AlState)` is for log lines). It is now `mm::comm::AlState` end to end, integer on the wire, with the descriptor's `enum` options carrying the titles so the Console still reads "PREOP — loads and confirms the new firmware". **The general rule: a procedure parameter may invent a vocabulary (`group`, `mode`, `data` do) only where the API has none; where one exists, use it.** The second correction was the restriction to three states. It was justified by "SAFEOP and OP re-map the whole bus", which does not survive scrutiny — the caller's own follow-up `POST /api/devices/state` performs the identical re-map, so refusing split one operation into two and bought nothing. The original argument had leaned on a power cycle being required first, which turned out to be false. Every AL state is accepted; PREOP is the default.
 
 **What the drive firmware actually does, read out of `sc_somanet_ip/module_ethercat/libsrc/ethercat_service.xc` rather than assumed.** The bootloader and the application are **two builds of the same EtherCAT service**, selected by the compile-time `ETHERCAT_BOOTLOADER` flag; both implement the full AL state machine, so registers, SII and AL status work whichever is running. (Register communication needs neither — the ESC serves those in hardware, which is why they work in any state and on a device with blank flash.) **The handover is driven by the master's INIT → PREOP request**: in the bootloader build the PREOP case calls `foe_glb_buffer_request_restart()` and then waits `REBOOT_TIMEOUT`; if a valid application exists the device *restarts into it inside that wait* and the following lines never run. If the wait expires, the application did not start, and the code sets `al_status_code = AL_NO_VALID_FIRMWARE` (`0x0014`), disables mailbox and PDO services, and returns to INIT. BOOT is the mirror: the application build's BOOTSTRAP case calls `boot_to_bootloader()`. Three consequences: **no power cycle is needed for the firmware** (only for an SII, since the ESC reads EEPROM at reset); the exit from BOOT is a *reboot*, so its timeout is sized in tens of seconds rather than as a mailbox round trip; and the no-firmware case is a decodable `0x0014` rather than a hang, which is what makes `preop` a safe default even when it is the wrong choice. Still unknown: what a *cold* power-up does when a valid application is present — the code read covers only the master-driven transition, so the descriptor does not claim either way.
 
@@ -5235,7 +5235,7 @@ script are now the same.
 
 **Names in code have no single standard, so C++ keeps its rule.** SOEM writes `EC_STATE_PRE_OP`,
 IgH `EC_AL_STATE_PREOP`, the ESI schema `PreOP` and `PreOp`, and the ESC data sheet `PreOp`. C++
-enumerators are PascalCase, and ETG itself writes `PreOp`, so `EtherCatState::PreOp` stays. No
+enumerators are PascalCase, and ETG itself writes `PreOp`, so `AlState::PreOp` stays. No
 source writes `Preop`.
 
 **What does not change.** ESI values such as `WriteRestrictions="PreOP"` are ETG.2000 data. The
@@ -5245,3 +5245,45 @@ released sections of `CHANGELOG.md` record what was released. The SOEM names bel
 `POST /api/eni/parse`, and a client that compared them with `PRE-OP` must change too. The project
 is in alpha, so there is no transition period. The number of places changed was not a reason to
 keep the old spelling: this software will be in use for years.
+
+## Session 2026-11-12 — One list of object addresses for C++, Python and TypeScript (#215)
+
+**The generator writes the client addresses in the same run as the headers.** C++ had 826
+generated addresses. The Python client had 15 flat constants written by hand, and the TypeScript
+client had none. `generate-object-addresses` now also writes `clients/python/motion_master_objects.py`
+and `web/packages/motion-master-client/src/objects.ts`, and both paths are required options, so no
+run can write one language alone. A client name is the C++ name without `k`, in capitals, so
+`kStatusword` is `Cia402.STATUSWORD` in Python and in TypeScript. The classes `Profile`, `Cia402` and
+`Somanet` follow the three C++ namespaces.
+
+**Every object, not a chosen few.** A hand-picked list is shorter, but it drifts from the C++ names,
+and a user must look up every object that is missing. The generated list has every object of every
+device in the ESI, as the headers do.
+
+**An address carries the type of its value.** C++ carries it in `ObjectAddress<T>`. TypeScript
+carries it in a type parameter, so `readValue(1, Cia402.STATUSWORD)` is a `Promise<number>`. Python
+carries it for a type checker only: `ObjectAddress` is a generic named tuple of the index and the
+subindex, so `(1, *Cia402.STATUSWORD)` is still a monitoring parameter. Name, access and unit stay in
+comments, because `GET /api/devices/{slavePosition}/parameters` gives them live from the device. A
+64-bit value is a `number` in TypeScript and exact only up to 2^53, because the API sends it as a
+JSON integer.
+
+**The AL state type is `AlState` in all three languages.** `EtherCatState` was the C++ name, but the
+SPoE driver reports the same states through the same type, and the API names the field `alState` for
+both drivers. "AL state" is the ETG term and names no transport. So the C++ type is renamed too, and
+its enumerators keep their names. `AlState` has `UNKNOWN = 0`, because the API reports 0 for a device
+that does not answer, and a type that cannot hold every value the API sends fails in a script when a
+device stops answering. `NONE`, SOEM's name for 0, was rejected: the device has a state, and we do
+not know it.
+
+**The CiA402 states.** Python has `Cia402State`, a `StrEnum` whose members equal the API's names.
+TypeScript names the union the OpenAPI generator already makes. Both clients have `Cia402.state()`.
+The server's `cia402::decodeState` and the two clients are tested against one table,
+`libs/node/tests/data/cia402_statusword_states.json`, so the three cannot decode differently.
+
+**The C++ headers now have a CI check, and the reason against one no longer holds.** The old reason
+was that a check fails exactly when a lag between a new ESI and the headers is intended. The check
+reads the pinned ESI in the repository, so that lag cannot fail it. What it catches is the
+languages drifting apart: a hand edit, or a generator change regenerated for one language. It
+compares the headers with whitespace removed, because the build job has no clang-format and the
+clang-format job already checks their layout.

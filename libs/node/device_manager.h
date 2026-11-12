@@ -53,7 +53,7 @@ void to_json(nlohmann::json& j, const DeviceStateInfo& info);
 struct RestartOutcome {
   /// The last AL state the restart commanded. It is the target when every device arrived, and
   /// the step a device fell short of otherwise.
-  mm::comm::EtherCatState step = mm::comm::EtherCatState::Init;
+  mm::comm::AlState step = mm::comm::AlState::Init;
   /// The state of every targeted device after that step, in the order targeted.
   std::vector<DeviceStateInfo> states;
 };
@@ -670,7 +670,7 @@ class DeviceManager {
   ///         @c StateChangeError: @c kIllegalTransition when the AL state machine does not allow
   ///         the transition, @c kFailed for anything else.
   std::expected<std::vector<DeviceStateInfo>, StateChangeError> changeState(
-      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+      const std::vector<uint16_t>& positions, mm::comm::AlState targetState,
       std::chrono::steady_clock::duration timeout);
 
   /// @brief Brings a set of devices to @p targetState, one legal AL transition at a time, and
@@ -701,7 +701,7 @@ class DeviceManager {
   ///         refuses state changes (see @c stateChangeRefusal), or the final state read-back
   ///         fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> transitionToState(
-      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+      const std::vector<uint16_t>& positions, mm::comm::AlState targetState,
       std::chrono::steady_clock::duration timeout);
 
   /// @brief Takes a set of devices to INIT and then up to @p targetState one AL state at a time.
@@ -721,7 +721,7 @@ class DeviceManager {
   /// @return Where the walk stopped and the state of each device there, or an error string when a
   ///         step could not be commanded (see @c transitionToState).
   std::expected<RestartOutcome, std::string> restartToState(
-      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+      const std::vector<uint16_t>& positions, mm::comm::AlState targetState,
       std::chrono::steady_clock::duration timeout);
 
   /// @brief Returns why the driver refuses every state change, or nullopt when it accepts them,
@@ -1077,7 +1077,7 @@ class DeviceManager {
   /// figure the bus does not reach until the climbing device arrives — counting the seconds in
   /// between as a fault, which is the very thing this exists to prevent.
   int expectedWkcDuring(std::span<const uint16_t> transitioning,
-                        std::optional<mm::comm::EtherCatState> target) const;
+                        std::optional<mm::comm::AlState> target) const;
 
   /// @brief Recomputes the expected working counter from the devices' current AL states and
   ///        PDO presence. Called after configure and after each state transition.
@@ -1096,7 +1096,7 @@ class DeviceManager {
   /// every climb read as short instead, which is the same bug in the other direction; a climb is
   /// covered by @c updateExpectedWkc afterwards, and a bus answering more than expected is not
   /// counted at all.
-  void lowerExpectedWkc(std::span<const uint16_t> positions, mm::comm::EtherCatState target);
+  void lowerExpectedWkc(std::span<const uint16_t> positions, mm::comm::AlState target);
 
   /// @brief Unpublishes the process image and waits for any in-flight exchange cycle to finish.
   ///

@@ -1975,8 +1975,8 @@ bool resetMailboxCounter(ecx_contextt* ctx, uint16_t slave) {
 }  // namespace
 
 void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requested,
-                                           std::optional<EtherCatState> requiredState,
-                                           EtherCatState targetState,
+                                           std::optional<AlState> requiredState,
+                                           AlState targetState,
                                            std::chrono::steady_clock::duration timeout,
                                            std::chrono::steady_clock::duration resendInterval,
                                            std::function<void()> tick,
@@ -1992,7 +1992,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   // Boot_Handle_ESM_AL_Control_Changed_Ind). The step to INIT also restarts a Jasper-based drive
   // that committed an app or com binary in BOOT. It answers again in INIT about 1.9 s after the
   // request, without its station address.
-  const bool leavesBoot = targetState == EtherCatState::Init || targetState == EtherCatState::PreOp;
+  const bool leavesBoot = targetState == AlState::Init || targetState == AlState::PreOp;
   const auto mayRestart = [this, leavesBoot](uint16_t pos) {
     return leavesBoot && bootMailboxSlaves_.contains(pos);
   };
@@ -2039,7 +2039,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   // the error bit, so a cleanly-latched INIT (no error bit) would otherwise never get this kick.
   // Issued under the lock, then released so the slave can settle without the lock held across the
   // sleep.
-  if (targetState != EtherCatState::Init) {
+  if (targetState != AlState::Init) {
     std::vector<uint16_t> kicked;
     {
       const auto lock = controlPlane_.lockBus();
@@ -2047,8 +2047,8 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
       for (uint16_t pos : positions) {
         const uint16_t stateClean = ctx_->slavelist[pos].state & 0x000Fu;
         if ((!requiredState || stateClean == static_cast<uint16_t>(*requiredState)) &&
-            stateClean == static_cast<uint16_t>(EtherCatState::Init)) {
-          ctx_->slavelist[pos].state = static_cast<uint16_t>(EtherCatState::Init) | EC_STATE_ACK;
+            stateClean == static_cast<uint16_t>(AlState::Init)) {
+          ctx_->slavelist[pos].state = static_cast<uint16_t>(AlState::Init) | EC_STATE_ACK;
           ecx_writestate(ctx_.get(), pos);
           kicked.push_back(pos);
         }
@@ -2078,12 +2078,12 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
         // into BOOT earlier, e.g. for a firmware download). On a plain fresh-scan
         // INIT→PREOP the SMs ecx_config_init already programmed are correct, and touching
         // them here is both redundant and harmful (it seizes EEPROM from the slave's PDI).
-        if (stateClean == static_cast<uint16_t>(EtherCatState::Init)) {
+        if (stateClean == static_cast<uint16_t>(AlState::Init)) {
           leavingInit.insert(pos);
-          if (targetState == EtherCatState::Boot) {
-            updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::Boot);
+          if (targetState == AlState::Boot) {
+            updateMailboxSyncManagers(ctx_.get(), pos, AlState::Boot);
             bootMailboxSlaves_.insert(pos);
-          } else if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos)) {
+          } else if (targetState == AlState::PreOp && bootMailboxSlaves_.contains(pos)) {
             // Deliberately NOT erased here. Leaving BOOT for PREOP makes a SOMANET bootloader
             // hand over to the application by **restarting the device**, and the restart wipes the
             // sync managers programmed a moment ago. Striking the slave off the list on the
@@ -2091,7 +2091,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
             // INIT with unusable mailbox config, ignored every resend, and sat there until the
             // timeout with no AL error to explain it. It is erased once PREOP is actually
             // reached; until then the resend path below reprograms as often as it needs to.
-            updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+            updateMailboxSyncManagers(ctx_.get(), pos, AlState::PreOp);
           }
         }
         ctx_->slavelist[pos].state = targetRaw;
@@ -2146,9 +2146,9 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
       // the address gets no answer, the state reads as 0, and the slave stays pending.
       if (ctx_->slavelist[pos].state == targetRaw && mayRestart(pos)) {
         if (restoreStationAddress(ctx_.get(), pos) == AddressState::Reassigned &&
-            targetState == EtherCatState::PreOp) {
+            targetState == AlState::PreOp) {
           spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
-          updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+          updateMailboxSyncManagers(ctx_.get(), pos, AlState::PreOp);
         }
         if (!readStateAtAddress(ctx_.get(), pos)) {
           ctx_->slavelist[pos].state = 0;
@@ -2171,7 +2171,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
       // Exact match required: OP+ERROR (0x18) must not pass as OP (0x08).
       if (state == targetRaw) {
         spdlog::info("Device {}: reached state 0x{:02X}", pos, targetRaw);
-        if (targetState == EtherCatState::PreOp) {
+        if (targetState == AlState::PreOp) {
           // Confirmed out of the BOOT mailbox; a later plain INIT->PREOP must not touch the SMs.
           bootMailboxSlaves_.erase(pos);
           // Under the same lock as the state read that saw PREOP, so this is the first mailbox
@@ -2219,9 +2219,9 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
         // register read per resend and reprograms only a slave that genuinely restarted (doing it
         // otherwise seizes EEPROM from the slave's own PDI).
         if (mayRestart(pos) && restoreStationAddress(ctx_.get(), pos) == AddressState::Reassigned &&
-            targetState == EtherCatState::PreOp) {
+            targetState == AlState::PreOp) {
           spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
-          updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+          updateMailboxSyncManagers(ctx_.get(), pos, AlState::PreOp);
         }
         if (state & EC_STATE_ERROR) {
           ctx_->slavelist[pos].state = (state & 0x000Fu) | EC_STATE_ACK;

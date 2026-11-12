@@ -20,12 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from motion_master_client import (  # noqa: E402
-    BOOT,
-    INIT,
-    OP,
-    PREOP,
-    SAFEOP,
-    STATE_NAMES,
+    AlState,
     MotionMasterClient,
     ProcedureError,
     StateError,
@@ -199,7 +194,7 @@ class Session:
 
     def firmware_running(self):
         """Return whether the drive runs its firmware, which is so in PREOP, SAFEOP and OP."""
-        return self.al_state() in (PREOP, SAFEOP, OP)
+        return self.al_state() in (AlState.PREOP, AlState.SAFEOP, AlState.OP)
 
     def heading(self, title):
         """Show and log the start of a step, numbered in the order the steps run. Returns the
@@ -299,7 +294,7 @@ def connect(s):
     heading("Connect")
     s.client.init()
     s.client.ensure_scanned()
-    say("the drive is in %s", STATE_NAMES[s.al_state()])
+    say("the drive is in %s", AlState(s.al_state()).name)
 
 
 def ensure_state(s, state):
@@ -311,7 +306,7 @@ def ensure_state(s, state):
     installation writes, and stays there whatever `state` is. A drive that reaches PREOP but not
     `state` fails the call.
     """
-    heading(f"AL state · at least {STATE_NAMES[state]}")
+    heading(f"AL state · at least {AlState(state).name}")
     _reach(s, state, exact=False)
 
 
@@ -324,30 +319,31 @@ def transition_to_state(s, state):
 
     A drive with no running firmware goes to BOOT, as in ensure_state.
     """
-    heading(f"AL state · {STATE_NAMES[state]}")
-    ladder = [INIT, PREOP, SAFEOP, OP]
+    heading(f"AL state · {AlState(state).name}")
+    ladder = [AlState.INIT, AlState.PREOP, AlState.SAFEOP, AlState.OP]
     current = s.al_state()
     down = current in ladder and state in ladder and ladder.index(state) < ladder.index(current)
-    if down and state in (PREOP, SAFEOP):
+    if down and state in (AlState.PREOP, AlState.SAFEOP):
         say("going down through INIT")
-        s.client.ensure_state(INIT, positions=[s.slave], exact=True)
+        s.client.ensure_state(AlState.INIT, positions=[s.slave], exact=True)
     _reach(s, state, exact=True)
 
 
 def _reach(s, state, exact):
-    if state in (INIT, BOOT):
+    if state in (AlState.INIT, AlState.BOOT):
         s.client.ensure_state(state, positions=[s.slave], exact=exact)
     else:
         try:
-            s.client.ensure_state(PREOP, positions=[s.slave], exact=exact and state == PREOP)
+            exact_preop = exact and state == AlState.PREOP
+            s.client.ensure_state(AlState.PREOP, positions=[s.slave], exact=exact_preop)
         except StateError as e:
             say("the drive did not reach PREOP: %s", e, style="warning")
             say("moving the drive to BOOT", style="warning")
-            s.client.ensure_state(BOOT, positions=[s.slave])
+            s.client.ensure_state(AlState.BOOT, positions=[s.slave])
             s.add("AL state", [f"did not reach PREOP: {e}", "moved to BOOT"])
         else:
             s.client.ensure_state(state, positions=[s.slave], exact=exact)
-    say("the drive is in %s", STATE_NAMES[s.al_state()])
+    say("the drive is in %s", AlState(s.al_state()).name)
 
 
 def heading(label):
@@ -409,7 +405,7 @@ def firmware_version(s):
     # Outside PREOP, SAFEOP and OP the server answers 0x100A from its cache, and the answer does
     # not say so (#177). The version of a firmware that does not run is not recorded.
     if not s.firmware_running():
-        return f"not running (drive in {STATE_NAMES[s.al_state()]})"
+        return f"not running (drive in {AlState(s.al_state()).name})"
     path = {"slavePosition": s.slave, "index": 0x100A, "subindex": 0}
     return s.client.call("readParameter", path=path).json()["value"]
 
@@ -525,7 +521,7 @@ def install_firmware(s):
         headers={"Content-Type": "application/octet-stream"},
     )
     log.info("uploaded %s", package.name)
-    params = {"packageFilename": package.name, "finalState": PREOP}
+    params = {"packageFilename": package.name, "finalState": AlState.PREOP}
     run_procedure(s, "firmware-installation", params)
     after = firmware_version(s)
     s.firmware_version = after

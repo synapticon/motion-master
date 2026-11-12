@@ -1529,7 +1529,7 @@ inline constexpr std::string_view kFirmwareInstallationProcedure = "firmware-ins
 
 /// @brief Where an install leaves the device, as an AL state.
 ///
-/// Deliberately @c mm::comm::EtherCatState rather than a firmware-specific enum, and deliberately
+/// Deliberately @c mm::comm::AlState rather than a firmware-specific enum, and deliberately
 /// the same integer encoding the rest of the API uses (@c POST @c /api/devices/state, and the
 /// @c alState every state read reports): one concept, one spelling. A parallel vocabulary here
 /// would mean a client holding two ways to say PREOP.
@@ -1568,7 +1568,7 @@ struct FirmwareInstallationRequest {
   /// that gets a new file does not write it to a drive unasked.
   std::vector<std::string> extraFiles;
   bool cachePackage = true;  ///< Keep a copy under @c firmwareCacheDir when named.
-  mm::comm::EtherCatState finalState = mm::comm::EtherCatState::PreOp;
+  mm::comm::AlState finalState = mm::comm::AlState::PreOp;
 
   /// How long to wait after entering BOOT before the first file transfer.
   ///

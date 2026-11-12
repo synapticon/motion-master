@@ -23,7 +23,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
@@ -52,9 +52,7 @@ class VendorFakeDriver : public FieldbusDriver {
     info.vendorId = vendorId_;
     return info;
   }
-  uint16_t slaveState(uint16_t) const override {
-    return static_cast<uint16_t>(EtherCatState::PreOp);
-  }
+  uint16_t slaveState(uint16_t) const override { return static_cast<uint16_t>(AlState::PreOp); }
 
   // --- unused stubs ---------------------------------------------------------
   std::expected<void, std::string> init() override { return {}; }
@@ -89,7 +87,7 @@ class VendorFakeDriver : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
+  void transitionToState(const std::vector<uint16_t>&, std::optional<AlState>, AlState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
                          std::function<void()>, std::function<bool()>) override {}
 

@@ -44,7 +44,7 @@
 
 namespace {
 
-using mm::comm::EtherCatState;
+using mm::comm::AlState;
 using Clock = std::chrono::steady_clock;
 
 constexpr int kStateTimeoutUs = 10'000'000;
@@ -70,7 +70,7 @@ struct Options {
   std::string ifname;
   uint16_t slave = 1;
   std::string file = ".hardware_description";
-  EtherCatState state = EtherCatState::Boot;
+  AlState state = AlState::Boot;
   int rounds = 3;
   int waitS = 10;
   AfterBusy afterBusy = AfterBusy::kWait;
@@ -110,9 +110,9 @@ bool parseOptions(int argc, char** argv, Options& options) {
     } else if (arg == "--state") {
       const std::string_view state = argv[++i];
       if (state == "boot") {
-        options.state = EtherCatState::Boot;
+        options.state = AlState::Boot;
       } else if (state == "preop") {
-        options.state = EtherCatState::PreOp;
+        options.state = AlState::PreOp;
       } else {
         return false;
       }
@@ -151,7 +151,7 @@ bool parseOptions(int argc, char** argv, Options& options) {
 // or on the step to PREOP without one. So the request is written again every second until
 // kStateTimeoutUs, and a drive found without its address gets it back, and on the step to PREOP
 // its mailbox sync managers too.
-bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
+bool requestState(ecx_contextt* ctx, uint16_t slave, AlState state) {
   const auto raw = static_cast<uint16_t>(state);
   const auto deadline = Clock::now() + std::chrono::microseconds(kStateTimeoutUs);
   for (;;) {
@@ -165,8 +165,8 @@ bool requestState(ecx_contextt* ctx, uint16_t slave, EtherCatState state) {
     }
     if (mm::comm::soem::restoreStationAddress(ctx, slave) ==
             mm::comm::soem::AddressState::Reassigned &&
-        state == EtherCatState::PreOp) {
-      mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::PreOp);
+        state == AlState::PreOp) {
+      mm::comm::soem::updateMailboxSyncManagers(ctx, slave, AlState::PreOp);
     }
   }
 }
@@ -344,8 +344,8 @@ int main(int argc, char** argv) {
   const auto elapsed = [&programStart] {
     return std::chrono::duration<double>(Clock::now() - programStart).count();
   };
-  const auto enter = [&](EtherCatState state) {
-    if (state != EtherCatState::Init) {
+  const auto enter = [&](AlState state) {
+    if (state != AlState::Init) {
       mm::comm::soem::updateMailboxSyncManagers(ctx.get(), slave, state);
     }
     if (requestState(ctx.get(), slave, state)) {
@@ -358,9 +358,9 @@ int main(int argc, char** argv) {
 
   bool passed = true;
   for (int round = 1; round <= options.rounds; ++round) {
-    bool entered = enter(EtherCatState::Init);
+    bool entered = enter(AlState::Init);
     if (entered && options.viaPreOp) {
-      entered = enter(EtherCatState::PreOp) && enter(EtherCatState::Init);
+      entered = enter(AlState::PreOp) && enter(AlState::Init);
     }
     entered = entered && enter(options.state);
     if (!entered) {
@@ -383,14 +383,14 @@ int main(int argc, char** argv) {
   }
 
   // The check that matters after an abort: a drive that hangs after a BUSY no longer leaves BOOT.
-  if (requestState(ctx.get(), slave, EtherCatState::Init)) {
+  if (requestState(ctx.get(), slave, AlState::Init)) {
     std::cout << "INIT reached\n";
   } else {
     std::cout << "INIT NOT REACHED\n";
     passed = false;
   }
-  mm::comm::soem::updateMailboxSyncManagers(ctx.get(), slave, EtherCatState::PreOp);
-  requestState(ctx.get(), slave, EtherCatState::PreOp);
+  mm::comm::soem::updateMailboxSyncManagers(ctx.get(), slave, AlState::PreOp);
+  requestState(ctx.get(), slave, AlState::PreOp);
   ecx_close(ctx.get());
   return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }

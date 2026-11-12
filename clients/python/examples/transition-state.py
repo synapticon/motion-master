@@ -16,9 +16,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import STATE_NAMES, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
-STATES = {name.lower(): value for value, name in STATE_NAMES.items() if value != 0}
+STATES = {s.name.lower(): s for s in AlState if s}
 
 
 def main():
@@ -36,7 +36,7 @@ def main():
 
     query = {"positions": str(args.slave)} if args.slave else None
     for d in client.call("getDeviceStates", query=query).json():
-        print(f"  {d['slavePosition']:3d}  {STATE_NAMES[d['alState']]}")
+        print(f"  {d['slavePosition']:3d}  {AlState(d['alState']).name}")
 
 
 if __name__ == "__main__":

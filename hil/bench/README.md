@@ -36,7 +36,7 @@ A test can compare the device with it, or write it back to the device.
 The run has one bench, and the tests use it one after the other. Each test brings the bench to the
 start it needs with its first lines: `bench.client.reset()` for no state on the server,
 `bench.psu.cycle()` for drives that just booted, followed by `bench.client.init()` and
-`bench.wait_for_devices_on_wire()`, and `bench.client.restart(PREOP)` for every drive restarted
+`bench.wait_for_devices_on_wire()`, and `bench.client.restart(AlState.PREOP)` for every drive restarted
 through INIT to PREOP. A reset of the server
 does not send the drives to any AL state. So a drive keeps the state that the test before left it
 in, or drops to SAFEOP with an error when its watchdog trips. A test that needs a known state

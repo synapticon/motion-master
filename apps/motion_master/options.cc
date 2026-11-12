@@ -66,6 +66,12 @@ Options parseOptions(int argc, char** argv) {
   generate->add_option("--out", outDir, "Directory to write the headers into")
       ->required()
       ->check(CLI::ExistingDirectory);
+  // Required, so one run writes all five files and the three languages hold one list.
+  std::string pythonPath;
+  std::string typescriptPath;
+  generate->add_option("--python", pythonPath, "Path of the Python module to write")->required();
+  generate->add_option("--typescript", typescriptPath, "Path of the TypeScript module to write")
+      ->required();
 
   try {
     app.parse(argc, argv);
@@ -75,7 +81,7 @@ Options parseOptions(int argc, char** argv) {
   }
 
   if (*generate) {
-    const auto result = mm::generateObjectAddresses(esiPath, outDir);
+    const auto result = mm::generateObjectAddresses(esiPath, outDir, pythonPath, typescriptPath);
     if (!result) {
       std::cerr << result.error() << "\n";
       // NOLINTNEXTLINE(concurrency-mt-unsafe)

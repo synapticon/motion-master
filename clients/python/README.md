@@ -4,14 +4,55 @@ This is a reference Python client for the Motion Master HTTP API and the WebSock
 At startup it reads the OpenAPI spec from the server and calls each operation by its
 `operationId`. See [Why it reads the spec](#why-it-reads-the-spec).
 
-It is easy to start, and nothing must be built. Clone this repository, set up the client, and
-run a script. Then use the scripts as a starting point for your own programs. We recommend an AI
-coding assistant, such as Claude Code. Open it in `clients/python` and tell it what your program
-must do. It reads the client, the scripts and `swagger.yml`, and writes the program.
+There are two ways to get it:
 
-The recording below shows a first run. The steps are in [Setup](#setup) and [Run](#run).
+- **Install it with pip** to use it in your own program. See [Install with pip](#install-with-pip).
+- **Clone this repository** to run the example scripts, or to change the client. See
+  [Setup](#setup).
 
-![A first run of the Python client](demo.gif)
+The example scripts are a starting point for your own programs. We recommend an AI coding
+assistant, such as Claude Code. Open it in `clients/python` of a clone and tell it what your
+program must do. It reads the client, the scripts and `swagger.yml`, and writes the program.
+
+The recording below shows a first run from a clone. The steps are in [Setup](#setup) and
+[Run](#run).
+
+![A first run of the Python client](https://raw.githubusercontent.com/synapticon/motion-master/main/clients/python/demo.gif)
+
+## Install with pip
+
+Python 3.11 or newer is necessary, because the client reads the config with the standard library
+module `tomllib`.
+
+```bash
+pip install motion-master-client
+```
+
+The package has the same version as the server, and is published with each release. A version of
+the client works with the server of the same version. Every version is a pre-release until 6.0.0.
+pip installs a pre-release when no final release exists, so `pip install` needs no `--pre`.
+
+The package holds the two modules, `motion_master_client` and `motion_master_objects`. It does not
+hold the example scripts. Write `config.toml` in the directory that your program runs from. Take
+the content from [`config.example.toml`](https://github.com/synapticon/motion-master/blob/main/clients/python/config.example.toml), and set `adapter` as [Setup](#setup) says. Then:
+
+```python
+from motion_master_client import AlState, MotionMasterClient, run
+
+
+def main():
+    client = MotionMasterClient.from_config()
+    client.ensure_state(AlState.PREOP)
+    for device in client.devices():
+        print(device["slavePosition"], device["productName"])
+
+
+run(main)
+```
+
+`from_config()` reads `config.toml` in the current directory. It writes the spec of the server to
+`swagger.yml` beside that file. To keep the config in another place, give its path:
+`MotionMasterClient.from_config("/path/to/config.toml")`.
 
 ## Setup
 
@@ -169,7 +210,7 @@ Three values in that column are not states:
 
 A production script runs many steps in order on one drive, asks before the steps that need a
 decision, and writes a log and a record of the drive. Its steps are in
-[`examples/production/README.md`](examples/production/README.md).
+[`examples/production/README.md`](https://github.com/synapticon/motion-master/blob/main/clients/python/examples/production/README.md).
 
 | Script | What it does | AL state |
 | --- | --- | --- |
@@ -296,7 +337,7 @@ That gives four results:
 - **The client always matches its server.** The spec comes from the running server. So the client
   is correct against the contract of that server, older or newer.
 - **The client is standalone.** There is no bundled spec, no code generation and no checkout of
-  this repository. Copy `motion_master_client.py`, install the requirements, and point it at a
+  this repository. Install it with pip, and point it at a
   server.
 - **A script shows the API.** Each call names the operation that it invokes. There is no URL
   string to read past.
@@ -309,9 +350,16 @@ The cost is one request at startup, and the server must be reachable when the cl
 | --- | --- |
 | `motion_master_client.py` | `MotionMasterClient`, which calls the HTTP API and the WebSocket. See [Calls by operationId](#calls-by-operationid). |
 | `setup.sh` | Creates and activates the virtual environment. See [Setup](#setup). |
-| `requirements.txt` | The Python packages that the client needs. |
+| `motion_master_objects.py` | The generated object addresses. See [Calls by operationId](#calls-by-operationid). |
+| `requirements.txt` | The Python packages that the client needs. Keep it the same as the dependencies in `pyproject.toml`. |
+| `pyproject.toml` | The package that a release publishes to PyPI. The version is set by `tools/bump-version.sh`. |
+| `LICENSE` | A copy of the GPL v3 licence of the repository, which the package carries. |
 | `config.example.toml` | The config template. Copy it to `config.toml`. |
 | `demo.tape` | The [VHS](https://github.com/charmbracelet/vhs) script that records `demo.gif`. Run `vhs demo.tape`. |
 | `examples/` | The example scripts. See [Scripts](#scripts). |
 | `files/` | Where a script saves a file when `--output` names no other path. Git ignores this directory. |
-| `swagger.yml` | A copy of the spec that the client read from the server at its last startup. Look up an `operationId` here when you write a new script. The client writes it again at each startup, and Git ignores it. |
+| `swagger.yml` | A copy of the spec that the client read from the server at its last startup. `from_config()` writes it beside `config.toml`. Look up an `operationId` here when you write a new script. The client writes it again at each startup, and Git ignores it. |
+
+## Licence
+
+GPL v3, the licence of the whole Motion Master repository. See `LICENSE`.

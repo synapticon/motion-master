@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "motion-master-client"
 # tools/bump-version.sh sets this with every other version in the repository.
-version = "6.0.0-alpha.123"
+version = "6.0.0-alpha.124"
 description = "Python client for the Motion Master HTTP API and WebSocket"
 readme = "README.md"
 license = "GPL-3.0-only"

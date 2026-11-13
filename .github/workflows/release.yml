@@ -345,6 +345,40 @@ jobs:
           esac
           pnpm --filter @synapticon/motion-master-client publish --no-git-checks --tag "$tag"
 
+  # ── Publish the Python client motion-master-client to PyPI ─────────────────
+  # The same version as the server, like the npm package. Authentication is PyPI trusted
+  # publishing: PyPI exchanges the OIDC token of this job for a short-lived credential, so there is
+  # no token to store. PyPI accepts the exchange only for the trusted publisher registered on the
+  # project, which names this repository and this workflow file, so a rename of the file breaks it.
+  # A pre-release version such as 6.0.0-alpha.1 becomes 6.0.0a1 on PyPI. pip installs a pre-release
+  # only when no final release exists or when it gets --pre, so PyPI needs no dist-tag.
+  publish-python-client:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Build the sdist and the wheel
+        working-directory: clients/python
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir "$GITHUB_WORKSPACE/dist-python"
+
+      # A tag that is moved and pushed again, after a release run that failed in a build leg, meets
+      # a version this job already published. PyPI refuses a second upload of one version, so
+      # skip-existing skips it instead of failing the run.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-python
+          skip-existing: true
+
   # ── Publish the container image to Docker Hub ──────────────────────────────
   # The image is built on request today: docker-publish.yml, started by hand for the versions that
   # get one, because the pre-release versions follow each other fast. To build it with every

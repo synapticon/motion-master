@@ -19,6 +19,16 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **The Python client is on PyPI: `pip install motion-master-client`.** Each release publishes it at the same version as the server. A pre-release such as 6.0.0-alpha.124 has the PyPI form 6.0.0a124. The package holds `motion_master_client` and `motion_master_objects`, and not the example scripts, which stay in `clients/python/examples` (#227).
+
+### Changed
+
+- **The TypeScript client `@synapticon/motion-master-client` is GPL v3, like the rest of the repository.** It was MIT. The Python client is GPL v3 too.
+
+- **`MotionMasterClient.from_config()` without a path reads `config.toml` in the current directory first**, and then `config.toml` next to the module, as before. It writes the copy of the spec, `swagger.yml`, beside the config file it read. A client built with the constructor writes no copy, unless it gets `spec_copy` (#227).
+
 ## [6.0.0-alpha.123] - 2026-11-12
 
 ### Added

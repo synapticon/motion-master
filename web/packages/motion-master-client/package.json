@@ -2,7 +2,7 @@
   "name": "@synapticon/motion-master-client",
   "version": "6.0.0-alpha.123",
   "description": "Isomorphic TypeScript client for Motion Master: the generated HTTP API client, the WebSocket connection, and helpers.",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/synapticon/motion-master.git",

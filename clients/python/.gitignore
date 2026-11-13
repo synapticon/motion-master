@@ -11,3 +11,8 @@ swagger.yml
 
 # Files that the examples save.
 files/
+
+# What python -m build leaves behind.
+*.egg-info/
+build/
+dist/

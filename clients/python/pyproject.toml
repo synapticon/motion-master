@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "motion-master-client"
+# tools/bump-version.sh sets this with every other version in the repository.
+version = "6.0.0-alpha.123"
+description = "Python client for the Motion Master HTTP API and WebSocket"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# Keep this list the same as requirements.txt, which a clone of the repository installs.
+dependencies = ["requests>=2.31", "pyyaml>=6", "websockets>=13"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://motion-master.synapticon.com"
+Source = "https://github.com/synapticon/motion-master/tree/main/clients/python"
+Issues = "https://github.com/synapticon/motion-master/issues"
+
+# The two modules are the package. A list turns off the discovery of setuptools, which would
+# otherwise take examples/ for a package.
+[tool.setuptools]
+py-modules = ["motion_master_client", "motion_master_objects"]

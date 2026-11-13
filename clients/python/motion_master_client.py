@@ -144,6 +144,23 @@ def _path(position, **more):
     return {"slavePosition": position, **more}
 
 
+_CONFIG_TEMPLATE_URL = (
+    "https://github.com/synapticon/motion-master/blob/main/clients/python/config.example.toml"
+)
+
+
+def _missing_config_message(candidates):
+    """Say where from_config() looked, and how to make the file."""
+    looked = " or ".join(str(c) for c in candidates)
+    # A clone has the template next to this module. A pip install does not.
+    template = Path(__file__).resolve().parent / "config.example.toml"
+    if template.exists():
+        make = f"copy the template: cp {template} {candidates[-1]}"
+    else:
+        make = f"write config.toml in the current directory from {_CONFIG_TEMPLATE_URL}"
+    return f"no config.toml in {looked} -- {make}"
+
+
 def _not_reached(result, step):
     """Say which devices of a state change did not reach `step`, and why."""
     failed = ", ".join(
@@ -271,7 +288,13 @@ def run(main):
 class MotionMasterClient:
     """Thin wrapper over requests that resolves operations from the server's OpenAPI spec."""
 
-    def __init__(self, http_url, ws_url=None, verify=False, fieldbus=None):
+    def __init__(self, http_url, ws_url=None, verify=False, fieldbus=None, spec_copy=None):
+        """Read the spec of the server at http_url.
+
+        spec_copy names a file that receives a copy of the spec, for a reader or a coding assistant
+        that looks up an operationId without a running server. from_config() puts it beside the
+        config file, because an installed module can sit in a directory nobody may write.
+        """
         self._http_url = http_url.rstrip("/")
         # The body of POST /api/init, for example {"driver": "soem", "adapter": "eth0"}.
         self.fieldbus = fieldbus
@@ -291,9 +314,8 @@ class MotionMasterClient:
         # path template such as "/api/devices/{slavePosition}/sdo/{index}/{subindex}").
         response = self._session.get(f"{self._http_url}/api/swagger.yml", verify=verify)
         response.raise_for_status()
-        # A copy beside this module lets a reader, or a coding assistant that writes a new script,
-        # look up an operationId without a running server.
-        (Path(__file__).resolve().parent / "swagger.yml").write_text(response.text, encoding="utf-8")
+        if spec_copy is not None:
+            Path(spec_copy).write_text(response.text, encoding="utf-8")
         spec = yaml.safe_load(response.text)
 
         self._ops = {}
@@ -325,17 +347,26 @@ class MotionMasterClient:
 
     @classmethod
     def from_config(cls, path=None):
-        """Build a client from a TOML config file, by default config.toml next to this module.
+        """Build a client from a TOML config file.
 
-        The file gives the host, the two ports, the TLS verification and the [fieldbus] table
-        that init() sends. config.example.toml is the template.
+        Without a path, it reads config.toml in the current directory, and else config.toml next
+        to this module. The first is for a client installed with pip. The second is for a clone of
+        the repository, where a script runs from any directory. The file gives the host, the two
+        ports, the TLS verification and the [fieldbus] table that init() sends.
+        config.example.toml is the template. The client writes the spec of the server to
+        swagger.yml beside the file.
         """
-        path = Path(path) if path else Path(__file__).resolve().parent / "config.toml"
-        if not path.exists():
-            raise FileNotFoundError(
-                f"{path} not found -- copy the template first:\n"
-                f"    cp {path.parent / 'config.example.toml'} {path}"
-            )
+        if path:
+            path = Path(path)
+            if not path.exists():
+                raise FileNotFoundError(f"{path} not found")
+        else:
+            here = Path(__file__).resolve().parent
+            # One entry when the current directory is the directory of this module.
+            candidates = list(dict.fromkeys([Path.cwd() / "config.toml", here / "config.toml"]))
+            path = next((c for c in candidates if c.exists()), None)
+            if path is None:
+                raise FileNotFoundError(_missing_config_message(candidates))
         with open(path, "rb") as f:
             cfg = tomllib.load(f)
         return cls(
@@ -343,6 +374,7 @@ class MotionMasterClient:
             ws_url=f"wss://{cfg['host']}:{cfg['ws_port']}",
             verify=cfg.get("verify", False),
             fieldbus=cfg.get("fieldbus"),
+            spec_copy=path.parent / "swagger.yml",
         )
 
     def init(self, fieldbus=None):

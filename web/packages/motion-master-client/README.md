@@ -8,7 +8,7 @@ The package contains three parts:
 - `client.ws`: a connection to the WebSocket of the server. It delivers monitoring data and notifications.
 - Helpers: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, ENI export and parse, and the host names for a server on another machine.
 
-The licence is MIT.
+The licence is GPL v3, the licence of the whole Motion Master repository.
 
 ## Version
 
@@ -198,4 +198,4 @@ const client = new MotionMasterClient({
 
 ## Licence
 
-MIT. See `LICENSE`.
+GPL v3, the licence of the whole Motion Master repository. See `LICENSE`.

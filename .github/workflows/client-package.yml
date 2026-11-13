@@ -87,3 +87,73 @@ jobs:
             }
             console.log(table.cases.length + ' statuswords decode as the table says')
           "
+
+  python-client-package:
+    name: Python client installs from its wheel
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Build the sdist and the wheel
+        working-directory: clients/python
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir "$RUNNER_TEMP/dist"
+
+      # Every file of the wheel outside its .dist-info directory is something an install adds to
+      # site-packages. That must be the two modules and nothing of examples/.
+      - name: The wheel holds the two modules only
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          (wheel,) = glob.glob("*.whl")
+          modules = sorted(n for n in zipfile.ZipFile(wheel).namelist() if ".dist-info/" not in n)
+          if modules != ["motion_master_client.py", "motion_master_objects.py"]:
+              raise SystemExit(f"::error::the wheel holds {modules}")
+          PY
+
+      # An empty directory outside the clone, so the import can only find the installed modules.
+      - name: Install the wheel in an empty virtual environment and load it
+        working-directory: ${{ runner.temp }}
+        env:
+          TABLE: ${{ github.workspace }}/libs/node/tests/data/cia402_statusword_states.json
+        run: |
+          python -m venv "$RUNNER_TEMP/consumer-venv"
+          mkdir consumer && cd consumer
+          "$RUNNER_TEMP"/consumer-venv/bin/pip install ../dist/*.whl
+          "$RUNNER_TEMP"/consumer-venv/bin/python - <<'PY'
+          import json, os, pathlib
+          import requests
+          import motion_master_client
+          from motion_master_client import AlState, Cia402, MotionMasterClient
+
+          if "site-packages" not in motion_master_client.__file__:
+              raise SystemExit(f"::error::the module came from {motion_master_client.__file__}")
+
+          table = json.loads(pathlib.Path(os.environ["TABLE"]).read_text())
+          wrong = [c for c in table["cases"] if Cia402.state(c["statusword"]) != c["state"]]
+          if wrong:
+              raise SystemExit(f"::error::Cia402.state() decodes differently from the table: {wrong}")
+          assert Cia402.STATUSWORD.index == 0x6041 and AlState.PREOP == 2
+
+          # Without a config.toml, the error names where to get the template.
+          try:
+              MotionMasterClient.from_config()
+              raise SystemExit("::error::from_config() found a config that does not exist")
+          except FileNotFoundError as error:
+              assert "config.example.toml" in str(error) and "https://" in str(error), error
+
+          # No server listens on port 9, so the client must fail on the connection, not before it.
+          pathlib.Path("config.toml").write_text('host = "127.0.0.1"\nhttp_port = 9\nws_port = 9\n')
+          try:
+              MotionMasterClient.from_config()
+              raise SystemExit("::error::a request to a closed port succeeded")
+          except requests.ConnectionError:
+              pass
+          print(f"{len(table['cases'])} statuswords decode as the table says")
+          PY

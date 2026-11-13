@@ -89,13 +89,14 @@ ctest --test-dir build/x64-linux-debug --output-on-failure
 ```
 
 The script also updates `vcpkg.json`, the root and per-package `package.json` files,
-`apps/motion_master/swagger.yml`, the assertion in
+`clients/python/pyproject.toml`, `apps/motion_master/swagger.yml`, the assertion in
 `libs/core/tests/version_test.cc`, the sidebar badge in
 `web/apps/console/src/layouts/RootLayout.tsx`, and `motion_master_version` in
 `rt/provision/ansible/roles/motion-master/defaults/main.yml`.
 
-After bumping: commit, then push a `v<version>` tag. That triggers `release.yml` and
-publishes `@synapticon/motion-master-client` to npm.
+After bumping: commit, then push a `v<version>` tag. That triggers `release.yml`, which
+publishes `@synapticon/motion-master-client` to npm and the Python client
+`motion-master-client` to PyPI.
 
 **Everything ships one version, on purpose.** The binary, the `web/apps/*` PWAs, and the
 TypeScript client all depend on one contract: the HTTP API plus the WebSocket protocol.
@@ -130,12 +131,14 @@ More workflows:
 - **`release.yml`** — on `v*` tags. Four build legs produce eight artifacts (tar.gz, deb
   and rpm for both Linux architectures, a Windows zip, a macOS tar.gz). Packages install
   to `/opt/motion-master/`. Certs are marked as config files so an upgrade never
-  overwrites them.
+  overwrites them. Two more jobs publish the clients, to npm and to PyPI, both with trusted
+  publishing and no stored token.
 - **`lint.yml`** — clang-format, cpplint, cppcheck, the API client drift check, and the
   Python client example.
 - **`client-package.yml`** — packs `@synapticon/motion-master-client`, installs the tarball in
   an empty project, and loads it with `import` and `require()`. The workspace links the client's
-  TypeScript source, so this is the only check of what npm users get.
+  TypeScript source, so this is the only check of what npm users get. A second job builds the
+  Python wheel, installs it in an empty virtual environment, and loads it outside the clone.
 - **`deploy-pages.yml`** — publishes `motion-master.synapticon.com`. Docs and landing
   track `main`; the web apps are pinned to the latest `v*` tag and cached per tag.
 

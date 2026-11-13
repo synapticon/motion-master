@@ -36,6 +36,10 @@ for f in \
   sed -i "s/\"version\": \"${OLD_ESC}\"/\"version\": \"${NEW_VERSION}\"/" "$f"
 done
 
+# 3b. Python client package. PyPI stores 6.0.0-alpha.1 in the normalized form 6.0.0a1.
+sed -i "s/^version = \"${OLD_ESC}\"/version = \"${NEW_VERSION}\"/" \
+  "$ROOT/clients/python/pyproject.toml"
+
 # 4. OpenAPI spec (info.version)
 sed -i "s/version: \"${OLD_ESC}\"/version: \"${NEW_VERSION}\"/" \
   "$ROOT/apps/motion_master/swagger.yml"
@@ -65,4 +69,5 @@ echo "  git commit -am \"chore: bump version to ${NEW_VERSION}\""
 echo "  git push --atomic origin main v${NEW_VERSION}"
 echo
 echo "Tagging v${NEW_VERSION} builds the release binaries, deploys the tagged web apps"
-echo "to Pages, and publishes @synapticon/motion-master-client@${NEW_VERSION} to npm."
+echo "to Pages, publishes @synapticon/motion-master-client@${NEW_VERSION} to npm, and"
+echo "publishes motion-master-client ${NEW_VERSION} to PyPI."

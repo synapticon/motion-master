@@ -25,6 +25,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- **The TypeScript client `@synapticon/motion-master-client` is GPL v3, like the rest of the repository.** It was MIT. The Python client is GPL v3 too.
+
 - **`MotionMasterClient.from_config()` without a path reads `config.toml` in the current directory first**, and then `config.toml` next to the module, as before. It writes the copy of the spec, `swagger.yml`, beside the config file it read. A client built with the constructor writes no copy, unless it gets `spec_copy` (#227).
 
 ## [6.0.0-alpha.123] - 2026-11-12

@@ -19,10 +19,18 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.125] - 2026-11-14
+
 ### Added
 
 - The Python client and the TypeScript client name the operation modes with `OperationMode`, for
   example `OperationMode.CYCLIC_SYNC_VELOCITY`. The names are the same in both clients.
+
+### Changed
+
+- The type of one entry of `GET /api/devices/{slavePosition}/operation-modes` is now
+  `OperationModeInfo` in the API specification and in the TypeScript client. Before, it was
+  `OperationMode`, the name that the operation modes now use.
 
 ## [6.0.0-alpha.124] - 2026-11-13
 
@@ -1118,7 +1126,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.124...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.125...HEAD
+[6.0.0-alpha.125]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.124...v6.0.0-alpha.125
 [6.0.0-alpha.124]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.123...v6.0.0-alpha.124
 [6.0.0-alpha.123]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.122...v6.0.0-alpha.123
 [6.0.0-alpha.122]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.121...v6.0.0-alpha.122

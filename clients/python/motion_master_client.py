@@ -32,7 +32,7 @@ decoded by the server, and wait_for_value() reads it until a condition holds.
 Profile, Cia402 and Somanet name every object of a SOMANET device as an address,
 such as Cia402.STATUSWORD, generated in motion_master_objects.py. AlState names the
 AL states, Cia402State the CiA402 states, and Cia402.state() names the state a
-statusword reports.
+statusword reports. OperationMode names the operation modes.
 devices() lists the scanned devices, and parameters() and hardware_description()
 read one device. restart() restarts devices through INIT up to an AL state, and
 set_operation_mode(), set_target(), enable(), disable() and quick_stop() drive
@@ -104,6 +104,33 @@ class Cia402State(enum.StrEnum):
     QUICK_STOP_ACTIVE = "QuickStopActive"
     FAULT_REACTION_ACTIVE = "FaultReactionActive"
     FAULT = "Fault"
+
+
+class OperationMode(enum.IntEnum):
+    """An operation mode, in the encoding of 0x6060 and 0x6061.
+
+    It is an int, so a member goes into a request body as it is, and OperationMode(value) converts
+    a mode that the server reports. The values from 0 up are the CiA402 modes. The negative values
+    are the SOMANET modes. Value 5 does not exist, because CiA402 reserves it.
+    """
+
+    NO_MODE = 0
+    PROFILE_POSITION = 1
+    VELOCITY = 2
+    PROFILE_VELOCITY = 3
+    PROFILE_TORQUE = 4
+    HOMING = 6
+    INTERPOLATED_POSITION = 7
+    CYCLIC_SYNC_POSITION = 8
+    CYCLIC_SYNC_VELOCITY = 9
+    CYCLIC_SYNC_TORQUE = 10
+    CYCLIC_SYNC_TORQUE_COMMUTATION_ANGLE = 11
+    IMPEDANCE = -6
+    JOINT_TORQUE = -5
+    SYSTEM_IDENTIFICATION = -4  # The firmware deprecates this mode.
+    OPEN_LOOP_FIELD = -3
+    DIAGNOSTICS = -2
+    COGGING_COMPENSATION_RECORDING = -1
 
 
 class Cia402(_Cia402Objects):
@@ -610,6 +637,8 @@ class MotionMasterClient:
 
     def set_operation_mode(self, position, mode):
         """Write the CiA402 operation mode (0x6060) of a drive (setCia402OperationMode).
+
+        The mode is an OperationMode, such as OperationMode.CYCLIC_SYNC_VELOCITY, or its int value.
 
         The server waits until 0x6061 shows the mode, so the drive runs in it when this returns.
         Returns the CiA402 snapshot. Raises requests.HTTPError, 409, when the drive does not take

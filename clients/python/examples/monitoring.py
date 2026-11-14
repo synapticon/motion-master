@@ -36,11 +36,16 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, Cia402, MotionMasterClient, Somanet, run  # noqa: E402
+from motion_master_client import (  # noqa: E402
+    AlState,
+    Cia402,
+    MotionMasterClient,
+    OperationMode,
+    Somanet,
+    run,
+)
 
 FILES_DIR = Path(__file__).resolve().parent.parent / "files"
-
-CYCLIC_SYNC_VELOCITY = 9
 
 # The monitored objects, in the order of the columns.
 OBJECTS = [
@@ -74,7 +79,7 @@ def main():
     parameters = [(args.slave, *address) for address in OBJECTS]
     try:
         with client.monitoring(parameters, interval_ms=50) as m:
-            client.set_operation_mode(args.slave, CYCLIC_SYNC_VELOCITY)
+            client.set_operation_mode(args.slave, OperationMode.CYCLIC_SYNC_VELOCITY)
             # A target left from an earlier run would turn the motor at the enable.
             client.set_target(args.slave, "velocity", 0)
             client.enable(args.slave)

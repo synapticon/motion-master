@@ -19,6 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- The Python client and the TypeScript client name the operation modes with `OperationMode`, for
+  example `OperationMode.CYCLIC_SYNC_VELOCITY`. The names are the same in both clients.
+
 ## [6.0.0-alpha.124] - 2026-11-13
 
 ### Added

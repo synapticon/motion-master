@@ -11,13 +11,12 @@ import logging
 import time
 
 import pytest
-from motion_master_client import AlState, Cia402
+from motion_master_client import AlState, Cia402, OperationMode
 
 from bench import Bench
 
 log = logging.getLogger(__name__)
 
-PROFILE_VELOCITY = 3
 # The inputs and the expectations of the Integro test. A test of another device has its own.
 TARGET_RPM = 1000
 # The move holds the target this long. The last WINDOW_US of it is the window the checks read, so
@@ -73,7 +72,7 @@ def test_integro_profile_velocity_reaches_the_target_and_quick_stops(
             # An object that is not in the process data gives one value per flush, not per cycle.
             assert monitoring.sources == ["pdo"] * len(parameters), monitoring.parameters
 
-            client.set_operation_mode(integro.position, PROFILE_VELOCITY)
+            client.set_operation_mode(integro.position, OperationMode.PROFILE_VELOCITY)
             # A stale target velocity would start the motor at the enable.
             client.set_target(integro.position, "velocity", 0)
             client.enable(integro.position)

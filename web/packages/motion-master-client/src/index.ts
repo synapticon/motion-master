@@ -12,11 +12,11 @@ export * from './constants'
 export * from './web-socket-connection'
 export * from './client'
 
-// The objects of a SOMANET device as addresses (generated, see `objects.ts`), the AL states and the
-// CiA402 states. `Cia402` comes from `cia402.ts`, which adds the statusword decode to the generated
-// addresses.
+// The objects of a SOMANET device as addresses (generated, see `objects.ts`), the AL states, the
+// CiA402 states and the operation modes. `Cia402` comes from `cia402.ts`, which adds the statusword
+// decode to the generated addresses.
 export { type ObjectAddress, Profile, Somanet } from './objects'
-export { Cia402, type Cia402State } from './cia402'
+export { Cia402, type Cia402State, OperationMode, operationModeName } from './cia402'
 export * from './al-state'
 
 // Pure, framework-agnostic helpers (no DOM/React): hex formatting, CoE SDO value

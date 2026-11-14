@@ -97,11 +97,11 @@ export interface OperationModes {
    */
   manufacturerBits: number[];
   /** Every mode, ascending by value — manufacturer modes first, then standard. */
-  modes: OperationMode[];
+  modes: OperationModeInfo[];
 }
 
 /** One operation mode of one device. */
-export interface OperationMode {
+export interface OperationModeInfo {
   /**
    * The value written to 0x6060 / read from 0x6061. Negative for a vendor mode.
    * @example -2

@@ -296,6 +296,11 @@ The module names objects and states with classes:
   API uses: `Cia402State.OPERATION_ENABLED == "OperationEnabled"`. `Cia402.state(statusword)`
   returns the state that a statusword reports. It is meant for recorded rows, where the server
   sends the raw statusword.
+- `OperationMode` names the operation modes, the values of 0x6060 and 0x6061, for example
+  `OperationMode.CYCLIC_SYNC_VELOCITY`. It is an `IntEnum`, so
+  `set_operation_mode(1, OperationMode.CYCLIC_SYNC_VELOCITY)` sends 9, and `OperationMode(value)`
+  converts a mode that the server reports. The values from 0 up are the CiA402 modes. The negative
+  values are the SOMANET modes.
 
 `motion_master_objects.py` holds the addresses. The server's `generate-object-addresses` command
 writes it from the ESI, with the C++ headers and the TypeScript file, so do not edit it.

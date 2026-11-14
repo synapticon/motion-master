@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import type { OperationMode } from '@synapticon/motion-master-client'
+import type { OperationModeInfo } from '@synapticon/motion-master-client'
 import { useConnection } from '../contexts/ConnectionContext'
 
 // Static per device — a property of its firmware, not of its state — so it is fetched once and kept.
@@ -28,8 +28,8 @@ export function useOperationModes(slavePosition: number, enabled = true) {
 
 /** The mode with this 0x6060/0x6061 value, or undefined when the table does not name it. */
 export function findMode(
-  modes: OperationMode[] | undefined,
+  modes: OperationModeInfo[] | undefined,
   value: number,
-): OperationMode | undefined {
+): OperationModeInfo | undefined {
   return modes?.find((m) => m.value === value)
 }

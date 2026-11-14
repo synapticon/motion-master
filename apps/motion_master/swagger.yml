@@ -5755,8 +5755,8 @@ components:
           type: array
           description: Every mode, ascending by value — manufacturer modes first, then standard.
           items:
-            $ref: "#/components/schemas/OperationMode"
-    OperationMode:
+            $ref: "#/components/schemas/OperationModeInfo"
+    OperationModeInfo:
       type: object
       description: One operation mode of one device.
       required: [value, name, label, kind, bit, abbreviation, supported]

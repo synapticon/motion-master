@@ -184,6 +184,30 @@ export function sdoTypeForDataTypeName(dataTypeName: string): SdoType {
   }
 }
 
+/**
+ * Returns the integer that `bytes` hold, of any length, as a `bigint`: a value can be longer than the
+ * 53 bits of a `number`. `byteOrder` is `'little'` when not given, because EtherCAT and CoE are
+ * little-endian. With `signed`, the highest bit of the most significant byte is the sign.
+ *
+ * Python's `int.from_bytes(data, byteorder, signed=...)` does the same. Its `byteorder` is `'big'`
+ * when not given, so a Python script names `'little'`.
+ *
+ *     integerFromBytes([0x37, 0x02]); // 567n
+ *     integerFromBytes([0xff, 0xff], { signed: true }); // -1n
+ */
+export function integerFromBytes(
+  bytes: readonly number[] | Uint8Array,
+  options: { byteOrder?: 'little' | 'big'; signed?: boolean } = {},
+): bigint {
+  const { byteOrder = 'little', signed = false } = options;
+  const ordered = byteOrder === 'little' ? [...bytes].reverse() : [...bytes];
+  let value = ordered.reduce((v, b) => (v << 8n) | BigInt(b), 0n);
+  if (signed && ordered.length > 0 && ordered[0] >= 0x80) {
+    value -= 1n << BigInt(8 * ordered.length);
+  }
+  return value;
+}
+
 export interface SdoInterpretation {
   label: string;
   value: string;

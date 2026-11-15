@@ -14,6 +14,7 @@ import {
   AlState,
   type DeviceParameter,
   formatHex,
+  integerFromBytes,
   MotionMasterClient,
   run,
 } from '@synapticon/motion-master-client';
@@ -22,16 +23,6 @@ import { cli, integer } from './options';
 /** Returns the bytes as lowercase hex, separated by spaces. */
 function hexBytes(bytes: number[]): string {
   return bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
-}
-
-/** Returns the integer that the little-endian bytes hold, of any width. */
-function fromLittleEndian(bytes: number[], signed: boolean): bigint {
-  let n = bytes.reduceRight((acc, b) => (acc << 8n) | BigInt(b), 0n);
-  const last = bytes.at(-1);
-  if (signed && last !== undefined && last >= 0x80) {
-    n -= 1n << BigInt(8 * bytes.length);
-  }
-  return n;
 }
 
 /**
@@ -52,13 +43,13 @@ function decodeValue(param: DeviceParameter): string {
   const hexs = hexBytes(value);
 
   if (name.startsWith('INTEGER')) {
-    return `${fromLittleEndian(value, true)}  (0x ${hexs})`;
+    return `${integerFromBytes(value, { signed: true })}  (0x ${hexs})`;
   }
   if (
     ['UNSIGNED', 'BIT', 'ENUM'].some((prefix) => name.startsWith(prefix)) ||
     ['BYTE', 'WORD', 'DWORD'].includes(name)
   ) {
-    return `${fromLittleEndian(value, false)}  (0x ${hexs})`;
+    return `${integerFromBytes(value)}  (0x ${hexs})`;
   }
   if (name === 'OCTET_STRING') {
     let end = value.length;

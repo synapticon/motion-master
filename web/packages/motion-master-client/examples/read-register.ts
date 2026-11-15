@@ -10,7 +10,12 @@
 //     pnpm example examples/read-register.ts
 //     pnpm example examples/read-register.ts --address 0x0130 --length 2 --slave 2
 
-import { formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import {
+  formatHex,
+  integerFromBytes,
+  MotionMasterClient,
+  run,
+} from '@synapticon/motion-master-client';
 import { Option } from 'commander';
 import { cli, integer } from './options';
 
@@ -35,8 +40,7 @@ async function main(): Promise<void> {
   const bytes = data.map((b) => b.toString(16).padStart(2, '0')).join(' ');
   let line = `slave ${slave} ${formatHex(address)}: ${bytes}`;
   if (data.length <= 8) {
-    // A bigint, because 8 bytes do not fit into the 53 bits of a number.
-    const value = data.reduceRight((v, b) => (v << 8n) | BigInt(b), 0n);
+    const value = integerFromBytes(data);
     line += ` = ${value} (0x${value.toString(16)})`;
   }
   console.log(line);

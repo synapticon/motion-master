@@ -50,6 +50,10 @@ the HTTP/WebSocket API may break between any two alphas.
 - The Python client's `error_line()` and `run()` also give one line for a `CaptureError` and a
   `ProcessDataDumpError`.
 
+- The TypeScript client turns bytes into an integer of any length with
+  `integerFromBytes(bytes, { byteOrder, signed })`, the twin of Python's `int.from_bytes`. It reads
+  little-endian when no byte order is given, because EtherCAT is little-endian.
+
 ### Changed
 
 - The TypeScript client's `readProcessDataMark()` is `processDataMark()`, and `fetchProcessDataDump()`

@@ -113,6 +113,7 @@ An example imports the package by its name, as a program that installed it from 
 | `dump-process-data.ts` | Saves the recorder of the server as a `.mmpd` file in `files/`. |
 | `export-eni.ts` | Saves the bus as an ENI (EtherCAT Network Information) file in `files/`, for another EtherCAT master. |
 | `capture.ts` | Records the EtherCAT frames on the bus adapter for `--seconds` and prints the summary of late frames. Linux and macOS servers only. |
+| `stream-monitoring.ts` | Creates a monitoring of four objects and prints each batch of rows as it arrives, until Ctrl-C or `--count` batches. Deletes the monitoring at the end. |
 | `notifications.ts` | Prints the notifications of the server until Ctrl-C, or `--count` of them. It opens no fieldbus driver. |
 | `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`, prints it as a table, and saves every cycle as CSV in `files/`. **The motor turns.** |
 

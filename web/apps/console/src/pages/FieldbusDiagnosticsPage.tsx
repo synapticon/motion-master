@@ -6,7 +6,7 @@ import type {
   PortDiagnostics,
 } from '@synapticon/motion-master-client';
 import FilePickerButton from '../components/FilePickerButton';
-import { encodeUserCachePath, userCacheUrl } from '../utils/userCache';
+import { userCacheUrl } from '../utils/userCache';
 import PageHeader from '../components/PageHeader';
 import DiagnosticsExplainer from '../components/DiagnosticsExplainer';
 import SlavePositionBadge from '../components/SlavePositionBadge';
@@ -609,11 +609,7 @@ function CaptureSection() {
             <SummaryTable summary={result.summary} />
             <p className="text-xs text-grey-600">
               File: <span className="font-mono">{result.path}</span>{' '}
-              <a
-                className="underline"
-                href={userCacheUrl(api.baseUrl, encodeUserCachePath(result.path))}
-                download
-              >
+              <a className="underline" href={userCacheUrl(api.baseUrl, result.path)} download>
                 Download
               </a>
             </p>

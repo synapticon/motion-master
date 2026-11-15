@@ -3,6 +3,7 @@ import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import {
+  apiErrorMessage,
   formatHex,
   type DeviceParameter,
   type PdoMapping,
@@ -130,19 +131,6 @@ function moveAt<T>(a: T[], i: number, delta: number): T[] {
   const c = a.slice();
   [c[i], c[j]] = [c[j], c[i]];
   return c;
-}
-
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error;
-    if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error);
-    }
-    if (typeof inner === 'string') {
-      return inner;
-    }
-  }
-  return 'Unknown error';
 }
 
 interface EntryRowProps {
@@ -478,7 +466,7 @@ export default function DevicePdoMappingPage() {
       setSaved(true);
     },
     onError: (e) => {
-      setWriteError(apiError(e));
+      setWriteError(apiErrorMessage(e));
       setSaved(false);
     },
   });
@@ -514,8 +502,8 @@ export default function DevicePdoMappingPage() {
 
           {query.isError && (
             <Callout variant="error">
-              Could not read the current mapping: {apiError(query.error)}. The device's mailbox must
-              be active (PREOP or higher).
+              Could not read the current mapping: {apiErrorMessage(query.error)}. The device's
+              mailbox must be active (PREOP or higher).
             </Callout>
           )}
 

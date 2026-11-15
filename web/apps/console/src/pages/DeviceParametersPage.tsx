@@ -10,6 +10,8 @@ import HexDecInput from '../components/HexDecInput';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import {
+  apiErrorMessage,
+  HttpError,
   type Api,
   type DeviceParameter,
   SDO_TYPES,
@@ -29,30 +31,6 @@ const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 const btnGhostCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
-
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error;
-      // Structured driver error: { error: { error: "message" } }
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error);
-      }
-      if (typeof inner === 'string') {
-        return inner;
-      }
-    }
-    // Non-OK response with no JSON error body (e.g. an unmatched route → 404).
-    // Surface the HTTP status so the cause is diagnosable instead of opaque.
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      const { status } = err as { status: number };
-      const statusText =
-        'statusText' in err ? String((err as { statusText: unknown }).statusText) : '';
-      return `HTTP ${status}${statusText ? ` ${statusText}` : ''}`;
-    }
-  }
-  return 'Unknown error';
-}
 
 function parseHexOrDec(s: string): number | null {
   const t = s.trim();
@@ -317,10 +295,10 @@ const ReadSdoCard = memo(function ReadSdoCard({
       // A failed transaction still consumed wire time (an SDO read waits out the mailbox timeout);
       // the backend attaches X-Wire-Us to the error too, so show the same timing as on success.
       setReadSdoElapsedMs(performance.now() - start);
-      if (err instanceof Response) {
-        setReadSdoWireMs(wireTimeMs(err));
+      if (err instanceof HttpError) {
+        setReadSdoWireMs(wireTimeMs(err.response));
       }
-      setError(apiError(err));
+      setError(apiErrorMessage(err));
     } finally {
       setUploading(false);
     }
@@ -454,10 +432,10 @@ const WriteSdoCard = memo(function WriteSdoCard({
     } catch (err) {
       // Show the wire time on failure too — the backend attaches X-Wire-Us to the error.
       setWriteSdoElapsedMs(performance.now() - start);
-      if (err instanceof Response) {
-        setWriteSdoWireMs(wireTimeMs(err));
+      if (err instanceof HttpError) {
+        setWriteSdoWireMs(wireTimeMs(err.response));
       }
-      setDlError(apiError(err));
+      setDlError(apiErrorMessage(err));
     } finally {
       setDownloading(false);
     }
@@ -690,7 +668,7 @@ export default function DeviceParametersPage() {
       });
       clearEdit(key);
     } catch (err) {
-      setRowMsg({ key, message: apiError(err), kind: 'error' });
+      setRowMsg({ key, message: apiErrorMessage(err), kind: 'error' });
     } finally {
       setRefreshingKeys((prev) => {
         const next = new Set(prev);
@@ -758,7 +736,7 @@ export default function DeviceParametersPage() {
         });
       }
     } catch (err) {
-      setRowMsg({ key, message: apiError(err), kind: 'error' });
+      setRowMsg({ key, message: apiErrorMessage(err), kind: 'error' });
     } finally {
       setSettingKeys((prev) => {
         const next = new Set(prev);
@@ -770,9 +748,9 @@ export default function DeviceParametersPage() {
 
   const params: DeviceParameter[] = paramsQuery.data?.data ?? [];
   const listError = initMutation.error
-    ? apiError(initMutation.error)
+    ? apiErrorMessage(initMutation.error)
     : readAllMutation.error
-      ? apiError(readAllMutation.error)
+      ? apiErrorMessage(readAllMutation.error)
       : null;
   const listBusy = initMutation.isPending || readAllMutation.isPending || paramsQuery.isFetching;
 

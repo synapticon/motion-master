@@ -13,21 +13,19 @@ not reach --state.
     python restart-devices.py --state preop --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
-
-STATES = {s.name.lower(): s for s in AlState if s}
+from options import AL_STATES, integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--state", choices=STATES, default="op")
-    ap.add_argument("--slave", type=int, help="one device position (default: every device)")
+    ap = parser(__doc__)
+    ap.add_argument("--state", choices=AL_STATES, default="op", help="the AL state to restart to")
+    ap.add_argument("--slave", type=integer, help="one device position (default: every device)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -35,12 +33,12 @@ def main():
     client.init()
     client.ensure_scanned()
 
-    body = {"target": STATES[args.state]}
+    body = {"target": AL_STATES[args.state]}
     if args.slave:
         body["positions"] = [args.slave]
     result = client.call("restartDevices", body=body).json()
     for d in result["devices"]:
-        mark = "" if d["reached"] else f"  not reached, alStatusCode 0x{d['alStatusCode']:04x}"
+        mark = "" if d["reached"] else f"  not reached, alStatusCode 0x{d['alStatusCode']:04X}"
         print(f"  {d['slavePosition']:3d}  {AlState(d['alState']).name}{mark}")
     if not result["ok"]:
         sys.exit(f"the restart stopped at {AlState(result['step']).name}")

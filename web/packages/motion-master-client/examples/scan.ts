@@ -1,0 +1,33 @@
+// Scan the bus and list the devices it finds (POST /api/scan).
+//
+// Opens the fieldbus driver from config.jsonc first when none is open. A scan leaves every device in
+// INIT. An empty bus is a successful scan that finds no devices, not an error.
+//
+//     pnpm example examples/scan.ts
+
+import { alStateName, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli } from './options';
+
+async function main(): Promise<void> {
+  cli().description('Scan the bus and list the devices it finds (POST /api/scan).').parse();
+
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+
+  const found = await client.scan();
+  if (found > 0) {
+    const states = new Map(
+      (await client.api.getDeviceStates()).data.map((d) => [d.slavePosition, d]),
+    );
+    for (const d of await client.devices()) {
+      const state = alStateName(states.get(d.slavePosition)?.alState ?? 0);
+      console.log(
+        `  ${String(d.slavePosition).padStart(3)}  ${d.productName.padEnd(30)}  ` +
+          `serial ${String(d.serialNumber).padEnd(12)}  ` +
+          `revision ${formatHex(d.revisionNumber, 8)}  ${state}`,
+      );
+    }
+  }
+}
+
+await run(main);

@@ -18,7 +18,6 @@ SAFEOP or OP stays there.
         --amplitude 50 --time 5000
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
@@ -27,27 +26,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
     AlState,
     MotionMasterClient,
-    ProcedureError,
-    format_step,
     run,
-    step_changes,
 )
+from options import integer, parser  # noqa: E402
+from procedures import run_to_end  # noqa: E402
 
 PROCEDURE = "system-identification"
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--start-frequency", type=int, required=True, help="sweep start, mHz")
-    ap.add_argument("--target-frequency", type=int, required=True, help="sweep end, mHz")
+    ap = parser(__doc__)
     ap.add_argument(
-        "--amplitude", type=int, required=True, help="peak torque, per mille of rated torque"
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
     )
-    ap.add_argument("--time", type=int, required=True, help="sweep duration, ms")
-    ap.add_argument("--signal", choices=["logarithmic", "linear"], default="logarithmic")
+    ap.add_argument("--start-frequency", type=integer, required=True, help="sweep start, mHz")
+    ap.add_argument("--target-frequency", type=integer, required=True, help="sweep end, mHz")
     ap.add_argument(
-        "--start", choices=["none", "immediately", "after-hrd-stream-start"], default="none"
+        "--amplitude", type=integer, required=True, help="peak torque, per mille of rated torque"
+    )
+    ap.add_argument("--time", type=integer, required=True, help="sweep duration, ms")
+    ap.add_argument(
+        "--signal",
+        choices=["logarithmic", "linear"],
+        default="logarithmic",
+        help="the shape of the sweep",
+    )
+    ap.add_argument(
+        "--start",
+        choices=["none", "immediately", "after-hrd-stream-start"],
+        default="none",
+        help="when the chirp starts",
     )
     args = ap.parse_args()
     body = {
@@ -64,26 +72,7 @@ def main():
     client.init()
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
-    snapshot = None
-    changes = step_changes(client.run_procedure(args.slave, PROCEDURE, body))
-    try:
-        for snapshot, changed in changes:
-            for step in changed:
-                print(format_step(step))
-    except ProcedureError as e:
-        sys.exit(str(e))
-    except KeyboardInterrupt:
-        print("\ncancelled")
-        sys.exit(1)
-    finally:
-        # Closing the generator cancels a run that is still in progress.
-        changes.close()
-
-    if snapshot.get("error"):
-        print(f"error: {snapshot['error']}")
-    print(f"{PROCEDURE} {snapshot['status']}")
-    if snapshot["status"] != "succeeded":
-        sys.exit(1)
+    run_to_end(client, args.slave, PROCEDURE, body)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,8 @@
 //
 // The generated client types `GET /api/eni` as a `File`, which is what swagger-typescript-api makes
 // of a binary response. An ENI is text, and what a caller wants is the document plus the warning
-// count that came with it, so this wraps the call.
+// count that came with it, so `MotionMasterClient.exportEni` reads the body as text and the count
+// from the `X-Eni-Warnings` header.
 
 /** The result of an ENI export: the document, and how many parts the server could not read. */
 export interface EniExport {
@@ -14,41 +15,6 @@ export interface EniExport {
    * The server logs what each one was.
    */
   warnings: number;
-}
-
-/**
- * Exports the bus as an ENI document (`GET /api/eni`). `baseUrl` is the HTTP API origin (e.g.
- * `https://host:61447`). Throws on a non-OK response, with the response body's `error` message
- * when there is one — a bus that has not reached SAFEOP or OP answers 409, because before that
- * there is no mapping to describe. Pass `fetch` to inject an implementation (Node, request
- * logging).
- */
-export async function fetchEni(
-  baseUrl: string,
-  options: { fetch?: typeof fetch; signal?: AbortSignal } = {},
-): Promise<EniExport> {
-  const doFetch = options.fetch ?? fetch;
-  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/eni`, {
-    headers: { Accept: 'application/xml' },
-    signal: options.signal,
-  });
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) {
-        message = body.error;
-      }
-    } catch {
-      // Non-JSON error body — keep the status message.
-    }
-    throw new Error(message);
-  }
-  const warnings = Number.parseInt(res.headers.get('X-Eni-Warnings') ?? '0', 10);
-  return {
-    xml: await res.text(),
-    warnings: Number.isFinite(warnings) ? warnings : 0,
-  };
 }
 
 // --- Parsed documents -------------------------------------------------------------------------
@@ -254,36 +220,4 @@ export interface EniParseResult {
   /** One line per element seen and not modelled, or per value that would not decode. */
   warnings: string[];
   summary: { devices: number; datagrams: number; coeTransfers: number };
-}
-
-/**
- * Parses an ENI document (`POST /api/eni/parse`). `baseUrl` is the HTTP API origin. The document
- * need not have come from this server — reading one another tool wrote is the point. Throws on a
- * non-OK response, with the server's `error` message when there is one.
- */
-export async function parseEni(
-  baseUrl: string,
-  xml: string,
-  options: { fetch?: typeof fetch; signal?: AbortSignal } = {},
-): Promise<EniParseResult> {
-  const doFetch = options.fetch ?? fetch;
-  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/eni/parse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/xml' },
-    body: xml,
-    signal: options.signal,
-  });
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) {
-        message = body.error;
-      }
-    } catch {
-      // Non-JSON error body — keep the status message.
-    }
-    throw new Error(message);
-  }
-  return (await res.json()) as EniParseResult;
 }

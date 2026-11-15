@@ -24,6 +24,10 @@
   "scripts": {
     "generate": "swagger-typescript-api generate -p ../../../apps/motion_master/swagger.yml -o ./src/generated -n api.ts --modular",
     "build": "tsc -p tsconfig.build.json && node scripts/fix-esm-imports.mjs",
+    "example": "tsx --tsconfig examples/tsconfig.json",
+    "typecheck:examples": "tsc -p examples/tsconfig.json",
+    "test": "vitest run",
+    "typecheck:tests": "tsc -p tests/tsconfig.json",
     "prepublishOnly": "pnpm run generate && pnpm run build"
   },
   "publishConfig": {
@@ -39,7 +43,15 @@
     }
   },
   "devDependencies": {
+    "@types/debug": "4.1.13",
+    "@types/node": "^22.20.5",
+    "commander": "15.0.0",
     "swagger-typescript-api": "^13.7.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "debug": "4.4.3",
+    "jsonc-parser": "3.3.1"
   }
 }

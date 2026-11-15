@@ -13,7 +13,7 @@ In CSV the drive takes the target velocity of every cycle as it is, with no prof
 own, so the target steps from 0 to --velocity and back. The velocity is in the units of 0x60FF.
 
 client.monitoring() records every cycle while the with block runs, also the cycles between two
-flushes: an object in the process data gives one value per cycle. After the move, the Monitoring
+flushes: an object in the process data gives one value per cycle. After the move, the recording
 shows its rows: m.print_table() prints one row every --every ms, with the CiA402 state beside the
 statusword, and m.write_csv() writes every row to a CSV file. Both name a column after the device
 position and the object, such as 1:VELOCITY_ACTUAL_VALUE. The script also prints how fast the
@@ -27,15 +27,14 @@ drop in it is not a restart of the drive. Use the row timestamp for the time of 
     python monitoring.py --slave 2 --velocity 500 --seconds 3 --output /tmp/move.csv
 """
 
-import argparse
 import contextlib
 import logging
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from files import FILES_DIR, file_stamp  # noqa: E402
 from motion_master_client import (  # noqa: E402
     AlState,
     Cia402,
@@ -44,8 +43,7 @@ from motion_master_client import (  # noqa: E402
     Somanet,
     run,
 )
-
-FILES_DIR = Path(__file__).resolve().parent.parent / "files"
+from options import integer, parser  # noqa: E402
 
 # The monitored objects, in the order of the columns.
 OBJECTS = [
@@ -63,11 +61,15 @@ AFTER_STOP_SECONDS = 1.0
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--velocity", type=int, default=250, help="target velocity, units of 0x60FF")
-    ap.add_argument("--seconds", type=float, default=2.0, help="how long to hold the velocity")
-    ap.add_argument("--every", type=int, default=100, help="print one line every N ms")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument(
+        "--velocity", type=integer, default=250, help="target velocity, units of 0x60FF"
+    )
+    ap.add_argument("--seconds", type=float, default=2, help="how long to hold the velocity")
+    ap.add_argument("--every", type=integer, default=100, help="print one line every N ms")
     ap.add_argument("--output", help="CSV file (default: files/monitoring-<time>.csv)")
     args = ap.parse_args()
 
@@ -83,11 +85,14 @@ def main():
             # A target left from an earlier run would turn the motor at the enable.
             client.set_target(args.slave, "velocity", 0)
             client.enable(args.slave)
-            print(f"turning at {args.velocity} for {args.seconds} s")
+            print(f"turning at {args.velocity} for {args.seconds:g} s")
             client.set_target(args.slave, "velocity", args.velocity)
             time.sleep(args.seconds)
             client.set_target(args.slave, "velocity", 0)
             time.sleep(AFTER_STOP_SECONDS)
+    except KeyboardInterrupt:
+        print("cancelled", file=sys.stderr)
+        sys.exit(1)
     finally:
         # Never leave the drive enabled, also when a step above failed or Ctrl-C stopped it.
         with contextlib.suppress(Exception):
@@ -103,7 +108,7 @@ def main():
     if args.output:
         out = Path(args.output)
     else:
-        out = FILES_DIR / f"monitoring-{datetime.now():%Y%m%d-%H%M%S}.csv"
+        out = FILES_DIR / f"monitoring-{file_stamp()}.csv"
     m.write_csv(out)
     print(f"saved {len(m.rows)} row(s) -> {out}")
 
@@ -116,14 +121,21 @@ def print_summary(m, slave, velocity):
         return
     t_off = m.first(slave, Cia402.TARGET_VELOCITY, lambda v: v != velocity, after=t_target)
     held = m.values(slave, Cia402.VELOCITY_ACTUAL_VALUE, start=t_target, end=t_off)
+    # A value is None while the device does not exchange process data.
+    held = [v for v in held if v is not None]
     # The second half of the hold, where the step response has settled.
     settled = held[len(held) // 2 :]
     if not settled:
         print("no velocity was recorded while the target was held")
         return
     mean = sum(settled) / len(settled)
+    # Measured in the direction of the target, so that a negative velocity works too.
+    direction = 1 if velocity >= 0 else -1
     t_reached = m.first(
-        slave, Cia402.VELOCITY_ACTUAL_VALUE, lambda v: v >= velocity * 0.95, after=t_target
+        slave,
+        Cia402.VELOCITY_ACTUAL_VALUE,
+        lambda v: v is not None and v * direction >= abs(velocity) * 0.95,
+        after=t_target,
     )
     reached = f"{(t_reached - t_target) / 1000:.0f} ms" if t_reached is not None else "never"
     print(

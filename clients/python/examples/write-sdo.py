@@ -12,39 +12,38 @@ mailbox is live from PREOP up. A device in SAFEOP or OP stays there.
     python write-sdo.py --index 0x607a --subindex 0 --data 0x10,0x27,0,0 --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
-
-
-def auto_int(text):
-    """Parse a decimal or 0x-prefixed hex integer."""
-    return int(text, 0)
+from motion_master_client import AlState, MotionMasterClient, object_address_text, run  # noqa: E402
+from options import byte_list, integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--index", type=auto_int, required=True)
-    ap.add_argument("--subindex", type=auto_int, required=True)
-    ap.add_argument("--data", required=True, help="bytes separated by commas, such as 0x10,0x27")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument("--index", type=integer, required=True, help="the index of the object")
+    ap.add_argument("--subindex", type=integer, required=True, help="the subindex of the object")
+    ap.add_argument(
+        "--data",
+        type=byte_list,
+        required=True,
+        help="bytes separated by commas, such as 0x10,0x27",
+    )
     args = ap.parse_args()
-    data = [int(b, 0) for b in args.data.split(",")]
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
-    path = {"slavePosition": args.slave, "index": args.index, "subindex": args.subindex}
-    r = client.call("sdoDownload", path=path, body={"data": data}, check=False)
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
-    print(f"slave {args.slave} 0x{args.index:04x}:{args.subindex:02x} <- {bytes(data).hex(' ')}")
+    client.write_sdo(args.slave, args.index, args.subindex, args.data)
+    address = object_address_text(args.index, args.subindex)
+    print(f"slave {args.slave} {address} <- {bytes(args.data).hex(' ').upper()}")
 
 
 if __name__ == "__main__":

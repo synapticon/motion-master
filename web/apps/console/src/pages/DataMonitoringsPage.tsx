@@ -13,6 +13,7 @@ import { useConnection } from '../contexts/ConnectionContext';
 import { type SampleRows, useMonitoringSocket } from '../contexts/MonitoringSocketContext';
 import { type CycleStats, cycleStats } from '../utils/cycleStats';
 import { downloadText } from '../utils/download';
+import { apiErrorMessage } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
@@ -20,25 +21,6 @@ const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 const btnGhostCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
-
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error;
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error);
-      }
-      if (typeof inner === 'string') {
-        return inner;
-      }
-    }
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      const { status } = err as { status: number };
-      return `HTTP ${status}`;
-    }
-  }
-  return 'Unknown error';
-}
 
 function parseHexOrDec(s: string): number | null {
   const t = s.trim();
@@ -528,7 +510,7 @@ function CreateMonitoringForm({
       setOpen(false);
       onCreated();
     },
-    onError: (err) => setError(apiError(err)),
+    onError: (err) => setError(apiErrorMessage(err)),
   });
 
   function setRow(i: number, patch: Partial<ParamRowState>) {

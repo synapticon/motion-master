@@ -21,8 +21,9 @@ The recording below shows a first run from a clone. The steps are in [Setup](#se
 
 ## Install with pip
 
-Python 3.11 or newer is necessary, because the client reads the config with the standard library
-module `tomllib`.
+Python 3.12 or newer is necessary. Debian 12 and the Raspberry Pi OS based on it have Python 3.11
+as their system Python. There, install a newer Python beside it, for example with
+`uv python install 3.12`.
 
 ```bash
 pip install motion-master-client
@@ -56,8 +57,8 @@ run(main)
 
 ## Setup
 
-Python 3.11 or newer is necessary, because the client reads the config with the standard library
-module `tomllib`.
+Python 3.12 or newer is necessary. [Install with pip](#install-with-pip) says what to do on Debian
+12.
 
 ```bash
 git clone https://github.com/synapticon/motion-master.git
@@ -95,7 +96,12 @@ the drives are connected to. Give an interface name, such as `eth0`, or a MAC ad
 Any script can run first, because it brings the server to the state it needs. A script that
 needs a bus opens the fieldbus driver from `config.toml` when no driver is open. It scans when no
 devices are known. A script that addresses one device takes `--slave`, the position of the device
-on the bus. The default is 1. Each script prints its options with `--help`.
+on the bus. The default is 1. Each script prints what it does and its options with `--help`.
+
+Three modules in `examples/` hold what the scripts share, and are no scripts of their own:
+`options.py` (the command line), `procedures.py` (`run_to_end`, which runs a procedure to its end
+and cancels it on Ctrl-C) and `files.py` (the `files/` folder that the scripts save into). The
+TypeScript client has the same three, with the same functions.
 
 ```bash
 python examples/scan.py
@@ -103,7 +109,7 @@ python examples/transition-state.py --state op
 python examples/read-sdo.py --index 0x6064 --subindex 0
 python examples/read-file.py --filename .hardware_description
 python examples/read-all-parameters.py --slave 2
-python examples/monitor.py --count 10
+python examples/stream-monitoring.py --count 10
 python examples/reset.py
 ```
 
@@ -176,7 +182,7 @@ Three values in that column are not states:
 | --- | --- | --- |
 | `read-pdo-mapping.py` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PREOP |
 | `write-pdo-mapping.py` | Writes the PDO mapping from a JSON file. It moves the device to PREOP for the write, and back to SAFEOP or OP. | PREOP for the write |
-| `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
+| `stream-monitoring.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
 | `monitoring.py` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`: 250 for 2 s, then 0. Prints the target, the actual velocity and the CiA402 state, and saves every cycle as a CSV file in `files/`. **The motor turns.** | OP |
 | `dump-process-data.py` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFEOP |
 
@@ -184,7 +190,7 @@ Three values in that column are not states:
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `cia402-state.py` | Prints the CiA 402 state of the drive with its actual and target values. | PREOP |
+| `cia402-state.py` | Prints the CiA402 state of the drive with its actual and target values. | PREOP |
 | `set-target.py` | Sets the position, velocity or torque target. **An enabled drive moves to it at once.** | PREOP |
 | `release-brake.py` | Releases the brake of a SOMANET drive. It releases only while the drive is in Operation Enabled, and stays released. | PREOP |
 | `engage-brake.py` | Engages the brake of a SOMANET drive. | PREOP |
@@ -227,7 +233,13 @@ client.call("init", body={"driver": "soem", "adapter": "eth0"})
 client.call("sdoUpload", path={"slavePosition": 1, "index": 0x6041, "subindex": 0})
 ```
 
-The steps that most scripts begin with are methods on the client:
+## Helpers
+
+The client has helpers for the steps that most scripts begin with. They have the same names and the
+same behaviour as the helpers of the TypeScript client, in `snake_case`. A required argument is
+positional. An optional one is a keyword argument, with the same name as in TypeScript, in
+`snake_case`.
+`clients/PARITY.md` lists both sets.
 
 ```python
 client = MotionMasterClient.from_config()     # reads config.toml
@@ -235,53 +247,99 @@ client.init()                                 # opens the driver, or accepts the
 client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then moves device 1 up
 ```
 
-`ensure_scanned()` scans when needed and moves no device. `init()`, `ensure_scanned()` and
-`ensure_state()` log through the `motion_master_client` logger. Turn on logging at INFO to see
-each step.
-
-Other methods:
-
-- `reset()` closes the fieldbus driver and forgets every device. It commands no AL state.
+- `init(fieldbus=None)` opens the fieldbus driver, unless one is open already. Without `fieldbus`,
+  it sends the settings of the client.
+- `reset()` closes the fieldbus driver and forgets every device. The devices stay in their AL state.
 - `scan()` scans the bus every time and returns the number of devices it found.
-- `start_capture(adapter, seconds)` starts a capture of the EtherCAT frames that runs until
-  `stop_capture()`, which returns the path of the pcap file in the user cache and the summary of
-  late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
-- `process_data_mark()` returns the recorder clock of the server, in epoch microseconds.
-  `process_data_dump(from_us, to_us)` returns the `.mmpd` dump of the cycles between two marks as
-  bytes, or of the whole recorder without them. It returns `None` when the server has no cycle to
-  dump, and raises `ProcessDataDumpError` for any other refusal. `mmpd_flags()` of the result has
-  `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after the
-  start.
-- `run_procedure()` runs a procedure to its end.
-- `monitor(topic)` streams the batches of a monitoring from the WebSocket.
-- `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,
-  keeps every row while the block runs, and deletes the monitoring at the end. Then `column()`
-  returns the values of one object with their timestamps, `values()` returns the values in a time
-  window, `first()` returns the time of the first value that meets a condition,
-  `print_table()` prints one row every `every_ms`, with the CiA402 state beside a statusword, and
-  `write_csv(path)` writes every row to a CSV file. Both name a column like `1:STATUSWORD`, as
-  `names` lists them.
-- `notifications()` streams the notifications from the WebSocket.
-- `devices()` returns the scanned devices in bus order, as `GET /api/devices` gives them.
+- `devices()` returns the scanned devices, in bus order.
 - `parameters(position)` returns every parameter of a device, with its value and metadata.
 - `hardware_description(position)` returns the parsed `.hardware_description` of a device.
-- `read_value(position, obj)` reads one object and returns the value that the server decoded with
-  the data type from the object dictionary.
-- `wait_for_value(position, obj, predicate)` reads one object until the predicate is true, and
-  raises `TimeoutError` with the last value when the time runs out.
-- `restart(target, positions)` restarts devices through INIT and walks them up to an AL state. The
-  server does the walk.
-- `set_operation_mode()`, `set_target()`, `enable()`, `disable()` and `quick_stop()` drive the
-  CiA402 state machine and the targets of one drive, by its position.
-- `run(main)` calls `main` and prints an error that a user can correct as one line instead of a
-  traceback. An example is a server that is not running. Set `MM_TRACEBACK=1` to get the
-  traceback.
+- `read_value(position, obj)` reads one object and returns the value that the server decoded.
+  `write_value(position, obj, value)` writes one, converted by the server to its data type, and
+  returns the value read back.
+- `read_sdo(position, index, subindex)` returns the raw bytes of one object, read with an SDO
+  upload, and `write_sdo(position, index, subindex, data)` writes raw bytes with an SDO download.
+  `int.from_bytes(data, "little")` turns bytes into an integer.
+- `list_files(position)` returns the files on a device, each as `{"name": ..., "byteCount": ...}`.
+  `read_file(position, name, format="bytes")` reads one over FoE as `"bytes"`, `"text"` or
+  `"json"`. `write_file(position, name, content)` writes bytes, or a str as UTF-8, and
+  `remove_file(position, name)` removes a file.
+- `object_name(index, subindex)` returns the generated name of an object, such as `STATUSWORD`, and
+  `object_address_text(index, subindex)` its address, such as `0x6041:00`.
+- `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until
+  the predicate is true. It raises `TimeoutError` with the last value when the time runs out.
+- `ensure_scanned()` scans when the last scan is missing or wrong, and moves no device.
+- `ensure_state(state, positions=None, exact=False)` scans when needed and brings the devices to an
+  AL state. A device above that state stays where it is, unless `exact` is true.
+- `restart(target, positions=None)` restarts devices through INIT and walks them up to an AL state.
+- `set_operation_mode(position, mode)` writes the CiA402 operation mode, such as
+  `OperationMode.CYCLIC_SYNC_VELOCITY`, and returns when the drive shows it.
+- `set_target(position, kind, value)` writes the `"position"`, `"velocity"` or `"torque"` target, in
+  the units of its object.
+- `enable(position)` brings a drive to Operation Enabled. The device must exchange process data.
+- `disable(position)` brings a drive to Switch On Disabled.
+- `quick_stop(position)` sends a quick stop. The drive stops on its quick stop ramp.
+- `run_procedure(position, name, params=None, poll_interval_ms=500)` starts a procedure and yields
+  its snapshot at every poll until the run ends. Leaving the loop early cancels the run. It raises
+  `ProcedureError` when the server refuses the start.
+- `process_data_mark()` returns the recorder clock of the server, in epoch microseconds.
+  `process_data_dump(from_us=None, to_us=None)` returns the `.mmpd` dump of the cycles between two
+  marks as bytes, or of the whole recorder without them. It returns `None` when the server has no
+  cycle to dump, and raises `ProcessDataDumpError` for any other refusal. `mmpd_flags()` of the
+  result has `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after
+  the start.
+- `export_eni()` returns the bus as an ENI document, `{"xml": ..., "warnings": ...}`.
+  `parse_eni(xml)` reads an ENI document and returns its network with each datagram annotated.
+- `start_capture(adapter=None, seconds=None)` starts a capture of the EtherCAT frames that runs
+  until `stop_capture()`, which returns the path of the pcap file in the user cache and the summary
+  of late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
+- `step_changes(run)` yields each snapshot of a run as `(snapshot, changed)`, where `changed` lists
+  the steps whose status changed. `format_step(step)` turns a step into one line.
+- `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
+  WebSocket.
+- `monitoring(parameters, interval_ms=50, topic=None, name=None)` returns a `MonitoringRecording`
+  for a `with` block. It creates the monitoring, keeps every row while the block runs, and deletes
+  the monitoring at the end. The recording has these methods:
+  - `column()` returns the values of one object with their timestamps.
+  - `values()` returns the values in a time window.
+  - `first()` returns the time of the first value that meets a condition.
+  - `print_table()` prints one row every `every_ms`, with the CiA402 state beside a statusword.
+  - `write_csv(path)` writes every row to a CSV file.
+  - `names` gives the name of each column, such as `1:STATUSWORD`, which `print_table()` and
+    `write_csv()` use. `sources` gives where each value comes from, `pdo` or `sdo`.
+- `notifications()` streams the notifications from the WebSocket.
+
+`monitoring()` raises `MonitoringError` when the server refuses the monitoring, when no row arrives
+within 5000 ms, when the rows of the last flush do not arrive, and when the WebSocket closes during
+the recording. An error of the `with` block wins over them. A close of the WebSocket during
+`stream_monitoring()` or `notifications()` raises `ConnectionError`, because the messages sent
+meanwhile are lost.
+
+```python
+for snapshot, changed in step_changes(client.run_procedure(1, "store-parameters")):
+    for step in changed:
+        print(format_step(step))
+```
+
+`error_line(error)` returns one line for an error a user can act on, such as
+`POST /api/devices/state/transition: HTTP 409, …` or `cannot connect to …`, and `None` for a bug.
+`run(main)` calls `main` and ends the script with that line and exit code 1, while a bug keeps its
+traceback. Set `MM_TRACEBACK=1` to get the traceback for every error.
+
+`ensure_scanned`, `ensure_state` and `restart` raise a `StateError` when a device does not answer or
+does not reach its state. A failed HTTP request raises `requests.HTTPError`, and a server that the
+client cannot reach raises `requests.ConnectionError`.
+
+The helpers log each step they take, such as `found 1 device(s)`, through the
+`motion_master_client` logger. The log is off by default. Turn on logging at INFO to see it.
+
+## Objects and states
 
 The module names objects and states with classes:
 
 - `Profile`, `Cia402` and `Somanet` name every object of a SOMANET device as an address, for example
   `Cia402.STATUSWORD`. `Profile` holds the CiA 301 communication area (0x1xxx) and the standard MDP
-  objects, `Cia402` the CiA 402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area
+  objects, `Cia402` the CiA402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area
   (0x2xxx) and FSoE. An address unpacks to `(index, subindex)`, so `read_value(1, Cia402.STATUSWORD)`
   and the monitoring parameter `(1, *Cia402.STATUSWORD)` name the object the same way. An address
   also carries the type of the value, for a type checker. The names are the same as in the
@@ -322,8 +380,9 @@ when you know which certificate the server presents.
 
 Motion Master serves two endpoints, each on its own event loop. The HTTP API is on `http_port`,
 61447. The WebSocket is on `ws_port`, 62281. That is why `host` in the config has no port.
-`client.call(...)` uses the HTTP API. `client.monitor(topic)` and `client.notifications()` use
-the WebSocket. `monitor.py` and `notifications.py` show the WebSocket.
+`client.call(...)` uses the HTTP API. `client.stream_monitoring(topic)` and
+`client.notifications()` use the WebSocket. `stream-monitoring.py` and `notifications.py` show the
+WebSocket.
 
 ## Why it reads the spec
 
@@ -355,7 +414,7 @@ The cost is one request at startup, and the server must be reachable when the cl
 | --- | --- |
 | `motion_master_client.py` | `MotionMasterClient`, which calls the HTTP API and the WebSocket. See [Calls by operationId](#calls-by-operationid). |
 | `setup.sh` | Creates and activates the virtual environment. See [Setup](#setup). |
-| `motion_master_objects.py` | The generated object addresses. See [Calls by operationId](#calls-by-operationid). |
+| `motion_master_objects.py` | The generated object addresses. See [Objects and states](#objects-and-states). |
 | `requirements.txt` | The Python packages that the client needs. Keep it the same as the dependencies in `pyproject.toml`. |
 | `pyproject.toml` | The package that a release publishes to PyPI. The version is set by `tools/bump-version.sh`. |
 | `LICENSE` | A copy of the GPL v3 licence of the repository, which the package carries. |

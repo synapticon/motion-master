@@ -14,18 +14,20 @@ SAFEOP or OP stays there. A device in BOOT goes through INIT to PREOP.
     python write-file.py --file files/config.csv --filename config.csv --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--file", required=True, help="the local file to write")
     ap.add_argument("--filename", help="the name on the device (default: the local name)")
     args = ap.parse_args()
@@ -39,15 +41,7 @@ def main():
     client.init()
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
-    r = client.call(
-        "foeWriteFile",
-        path={"slavePosition": args.slave, "filename": filename},
-        data=content,
-        headers={"Content-Type": "application/octet-stream"},
-        check=False,
-    )
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
+    client.write_file(args.slave, filename, content)
     print(f"wrote {len(content)} byte(s) from {local} -> slave {args.slave}:{filename}")
 
 

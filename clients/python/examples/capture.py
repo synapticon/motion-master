@@ -13,7 +13,6 @@ open driver. It scans nothing and moves no device.
     python capture.py --seconds 30
 """
 
-import argparse
 import json
 import logging
 import sys
@@ -21,11 +20,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--seconds", type=int, default=10, help="capture length, 1 to 300")
+    ap = parser(__doc__)
+    ap.add_argument("--seconds", type=integer, default=10, help="capture length, 1 to 300")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")

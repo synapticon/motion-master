@@ -6,6 +6,7 @@ import Callout from '../components/Callout';
 import GameLoopExplainer from '../components/GameLoopExplainer';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
+import { apiErrorMessage } from '@synapticon/motion-master-client';
 
 // One shared control height (h-[38px]) for the input and its Apply button so they line up — the
 // same explicit-px approach the Motion page uses (this theme's spacing scale is geometric, so a
@@ -15,25 +16,6 @@ const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-32 font-mono bg
 const btnCls =
   'inline-flex items-center justify-center bg-syn-red text-white px-4 h-[38px] text-xs ' +
   'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
-
-// Flatten the client's nested {error:{error}} / {status} shape into a single message.
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error;
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error);
-      }
-      if (typeof inner === 'string') {
-        return inner;
-      }
-    }
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      return `HTTP ${(err as { status: number }).status}`;
-    }
-  }
-  return 'Unknown error';
-}
 
 // Poll cadence. The endpoint reports cumulative averages plus raw counters + a server timestamp, so
 // we diff successive polls to derive the *instantaneous* rate the loop is achieving right now. One
@@ -147,7 +129,7 @@ export default function ServerGameLoopPage() {
         setInstant(null);
         void query.refetch();
       },
-      onError: (err) => setPeriodError(apiError(err)),
+      onError: (err) => setPeriodError(apiErrorMessage(err)),
     });
   }
 

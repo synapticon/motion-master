@@ -1125,6 +1125,36 @@ of the union is the same text merged with itself. The generator warns when two d
 different types for one address and keeps the first. What it cannot see is one index reused for
 a different quantity of the same type. If that appears, the family needs a header per device.
 
+## Client Parity
+
+**The Python client and the TypeScript client offer the same helpers.** A helper has the same name
+in both, word by word: `snake_case` in Python, `camelCase` in TypeScript, so `wait_for_value` is
+`waitForValue`. It takes the same arguments in the same order and returns the same shape. Each
+language keeps its own idiom: generators and `with` blocks in Python, `AsyncIterable` and promises
+in TypeScript.
+
+Three rules turn a Python signature into a TypeScript one:
+
+- A required argument is positional in both clients.
+- An optional argument is a keyword argument in Python and a field of a trailing options object in
+  TypeScript, with the same name. A TypeScript helper that waits also takes `signal`.
+- A time carries its unit in its name, in milliseconds unless the API uses another unit:
+  `timeout_ms` is `timeoutMs`.
+
+**`clients/PARITY.md` is the table, and `tools/check-client-parity.mjs` enforces it.** The check
+reads the public names of both clients and fails `client-package.yml` when one is not in the table.
+A change that adds, renames or removes a helper in one client makes the same change in the other in
+the same commit. A helper that belongs to one language gets a row with the other column empty and
+the reason. A Console function that is not about the UI belongs in the TypeScript client, and then
+under this rule.
+
+**The examples follow the same rule.** Each task has one example program in each client, with the
+same file name, the same options and the same output: `clients/python/examples/scan.py` and
+`web/packages/motion-master-client/examples/scan.ts`. The section Examples of `clients/PARITY.md`
+lists every pair, and the same check reads both folders. An example added, renamed or removed in
+one client changes in the other in the same commit. The Python `production/` scripts are not
+examples and stay out of the table.
+
 ## Dependencies
 
 Managed by vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add one: edit
@@ -1159,6 +1189,21 @@ Tests live in a `tests/` subdirectory beside their library. CTest discovers the 
 ctest --test-dir build/x64-linux-debug -R VersionTest
 ./tools/tsan.sh                       # the concurrency tests under ThreadSanitizer
 ```
+
+The TypeScript client has its tests in `web/packages/motion-master-client/tests/`, run by Vitest
+from the workspace root. MSW (Mock Service Worker) answers in place of the server: it intercepts the
+real `fetch` and `WebSocket`, so the client runs unchanged. A request or a WebSocket connection that
+no handler of the test expects fails the test. `tests/fakes.ts` holds the fake server and the fake
+WebSocket that every test uses.
+
+```bash
+pnpm test                                                      # every TypeScript test
+pnpm --filter @synapticon/motion-master-client typecheck:tests
+```
+
+A new helper of the client gets its tests in the same change. **Vitest is the one test runner for
+TypeScript in this repository**, also for the Console when it gets tests, so that React Testing
+Library and the MSW handlers can be shared.
 
 **`libs/node/tests/concurrency_test.cc` is the only machine check on the locking design.** It drives
 one `DeviceManager` from several threads — one standing in for the RT loop, the others as HTTP

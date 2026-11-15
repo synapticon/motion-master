@@ -28,6 +28,21 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      # A helper added to one client fails here until it is in the other client too, or until
+      # clients/PARITY.md names it as one language's own. The runner image has python3.
+      - name: The two clients match the parity table
+        run: node tools/check-client-parity.mjs
+
+      - name: Typecheck the examples
+        run: pnpm --filter @synapticon/motion-master-client typecheck:examples
+
+      - name: Typecheck the tests
+        run: pnpm --filter @synapticon/motion-master-client typecheck:tests
+
+      # Vitest, with MSW in place of the server, so no Motion Master runs.
+      - name: Run the tests of the client
+        run: pnpm test
+
       - name: Build the client
         run: pnpm run build:client
 
@@ -44,10 +59,10 @@ jobs:
           echo '{ "name": "consumer", "private": true }' > package.json
           npm install --no-audit --no-fund ../synapticon-motion-master-client-*.tgz
           test -f node_modules/@synapticon/motion-master-client/README.md
-          # No server listens on port 9, so the request must fail inside fetch. A TypeError from the
-          # client itself means the client never reached fetch.
+          # No server listens on port 9, so the request must fail inside fetch, and the client must
+          # report that as a ConnectionError. Any other error means the client never reached fetch.
           node --input-type=module -e "
-            import { MotionMasterClient, parseMmpd } from '@synapticon/motion-master-client'
+            import { ConnectionError, MotionMasterClient, parseMmpd } from '@synapticon/motion-master-client'
             const client = new MotionMasterClient({ baseUrl: 'http://127.0.0.1:9' })
             if (typeof client.api.getVersion !== 'function' || typeof parseMmpd !== 'function') {
               throw new Error('the ES module import is incomplete')
@@ -56,7 +71,7 @@ jobs:
               await client.api.getVersion()
               throw new Error('a request to a closed port succeeded')
             } catch (err) {
-              if (!(err instanceof TypeError) || err.message !== 'fetch failed') {
+              if (!(err instanceof ConnectionError) || err.cause?.message !== 'fetch failed') {
                 throw err
               }
             }
@@ -88,15 +103,56 @@ jobs:
             console.log(table.cases.length + ' statuswords decode as the table says')
           "
 
+      # The same recording as the MonitoringRecording step of the Python client example in lint.yml,
+      # with the same expected CSV and table, so that both clients write the same output.
+      - name: MonitoringRecording of the installed package writes and prints its rows as Python does
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          node --input-type=module -e "
+            import { mkdtempSync, readFileSync } from 'node:fs'
+            import { tmpdir } from 'node:os'
+            import { join } from 'node:path'
+            import { MonitoringRecording } from '@synapticon/motion-master-client'
+            const m = new MonitoringRecording('ci', [
+              { devicePosition: 1, index: 0x6041, subindex: 0, source: 'pdo' },
+              { devicePosition: 2, index: 0x9999, subindex: 3, source: 'sdo' },
+            ], [[1000000, 0x0237, 7], [1001000, null, 8]])
+            const path = join(mkdtempSync(join(tmpdir(), 'ci-')), 'sub', 'm.csv')
+            await m.writeCsv(path)
+            const csv = readFileSync(path, 'utf8')
+            const expectedCsv = 'time_s,timestamp_us,1:STATUSWORD,2:0x9999:03\r\n' +
+              '0.000000,1000000,567,7\r\n0.001000,1001000,,8\r\n'
+            if (csv !== expectedCsv) {
+              throw new Error('writeCsv() wrote ' + JSON.stringify(csv))
+            }
+            let out = ''
+            m.printTable({ everyMs: 1, file: { write: (text) => { out += text } } })
+            const table = JSON.stringify(out.trim().split('\n').map((l) => l.trim().split(/ +/)))
+            const expectedTable = JSON.stringify([
+              ['time_s', '1:STATUSWORD', '1:CIA402_STATE', '2:0x9999:03'],
+              ['0.000', '0x0237', 'OperationEnabled', '7'],
+              ['0.001', '-', '-', '8'],
+            ])
+            if (table !== expectedTable) {
+              throw new Error('printTable() printed ' + table)
+            }
+            console.log('writeCsv() and printTable() give the rows as the Python client does')
+          "
+
+  # The oldest Python that pyproject.toml allows, and the newest release.
   python-client-package:
-    name: Python client installs from its wheel
+    name: Python client installs from its wheel (${{ matrix.python }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.x"]
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Build the sdist and the wheel
         working-directory: clients/python

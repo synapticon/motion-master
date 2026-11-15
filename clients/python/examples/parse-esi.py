@@ -12,17 +12,17 @@ The script needs no bus and no fieldbus driver, so it opens none and leaves the 
     python parse-esi.py somanet.xml --output files/esi.json
 """
 
-import argparse
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = parser(__doc__)
     ap.add_argument("esi", help="path to the ESI XML file")
     ap.add_argument("--output", help="save the whole parsed response as JSON to this path")
     args = ap.parse_args()
@@ -41,10 +41,10 @@ def main():
         print(f"saved -> {out}")
 
     vendor = result["vendor"]
-    print(f"{vendor['name']} (vendor 0x{vendor['id']:08x}), ESI version {result['version']}")
+    print(f"{vendor['name']} (vendor 0x{vendor['id']:08X}), ESI version {result['version']}")
     for d in result["devices"]:
         print(
-            f"  {d['name']}: product 0x{d['productCode']:08x}, revision 0x{d['revisionNo']:08x}, "
+            f"  {d['name']}: product 0x{d['productCode']:08X}, revision 0x{d['revisionNo']:08X}, "
             f"{d['objectCount']} object(s) of its own, {len(d['entries'])} entries with its "
             f"modules, {d['rxPdoCount']} RxPDO(s), {d['txPdoCount']} TxPDO(s), "
             f"{len(d['warnings'])} warning(s)"

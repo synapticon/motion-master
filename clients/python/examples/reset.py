@@ -16,9 +16,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import parser  # noqa: E402
 
 
 def main():
+    parser(__doc__).parse_args()
+
     client = MotionMasterClient.from_config()
     client.reset()
     print("reset: the fieldbus driver is closed and the device list is empty")

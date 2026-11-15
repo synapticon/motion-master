@@ -16,7 +16,7 @@ Only needed for the parts you actually touch:
 | For | Needs |
 | --- | --- |
 | The web apps and the TS SDK | Node.js 22+ and pnpm 10+ |
-| The [Python reference client](../README.md#clients), the [bench tests](#bench-tests), and the `jitter_bench` plot script | Python 3.11+ (`matplotlib` for plotting) |
+| The [Python reference client](../README.md#clients), the [bench tests](#bench-tests), and the `jitter_bench` plot script | Python 3.12+ (`matplotlib` for plotting) |
 | Static analysis and formatting | `pip install cpplint cmakelang`, plus `clang-format` and `cppcheck` from your package manager |
 
 ## Building from source

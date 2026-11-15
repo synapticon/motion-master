@@ -149,15 +149,21 @@ jobs:
       - name: Run ESLint
         run: pnpm lint
 
+  # The oldest Python that pyproject.toml allows, and the newest release, so that code works on both
+  # ends: a newer Python reads code that an older one rejects, and the other way round.
   python-client-example:
-    name: Python client example
+    name: Python client example (${{ matrix.python }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.x"]
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install dependencies
         run: pip install -r clients/python/requirements.txt
@@ -182,14 +188,14 @@ jobs:
           print(f"{len(table['cases'])} statuswords decode as the table says")
           PY
 
-      - name: Monitoring writes and prints its rows with named columns
+      - name: MonitoringRecording writes and prints its rows with named columns
         working-directory: clients/python
         run: |
           python - <<'PY'
           import csv, io, pathlib, tempfile
-          from motion_master_client import Monitoring
+          from motion_master_client import MonitoringRecording
 
-          m = Monitoring(None, [], 50, "ci", None)
+          m = MonitoringRecording(None, [], 50, "ci", None)
           m.parameters = [
               {"devicePosition": 1, "index": 0x6041, "subindex": 0, "source": "pdo"},
               {"devicePosition": 2, "index": 0x9999, "subindex": 3, "source": "sdo"},

@@ -13,18 +13,20 @@ SAFEOP or OP stays there. A device in BOOT goes through INIT to PREOP.
     python check-firmware-compatibility.py --filename package_ACTILINK_6000-05-2423-1_motion-drive_v5.6.11.zip
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--filename", required=True, help="the package filename, a path is allowed")
     args = ap.parse_args()
 
@@ -37,12 +39,7 @@ def main():
         "checkDeviceFirmwareCompatibility",
         path={"slavePosition": args.slave},
         query={"filename": Path(args.filename).name},
-        check=False,
     )
-    # A 4xx means that the server could not ask the question, for example because the filename is
-    # not a package name. Its error says why.
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
 
     result = r.json()
     print(f"{'compatible' if result['compatible'] else 'not compatible'}: {result['explanation']}")

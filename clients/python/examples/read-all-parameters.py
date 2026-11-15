@@ -12,13 +12,14 @@ mailbox is live from PREOP up. A device in SAFEOP or OP stays there.
     python read-all-parameters.py --slave 2
 """
 
-import argparse
+import json
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, object_address_text, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def decode_value(param):
@@ -31,11 +32,15 @@ def decode_value(param):
     """
     value = param["value"]
     if not isinstance(value, list):
-        return repr(value)
+        # As the TypeScript example prints it: a string as JSON, "v5.6.11", and a whole float with
+        # no fraction, 0 and not 0.0.
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        return json.dumps(value, ensure_ascii=False)
 
     name = param["dataTypeName"]
     raw = bytes(value)
-    hexs = raw.hex(" ")
+    hexs = raw.hex(" ").upper()
 
     if name.startswith("INTEGER"):
         return f"{int.from_bytes(raw, 'little', signed=True)}  (0x {hexs})"
@@ -43,13 +48,15 @@ def decode_value(param):
         return f"{int.from_bytes(raw, 'little')}  (0x {hexs})"
     if name == "OCTET_STRING":
         text = raw.rstrip(b"\x00 ").decode("ascii", "replace")
-        return f"{text!r}  (0x {hexs})"
+        return f"{json.dumps(text, ensure_ascii=False)}  (0x {hexs})"
     return f"0x {hexs}" if raw else "(empty)"
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -66,7 +73,7 @@ def main():
 
     for p in params:
         print(
-            f"  0x{p['index']:04x}:{p['subindex']:02x}  "
+            f"  {object_address_text(p['index'], p['subindex'])}  "
             f"{p['dataTypeName']:<14}  {decode_value(p):<24}  {p['name']}"
         )
     print(f"{len(params)} parameter(s)")

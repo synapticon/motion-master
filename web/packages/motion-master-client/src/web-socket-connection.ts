@@ -1,6 +1,6 @@
 // Framework-agnostic connection to Motion Master's single WebSocket — the one bidirectional
-// socket that carries server->client monitoring batches, notifications, and (planned) procedure
-// progress, and client->server topic subscribe/unsubscribe. It owns reconnection, multiplexes
+// socket that carries server->client monitoring batches and notifications, and client->server
+// topic subscribe/unsubscribe. It owns reconnection, multiplexes
 // per-topic subscriptions over the one socket (ref-counted: subscribe on the first listener,
 // unsubscribe on the last, re-subscribe everything on reconnect), and routes inbound frames by
 // type. Nothing arrives until something is subscribed: `subscribe(topic, cb)` for one monitoring's
@@ -28,25 +28,21 @@ export interface MonitoringMessage {
   data: MonitoringBatch;
 }
 
+/** The data of a notification. `event` names its kind, such as `short-working-counter`. */
+export interface NotificationData {
+  event: string;
+  [field: string]: unknown;
+}
+
 export interface NotificationMessage {
   type: 'notification';
-  data: unknown;
+  data: NotificationData;
 }
 
-/**
- * Procedure progress — reserved on the server, not yet on the wire. Routed already so callers can
- * register handlers today and start receiving the moment the backend publishes them.
- */
-export interface ProgressMessage {
-  type: 'progress';
-  data: unknown;
-}
-
-export type ServerMessage = MonitoringMessage | NotificationMessage | ProgressMessage;
+export type ServerMessage = MonitoringMessage | NotificationMessage;
 
 type MonitoringListener = (rows: MonitoringBatch) => void;
-type NotificationListener = (data: unknown) => void;
-type ProgressListener = (data: unknown) => void;
+type NotificationListener = (data: NotificationData) => void;
 type StateListener = (state: ReadyState) => void;
 
 /**
@@ -83,15 +79,12 @@ export type WebSocketConstructor = new (url: string, protocolsOrOptions?: unknow
 export interface WebSocketConnectionOptions {
   /** Full WebSocket URL (e.g. `wss://host:62281`). */
   url: string;
-  /**
-   * WebSocket implementation. Defaults to the global `WebSocket` (browsers, Node >= 22). In older
-   * Node, inject the `ws` package's constructor.
-   */
+  /** The WebSocket class. Default: the global `WebSocket` of the browser or of Node.js. */
   WebSocket?: WebSocketConstructor;
   /**
-   * Extra argument forwarded as the constructor's second parameter — e.g.
-   * `{ rejectUnauthorized: false }` for the Node `ws` client against a self-signed dev cert. The
-   * browser global ignores it.
+   * The second argument of the WebSocket constructor, such as `{ rejectUnauthorized: false }` for
+   * the `ws` package. The global `WebSocket` takes no TLS option, and a browser refuses an object
+   * here.
    */
   protocolsOrOptions?: unknown;
   /**
@@ -113,12 +106,14 @@ export class WebSocketConnection {
   private socket: WebSocketLike | null = null;
   private state: ReadyState = 'closed';
   private closedByUser = false;
+  // True once a caller asked for the connection with connect(). A connection that only a listener
+  // opened closes when the last listener leaves, so that a Node.js program can end.
+  private keepOpen = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly topicListeners = new Map<string, Set<MonitoringListener>>();
   private readonly notificationListeners = new Set<NotificationListener>();
-  private readonly progressListeners = new Set<ProgressListener>();
   private readonly stateListeners = new Set<StateListener>();
 
   constructor(options: WebSocketConnectionOptions) {
@@ -134,22 +129,40 @@ export class WebSocketConnection {
   }
 
   /**
-   * Opens the socket if it is not already open or connecting. Idempotent — safe to call from every
-   * subscribe path. Connection is lazy: an HTTP-only consumer that never subscribes never opens a
-   * socket.
+   * Opens the socket and keeps it open after the last listener leaves, until `close()`. Without this
+   * call, a listener opens the socket, and the socket closes again when the last listener leaves.
    */
   connect(): void {
-    if (this.socket || this.state === 'connecting') {
-      return;
-    }
+    this.keepOpen = true;
+    this.open();
+  }
+
+  /**
+   * Throws when no WebSocket class is available: none was passed, and the runtime has no global
+   * `WebSocket`. A caller that is about to create something on the server checks this first.
+   */
+  assertAvailable(): void {
+    this.implementation();
+  }
+
+  private implementation(): WebSocketConstructor {
     const Impl =
       this.WebSocketImpl ?? (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
     if (!Impl) {
       throw new Error(
-        'No WebSocket implementation available. Inject one via the `WebSocket` option (e.g. the ' +
-          '`ws` package on Node < 22).',
+        'no WebSocket class: this runtime has no global WebSocket, so pass one with the ' +
+          '`WebSocket` option, such as the class of the `ws` package',
       );
     }
+    return Impl;
+  }
+
+  /** Opens the socket unless it is open or opening. */
+  private open(): void {
+    if (this.socket || this.state === 'connecting') {
+      return;
+    }
+    const Impl = this.implementation();
     this.closedByUser = false;
     this.setState('connecting');
     let socket: WebSocketLike;
@@ -188,19 +201,12 @@ export class WebSocketConnection {
    */
   close(): void {
     this.closedByUser = true;
+    this.keepOpen = false;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    const socket = this.socket;
-    this.socket = null;
-    if (socket) {
-      socket.onopen = null;
-      socket.onmessage = null;
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.close();
-    }
+    this.detach()?.close();
     this.setState('closed');
   }
 
@@ -210,6 +216,8 @@ export class WebSocketConnection {
    * unsubscribe function.
    */
   subscribe(topic: string, listener: MonitoringListener): () => void {
+    // Throws before any state changes, so a listener is never left behind.
+    this.implementation();
     let listeners = this.topicListeners.get(topic);
     if (!listeners) {
       listeners = new Set();
@@ -217,7 +225,7 @@ export class WebSocketConnection {
       this.send({ subscribe: topic });
     }
     listeners.add(listener);
-    this.connect();
+    this.open();
 
     return () => {
       const current = this.topicListeners.get(topic);
@@ -229,6 +237,7 @@ export class WebSocketConnection {
         this.topicListeners.delete(topic);
         this.send({ unsubscribe: topic });
       }
+      this.closeIfIdle();
     };
   }
 
@@ -239,29 +248,32 @@ export class WebSocketConnection {
    * removal function.
    */
   onNotification(listener: NotificationListener): () => void {
+    // Throws before any state changes, so a listener is never left behind.
+    this.implementation();
     if (this.notificationListeners.size === 0) {
       this.send({ subscribe: NOTIFICATION_TOPIC });
     }
     this.notificationListeners.add(listener);
-    this.connect();
+    this.open();
     return () => {
       this.notificationListeners.delete(listener);
       if (this.notificationListeners.size === 0) {
         this.send({ unsubscribe: NOTIFICATION_TOPIC });
       }
+      this.closeIfIdle();
     };
   }
 
   /**
-   * Registers a listener for procedure progress messages (reserved; fires once the backend ships
-   * them). Connects lazily. Returns a removal function.
+   * Calls `listener` each time the socket closes, with `true` when `close()` closed it. Returns a
+   * removal function.
    */
-  onProgress(listener: ProgressListener): () => void {
-    this.progressListeners.add(listener);
-    this.connect();
-    return () => {
-      this.progressListeners.delete(listener);
-    };
+  onClose(listener: (byUser: boolean) => void): () => void {
+    return this.onStateChange((state) => {
+      if (state === 'closed') {
+        listener(this.closedByUser);
+      }
+    });
   }
 
   /** Observes connection-state changes. Returns a removal function. */
@@ -270,6 +282,35 @@ export class WebSocketConnection {
     return () => {
       this.stateListeners.delete(listener);
     };
+  }
+
+  /**
+   * Closes a socket that only listeners opened once none is left. A later listener opens it again.
+   */
+  private closeIfIdle(): void {
+    const idle = this.topicListeners.size === 0 && this.notificationListeners.size === 0;
+    if (this.keepOpen || !idle) {
+      return;
+    }
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.detach()?.close();
+    this.setState('closed');
+  }
+
+  /** Takes the socket from this connection and removes its handlers. Returns it, or `null`. */
+  private detach(): WebSocketLike | null {
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
+    }
+    return socket;
   }
 
   private setState(state: ReadyState): void {
@@ -290,13 +331,7 @@ export class WebSocketConnection {
   }
 
   private handleDisconnect(): void {
-    if (this.socket) {
-      this.socket.onopen = null;
-      this.socket.onmessage = null;
-      this.socket.onclose = null;
-      this.socket.onerror = null;
-      this.socket = null;
-    }
+    this.detach();
     this.setState('closed');
     if (this.closedByUser || this.reconnectDelayMs <= 0) {
       return;
@@ -308,7 +343,7 @@ export class WebSocketConnection {
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      this.open();
     }, delay);
   }
 
@@ -337,13 +372,11 @@ export class WebSocketConnection {
         }
       }
     } else if (type === 'notification') {
-      const { data } = msg as { data?: unknown };
-      for (const listener of this.notificationListeners) {
-        listener(data);
+      const { data } = msg as { data?: NotificationData };
+      if (typeof data !== 'object' || data === null) {
+        return;
       }
-    } else if (type === 'progress') {
-      const { data } = msg as { data?: unknown };
-      for (const listener of this.progressListeners) {
+      for (const listener of this.notificationListeners) {
         listener(data);
       }
     }

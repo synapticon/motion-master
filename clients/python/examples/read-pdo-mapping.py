@@ -14,19 +14,21 @@ SAFEOP or OP stays there.
     python read-pdo-mapping.py --output files/pdo-mapping.json
 """
 
-import argparse
 import json
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, object_address_text, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--output", help="also save the mapping as JSON to this path")
     args = ap.parse_args()
 
@@ -36,7 +38,7 @@ def main():
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
     mapping = client.call("getDevicePdoMapping", path={"slavePosition": args.slave}).json()
-    parameters = client.call("getDeviceParameters", path={"slavePosition": args.slave}).json()
+    parameters = client.parameters(args.slave)
     names = {(p["index"], p["subindex"]): p["name"] for p in parameters}
 
     if args.output:
@@ -48,12 +50,12 @@ def main():
     for direction in ("outputs", "inputs"):
         print(f"{direction}:")
         for pdo in mapping[direction]:
-            print(f"  0x{pdo['pdoIndex']:04x}")
+            print(f"  0x{pdo['pdoIndex']:04X}")
             for e in pdo["entries"]:
                 name = names.get((e["index"], e["subindex"]), "")
                 print(
                     f"    bit {e['bitOffset']:>4}  {e['bitLength']:>2} bit(s)  "
-                    f"0x{e['index']:04x}:{e['subindex']:02x}  {name}"
+                    f"{object_address_text(e['index'], e['subindex'])}  {name}"
                 )
 
 

@@ -5,6 +5,7 @@ import ControlExplainer from '../components/ControlExplainer';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection, type SpoeMode } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
+import { apiErrorMessage } from '@synapticon/motion-master-client';
 
 // AL state transition targets, in the order the buttons are rendered. BOOT leads
 // (it is the odd one out — file-transfer only) and is styled distinctly; the rest
@@ -63,16 +64,6 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
 // otherwise seconds with one decimal (transitions can run up to the server timeout).
 function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
-}
-
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error;
-    if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error);
-    }
-  }
-  return 'Unknown error';
 }
 
 function apiStatus(err: unknown): number | undefined {
@@ -311,7 +302,7 @@ export default function FieldbusControlPage() {
           error: true,
           alStatusCode: 0,
           elapsedMs: 0,
-          requestError: apiError(err),
+          requestError: apiErrorMessage(err),
         },
       }));
     },
@@ -493,7 +484,7 @@ export default function FieldbusControlPage() {
               )}
               {initMutation.isSuccess && <p className="text-status-good text-xs">Initialized</p>}
               {initMutation.isError && apiStatus(initMutation.error) !== 409 && (
-                <p className="text-status-bad text-xs">{apiError(initMutation.error)}</p>
+                <p className="text-status-bad text-xs">{apiErrorMessage(initMutation.error)}</p>
               )}
               {alreadyInitialized && !initMutation.isSuccess && (
                 <div className="border-l-2 border-status-info bg-status-info/10 px-3 py-2">
@@ -523,7 +514,7 @@ export default function FieldbusControlPage() {
               </button>
               {resetMutation.isSuccess && <p className="text-status-good text-xs">Reset</p>}
               {resetMutation.isError && (
-                <p className="text-status-bad text-xs">{apiError(resetMutation.error)}</p>
+                <p className="text-status-bad text-xs">{apiErrorMessage(resetMutation.error)}</p>
               )}
             </div>
           </div>
@@ -554,7 +545,7 @@ export default function FieldbusControlPage() {
                 </p>
               )}
               {scanMutation.isError && (
-                <p className="text-status-bad text-xs">{apiError(scanMutation.error)}</p>
+                <p className="text-status-bad text-xs">{apiErrorMessage(scanMutation.error)}</p>
               )}
 
               {hasScanned && (
@@ -630,7 +621,9 @@ export default function FieldbusControlPage() {
                       );
                     })()}
                   {restartMutation.isError && (
-                    <p className="text-status-bad text-xs">{apiError(restartMutation.error)}</p>
+                    <p className="text-status-bad text-xs">
+                      {apiErrorMessage(restartMutation.error)}
+                    </p>
                   )}
                   <p className="text-xs text-grey-600">
                     Use the <span className="font-medium">Action</span> dropdown to command an
@@ -931,7 +924,9 @@ export default function FieldbusControlPage() {
                   );
                 })()}
               {transitionMutation.isError && (
-                <p className="text-status-bad text-xs">{apiError(transitionMutation.error)}</p>
+                <p className="text-status-bad text-xs">
+                  {apiErrorMessage(transitionMutation.error)}
+                </p>
               )}
             </div>
           </div>

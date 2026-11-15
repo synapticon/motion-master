@@ -13,20 +13,18 @@ recorder holds cycles only once the process data is exchanged. A device in OP st
     python dump-process-data.py --output /tmp/bus.mmpd
 """
 
-import argparse
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from files import FILES_DIR, file_stamp  # noqa: E402
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
-
-FILES_DIR = Path(__file__).resolve().parent.parent / "files"
+from options import parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = parser(__doc__)
     ap.add_argument(
         "--output", help="local path to save to (default: files/process-data-<time>.mmpd)"
     )
@@ -37,14 +35,14 @@ def main():
     client.init()
     client.ensure_state(AlState.SAFEOP)
 
-    content = client.call(
-        "streamProcessDataDump", headers={"Accept": "application/octet-stream"}
-    ).content
+    content = client.process_data_dump()
+    if content is None:
+        sys.exit("the server has no cycle to dump")
 
     if args.output:
         out = Path(args.output)
     else:
-        out = FILES_DIR / f"process-data-{datetime.now():%Y%m%d-%H%M%S}.mmpd"
+        out = FILES_DIR / f"process-data-{file_stamp()}.mmpd"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(content)
     print(f"saved {len(content)} byte(s) -> {out}")

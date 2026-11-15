@@ -19,6 +19,123 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- The TypeScript client streams the batches of a monitoring with `streamMonitoring(topic)`, which a
+  program reads with `for await`.
+- The TypeScript client builds a client from `config.jsonc`, JSON with comments, with
+  `MotionMasterClient.fromConfig()`, in Node.js. The file has the keys of `config.toml` of the Python
+  client, in camelCase.
+- The TypeScript client has an example program for every task that the Python client has one for,
+  in `examples/`, with the same name, options and output. They run with `tsx`, read their options
+  with commander, and print what they do with `--help`. `clients/PARITY.md` lists every pair, and
+  CI fails when a client has an example that its twin lacks.
+- Both clients read and write objects and files with `writeValue()`, `readSdo()`, `writeSdo()`,
+  `listFiles()`, `readFile()`, `writeFile()` and `removeFile()`, and the Python twins
+  `write_value()`, `read_sdo()` and so on. `readFile()` returns bytes, text or JSON. `writeFile()`
+  writes a string as UTF-8.
+- The TypeScript client exports `objectName()` and `objectAddressText()`, with the Python twins
+  `object_name()` and `object_address_text()`, and formats bytes as hex with `formatHexBytes()`.
+- The examples of both clients share their command line, the run of a procedure and their files
+  folder through `options`, `procedures` and `files` modules, the same in both languages.
+- The TypeScript client has the device and AL state helpers of the Python client: `init`, `reset`,
+  `scan`, `devices`, `parameters`, `hardwareDescription`, `waitForValue`, `ensureScanned`,
+  `ensureState` and `restart`, and `StateError`. They log each step through the `debug` package,
+  off by default: set `DEBUG=motion-master-client` to see it.
+- The TypeScript client has the CiA402 helpers of the Python client: `setOperationMode`,
+  `setTarget`, `enable`, `disable` and `quickStop`.
+- The TypeScript client runs a procedure with `runProcedure`, `stepChanges` and `formatStep`, as
+  the Python client does, and throws `ProcedureError` when the server refuses the start.
+- The TypeScript client records a monitoring for a span with `monitoring(parameters, span)`, as the
+  Python client does with a `with` block. The `MonitoringRecording` it returns has `column`,
+  `values`, `first`, `printTable` and `writeCsv`, which write the same layout as in Python.
+- The TypeScript client starts and stops a capture with `startCapture()` and `stopCapture()`, and
+  throws `CaptureError` when the server refuses, as the Python client does.
+- The TypeScript client yields the notifications of the server with `notifications()`, which a
+  program reads with `for await`, as the Python client does.
+- The Python client names the notifications topic `NOTIFICATION_TOPIC`, as the TypeScript client
+  does.
+- The TypeScript client turns an error a user can act on into one line with `errorLine(error)`, and
+  `run(main)` ends a Node.js program with that line, as `error_line` and `run` of the Python client
+  do. Its examples run through `run()`.
+- The Python client's `error_line()` and `run()` also give one line for a `CaptureError` and a
+  `ProcessDataDumpError`.
+
+- The TypeScript client turns bytes into an integer of any length with
+  `integerFromBytes(bytes, { byteOrder, signed })`, the twin of Python's `int.from_bytes`. It reads
+  little-endian when no byte order is given, because EtherCAT is little-endian.
+
+### Changed
+
+- The Python client needs Python 3.12 or newer. It needed 3.11. Debian 12 and the Raspberry Pi OS
+  based on it have 3.11 as their system Python, so there a newer Python goes beside it, for example
+  with `uv python install 3.12`. The server packages for arm64 already need Debian 13. CI tests the
+  client on 3.12 and on the newest Python.
+- The TypeScript client's `readProcessDataMark()` is `processDataMark()`, and `fetchProcessDataDump()`
+  is `processDataDump({ fromUs, toUs })`, the names of the Python client. The dump returns the bytes
+  of the `.mmpd` file, which `parseMmpd()` decodes, or `null` when the server has no cycle to dump. It
+  throws `ProcessDataDumpError` for any other refusal. The free function `fetchProcessDataDump()` is
+  gone.
+- The TypeScript client exports and reads an ENI with `exportEni()` and `parseEni(xml)` on the
+  client, which replace the free functions `fetchEni(baseUrl)` and `parseEni(baseUrl, xml)`. The
+  Python client has the same two as `export_eni()` and `parse_eni(xml)`.
+- Every request of the TypeScript client, `client.api` included, throws an `HttpError` when the
+  server refuses it, and a `ConnectionError` when it does not reach the server. A refused request
+  threw the response object. Both errors carry the `request`, and `HttpError` also carries the
+  `response`, its `status` and the server's `reason`, as `requests.ConnectionError` and
+  `requests.HTTPError` of the Python client do. The `request` has no body. `apiErrorMessage()`
+  returns the reason of an `HttpError` and the message of any other error. The Console pages use it
+  in place of their own copies.
+- `monitoring()` of both clients raises or throws a `MonitoringError` when the server refuses the
+  monitoring, when no row arrives, when the rows of the last flush do not arrive, and when the
+  WebSocket closes during the recording. It raised `RuntimeError` or `TimeoutError` in Python, and
+  threw a plain `Error` or a `TimeoutError` in TypeScript. The wait for the last flush is two flush
+  intervals plus 2000 ms. It was 2000 ms, so a recording with an interval above 1000 ms lost its last
+  rows without an error. A clean close of the WebSocket during a recording is an error in Python
+  too. `errorLine()` and `error_line()` give one line for a `MonitoringError`, for a timeout of
+  `waitForValue()` or `wait_for_value()`, and for a WebSocket that closes.
+- A stream of `streamMonitoring()` or `notifications()` in the TypeScript client takes a `signal`,
+  which ends it also while it waits. `client.close()` ends it, and any other close of the WebSocket
+  throws a `ConnectionError`. The stream reconnected without a word and lost the messages sent
+  meanwhile. In the Python client, a close raises `ConnectionError`. A clean close ended the stream
+  without an error.
+- `monitoring()` of the TypeScript client takes a `signal`. `examples/monitoring.ts` aborts it on
+  Ctrl-C, so that the program disables the drive and deletes the monitoring. Node.js ended at once
+  on Ctrl-C and left the drive enabled and turning.
+- `runProcedure()` of the TypeScript client starts no run when its `signal` is aborted already.
+- The TypeScript client closes a WebSocket that only its listeners opened when the last listener
+  leaves, so that a Node.js program ends. `client.ws.connect()` keeps the socket open until
+  `client.close()`, as the Console needs.
+- Both clients and their examples write hex in capitals, as `formatHex()` does: `alStatusCode
+  0x001D` and `0x6041:00` in a message, and every address, revision and status code an example
+  prints.
+- In the Python client, a failed cancel of a procedure or a failed delete of a monitoring no longer
+  replaces the error that ended the run or the recording. `export_eni()` decodes the document as
+  UTF-8, because the server names no charset. A refused request with no body gives the status text
+  as its reason.
+- The examples print `-` for a value that a drive does not give, where the Python `cia402-state.py`
+  crashed. The summary of `monitoring` skips values that are missing and works for a negative
+  velocity. `run-procedure` and `device-locate` leave a `ProcedureError` to `run()`.
+- The TypeScript client refuses a `baseUrl` that is not http or https, and a `wsUrl` that is not ws
+  or wss, such as `localhost:61447`. Such a URL failed at the first request as "cannot connect to
+  null". `fromConfig()` names a missing `host`, `httpPort` or `wsPort`.
+- The Python client's `wait_for_value()` takes `timeout_ms` and `interval_ms`, in milliseconds. It
+  took `timeout` and `interval` in seconds.
+- The Python client's `run_procedure()` takes `poll_interval_ms`, in milliseconds. It took
+  `poll_interval` in seconds.
+- The Python client's `monitoring()` returns a `MonitoringRecording`, which was named
+  `Monitoring`. A monitoring is the object on the server; the class holds the recording of one.
+- The Python client's `format_step()` writes a value with no space after `,` and `:`, as the
+  TypeScript client's `formatStep()` does.
+- The Python client streams the batches of a monitoring with `stream_monitoring(topic)`, which was
+  `monitor(topic)`. The example `monitor.py` is now `stream-monitoring.py`. The new name tells it
+  apart from `monitoring()`, which creates a monitoring and records it for a span.
+
+### Removed
+
+- The TypeScript client's `ws.onProgress()`. The server never sends procedure progress over the
+  WebSocket: a program polls a procedure with `runProcedure()`.
+
 ## [6.0.0-alpha.126] - 2026-11-15
 
 ### Changed

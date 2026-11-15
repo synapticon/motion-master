@@ -14,9 +14,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from options import parser  # noqa: E402
 
 
 def main():
+    parser(__doc__).parse_args()
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
@@ -26,11 +29,11 @@ def main():
         return
 
     states = {d["slavePosition"]: d for d in client.call("getDeviceStates").json()}
-    for d in client.call("getDevices").json():
+    for d in client.devices():
         state = AlState(states[d["slavePosition"]]["alState"]).name
         print(
             f"  {d['slavePosition']:3d}  {d['productName']:<30}  serial {d['serialNumber']:<12}"
-            f"  revision 0x{d['revisionNumber']:08x}  {state}"
+            f"  revision 0x{d['revisionNumber']:08X}  {state}"
         )
 
 

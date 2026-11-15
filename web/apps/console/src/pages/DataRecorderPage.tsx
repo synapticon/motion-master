@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type uPlot from 'uplot';
 import {
+  apiErrorMessage,
   parseMmpd,
   isPlottableDataType,
   formatHex,
@@ -25,17 +26,6 @@ import {
   userCacheUrl,
 } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
-
-// Pulls the server's { error } message out of a thrown request, for inline display.
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error;
-    if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error);
-    }
-  }
-  return 'Failed to write the dump.';
-}
 
 // One PDO object flattened across devices, for the series picker.
 interface FlatEntry {
@@ -141,7 +131,11 @@ export default function DataRecorderPage() {
     setLoading(true);
     setViewError(null);
     try {
-      const parsed = await client.fetchProcessDataDump();
+      const bytes = await client.processDataDump();
+      if (bytes === null) {
+        throw new Error('The server has no cycle to dump. Bring a device to SAFEOP or OP first.');
+      }
+      const parsed = parseMmpd(bytes);
       load(parsed, `Recorder ring — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
       setViewError(errorText(e));
@@ -327,7 +321,9 @@ export default function DataRecorderPage() {
             </p>
           )}
           {dumpMutation.isError && (
-            <p className="text-[11px] text-status-bad mt-2">{apiError(dumpMutation.error)}</p>
+            <p className="text-[11px] text-status-bad mt-2">
+              {apiErrorMessage(dumpMutation.error, 'Failed to write the dump.')}
+            </p>
           )}
         </div>
 

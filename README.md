@@ -161,7 +161,7 @@ If a raised `skippedCycles` count shows up right after start (visible on the con
 
 The API is plain HTTPS + JSON, so any language works. Two reference clients ship in the repo:
 
-- **[`clients/python`](clients/python)** — a standalone reference client (`requests` + `websockets`) with one example script per action, each named after it: `scan.py`, `read-parameter.py`, `monitor.py`, `offset-detection.py`, `firmware-installation.py` and more. Each script runs on its own. It opens the fieldbus driver, scans, and moves the device to the AL state it needs, so no script has to run before another, and a second run gives the same result. The client resolves every call by `operationId` against the spec it fetches from `GET /api/swagger.yml` at startup, so it holds no hardcoded URLs and adapts to whichever server version it is pointed at. Copy `motion_master_client.py` anywhere — no checkout needed.
+- **[`clients/python`](clients/python)** — a standalone reference client (`requests` + `websockets`) with one example script per action, each named after it: `scan.py`, `read-parameter.py`, `stream-monitoring.py`, `offset-detection.py`, `firmware-installation.py` and more. Each script runs on its own. It opens the fieldbus driver, scans, and moves the device to the AL state it needs, so no script has to run before another, and a second run gives the same result. The client resolves every call by `operationId` against the spec it fetches from `GET /api/swagger.yml` at startup, so it holds no hardcoded URLs and adapts to whichever server version it is pointed at. Copy `motion_master_client.py` anywhere — no checkout needed.
 
   ```bash
   cd clients/python

@@ -28,7 +28,6 @@ because the drive enables only while it exchanges process data. Give --state op 
     python run-procedure.py offset-detection --state op --slave 2
 """
 
-import argparse
 import base64
 import json
 import logging
@@ -37,22 +36,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
-    AlState,
     MotionMasterClient,
-    ProcedureError,
-    format_step,
     run,
-    step_changes,
 )
-
-STATES = {s.name.lower(): s for s in AlState if s}
+from options import AL_STATES, byte_list, integer, parser  # noqa: E402
+from procedures import run_to_end  # noqa: E402
 
 
 def convert(param, text):
     """Convert the text of one name=value argument to the JSON value of its parameter type."""
     kind = param["type"]
     if kind == "integer":
-        return int(text, 0)
+        return integer(text)
     if kind == "boolean":
         if text.lower() not in ("true", "false"):
             raise ValueError("expected true or false")
@@ -64,7 +59,7 @@ def convert(param, text):
         values = ", ".join(str(o["value"]) for o in param["options"])
         raise ValueError(f"expected one of {values}")
     if kind == "byteArray":
-        return [int(b, 0) for b in text.split(",")]
+        return byte_list(text)
     if kind == "stringArray":
         return text.split(",") if text else []
     if kind == "file":
@@ -123,18 +118,26 @@ def describe(descriptor):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = parser(__doc__)
     ap.add_argument("name", nargs="?", help="the procedure to run (default: list them)")
     ap.add_argument("params", nargs="*", help="parameters as name=value")
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--state", choices=STATES, default="preop")
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument(
+        "--state",
+        choices=AL_STATES,
+        default="preop",
+        help="the state to move the device to first",
+    )
     ap.add_argument("--describe", action="store_true", help="describe the procedure, do not run it")
-    args = ap.parse_args()
+    # Intermixed, so that an option may stand between two name=value arguments.
+    args = ap.parse_intermixed_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()
-    client.ensure_state(STATES[args.state], positions=[args.slave])
+    client.ensure_state(AL_STATES[args.state], positions=[args.slave])
 
     procedures = client.call("listProcedures", path={"slavePosition": args.slave}).json()
     descriptors = {p["descriptor"]["name"]: p["descriptor"] for p in procedures}
@@ -153,26 +156,7 @@ def main():
 
     body = build_params(descriptor, args.params)
 
-    snapshot = None
-    changes = step_changes(client.run_procedure(args.slave, args.name, body))
-    try:
-        for snapshot, changed in changes:
-            for step in changed:
-                print(format_step(step))
-    except ProcedureError as e:
-        sys.exit(str(e))
-    except KeyboardInterrupt:
-        print("\ncancelled")
-        sys.exit(1)
-    finally:
-        # Closing the generator cancels a run that is still in progress.
-        changes.close()
-
-    if snapshot.get("error"):
-        print(f"error: {snapshot['error']}")
-    print(f"{args.name} {snapshot['status']}")
-    if snapshot["status"] != "succeeded":
-        sys.exit(1)
+    run_to_end(client, args.slave, args.name, body)
 
 
 if __name__ == "__main__":

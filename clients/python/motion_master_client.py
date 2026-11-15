@@ -25,7 +25,7 @@ script that wants to see them turns on logging at INFO. run_procedure() starts a
 procedure, polls it until it ends, and cancels it when the caller stops early.
 step_changes() picks out the steps whose status changed, and format_step() turns
 one into a line.
-monitor() and notifications() stream from the WebSocket. monitoring() creates a
+stream_monitoring() and notifications() stream from the WebSocket. monitoring() creates a
 monitoring, records its rows while a with block runs, and deletes it at the
 end, so a script can check the rows afterwards. read_value() reads one object,
 decoded by the server, and wait_for_value() reads it until a condition holds.
@@ -49,6 +49,7 @@ import functools
 import json
 import logging
 import os
+import signal
 import ssl
 import sys
 import threading
@@ -192,7 +193,7 @@ def _not_reached(result, step):
     """Say which devices of a state change did not reach `step`, and why."""
     failed = ", ".join(
         f"device {d['slavePosition']} in {AlState(d['alState']).name}"
-        f" with alStatusCode 0x{d['alStatusCode']:04x}"
+        f" with alStatusCode 0x{d['alStatusCode']:04X}"
         for d in result["devices"]
         if not d["reached"]
     )
@@ -211,9 +212,20 @@ class CaptureError(Exception):
     """The server refuses to start or stop a capture. The message is the server's reason."""
 
 
+class MonitoringError(Exception):
+    """A recording of monitoring() fails.
+
+    The server refuses the monitoring, no row arrives, the rows of the last flush do not arrive, or
+    the WebSocket closes during the recording.
+    """
+
+
 class ProcessDataDumpError(Exception):
     """The server could not produce a process-data dump. The message is the server's reason."""
 
+
+# The one topic that every notification source of the server publishes to.
+NOTIFICATION_TOPIC = "notifications"
 
 # A flag bit of a .mmpd file, at byte 6: the dump is of a span, and the server no longer held every
 # cycle right after its start. A re-map, a reset or a scan discarded some, or the ring overwrote
@@ -231,7 +243,7 @@ def _reason(response):
     try:
         return response.json()["error"]
     except (ValueError, KeyError, TypeError):
-        return response.text.strip()
+        return response.text.strip() or response.reason
 
 
 def _satisfied(current, target, exact):
@@ -270,7 +282,8 @@ def format_step(step):
     """Return one line for a step of a procedure: its id, its status, and its value or error."""
     line = f"  {step['id']:<36} {step['status']}"
     if "value" in step:
-        line += f"  {json.dumps(step['value'], ensure_ascii=False)}"
+        # The separators of JSON.stringify, so that both clients print the same line.
+        line += f"  {json.dumps(step['value'], ensure_ascii=False, separators=(',', ':'))}"
     if "error" in step:
         line += f"  {step['error']}"
     return line
@@ -290,7 +303,17 @@ def error_line(error):
             reason = r.text or r.reason
         path = urllib.parse.urlsplit(r.url).path
         return f"{r.request.method} {path}: HTTP {r.status_code}, {reason}"
-    if isinstance(error, (StateError, ProcedureError, FileNotFoundError, ConnectionError)):
+    user_errors = (
+        StateError,
+        ProcedureError,
+        CaptureError,
+        MonitoringError,
+        ProcessDataDumpError,
+        FileNotFoundError,
+        ConnectionError,
+        TimeoutError,
+    )
+    if isinstance(error, user_errors):
         return str(error)
     return None
 
@@ -298,9 +321,10 @@ def error_line(error):
 def run(main):
     """Call main() and exit with one line on stderr when it fails with an error a user can act on.
 
-    Those errors are: no connection to the server, an HTTP error status, a StateError, a
-    ProcedureError and a missing file. Any other error is a bug, so it keeps its traceback. Set
-    MM_TRACEBACK=1 to get the traceback for every error.
+    Those errors are: no connection to the server, an HTTP error status, a WebSocket that closes, a
+    StateError, a ProcedureError, a CaptureError, a MonitoringError, a ProcessDataDumpError, a
+    TimeoutError of wait_for_value() and a missing file. Any other error is a bug, so it keeps its
+    traceback. Set MM_TRACEBACK=1 to get the traceback for every error.
     """
     try:
         main()
@@ -325,9 +349,8 @@ class MotionMasterClient:
         self._http_url = http_url.rstrip("/")
         # The body of POST /api/init, for example {"driver": "soem", "adapter": "eth0"}.
         self.fieldbus = fieldbus
-        # The monitoring WebSocket endpoint. Held here so the client is the one
-        # connection object -- a future monitor()/trace-process-data method reads
-        # this instead of callers wiring up a second object.
+        # The WebSocket endpoint. stream_monitoring(), notifications() and monitoring() connect to
+        # it, so a script needs no second connection object.
         self.ws_url = ws_url
         self._verify = verify
         self._session = requests.Session()
@@ -513,6 +536,31 @@ class MotionMasterClient:
             )
         return r.content
 
+    def export_eni(self):
+        """Export the bus as an ENI document (exportEni), with the parts the server could not read.
+
+        Returns {"xml": the document as text, "warnings": the number of parts that were asked for
+        and not answered}. A bus that has not reached SAFEOP or OP answers 409, because before that
+        there is no mapping to describe. Raises requests.HTTPError when the server refuses.
+        """
+        r = self.call("exportEni", headers={"Accept": "application/xml"})
+        try:
+            warnings = int(r.headers.get("X-Eni-Warnings", "0"))
+        except ValueError:
+            warnings = 0
+        # The server names no charset, and an ENI is UTF-8. r.text would guess the encoding.
+        return {"xml": r.content.decode("utf-8"), "warnings": warnings}
+
+    def parse_eni(self, xml):
+        """Read an ENI document (parseEni) and return its network, with each datagram annotated.
+
+        Any ENI that follows ETG.2100 is read, not only one that export_eni() wrote. Raises
+        requests.HTTPError when the server refuses.
+        """
+        body = xml.encode("utf-8")
+        headers = {"Content-Type": "application/xml"}
+        return self.call("parseEni", data=body, headers=headers).json()
+
     def devices(self):
         """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).
 
@@ -544,13 +592,77 @@ class MotionMasterClient:
         path = _path(position, index=index, subindex=subindex)
         return self.call("readParameter", path=path).json()["value"]
 
+    def write_value(self, position: int, obj: ObjectAddress[_T], value: _T) -> _T:
+        """Write one object, converted by the server to its data type, and return the value read back.
+
+        The twin of read_value(). The server writes a PDO-mapped object of an exchanging device into
+        the process data, and any other object with an SDO download.
+        """
+        index, subindex = obj
+        path = _path(position, index=index, subindex=subindex)
+        return self.call("writeParameter", path=path, body={"value": value}).json()["value"]
+
+    def read_sdo(self, position, index, subindex):
+        """Return the raw bytes of one object, read with an SDO upload (sdoUpload).
+
+        read_value() decodes the value by its data type instead, and int.from_bytes(data, "little")
+        turns bytes into an integer.
+        """
+        path = _path(position, index=index, subindex=subindex)
+        return bytes(self.call("sdoUpload", path=path).json()["data"])
+
+    def write_sdo(self, position, index, subindex, data):
+        """Write raw bytes, a bytes object or a list of ints, to one object with an SDO download."""
+        path = _path(position, index=index, subindex=subindex)
+        self.call("sdoDownload", path=path, body={"data": list(data)})
+
+    def list_files(self, position):
+        """Return the files on a device (listDeviceFiles), each with the size the device reports.
+
+        Each file is {"name": ..., "byteCount": ...}. byteCount is missing when the device reports a
+        name without a size.
+        """
+        return self.call("listDeviceFiles", path=_path(position)).json()
+
+    def read_file(self, position, name, format="bytes"):
+        """Read a file from a device over FoE (foeReadFile).
+
+        `format` says what to return: "bytes" (the default), "text", the file decoded as UTF-8, such
+        as a CSV, or "json", the file parsed as JSON.
+        """
+        if format not in ("bytes", "text", "json"):
+            raise ValueError(f"format must be bytes, text or json, not {format!r}")
+        content = self.call("foeReadFile", path=_path(position, filename=name)).content
+        if format == "text":
+            return content.decode("utf-8")
+        if format == "json":
+            return json.loads(content)
+        return content
+
+    def write_file(self, position, name, content):
+        """Write a file to a device over FoE (foeWriteFile), and replace a file of the same name.
+
+        `content` is bytes, or a str, which is written as UTF-8.
+        """
+        data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+        self.call(
+            "foeWriteFile",
+            path=_path(position, filename=name),
+            data=data,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    def remove_file(self, position, name):
+        """Remove a file from the flash of a device (deleteDeviceFile)."""
+        self.call("deleteDeviceFile", path=_path(position, filename=name))
+
     def wait_for_value(
         self,
         position: int,
         obj: ObjectAddress[_T],
         predicate: Callable[[_T], object],
-        timeout: float = 1.0,
-        interval: float = 0.05,
+        timeout_ms: int = 1000,
+        interval_ms: int = 50,
     ) -> _T:
         """Read an object until `predicate(value)` is true, and return that value.
 
@@ -559,10 +671,10 @@ class MotionMasterClient:
 
             client.wait_for_value(1, Cia402.STATUSWORD, lambda sw: sw & 0x0400)  # target reached
 
-        Raises TimeoutError with the last value when the predicate is still false after `timeout`
-        seconds.
+        Raises TimeoutError with the last value when the predicate is still false after
+        `timeout_ms`.
         """
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout_ms / 1000
         while True:
             value = self.read_value(position, obj)
             if predicate(value):
@@ -570,9 +682,10 @@ class MotionMasterClient:
             if time.monotonic() >= deadline:
                 index, subindex = obj
                 raise TimeoutError(
-                    f"device {position} 0x{index:04x}:{subindex:02x} is {value} after {timeout} s"
+                    f"device {position} 0x{index:04X}:{subindex:02X} is {value}"
+                    f" after {timeout_ms} ms"
                 )
-            time.sleep(interval)
+            time.sleep(interval_ms / 1000)
 
     def ensure_scanned(self):
         """Scan when the last scan is missing or wrong, and move no device.
@@ -680,48 +793,72 @@ class MotionMasterClient:
         body = {"state": state}
         return self.call("transitionToCia402State", path=_path(position), body=body).json()
 
-    def run_procedure(self, position, name, params=None, poll_interval=0.5):
+    def run_procedure(self, position, name, params=None, poll_interval_ms=500):
         """Start a procedure on a device and yield its snapshot at every poll until the run ends.
 
         The last snapshot yielded has the final status: succeeded, failed or cancelled. Polling is
         lossless, because every finished step keeps its status and value, so a step that starts
         and ends between two polls still shows. When the caller stops iterating before the run
         ends, for example on Ctrl-C, the run is cancelled, so that the drive does not continue
-        alone.
+        alone. `poll_interval_ms` is the time between two polls.
 
         Raises ProcedureError when the server refuses the start: 409 when another procedure runs
         on the device, 404 when the device has no procedure of that name, 400 for a parameter the
         procedure refuses.
         """
         path = _path(position, procedureName=name)
-        r = self.call("startProcedure", path=path, body=params or {}, check=False)
+        # A Ctrl-C while the start is on the way would leave a run going that this generator never
+        # cancels, so it waits for the answer and is raised in the loop below, where the run is
+        # cancelled. A second Ctrl-C stops at once, for a server that never answers. Python takes a
+        # SIGINT handler only in the main thread.
+        interrupted = []
+
+        def on_sigint(*_):
+            if interrupted:
+                raise KeyboardInterrupt
+            interrupted.append(True)
+
+        previous = None
+        if threading.current_thread() is threading.main_thread():
+            previous = signal.signal(signal.SIGINT, on_sigint)
+        try:
+            r = self.call("startProcedure", path=path, body=params or {}, check=False)
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGINT, previous)
         if not r.ok:
-            try:
-                reason = r.json()["error"]
-            except (ValueError, KeyError):
-                reason = r.text
-            raise ProcedureError(f"{name} on device {position}: {reason} (HTTP {r.status_code})")
+            raise ProcedureError(
+                f"{name} on device {position}: {_reason(r)} (HTTP {r.status_code})"
+            )
         snapshot = r.json()
         try:
+            if interrupted:
+                raise KeyboardInterrupt
             while True:
                 yield snapshot
                 if snapshot["status"] != "running":
                     return
-                time.sleep(poll_interval)
+                time.sleep(poll_interval_ms / 1000)
                 snapshot = self.call("getProcedure", path=path).json()
         finally:
             if snapshot["status"] == "running":
                 log.info("cancelling %s on device %d", name, position)
-                self.call("cancelProcedure", path=path, check=False)
+                # A failed cancel has nothing to add to the error or the early exit that brought
+                # the run here, and must not replace it.
+                try:
+                    self.call("cancelProcedure", path=path, check=False)
+                except requests.RequestException:
+                    pass
 
     def notifications(self):
         """Subscribe to the notifications topic and yield the data of each notification.
 
         Every notification source publishes to the one "notifications" topic, so one subscription
         receives every event, also a kind that a later server adds. data["event"] names the kind.
-        The caller stops by breaking out of the loop.
+        The caller stops by breaking out of the loop. A close of the WebSocket raises
+        ConnectionError, because the notifications sent meanwhile are lost.
         """
-        for msg in self._subscribe("notifications"):
+        for msg in self._subscribe(NOTIFICATION_TOPIC):
             if msg.get("type") == "notification":
                 yield msg["data"]
 
@@ -731,13 +868,20 @@ class MotionMasterClient:
             raise RuntimeError("no ws_url configured on this client")
 
         # Lazy import so HTTP-only usage doesn't require the websockets package.
+        from websockets.exceptions import ConnectionClosed
         from websockets.sync.client import connect
 
         with connect(self.ws_url, ssl=self._ssl_context()) as ws:
             ws.send(json.dumps({"subscribe": topic}))
             try:
-                for message in ws:
-                    yield json.loads(message)
+                # Only the caller ends the stream, by breaking out of the loop. A close of the
+                # WebSocket loses the messages sent meanwhile, so it is an error.
+                try:
+                    for message in ws:
+                        yield json.loads(message)
+                except ConnectionClosed as error:
+                    raise ConnectionError("the WebSocket closed") from error
+                raise ConnectionError("the WebSocket closed")
             finally:
                 # Best-effort unsubscribe; the socket close below also ends it.
                 try:
@@ -756,23 +900,23 @@ class MotionMasterClient:
             return ssl.create_default_context(cafile=self._verify)
         return ssl.create_default_context()
 
-    def monitor(self, topic):
-        """Subscribe to a monitoring topic and yield its batches from the WebSocket.
+    def stream_monitoring(self, topic):
+        """Subscribe to the topic of a monitoring and yield each batch of rows from the WebSocket.
 
-        The monitoring itself must already exist (POST /api/monitorings, i.e.
-        client.call("createMonitoring", ...)). This opens the WebSocket, sends
-        {"subscribe": topic}, and yields each batch's rows -- a list of
-        [timestampUs, v0, v1, ...] cycle rows, positionally ordered by the
-        monitoring's parameters. The stream is lossless: every recorded cycle
-        since the last flush arrives in the batch. The caller stops by breaking
-        out of the loop; the socket and subscription are torn down on exit.
+        The monitoring must exist already: create it with client.call("createMonitoring", ...).
+        To record a monitoring for a span instead, use monitoring(), which creates and deletes it.
+        A batch is a list of rows, [timestampUs, v0, v1, ...], with the values in the order of the
+        parameters of the monitoring. The stream is lossless: a batch holds every cycle recorded
+        since the batch before. The caller stops by breaking out of the loop, and that closes the
+        WebSocket. A close of the WebSocket raises ConnectionError, because the batches sent
+        meanwhile are lost.
         """
         for msg in self._subscribe(topic):
             if msg.get("type") == "monitoring" and msg.get("topic") == topic:
                 yield msg["data"]
 
     def monitoring(self, parameters, interval_ms=50, topic=None, name=None):
-        """Return a Monitoring that records the rows of the parameters while a with block runs.
+        """Return a MonitoringRecording of the rows of the parameters while a with block runs.
 
         `parameters` is a list of (devicePosition, index, subindex). Create it after the devices
         are in SAFEOP or OP, because the server decides once, at creation, whether each object
@@ -783,7 +927,7 @@ class MotionMasterClient:
             velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE)
         """
         topic = topic or f"py-{uuid.uuid4().hex[:12]}"
-        return Monitoring(self, parameters, interval_ms, topic, name)
+        return MonitoringRecording(self, parameters, interval_ms, topic, name)
 
 
 @functools.cache
@@ -797,24 +941,33 @@ def _object_names():
     return names
 
 
-def _object_name(index, subindex):
-    """Return the generated name of an object, or 0xIIII:SS when it has none."""
-    return _object_names().get((index, subindex), f"0x{index:04X}:{subindex:02X}")
+def object_name(index, subindex):
+    """Return the generated name of an object, such as STATUSWORD, or its address when it has none."""
+    return _object_names().get((index, subindex), object_address_text(index, subindex))
 
 
-class Monitoring:
-    """A monitoring on the server, and every row it sent while the with block ran.
+def object_address_text(index, subindex):
+    """Return the address of an object in hex, such as 0x6041:00."""
+    return f"0x{index:04X}:{subindex:02X}"
+
+
+class MonitoringRecording:
+    """The recording of a monitoring: the monitoring on the server, and every row of the with block.
 
     Entering the block creates the monitoring, subscribes to its topic, and returns when the first
     row arrives, so nothing the block does is missed. Leaving the block waits for the rows of the
     last flush, closes the WebSocket and deletes the monitoring, also when the block raised. The
-    rows stay readable after the block. An error of the thread that reads the WebSocket is raised
-    when the block ends.
+    rows stay readable after the block.
+
+    Raises MonitoringError when the server refuses the monitoring, when no row arrives within
+    5000 ms, when the rows of the last flush do not arrive, and when the WebSocket closes during the
+    recording. An error of the block wins over them.
     """
 
-    # How long entering waits for the first row, and leaving for the last flush.
-    _FIRST_ROW_TIMEOUT = 5.0
-    _LAST_FLUSH_TIMEOUT = 2.0
+    # How long entering waits for the first row. Leaving waits two flush intervals for the last
+    # rows, and this margin on top.
+    _FIRST_ROW_TIMEOUT_MS = 5000
+    _LAST_FLUSH_MARGIN_MS = 2000
 
     def __init__(self, client, parameters, interval_ms, topic, name):
         self._client = client
@@ -833,6 +986,9 @@ class Monitoring:
         self._connection = ExitStack()
         self._ws = None
         self._thread = None
+        # Set before _stop() closes the WebSocket, so that the reading thread takes that close for
+        # the end of the recording, and any other close for an error.
+        self._stopping = False
         self._error = None
 
     @property
@@ -850,7 +1006,7 @@ class Monitoring:
             if (p["devicePosition"], p["index"], p["subindex"]) == (position, index, subindex):
                 with self._lock:
                     return [(row[0], row[i + 1]) for row in self.rows]
-        raise KeyError(f"device {position} 0x{index:04x}:{subindex:02x} is not in this monitoring")
+        raise KeyError(f"device {position} 0x{index:04X}:{subindex:02X} is not in this monitoring")
 
     def values(self, position, obj, start=None, end=None):
         """Return the values of one object from the cycles with start <= timestampUs < end.
@@ -882,7 +1038,7 @@ class Monitoring:
         generated name. write_csv() and print_table() name their columns with these.
         """
         return [
-            f"{p['devicePosition']}:{_object_name(p['index'], p['subindex'])}"
+            f"{p['devicePosition']}:{object_name(p['index'], p['subindex'])}"
             for p in self.parameters
         ]
 
@@ -949,12 +1105,8 @@ class Monitoring:
             body["name"] = self._name
         r = self._client.call("createMonitoring", body=body, check=False)
         if r.status_code != 201:
-            try:
-                reason = r.json()["error"]
-            except (ValueError, KeyError):
-                reason = r.text
-            raise RuntimeError(
-                f"cannot create monitoring {self.topic}: {reason} (HTTP {r.status_code})"
+            raise MonitoringError(
+                f"cannot create monitoring {self.topic}: {_reason(r)} (HTTP {r.status_code})"
             )
         self.parameters = r.json()["parameters"]
         try:
@@ -965,19 +1117,28 @@ class Monitoring:
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        flushed = True
+        timeout_ms = 2 * self._interval_ms + self._LAST_FLUSH_MARGIN_MS
         try:
             if self._thread is not None and self._thread.is_alive():
                 # A row is in a batch only after the next flush, so wait for two more batches.
                 with self._lock:
                     target = self._batches + 2
-                    self._arrived.wait_for(
+                    flushed = self._arrived.wait_for(
                         lambda: self._batches >= target or self._error is not None,
-                        timeout=self._LAST_FLUSH_TIMEOUT,
+                        timeout=timeout_ms / 1000,
                     )
         finally:
             self._stop()
-        if self._error is not None and exc_type is None:
-            raise RuntimeError(f"monitoring {self.topic}: {self._error!r}") from self._error
+        if exc_type is not None:
+            return False
+        if self._error is not None:
+            raise self._error
+        if not flushed:
+            raise MonitoringError(
+                f"monitoring {self.topic}: the rows of the last flush did not arrive within "
+                f"{timeout_ms} ms"
+            )
         return False
 
     def _start(self):
@@ -996,16 +1157,18 @@ class Monitoring:
         self._thread.start()
         with self._lock:
             arrived = self._arrived.wait_for(
-                lambda: self.rows or self._error is not None, timeout=self._FIRST_ROW_TIMEOUT
+                lambda: self.rows or self._error is not None,
+                timeout=self._FIRST_ROW_TIMEOUT_MS / 1000,
             )
         if self._error is not None:
-            raise RuntimeError(f"monitoring {self.topic}: {self._error!r}") from self._error
+            raise self._error
         if not arrived:
-            raise TimeoutError(f"monitoring {self.topic}: no row after {self._FIRST_ROW_TIMEOUT} s")
+            raise MonitoringError(
+                f"monitoring {self.topic}: no row after {self._FIRST_ROW_TIMEOUT_MS} ms"
+            )
 
     def _read(self):
-        from websockets.exceptions import ConnectionClosedOK
-
+        cause = None
         try:
             for message in self._ws:
                 msg = json.loads(message)
@@ -1014,16 +1177,25 @@ class Monitoring:
                         self.rows.extend(msg["data"])
                         self._batches += 1
                         self._arrived.notify_all()
-        except ConnectionClosedOK:
-            pass
         except Exception as error:
-            with self._lock:
-                self._error = error
-                self._arrived.notify_all()
+            cause = error
+        with self._lock:
+            if not self._stopping:
+                self._error = MonitoringError(
+                    f"monitoring {self.topic}: the WebSocket closed during the recording"
+                )
+                self._error.__cause__ = cause
+            self._arrived.notify_all()
 
     def _stop(self):
         # Closing the socket from this thread ends the loop of the reading thread.
+        with self._lock:
+            self._stopping = True
         self._connection.close()
         if self._thread is not None:
             self._thread.join(timeout=5)
-        self._client.call("deleteMonitoring", path={"topic": self.topic}, check=False)
+        # A failed delete must not replace the error that ended the recording.
+        try:
+            self._client.call("deleteMonitoring", path={"topic": self.topic}, check=False)
+        except requests.RequestException:
+            pass

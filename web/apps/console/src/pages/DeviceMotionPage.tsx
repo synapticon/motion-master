@@ -8,6 +8,7 @@ import { useMonitoringSocket, type SampleRows } from '../contexts/MonitoringSock
 import { useConnection } from '../contexts/ConnectionContext';
 import { cia402StatusKey, useCia402Status } from '../hooks/useCia402Status';
 import { useOperationModes } from '../hooks/useOperationModes';
+import { apiErrorMessage } from '@synapticon/motion-master-client';
 
 // One shared control height for every interactive control — selects, inputs, and buttons — so a
 // button and its neighbouring input/select are always the exact same height, and standalone
@@ -84,29 +85,6 @@ const SERIES: SeriesDef[] = [
   { quantity: 'torque', role: 'target', index: 0x6071 },
   { quantity: 'torque', role: 'actual', index: 0x6077 },
 ];
-
-// Surfaces the node layer's error string from a failed request (matching the other device pages).
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error;
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error);
-      }
-      if (typeof inner === 'string') {
-        return inner;
-      }
-    }
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      const { status } = err as { status: number };
-      return `HTTP ${status}`;
-    }
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return 'Unknown error';
-}
 
 // A thrown request carries the HTTP status; 409 from createMonitoring means the topic already
 // exists (so we reuse it rather than surfacing an error).
@@ -243,7 +221,9 @@ export default function DeviceMotionPage() {
                   </button>
                 </div>
                 {setModeMutation.isError && (
-                  <p className="text-status-bad text-xs">{apiError(setModeMutation.error)}</p>
+                  <p className="text-status-bad text-xs">
+                    {apiErrorMessage(setModeMutation.error)}
+                  </p>
                 )}
               </div>
             </div>
@@ -292,7 +272,9 @@ export default function DeviceMotionPage() {
                   </button>
                 </div>
                 {commandMutation.isError && (
-                  <p className="text-status-bad text-xs">{apiError(commandMutation.error)}</p>
+                  <p className="text-status-bad text-xs">
+                    {apiErrorMessage(commandMutation.error)}
+                  </p>
                 )}
               </div>
             </div>
@@ -345,7 +327,7 @@ export default function DeviceMotionPage() {
                   </button>
                 </div>
                 {targetMutation.isError && (
-                  <p className="text-status-bad text-xs">{apiError(targetMutation.error)}</p>
+                  <p className="text-status-bad text-xs">{apiErrorMessage(targetMutation.error)}</p>
                 )}
               </div>
             </div>
@@ -446,7 +428,7 @@ function MotionGraph({
       } catch (err) {
         if (!isConflict(err)) {
           if (!cancelled) {
-            setCreateError(apiError(err));
+            setCreateError(apiErrorMessage(err));
           }
           return;
         }

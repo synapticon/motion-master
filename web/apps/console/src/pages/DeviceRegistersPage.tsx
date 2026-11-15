@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import DevicePageHeader from '../components/DevicePageHeader';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
-import { parseHexBytes } from '@synapticon/motion-master-client';
+import { apiErrorMessage, parseHexBytes } from '@synapticon/motion-master-client';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
 
@@ -12,16 +12,6 @@ const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
-
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error;
-    if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error);
-    }
-  }
-  return 'Unknown error';
-}
 
 function interpretBytes(bytes: number[]): string | null {
   const view = new DataView(new Uint8Array(bytes).buffer);
@@ -115,7 +105,7 @@ export default function DeviceRegistersPage() {
       );
       setReadResult(res.data.data);
     } catch (err) {
-      setReadError(apiError(err));
+      setReadError(apiErrorMessage(err));
     } finally {
       setReading(false);
     }
@@ -153,7 +143,7 @@ export default function DeviceRegistersPage() {
       );
       setWriteOk(true);
     } catch (err) {
-      setWriteError(apiError(err));
+      setWriteError(apiErrorMessage(err));
     } finally {
       setWriting(false);
     }

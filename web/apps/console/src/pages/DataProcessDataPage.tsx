@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { Send } from 'lucide-react';
 import {
+  apiErrorMessage,
   type DeviceParameter,
   type ProcessImageObject,
   formatHex,
@@ -25,24 +26,6 @@ const TOPIC = 'process-data';
 // Flush cadence for the live stream (ms). 100 ms ≈ 10 Hz — plenty for a values panel and far cheaper
 // than chart-grade rates; the stream stays lossless regardless (every cycle is delivered per batch).
 const FLUSH_MS = 100;
-
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error;
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error);
-      }
-      if (typeof inner === 'string') {
-        return inner;
-      }
-    }
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      return `HTTP ${(err as { status: number }).status}`;
-    }
-  }
-  return 'Unknown error';
-}
 
 function parseHexOrDec(s: string): number | null {
   const t = s.trim();
@@ -392,7 +375,7 @@ function ProcessDataPanels({
           return next;
         });
       },
-      onError: (err) => setFormError(apiError(err)),
+      onError: (err) => setFormError(apiErrorMessage(err)),
     });
   }
 

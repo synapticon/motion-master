@@ -17,14 +17,22 @@ Opens the fieldbus driver and scans first when needed.
     python write-pdo-mapping.py --file files/pdo-mapping.json
 """
 
-import argparse
 import json
 import logging
 import sys
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from motion_master_client import (  # noqa: E402
+    AlState,
+    MotionMasterClient,
+    error_line,
+    object_address_text,
+    run,
+)
+from options import integer, parser  # noqa: E402
 
 
 def request_objects(objects):
@@ -42,8 +50,10 @@ def request_objects(objects):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--file", required=True, help="the mapping as JSON")
     args = ap.parse_args()
     mapping = json.loads(Path(args.file).read_text())
@@ -64,18 +74,18 @@ def main():
     # aborts with 0x08000000 after SAFEOP -> PREOP or OP -> PREOP, and passes after
     # INIT -> PREOP. The firmware source points at its application processor, which learns only
     # of a transition upwards and so checks the write against the rights of the state before.
-    body = {"positions": [args.slave], "target": AlState.PREOP}
-    restart = client.call("restartDevices", body=body)
+    restart = client.call(
+        "restartDevices", body={"positions": [args.slave], "target": AlState.PREOP}
+    )
     if not restart.json()["ok"]:
         sys.exit(f"slave {args.slave} did not reach PREOP through INIT")
 
-    r = client.call(
-        "writeDevicePdoMapping", path={"slavePosition": args.slave}, body=body, check=False
-    )
-    # A failed write is not undone, so the device stays in PREOP, where its mapping can be read and
-    # written again.
-    if r.status_code != 200:
-        sys.exit(f"{r.json().get('error', r.text)}\nslave {args.slave} stays in PREOP")
+    try:
+        r = client.call("writeDevicePdoMapping", path={"slavePosition": args.slave}, body=body)
+    except requests.HTTPError as error:
+        # A failed write is not undone, so the device stays in PREOP, where its mapping can be read
+        # and written again.
+        sys.exit(f"error: {error_line(error)}\nslave {args.slave} stays in PREOP")
     read_back = r.json()
 
     # A device that came from below PREOP stays in PREOP, which is where its mapping applies.
@@ -86,9 +96,10 @@ def main():
         print(f"{direction}:")
         for pdo in read_back[direction]:
             entries = ", ".join(
-                f"0x{e['index']:04x}:{e['subindex']:02x}/{e['bitLength']}" for e in pdo["entries"]
+                f"{object_address_text(e['index'], e['subindex'])}/{e['bitLength']}"
+                for e in pdo["entries"]
             )
-            print(f"  0x{pdo['pdoIndex']:04x}  {entries}")
+            print(f"  0x{pdo['pdoIndex']:04X}  {entries}")
 
 
 if __name__ == "__main__":

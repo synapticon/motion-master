@@ -13,7 +13,6 @@ Opens the fieldbus driver and scans first when needed, and moves no device.
     python read-sii.py --slave 2 --output files/sii.bin
 """
 
-import argparse
 import json
 import logging
 import sys
@@ -21,11 +20,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--output", help="save the raw EEPROM image to this path")
     args = ap.parse_args()
 

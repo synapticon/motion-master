@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fetchEni, parseEni, type EniParseResult } from '@synapticon/motion-master-client';
+import { apiErrorMessage, type EniParseResult } from '@synapticon/motion-master-client';
 import EniExplainer from '../components/EniExplainer';
 import EniView from '../components/EniView';
 import FilePickerButton from '../components/FilePickerButton';
@@ -17,7 +17,7 @@ import { useSupportsEsc } from '../hooks/useSupportsEsc';
 type Source = { kind: 'export'; warnings: number } | { kind: 'file'; filename: string };
 
 export default function ToolsEniPage() {
-  const { api } = useConnection();
+  const { client } = useConnection();
   const [xml, setXml] = useState<string | null>(null);
   const [parsed, setParsed] = useState<EniParseResult | null>(null);
   const [source, setSource] = useState<Source | null>(null);
@@ -32,7 +32,7 @@ export default function ToolsEniPage() {
    * to know about a document does not depend on who wrote it.
    */
   async function show(document: string, from: Source) {
-    setParsed(await parseEni(api.baseUrl, document));
+    setParsed(await client.parseEni(document));
     setXml(document);
     setSource(from);
   }
@@ -50,11 +50,11 @@ export default function ToolsEniPage() {
     reset();
     const start = performance.now();
     try {
-      const result = await fetchEni(api.baseUrl);
+      const result = await client.exportEni();
       await show(result.xml, { kind: 'export', warnings: result.warnings });
       setElapsedMs(performance.now() - start);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to export the ENI.');
+      setError(apiErrorMessage(err, 'Failed to export the ENI.'));
     } finally {
       setBusy(false);
     }
@@ -66,7 +66,7 @@ export default function ToolsEniPage() {
     try {
       await show(await file.text(), { kind: 'file', filename: file.name });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read the ENI file.');
+      setError(apiErrorMessage(err, 'Failed to read the ENI file.'));
     } finally {
       setBusy(false);
     }

@@ -8,6 +8,11 @@ export * from './generated/data-contracts';
 export * from './generated/Api';
 
 export * from './api-error';
+export * from './errors';
+export { errorLine, run } from './error-line';
+export * from './procedures';
+export { MonitoringRecording } from './monitoring-recording';
+export { type DeviceParameterAddress, objectAddressText, objectName } from './parameter-address';
 export * from './constants';
 export * from './web-socket-connection';
 export * from './client';
@@ -19,9 +24,9 @@ export { type ObjectAddress, Profile, Somanet } from './objects';
 export { Cia402, type Cia402State, OperationMode, operationModeName } from './cia402';
 export * from './al-state';
 
-// Pure, framework-agnostic helpers (no DOM/React): hex formatting, CoE SDO value
-// encode/decode, SOMANET file-list parsing, the ENI export, and the LAN hostname mapping that lets
-// a browser reach a server on another machine under a name the bundled certificate covers.
+// Pure, framework-agnostic helpers (no DOM/React): hex formatting, CoE SDO value encode/decode, the
+// .mmpd parser, the types of a parsed ENI, and the LAN hostname mapping that lets a program reach a
+// server on another machine under a name the bundled certificate covers.
 export * from './lan';
 export * from './eni';
 export * from './hex';

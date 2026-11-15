@@ -12,20 +12,21 @@ shows up as untracked in the repository. Pass --output for a different path.
     python read-file.py --slave 2 --filename config.csv --output /tmp/config.csv
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from files import FILES_DIR  # noqa: E402
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
-
-FILES_DIR = Path(__file__).resolve().parent.parent / "files"
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--filename", required=True, help="FoE filename as the firmware knows it")
     ap.add_argument("--output", help="local path to save to (default: files/<filename>)")
     args = ap.parse_args()
@@ -35,9 +36,7 @@ def main():
     client.init()
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
-    content = client.call(
-        "foeReadFile", path={"slavePosition": args.slave, "filename": args.filename}
-    ).content
+    content = client.read_file(args.slave, args.filename)
 
     out = Path(args.output) if args.output else FILES_DIR / Path(args.filename).name
     out.parent.mkdir(parents=True, exist_ok=True)

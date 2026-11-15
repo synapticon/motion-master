@@ -22,30 +22,36 @@ the device itself, also from BOOT.
     python firmware-installation.py --package firmware.zip --final-state boot --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
-    AlState,
     MotionMasterClient,
-    ProcedureError,
-    format_step,
+    error_line,
     run,
-    step_changes,
 )
+from options import AL_STATES, integer, parser  # noqa: E402
+from procedures import run_to_end  # noqa: E402
 
 PROCEDURE = "firmware-installation"
-STATES = {s.name.lower(): s for s in AlState if s}
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--package", required=True, help="path to the .zip firmware package")
-    ap.add_argument("--final-state", choices=STATES, default="preop")
+    ap.add_argument(
+        "--final-state",
+        choices=AL_STATES,
+        default="preop",
+        help="the state to leave the device in",
+    )
     args = ap.parse_args()
 
     package = Path(args.package)
@@ -56,18 +62,16 @@ def main():
 
     # The check reads two files of the device over FoE, so it fails on a device with no mailbox,
     # such as one in INIT. The install goes ahead without it.
-    r = client.call(
-        "checkDeviceFirmwareCompatibility",
-        path={"slavePosition": args.slave},
-        query={"filename": package.name},
-        check=False,
-    )
-    if r.status_code == 200:
-        result = r.json()
+    try:
+        result = client.call(
+            "checkDeviceFirmwareCompatibility",
+            path={"slavePosition": args.slave},
+            query={"filename": package.name},
+        ).json()
         verdict = "fits" if result["compatible"] else "DOES NOT FIT"
         print(f"package {verdict} the device: {result['explanation']}")
-    else:
-        print(f"could not check the package against the device: {r.json().get('error', r.text)}")
+    except requests.HTTPError as error:
+        print(f"could not check the package against the device: {error_line(error)}")
 
     client.call(
         "putUserCacheFile",
@@ -76,28 +80,9 @@ def main():
         headers={"Content-Type": "application/octet-stream"},
     )
     print(f"uploaded {package.name}")
-    body = {"packageFilename": package.name, "finalState": STATES[args.final_state]}
+    body = {"packageFilename": package.name, "finalState": AL_STATES[args.final_state]}
 
-    snapshot = None
-    changes = step_changes(client.run_procedure(args.slave, PROCEDURE, body))
-    try:
-        for snapshot, changed in changes:
-            for step in changed:
-                print(format_step(step))
-    except ProcedureError as e:
-        sys.exit(str(e))
-    except KeyboardInterrupt:
-        print("\ncancelled")
-        sys.exit(1)
-    finally:
-        # Closing the generator cancels a run that is still in progress.
-        changes.close()
-
-    if snapshot.get("error"):
-        print(f"error: {snapshot['error']}")
-    print(f"{PROCEDURE} {snapshot['status']}")
-    if snapshot["status"] != "succeeded":
-        sys.exit(1)
+    run_to_end(client, args.slave, PROCEDURE, body)
 
 
 if __name__ == "__main__":

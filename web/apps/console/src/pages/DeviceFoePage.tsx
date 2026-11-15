@@ -25,12 +25,6 @@ const btnCls =
 const btnOutlineCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 
-// Surfaces the node layer's error string from a failed request. The unwrapping lives in the client
-// library, which owns the generated client and therefore its error shape.
-function apiError(err: unknown): string {
-  return apiErrorMessage(err);
-}
-
 // Reading this FoE pseudo-command unlocks the drive's filesystem for writing.
 // DD1317 is the fixed unlock key the firmware expects.
 const SOMANET_UNLOCK_COMMAND = 'fs-stackunlock=DD1317';
@@ -260,7 +254,7 @@ export default function DeviceFoePage() {
       setFiles(data);
     } catch (err) {
       setFiles(null);
-      setListError(apiError(err));
+      setListError(apiErrorMessage(err));
     } finally {
       setListing(false);
     }

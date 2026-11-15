@@ -103,7 +103,7 @@ python examples/transition-state.py --state op
 python examples/read-sdo.py --index 0x6064 --subindex 0
 python examples/read-file.py --filename .hardware_description
 python examples/read-all-parameters.py --slave 2
-python examples/monitor.py --count 10
+python examples/stream-monitoring.py --count 10
 python examples/reset.py
 ```
 
@@ -176,7 +176,7 @@ Three values in that column are not states:
 | --- | --- | --- |
 | `read-pdo-mapping.py` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PREOP |
 | `write-pdo-mapping.py` | Writes the PDO mapping from a JSON file. It moves the device to PREOP for the write, and back to SAFEOP or OP. | PREOP for the write |
-| `monitor.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
+| `stream-monitoring.py` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
 | `monitoring.py` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`: 250 for 2 s, then 0. Prints the target, the actual velocity and the CiA402 state, and saves every cycle as a CSV file in `files/`. **The motor turns.** | OP |
 | `dump-process-data.py` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFEOP |
 
@@ -253,7 +253,8 @@ Other methods:
   `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after the
   start.
 - `run_procedure()` runs a procedure to its end.
-- `monitor(topic)` streams the batches of a monitoring from the WebSocket.
+- `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
+  WebSocket.
 - `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,
   keeps every row while the block runs, and deletes the monitoring at the end. Then `column()`
   returns the values of one object with their timestamps, `values()` returns the values in a time
@@ -322,8 +323,9 @@ when you know which certificate the server presents.
 
 Motion Master serves two endpoints, each on its own event loop. The HTTP API is on `http_port`,
 61447. The WebSocket is on `ws_port`, 62281. That is why `host` in the config has no port.
-`client.call(...)` uses the HTTP API. `client.monitor(topic)` and `client.notifications()` use
-the WebSocket. `monitor.py` and `notifications.py` show the WebSocket.
+`client.call(...)` uses the HTTP API. `client.stream_monitoring(topic)` and
+`client.notifications()` use the WebSocket. `stream-monitoring.py` and `notifications.py` show the
+WebSocket.
 
 ## Why it reads the spec
 

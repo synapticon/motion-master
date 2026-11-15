@@ -111,16 +111,18 @@ await client.api.createMonitoring({
   ],
 })
 
-const unsubscribe = client.ws.subscribe('my-axis', (rows) => {
+for await (const rows of client.streamMonitoring('my-axis')) {
   for (const [timestampUs, ...values] of rows) {
     console.log(timestampUs, values)
   }
-})
-
-// Later:
-unsubscribe()
+  if (done()) {
+    break // leaving the loop unsubscribes
+  }
+}
 await client.api.deleteMonitoring('my-axis')
 ```
+
+`streamMonitoring` yields the batches of a monitoring that exists already. To get each batch in a callback instead, use `client.ws.subscribe(topic, listener)`, which returns the function that unsubscribes.
 
 Each batch holds one row per cycle since the last batch. A row is the time in microseconds since the Unix epoch, then one value for each object, in the order of `parameters`. `GET /api/monitorings/{topic}` returns that order. A value is `null` while its device does not exchange process data, which starts in SAFEOP.
 

@@ -9,7 +9,12 @@ import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
 import { fetchProcessDataDump, type MmpdFile } from './mmpd';
 import type { ObjectAddress } from './objects';
-import { WebSocketConnection, type WebSocketConstructor } from './web-socket-connection';
+import { listen } from './stream';
+import {
+  type MonitoringBatch,
+  WebSocketConnection,
+  type WebSocketConstructor,
+} from './web-socket-connection';
 
 export interface MotionMasterClientOptions {
   /** Origin (or `host:port`) of the HTTP API. Default: the bundled localhost dev origin. */
@@ -70,6 +75,21 @@ export class MotionMasterClient {
   async readValue<T>(slavePosition: number, address: ObjectAddress<T>): Promise<T> {
     const response = await this.api.readParameter(slavePosition, address.index, address.subindex);
     return response.data.value as T;
+  }
+
+  /**
+   * Subscribes to the topic of a monitoring and yields each batch of rows from the WebSocket.
+   * The monitoring must exist already: create it with `client.api.createMonitoring`. A batch is a
+   * list of rows, `[timestampUs, v0, v1, ...]`, with the values in the order of the parameters of
+   * the monitoring. The stream is lossless: a batch holds every cycle recorded since the batch
+   * before. Leaving the `for await` loop unsubscribes.
+   *
+   *     for await (const rows of client.streamMonitoring('left-leg')) { ... }
+   */
+  streamMonitoring(topic: string): AsyncGenerator<MonitoringBatch, void, undefined> {
+    return listen((listener: (rows: MonitoringBatch) => void) =>
+      this.ws.subscribe(topic, listener),
+    );
   }
 
   /**

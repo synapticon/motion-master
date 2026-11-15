@@ -19,6 +19,17 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- The TypeScript client streams the batches of a monitoring with `streamMonitoring(topic)`, which a
+  program reads with `for await`.
+
+### Changed
+
+- The Python client streams the batches of a monitoring with `stream_monitoring(topic)`, which was
+  `monitor(topic)`. The example `monitor.py` is now `stream-monitoring.py`. The new name tells it
+  apart from `monitoring()`, which creates a monitoring and records it for a span.
+
 ## [6.0.0-alpha.126] - 2026-11-15
 
 ### Changed

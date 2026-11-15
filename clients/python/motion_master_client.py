@@ -25,7 +25,7 @@ script that wants to see them turns on logging at INFO. run_procedure() starts a
 procedure, polls it until it ends, and cancels it when the caller stops early.
 step_changes() picks out the steps whose status changed, and format_step() turns
 one into a line.
-monitor() and notifications() stream from the WebSocket. monitoring() creates a
+stream_monitoring() and notifications() stream from the WebSocket. monitoring() creates a
 monitoring, records its rows while a with block runs, and deletes it at the
 end, so a script can check the rows afterwards. read_value() reads one object,
 decoded by the server, and wait_for_value() reads it until a condition holds.
@@ -325,9 +325,8 @@ class MotionMasterClient:
         self._http_url = http_url.rstrip("/")
         # The body of POST /api/init, for example {"driver": "soem", "adapter": "eth0"}.
         self.fieldbus = fieldbus
-        # The monitoring WebSocket endpoint. Held here so the client is the one
-        # connection object -- a future monitor()/trace-process-data method reads
-        # this instead of callers wiring up a second object.
+        # The WebSocket endpoint. stream_monitoring(), notifications() and monitoring() connect to
+        # it, so a script needs no second connection object.
         self.ws_url = ws_url
         self._verify = verify
         self._session = requests.Session()
@@ -756,16 +755,15 @@ class MotionMasterClient:
             return ssl.create_default_context(cafile=self._verify)
         return ssl.create_default_context()
 
-    def monitor(self, topic):
-        """Subscribe to a monitoring topic and yield its batches from the WebSocket.
+    def stream_monitoring(self, topic):
+        """Subscribe to the topic of a monitoring and yield each batch of rows from the WebSocket.
 
-        The monitoring itself must already exist (POST /api/monitorings, i.e.
-        client.call("createMonitoring", ...)). This opens the WebSocket, sends
-        {"subscribe": topic}, and yields each batch's rows -- a list of
-        [timestampUs, v0, v1, ...] cycle rows, positionally ordered by the
-        monitoring's parameters. The stream is lossless: every recorded cycle
-        since the last flush arrives in the batch. The caller stops by breaking
-        out of the loop; the socket and subscription are torn down on exit.
+        The monitoring must exist already: create it with client.call("createMonitoring", ...).
+        To record a monitoring for a span instead, use monitoring(), which creates and deletes it.
+        A batch is a list of rows, [timestampUs, v0, v1, ...], with the values in the order of the
+        parameters of the monitoring. The stream is lossless: a batch holds every cycle recorded
+        since the batch before. The caller stops by breaking out of the loop, and that closes the
+        WebSocket.
         """
         for msg in self._subscribe(topic):
             if msg.get("type") == "monitoring" and msg.get("topic") == topic:

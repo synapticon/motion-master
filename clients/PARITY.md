@@ -110,7 +110,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `quick_stop` | — | pending | |
 | `run_procedure` | — | pending | |
 | `monitoring` | — | pending | |
-| `monitor` | — | pending | |
+| `stream_monitoring` | `streamMonitoring` | | |
 | `notifications` | — | pending | |
 | `start_capture` | — | pending | |
 | `stop_capture` | — | pending | |

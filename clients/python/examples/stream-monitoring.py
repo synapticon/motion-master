@@ -3,6 +3,9 @@
 
 Creates a monitoring over the HTTP API (POST /api/monitorings), subscribes to its topic on the
 WebSocket, and prints each batch of cycle rows as it arrives. The monitoring is deleted on exit.
+stream_monitoring() only reads a monitoring that exists, so this script creates and deletes it with
+call(). To record a span and check the rows afterwards, use client.monitoring(), as monitoring.py
+does.
 
 Opens the fieldbus driver, scans and moves the device to OP first when needed. A value is null
 while its device is not exchanging process data, which starts in SAFEOP.
@@ -12,8 +15,8 @@ The defaults sample four objects of the device: Timestamp (0x20F0:00), Position 
 reads each object from the process image when it is PDO-mapped, and with a background SDO poll
 otherwise. The header line shows which, as (pdo) or (sdo).
 
-    python monitor.py --count 10
-    python monitor.py --slave 2 --interval 500     # runs until Ctrl-C
+    python stream-monitoring.py --count 10
+    python stream-monitoring.py --slave 2 --interval 500     # runs until Ctrl-C
 """
 
 import argparse
@@ -62,7 +65,7 @@ def main():
 
     batches = 0
     try:
-        for rows in client.monitor(TOPIC):
+        for rows in client.stream_monitoring(TOPIC):
             ts_us, *values = rows[-1]
             ts = datetime.fromtimestamp(ts_us / 1e6, timezone.utc).strftime("%H:%M:%S.%f")
             print(f"  {ts}  {len(rows):4d} row(s)  latest={values}")

@@ -518,6 +518,8 @@ export class MotionMasterClient {
     options: { intervalMs?: number; topic?: string; name?: string } = {},
   ): Promise<MonitoringRecording> {
     const { intervalMs = 50, topic = uniqueTopic(), name } = options;
+    // Throws when there is no WebSocket, such as in Node.js 20, before the monitoring exists.
+    this.ws.connect();
     const body = {
       topic,
       interval: intervalMs,
@@ -554,24 +556,27 @@ export class MotionMasterClient {
         };
         wake();
       });
-    const unsubscribe = this.ws.subscribe(topic, (rows) => {
-      recording.rows.push(...rows);
-      batches += 1;
-      wake();
-    });
-    const stopWatching = this.ws.onStateChange((state) => {
-      if (state === 'closed') {
-        socketError = new Error(`monitoring ${topic}: the WebSocket closed during the recording`);
-        wake();
-      }
-    });
+    let unsubscribe = () => {};
+    let stopWatching = () => {};
     const stop = async () => {
       unsubscribe();
       stopWatching();
       await this.api.deleteMonitoring(topic).catch(() => {});
     };
 
+    // From here on the monitoring exists, so every failure deletes it.
     try {
+      unsubscribe = this.ws.subscribe(topic, (rows) => {
+        recording.rows.push(...rows);
+        batches += 1;
+        wake();
+      });
+      stopWatching = this.ws.onStateChange((state) => {
+        if (state === 'closed') {
+          socketError = new Error(`monitoring ${topic}: the WebSocket closed during the recording`);
+          wake();
+        }
+      });
       const arrived = await waitFor(
         () => recording.rows.length > 0 || socketError !== null,
         FIRST_ROW_TIMEOUT_MS,

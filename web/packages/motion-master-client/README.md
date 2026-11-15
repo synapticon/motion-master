@@ -88,6 +88,12 @@ pnpm install
 pnpm example examples/server-info.ts
 ```
 
+The examples that use the WebSocket, such as `monitoring.ts`, need Node.js 22, because older versions have no global `WebSocket`. Check with `node --version`. On Fedora, `node` can stay at an older version after a system upgrade. This makes Node.js 22 the default:
+
+```bash
+sudo dnf install --allowerasing nodejs22-bin nodejs22-npm-bin
+```
+
 An example imports the package by its name, as a program that installed it from npm does. `examples/tsconfig.json` points that name to the source in `src/`, so the examples need no build. `pnpm typecheck:examples` checks them.
 
 | Program | What it does |

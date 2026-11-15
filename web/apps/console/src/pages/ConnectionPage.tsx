@@ -33,7 +33,9 @@ function apiError(err: unknown): string {
 }
 
 function formatDate(iso?: string): string {
-  if (!iso) return '—';
+  if (!iso) {
+    return '—';
+  }
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
@@ -52,8 +54,12 @@ function containerSummary(container?: string, dockerVersion?: string): string {
   const runtime = container
     ? container.charAt(0).toUpperCase() + container.slice(1)
     : 'None (bare metal)';
-  if (!dockerVersion) return runtime;
-  if (container === 'docker') return `Docker ${dockerVersion}`;
+  if (!dockerVersion) {
+    return runtime;
+  }
+  if (container === 'docker') {
+    return `Docker ${dockerVersion}`;
+  }
   return `Docker ${dockerVersion} · ${runtime}`;
 }
 
@@ -143,7 +149,9 @@ export default function ConnectionPage() {
   const wsPortValid = isValidPort(draftWsPort);
   const endpointValid = draftHost.trim() !== '' && httpPortValid && wsPortValid;
   const applyEndpoint = () => {
-    if (!endpointValid) return;
+    if (!endpointValid) {
+      return;
+    }
     setHost(draftHost.trim());
     setHttpPort(draftHttpPort.trim());
     setWsPort(draftWsPort.trim());

@@ -25,10 +25,18 @@ function apiError(err: unknown): string {
 
 function interpretBytes(bytes: number[]): string | null {
   const view = new DataView(new Uint8Array(bytes).buffer);
-  if (bytes.length === 1) return `${view.getUint8(0)} (uint8)`;
-  if (bytes.length === 2) return `${view.getUint16(0, true)} (uint16 LE)`;
-  if (bytes.length === 4) return `${view.getUint32(0, true)} (uint32 LE)`;
-  if (bytes.length === 8) return `${view.getBigUint64(0, true).toString()} (uint64 LE)`;
+  if (bytes.length === 1) {
+    return `${view.getUint8(0)} (uint8)`;
+  }
+  if (bytes.length === 2) {
+    return `${view.getUint16(0, true)} (uint16 LE)`;
+  }
+  if (bytes.length === 4) {
+    return `${view.getUint32(0, true)} (uint32 LE)`;
+  }
+  if (bytes.length === 8) {
+    return `${view.getBigUint64(0, true).toString()} (uint64 LE)`;
+  }
   return null;
 }
 
@@ -73,7 +81,9 @@ export default function DeviceRegistersPage() {
 
   function selectFromCatalogue(addr: number) {
     const reg = catalogue.find((r) => r.address === addr);
-    if (!reg) return;
+    if (!reg) {
+      return;
+    }
     setAddress(String(reg.address));
     setLength(String(reg.length));
     setReadResult(null);
@@ -93,7 +103,9 @@ export default function DeviceRegistersPage() {
   }
 
   async function handleRead() {
-    if (!canRead) return;
+    if (!canRead) {
+      return;
+    }
     setReading(true);
     setReadResult(null);
     setReadError(null);
@@ -122,12 +134,16 @@ export default function DeviceRegistersPage() {
   }
 
   async function handleWrite() {
-    if (!canWrite || writeBytes === null) return;
+    if (!canWrite || writeBytes === null) {
+      return;
+    }
     const ok = window.confirm(
       `Write ${writeBytes.length} byte(s) to register ${writeAddrHex} on slave ${slavePosition}?\n` +
         'Writing ESC registers directly can disrupt device operation.',
     );
-    if (!ok) return;
+    if (!ok) {
+      return;
+    }
     setWriting(true);
     setWriteOk(false);
     setWriteError(null);

@@ -38,7 +38,9 @@ function apiError(err: unknown): string {
       if (inner && typeof inner === 'object' && 'error' in inner) {
         return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner;
+      if (typeof inner === 'string') {
+        return inner;
+      }
     }
     // Non-OK response with no JSON error body (e.g. an unmatched route → 404).
     // Surface the HTTP status so the cause is diagnosable instead of opaque.
@@ -54,8 +56,12 @@ function apiError(err: unknown): string {
 
 function parseHexOrDec(s: string): number | null {
   const t = s.trim();
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) return parseInt(t.slice(2), 16);
-  if (/^[0-9]+$/.test(t)) return parseInt(t, 10);
+  if (/^0[xX][0-9a-fA-F]+$/.test(t)) {
+    return parseInt(t.slice(2), 16);
+  }
+  if (/^[0-9]+$/.test(t)) {
+    return parseInt(t, 10);
+  }
   return null;
 }
 
@@ -64,11 +70,19 @@ function toHex(n: number, pad: number): string {
 }
 
 function formatValue(v: number | string | number[] | undefined): string {
-  if (v === undefined) return '—';
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'string') return v === '' ? '""' : `"${v}"`;
+  if (v === undefined) {
+    return '—';
+  }
+  if (typeof v === 'number') {
+    return String(v);
+  }
+  if (typeof v === 'string') {
+    return v === '' ? '""' : `"${v}"`;
+  }
   // byte array — render up to 16 bytes in hex
-  if (v.length === 0) return '[]';
+  if (v.length === 0) {
+    return '[]';
+  }
   const head = v
     .slice(0, 16)
     .map((b) => b.toString(16).toUpperCase().padStart(2, '0'))
@@ -79,9 +93,15 @@ function formatValue(v: number | string | number[] | undefined): string {
 // The current cached value rendered for an editable text input: plain (unquoted)
 // for numbers/strings, space-separated hex for byte arrays (matching `raw` input).
 function valueToInputString(v: number | string | number[] | undefined): string {
-  if (v === undefined) return '';
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'string') return v;
+  if (v === undefined) {
+    return '';
+  }
+  if (typeof v === 'number') {
+    return String(v);
+  }
+  if (typeof v === 'string') {
+    return v;
+  }
   return v.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 }
 
@@ -90,8 +110,12 @@ function valueToInputString(v: number | string | number[] | undefined): string {
 // Anything else (text, a byte list) has no range to check.
 function inputNumber(s: string): number | null {
   const t = s.trim();
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) return parseInt(t.slice(2), 16);
-  if (t === '') return null;
+  if (/^0[xX][0-9a-fA-F]+$/.test(t)) {
+    return parseInt(t.slice(2), 16);
+  }
+  if (t === '') {
+    return null;
+  }
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 }
@@ -100,9 +124,15 @@ function inputNumber(s: string): number | null {
 // firmware team writes values outside the range on purpose.
 function outsideRange(p: DeviceParameter, raw: string): boolean {
   const n = inputNumber(raw);
-  if (n === null) return false;
-  if (typeof p.minValue === 'number' && n < p.minValue) return true;
-  if (typeof p.maxValue === 'number' && n > p.maxValue) return true;
+  if (n === null) {
+    return false;
+  }
+  if (typeof p.minValue === 'number' && n < p.minValue) {
+    return true;
+  }
+  if (typeof p.maxValue === 'number' && n > p.maxValue) {
+    return true;
+  }
   return false;
 }
 
@@ -132,17 +162,27 @@ function formatAccess(a: number): string {
   // ETG.1000.6: bit 0=Rd PREOP, 1=Rd SAFEOP, 2=Rd OP, 3=Wr PREOP, 4=Wr SAFEOP, 5=Wr OP
   const r = (a & 0x07) !== 0;
   const w = isWritable(a);
-  if (r && w) return 'RW';
-  if (r) return 'RO';
-  if (w) return 'WO';
+  if (r && w) {
+    return 'RW';
+  }
+  if (r) {
+    return 'RO';
+  }
+  if (w) {
+    return 'WO';
+  }
   return '—';
 }
 
 function formatElapsed(ms: number): string {
   // Sub-10 ms ops (a single fast SDO) keep one decimal so they don't round to "0 ms";
   // larger ops (the list rebuilds) round to whole ms / two-decimal seconds.
-  if (ms < 10) return `${ms.toFixed(1)} ms`;
-  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 10) {
+    return `${ms.toFixed(1)} ms`;
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)} ms`;
+  }
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
@@ -262,7 +302,9 @@ const ReadSdoCard = memo(function ReadSdoCard({
   }
 
   async function handleUpload() {
-    if (!canUpload) return;
+    if (!canUpload) {
+      return;
+    }
     setUploading(true);
     clearReadStatus();
     const start = performance.now();
@@ -275,7 +317,9 @@ const ReadSdoCard = memo(function ReadSdoCard({
       // A failed transaction still consumed wire time (an SDO read waits out the mailbox timeout);
       // the backend attaches X-Wire-Us to the error too, so show the same timing as on success.
       setReadSdoElapsedMs(performance.now() - start);
-      if (err instanceof Response) setReadSdoWireMs(wireTimeMs(err));
+      if (err instanceof Response) {
+        setReadSdoWireMs(wireTimeMs(err));
+      }
       setError(apiError(err));
     } finally {
       setUploading(false);
@@ -394,7 +438,9 @@ const WriteSdoCard = memo(function WriteSdoCard({
   }
 
   async function handleDownload() {
-    if (!canDownload || !encodedBytes) return;
+    if (!canDownload || !encodedBytes) {
+      return;
+    }
     setDownloading(true);
     clearDownloadStatus();
     const start = performance.now();
@@ -408,7 +454,9 @@ const WriteSdoCard = memo(function WriteSdoCard({
     } catch (err) {
       // Show the wire time on failure too — the backend attaches X-Wire-Us to the error.
       setWriteSdoElapsedMs(performance.now() - start);
-      if (err instanceof Response) setWriteSdoWireMs(wireTimeMs(err));
+      if (err instanceof Response) {
+        setWriteSdoWireMs(wireTimeMs(err));
+      }
       setDlError(apiError(err));
     } finally {
       setDownloading(false);
@@ -632,7 +680,9 @@ export default function DeviceParametersPage() {
       // full parameter (decoded value + sync state), so no client-side byte decode is needed.
       const res = await api.readParameter(slavePosition, p.index, p.subindex);
       queryClient.setQueryData(paramsQueryKey, (prev: typeof paramsQuery.data) => {
-        if (!prev) return prev;
+        if (!prev) {
+          return prev;
+        }
         const next = prev.data.map((x) =>
           x.index === p.index && x.subindex === p.subindex ? res.data : x,
         );
@@ -652,7 +702,9 @@ export default function DeviceParametersPage() {
 
   function clearEdit(key: string) {
     setEditValues((prev) => {
-      if (!(key in prev)) return prev;
+      if (!(key in prev)) {
+        return prev;
+      }
       const next = { ...prev };
       delete next[key];
       return next;
@@ -683,7 +735,9 @@ export default function DeviceParametersPage() {
         ? (await api.readParameter(slavePosition, p.index, p.subindex)).data.value
         : written.data.value;
       queryClient.setQueryData(paramsQueryKey, (prev: typeof paramsQuery.data) => {
-        if (!prev) return prev;
+        if (!prev) {
+          return prev;
+        }
         const next = prev.data.map((x) =>
           x.index === p.index && x.subindex === p.subindex
             ? { ...x, value, syncState: 'synced' as const }
@@ -726,7 +780,9 @@ export default function DeviceParametersPage() {
   // the object's.
   const objectDescriptions = new Map<number, string>();
   for (const p of params) {
-    if (p.subindex === 0 && p.description) objectDescriptions.set(p.index, p.description);
+    if (p.subindex === 0 && p.description) {
+      objectDescriptions.set(p.index, p.description);
+    }
   }
   // A device with an ESI marks the entries its ESI leaves out, because those mean the ESI and the
   // firmware disagree.
@@ -735,8 +791,11 @@ export default function DeviceParametersPage() {
   function toggleDescription(key: string) {
     setOpenDescriptions((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
       return next;
     });
   }
@@ -1030,8 +1089,9 @@ export default function DeviceParametersPage() {
                                       value={selectedOption ? String(selectedOption.value) : ''}
                                       onChange={(e) => {
                                         const v = e.target.value;
-                                        if (v !== '')
+                                        if (v !== '') {
                                           setEditValues((prev) => ({ ...prev, [key]: v }));
+                                        }
                                       }}
                                       disabled={!writable || busy}
                                       title="Pick a named value to put it in the input. Any other value can still be typed and set."

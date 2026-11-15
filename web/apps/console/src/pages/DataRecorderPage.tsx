@@ -178,7 +178,9 @@ export default function DataRecorderPage() {
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = e.target.files?.[0];
     e.target.value = ''; // let the same file be re-picked
-    if (!picked) return;
+    if (!picked) {
+      return;
+    }
     setLoading(true);
     setViewError(null);
     try {
@@ -201,9 +203,13 @@ export default function DataRecorderPage() {
       labels: [] as string[],
       titles: [] as string[],
     };
-    if (!file) return empty;
+    if (!file) {
+      return empty;
+    }
     const chosen = flat.filter((e) => selected.has(e.key) && e.plottable);
-    if (chosen.length === 0) return empty;
+    if (chosen.length === 0) {
+      return empty;
+    }
     const tsUs = file.timestampsUs();
     const t0 = tsUs.length > 0 ? tsUs[0] : 0;
     const xs = Array.from(tsUs, (t) => t - t0);

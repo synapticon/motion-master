@@ -36,8 +36,12 @@ function isHexForm(value: string): boolean {
 // (empty, mid-edit, or a non-integer) — in which case the caller leaves the text untouched.
 function toBase(value: string, base: 'dec' | 'hex', hexPadDigits?: number): string | null {
   const n = parseIntegerFlexible(value.trim());
-  if (n === null) return null;
-  if (base === 'dec') return n.toString(10);
+  if (n === null) {
+    return null;
+  }
+  if (base === 'dec') {
+    return n.toString(10);
+  }
   const negative = n < 0n;
   const magnitude = (negative ? -n : n).toString(16).toUpperCase();
   const padded = hexPadDigits ? magnitude.padStart(hexPadDigits, '0') : magnitude;

@@ -93,14 +93,18 @@ function apiError(err: unknown): string {
       if (inner && typeof inner === 'object' && 'error' in inner) {
         return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner;
+      if (typeof inner === 'string') {
+        return inner;
+      }
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
       const { status } = err as { status: number };
       return `HTTP ${status}`;
     }
   }
-  if (err instanceof Error) return err.message;
+  if (err instanceof Error) {
+    return err.message;
+  }
   return 'Unknown error';
 }
 
@@ -133,7 +137,9 @@ export default function DeviceMotionPage() {
   // user's to change until they press "Set mode".
   const [selectedMode, setSelectedMode] = useState<number | null>(null);
   useEffect(() => {
-    if (selectedMode === null && status) setSelectedMode(status.operationMode);
+    if (selectedMode === null && status) {
+      setSelectedMode(status.operationMode);
+    }
   }, [status, selectedMode]);
 
   const setModeMutation = useMutation({
@@ -156,7 +162,9 @@ export default function DeviceMotionPage() {
   // would be hostile.
   const [targetValue, setTargetValue] = useState<string | null>(null);
   useEffect(() => {
-    if (targetValue !== null || !status || !targetKind) return;
+    if (targetValue !== null || !status || !targetKind) {
+      return;
+    }
     const seed = {
       position: status.targetPosition,
       velocity: status.targetVelocity,
@@ -384,7 +392,9 @@ function MotionGraph({
   const odIndices = useMemo(() => {
     const set = new Set<number>();
     for (const p of paramsQuery.data?.data ?? []) {
-      if (p.subindex === 0) set.add(p.index);
+      if (p.subindex === 0) {
+        set.add(p.index);
+      }
     }
     return set;
   }, [paramsQuery.data]);
@@ -395,7 +405,9 @@ function MotionGraph({
     const q = new Set<Quantity>();
     for (const s of series) {
       // A quantity is plottable only when both its target and actual object are present.
-      if (series.some((t) => t.quantity === s.quantity && t.role !== s.role)) q.add(s.quantity);
+      if (series.some((t) => t.quantity === s.quantity && t.role !== s.role)) {
+        q.add(s.quantity);
+      }
     }
     return (['position', 'velocity', 'torque'] as Quantity[]).filter((x) => q.has(x));
   }, [series]);
@@ -403,7 +415,9 @@ function MotionGraph({
   const [quantity, setQuantity] = useState<Quantity>(defaultQuantity);
   // Fall back to a plottable quantity once the OD is known.
   useEffect(() => {
-    if (available.length > 0 && !available.includes(quantity)) setQuantity(available[0]);
+    if (available.length > 0 && !available.includes(quantity)) {
+      setQuantity(available[0]);
+    }
   }, [available, quantity]);
 
   // Create the monitoring once the OD is loaded. It is NOT deleted on leave — it persists as a
@@ -416,10 +430,12 @@ function MotionGraph({
   const seriesRef = useRef(series);
   seriesRef.current = series;
   useEffect(() => {
-    if (paramsQuery.isPending || series.length === 0) return;
+    if (paramsQuery.isPending || series.length === 0) {
+      return;
+    }
     let cancelled = false;
     const parameters = series.map((s) => [slavePosition, s.index, 0]);
-    (async () => {
+    void (async () => {
       try {
         await api.createMonitoring({
           topic,
@@ -429,7 +445,9 @@ function MotionGraph({
         });
       } catch (err) {
         if (!isConflict(err)) {
-          if (!cancelled) setCreateError(apiError(err));
+          if (!cancelled) {
+            setCreateError(apiError(err));
+          }
           return;
         }
       }
@@ -461,12 +479,16 @@ function MotionGraph({
   }, [series]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready) {
+      return;
+    }
     const onBatch = (rows: SampleRows) => {
       const n = seriesRef.current.length;
       for (const row of rows) {
         const ts = typeof row[0] === 'number' ? row[0] : 0;
-        if (t0Ref.current === null) t0Ref.current = ts;
+        if (t0Ref.current === null) {
+          t0Ref.current = ts;
+        }
         xsRef.current.push(ts - t0Ref.current);
         for (let i = 0; i < n; i++) {
           const v = row[i + 1];
@@ -476,7 +498,9 @@ function MotionGraph({
       const overflow = xsRef.current.length - RETENTION;
       if (overflow > 0) {
         xsRef.current.splice(0, overflow);
-        for (const ys of ysRef.current) ys.splice(0, overflow);
+        for (const ys of ysRef.current) {
+          ys.splice(0, overflow);
+        }
       }
       setData([xsRef.current, ...ysRef.current] as uPlot.AlignedData);
     };

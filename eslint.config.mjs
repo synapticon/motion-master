@@ -57,7 +57,9 @@ export default defineConfig(
   {
     rules: {
       curly: ['error', 'all'],
-      eqeqeq: ['error', 'always'],
+      // x == null tests for null and undefined together, as the Google TypeScript style guide
+      // allows.
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
     },
   },
 );

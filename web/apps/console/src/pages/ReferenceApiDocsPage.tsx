@@ -159,11 +159,15 @@ export default function ReferenceApiDocsPage() {
   // covers Scalar's async render; the existence guard makes it idempotent.
   useEffect(() => {
     const root = rootRef.current;
-    if (!root) return undefined;
+    if (!root) {
+      return undefined;
+    }
 
     const tryInject = () => {
       const section = root.querySelector('.introduction-section');
-      if (!section || section.querySelector('.mm-spec-download')) return;
+      if (!section || section.querySelector('.mm-spec-download')) {
+        return;
+      }
       const bar = buildDownloadBar();
       const title = section.querySelector('h1');
       if (title) {

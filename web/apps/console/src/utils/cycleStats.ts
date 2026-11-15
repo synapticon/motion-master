@@ -11,7 +11,9 @@ export interface CycleStats {
 // its jitter (e.g. mean ≈ 1000 µs for a 1 ms loop), not the WebSocket flush cadence. stdev is the
 // population standard deviation, the headline jitter figure. xs is assumed monotonic and in µs.
 export function cycleStats(xs: ArrayLike<number>): CycleStats | null {
-  if (xs.length < 2) return null;
+  if (xs.length < 2) {
+    return null;
+  }
   let min = Infinity;
   let max = -Infinity;
   let sum = 0;
@@ -19,13 +21,19 @@ export function cycleStats(xs: ArrayLike<number>): CycleStats | null {
   for (let i = 1; i < xs.length; i++) {
     const d = xs[i] - xs[i - 1];
     deltas[i - 1] = d;
-    if (d < min) min = d;
-    if (d > max) max = d;
+    if (d < min) {
+      min = d;
+    }
+    if (d > max) {
+      max = d;
+    }
     sum += d;
   }
   const mean = sum / deltas.length;
   let sumSq = 0;
-  for (const d of deltas) sumSq += (d - mean) * (d - mean);
+  for (const d of deltas) {
+    sumSq += (d - mean) * (d - mean);
+  }
   const stdev = Math.sqrt(sumSq / deltas.length);
   const sorted = [...deltas].sort((a, b) => a - b);
   const mid = sorted.length >> 1;

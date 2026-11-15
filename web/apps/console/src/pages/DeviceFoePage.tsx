@@ -70,7 +70,9 @@ function encodeFilename(name: string): string {
 // Human-readable elapsed time for a FoE transfer — sub-second in ms, otherwise seconds.
 function formatDuration(ms: number): string {
   // Sub-10 ms (a fast FoE wire transaction) keeps one decimal so it doesn't round to "0 ms".
-  if (ms < 10) return `${ms.toFixed(1)} ms`;
+  if (ms < 10) {
+    return `${ms.toFixed(1)} ms`;
+  }
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
 }
 
@@ -107,7 +109,9 @@ function decodeUtf8(bytes: Uint8Array): string | null {
 
 // Pretty-print `text` as indented JSON, or null if it does not parse.
 function formatJson(text: string | null): string | null {
-  if (text === null) return null;
+  if (text === null) {
+    return null;
+  }
   try {
     return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
@@ -209,7 +213,9 @@ export default function DeviceFoePage() {
   }
 
   async function handleRead(name: string = filename) {
-    if (!name || reading) return;
+    if (!name || reading) {
+      return;
+    }
     setFilename(name);
     setReading(true);
     setResult(null);
@@ -242,7 +248,9 @@ export default function DeviceFoePage() {
   }
 
   async function handleList() {
-    if (listing) return;
+    if (listing) {
+      return;
+    }
     setListing(true);
     setListError(null);
     try {
@@ -286,7 +294,9 @@ export default function DeviceFoePage() {
   }
 
   async function handleUnlock() {
-    if (unlocking) return;
+    if (unlocking) {
+      return;
+    }
     setUnlocking(true);
     setUnlockOk(false);
     setUnlockError(null);
@@ -301,12 +311,16 @@ export default function DeviceFoePage() {
   }
 
   async function handleWrite() {
-    if (!writeFilename || writeBytes === null || writing) return;
+    if (!writeFilename || writeBytes === null || writing) {
+      return;
+    }
     const ok = window.confirm(
       `Write ${writeBytes.length.toLocaleString()} byte(s) to "${writeFilename}" on device ${slavePosition}?\n` +
         'This overwrites any existing file with that name on the drive.',
     );
-    if (!ok) return;
+    if (!ok) {
+      return;
+    }
     setWriting(true);
     setWriteOk(false);
     setWriteError(null);
@@ -328,7 +342,9 @@ export default function DeviceFoePage() {
         throw new Error(json?.error ?? `HTTP ${response.status}`);
       }
       setWriteOk(true);
-      if (isSomanet && files) handleList();
+      if (isSomanet && files) {
+        void handleList();
+      }
     } catch (err) {
       setWriteError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -339,11 +355,15 @@ export default function DeviceFoePage() {
   }
 
   async function handleRemove(name: string) {
-    if (removing) return;
+    if (removing) {
+      return;
+    }
     const ok = window.confirm(
       `Remove "${name}" from device ${slavePosition}?\nThis permanently deletes the file from the drive.`,
     );
-    if (!ok) return;
+    if (!ok) {
+      return;
+    }
     setRemoving(name);
     setListError(null);
     try {
@@ -386,7 +406,9 @@ export default function DeviceFoePage() {
                   value={filename}
                   onChange={(e) => pickFilename(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRead();
+                    if (e.key === 'Enter') {
+                      void handleRead();
+                    }
                   }}
                   placeholder="e.g. firmware.bin"
                   className={inputCls}

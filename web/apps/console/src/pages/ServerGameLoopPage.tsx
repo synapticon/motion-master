@@ -24,7 +24,9 @@ function apiError(err: unknown): string {
       if (inner && typeof inner === 'object' && 'error' in inner) {
         return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner;
+      if (typeof inner === 'string') {
+        return inner;
+      }
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
       return `HTTP ${(err as { status: number }).status}`;
@@ -44,15 +46,23 @@ const KEEPING_UP_FRACTION = 0.95;
 
 // Format a hertz figure with a sensible number of decimals for the magnitude.
 function formatHz(hz: number): string {
-  if (hz >= 100) return `${hz.toFixed(1)} Hz`;
-  if (hz >= 1) return `${hz.toFixed(2)} Hz`;
+  if (hz >= 100) {
+    return `${hz.toFixed(1)} Hz`;
+  }
+  if (hz >= 1) {
+    return `${hz.toFixed(2)} Hz`;
+  }
   return `${hz.toFixed(3)} Hz`;
 }
 
 // Format a nanosecond duration compactly: bare ns under a microsecond, then µs / ms.
 function formatNs(ns: number): string {
-  if (ns < 1_000) return `${ns} ns`;
-  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(2)} µs`;
+  if (ns < 1_000) {
+    return `${ns} ns`;
+  }
+  if (ns < 1_000_000) {
+    return `${(ns / 1_000).toFixed(2)} µs`;
+  }
   return `${(ns / 1_000_000).toFixed(2)} ms`;
 }
 
@@ -148,7 +158,9 @@ export default function ServerGameLoopPage() {
   const [instant, setInstant] = useState<{ hz: number; skipHz: number } | null>(null);
 
   useEffect(() => {
-    if (!health) return;
+    if (!health) {
+      return;
+    }
     const last = prev.current;
     if (last && health.timestampUs > last.timestampUs) {
       const dtSec = (health.timestampUs - last.timestampUs) / 1_000_000;

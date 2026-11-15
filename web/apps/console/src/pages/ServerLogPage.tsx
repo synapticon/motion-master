@@ -14,7 +14,9 @@ export default function ServerLogPage() {
     queryKey: ['log', host, httpPort],
     queryFn: async () => {
       const res = await fetch(`https://${host}:${httpPort}/api/log`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
       return res.text();
     },
     refetchInterval: false,

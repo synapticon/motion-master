@@ -339,7 +339,9 @@ export default function FieldbusControlPage() {
   // Scan/transition set states themselves, so this only fills the initial gap.
   const autoReadStates = useRef(false);
   useEffect(() => {
-    if (autoReadStates.current) return;
+    if (autoReadStates.current) {
+      return;
+    }
     if (devicesQuery.isSuccess && devicesQuery.data.data.length > 0) {
       autoReadStates.current = true;
       void readStatesFor(devicesQuery.data.data.map((d) => d.slavePosition));

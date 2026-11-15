@@ -33,7 +33,9 @@ function apiError(err: unknown): string {
       if (inner && typeof inner === 'object' && 'error' in inner) {
         return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner;
+      if (typeof inner === 'string') {
+        return inner;
+      }
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
       return `HTTP ${(err as { status: number }).status}`;
@@ -44,8 +46,12 @@ function apiError(err: unknown): string {
 
 function parseHexOrDec(s: string): number | null {
   const t = s.trim();
-  if (/^[-+]?0[xX][0-9a-fA-F]+$/.test(t)) return parseInt(t.replace(/0[xX]/, ''), 16);
-  if (/^[-+]?[0-9]+$/.test(t)) return parseInt(t, 10);
+  if (/^[-+]?0[xX][0-9a-fA-F]+$/.test(t)) {
+    return parseInt(t.replace(/0[xX]/, ''), 16);
+  }
+  if (/^[-+]?[0-9]+$/.test(t)) {
+    return parseInt(t, 10);
+  }
   return null;
 }
 
@@ -62,9 +68,15 @@ function objKeyOf(o: ProcessImageObject): string {
 // the JSON value to the declared type either way — this only picks the right input parsing.
 type ValueKind = 'int' | 'float' | 'string';
 function valueKind(dataTypeName: string | undefined): ValueKind {
-  if (!dataTypeName) return 'int';
-  if (dataTypeName.startsWith('REAL')) return 'float';
-  if (dataTypeName.includes('STRING')) return 'string';
+  if (!dataTypeName) {
+    return 'int';
+  }
+  if (dataTypeName.startsWith('REAL')) {
+    return 'float';
+  }
+  if (dataTypeName.includes('STRING')) {
+    return 'string';
+  }
   return 'int';
 }
 
@@ -74,9 +86,13 @@ function parseValue(
   text: string,
   kind: ValueKind,
 ): { ok: true; value: number | string } | { ok: false; error: string } {
-  if (kind === 'string') return { ok: true, value: text };
+  if (kind === 'string') {
+    return { ok: true, value: text };
+  }
   const t = text.trim();
-  if (t === '') return { ok: false, error: 'empty' };
+  if (t === '') {
+    return { ok: false, error: 'empty' };
+  }
   if (kind === 'float') {
     const n = Number(t);
     return Number.isFinite(n) ? { ok: true, value: n } : { ok: false, error: 'not a number' };
@@ -90,7 +106,9 @@ function parseValue(
 // Format a live value for display. null = the device was not exchanging at sample time (or no data
 // yet); numbers print as decimal.
 function formatLive(v: number | null): string {
-  if (v === null || v === undefined) return '—';
+  if (v === null || v === undefined) {
+    return '—';
+  }
   return String(v);
 }
 
@@ -111,7 +129,7 @@ export default function DataProcessDataPage() {
     enabled: hasScanned,
     staleTime: Infinity,
   });
-  const devices = devicesQuery.data?.data ?? [];
+  const devices = useMemo(() => devicesQuery.data?.data ?? [], [devicesQuery.data]);
   const deviceName = (pos: number) => devices.find((d) => d.slavePosition === pos)?.name ?? '';
 
   // Object dictionaries per device, so we can classify each object's data type (int/float/string)
@@ -251,6 +269,9 @@ function ProcessDataPanels({
   const sig = useMemo(() => [...outputs, ...inputs].map(objKeyOf).join('|'), [outputs, inputs]);
   const parameters = useMemo(
     () => [...outputs, ...inputs].map((o) => [o.slavePosition, o.index, o.subindex]),
+    // The memo is keyed on sig, the content of outputs and inputs, so a refetch that returns equal
+    // objects keeps the monitoring.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sig],
   );
 
@@ -259,7 +280,9 @@ function ProcessDataPanels({
   // unmount effect below removes it once.
   const tokenRef = useRef<object>({});
   useEffect(() => {
-    if (parameters.length === 0) return;
+    if (parameters.length === 0) {
+      return;
+    }
     const token = {};
     tokenRef.current = token;
     void (async () => {
@@ -268,7 +291,9 @@ function ProcessDataPanels({
       } catch {
         // Not present yet — fine.
       }
-      if (tokenRef.current !== token) return;
+      if (tokenRef.current !== token) {
+        return;
+      }
       try {
         await api.createMonitoring({
           topic: TOPIC,
@@ -294,7 +319,9 @@ function ProcessDataPanels({
   useEffect(() => {
     setLive(parameters.map(() => null));
     const onBatch = (rows: SampleRows) => {
-      if (rows.length === 0) return;
+      if (rows.length === 0) {
+        return;
+      }
       const last = rows[rows.length - 1];
       setLive(
         parameters.map((_, k) =>
@@ -328,7 +355,9 @@ function ProcessDataPanels({
     for (const o of outputs) {
       const key = objKeyOf(o);
       const text = edits.get(key);
-      if (text === undefined || text === '') continue;
+      if (text === undefined || text === '') {
+        continue;
+      }
       const kind = valueKind(paramByKey.get(key)?.dataTypeName);
       const parsed = parseValue(text, kind);
       if (!parsed.ok) {
@@ -349,13 +378,17 @@ function ProcessDataPanels({
         for (const r of results) {
           const key = objKey(r.slavePosition, r.index, r.subindex);
           nextOutcomes.set(key, { staged: r.staged, error: r.error });
-          if (r.staged) stagedKeys.add(key);
+          if (r.staged) {
+            stagedKeys.add(key);
+          }
         }
         setOutcomes(nextOutcomes);
         // Clear edits that landed; keep the ones that errored so the user can fix them.
         setEdits((m) => {
           const next = new Map(m);
-          for (const key of stagedKeys) next.delete(key);
+          for (const key of stagedKeys) {
+            next.delete(key);
+          }
           return next;
         });
       },

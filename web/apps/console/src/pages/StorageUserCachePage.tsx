@@ -76,7 +76,7 @@ export default function StorageUserCachePage() {
     },
     onSuccess: () => {
       setError(null);
-      invalidate();
+      void invalidate();
     },
     onError: (err: Error) => setError(err.message),
   });
@@ -86,7 +86,7 @@ export default function StorageUserCachePage() {
       fileTiming.measure(() => api.deleteUserCacheFile(encodeUserCachePath(path))),
     onSuccess: () => {
       setError(null);
-      invalidate();
+      void invalidate();
     },
     onError: (err: Error) => setError(err.message),
   });

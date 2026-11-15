@@ -21,7 +21,9 @@ export function ServerStateProbe({ children }: { children: React.ReactNode }) {
       .then((res) => {
         // Empty list = server not initialized, or an initialized-but-empty bus. Either
         // way keep the "Not initialized" view; do NOT init/scan from here.
-        if (cancelled || res.data.length === 0) return;
+        if (cancelled || res.data.length === 0) {
+          return;
+        }
         // Devices already present → the bus is live and scanned. Seed the cache so the
         // gated ['devices'] queries have data immediately, then pull current AL states.
         queryClient.setQueryData(['devices'], res);

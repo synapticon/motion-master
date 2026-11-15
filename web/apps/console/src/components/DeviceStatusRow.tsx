@@ -81,10 +81,14 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
   const [selectedMode, setSelectedMode] = useState<number | null>(null);
   const [selectedState, setSelectedState] = useState<Cia402TargetState | null>(null);
   useEffect(() => {
-    if (selectedMode === null && status) setSelectedMode(status.operationMode);
+    if (selectedMode === null && status) {
+      setSelectedMode(status.operationMode);
+    }
   }, [status, selectedMode]);
   useEffect(() => {
-    if (selectedState !== null || !status) return;
+    if (selectedState !== null || !status) {
+      return;
+    }
     // Seed with where the drive is, when that is somewhere it could also be sent. From a state it
     // cannot be sent to — Fault, or still starting up — seed with the one that gets it out.
     setSelectedState(

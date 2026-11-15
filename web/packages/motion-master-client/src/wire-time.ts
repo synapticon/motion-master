@@ -13,7 +13,9 @@ export const WIRE_TIME_HEADER = 'X-Wire-Us';
 // absent or unparseable. Accepts any `Response` (the generated client's `HttpResponse` extends it).
 export function wireTimeMs(res: Response): number | null {
   const raw = res.headers.get(WIRE_TIME_HEADER);
-  if (raw === null) return null;
+  if (raw === null) {
+    return null;
+  }
   const us = Number(raw);
   return Number.isFinite(us) ? us / 1000 : null;
 }

@@ -4,7 +4,9 @@ import { type CycleStats, micros } from '../utils/cycleStats';
 // consecutive samples. Shared by the live monitoring chart and the recorder RECORD & VIEW chart so
 // both report jitter the same way.
 export default function CycleStatsBar({ stats }: { stats: CycleStats | null }) {
-  if (!stats) return null;
+  if (!stats) {
+    return null;
+  }
   return (
     <div
       className="mb-2 text-center text-xs text-grey-500 cursor-help"

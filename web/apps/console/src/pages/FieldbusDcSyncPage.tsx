@@ -22,8 +22,12 @@ const inSync = (d: DcSyncStatus): boolean =>
 function formatNs(ns: number): string {
   const sign = ns < 0 ? '−' : '';
   const abs = Math.abs(ns);
-  if (abs < 1_000) return `${sign}${abs} ns`;
-  if (abs < 1_000_000) return `${sign}${(abs / 1_000).toFixed(2)} µs`;
+  if (abs < 1_000) {
+    return `${sign}${abs} ns`;
+  }
+  if (abs < 1_000_000) {
+    return `${sign}${(abs / 1_000).toFixed(2)} µs`;
+  }
   return `${sign}${(abs / 1_000_000).toFixed(2)} ms`;
 }
 

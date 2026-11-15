@@ -64,7 +64,7 @@ export function useApiHealth(api: Api, intervalMs = 2000): boolean {
       }
     }
 
-    check();
+    void check();
     return () => {
       cancelled = true;
       clearTimeout(timer);

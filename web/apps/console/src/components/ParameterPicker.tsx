@@ -42,7 +42,9 @@ function haystack(p: DeviceParameter): string {
 // "6064 position" narrows to the one entry matching both, regardless of token order.
 function matches(p: DeviceParameter, query: string): boolean {
   const q = query.trim().toLowerCase();
-  if (q === '') return true;
+  if (q === '') {
+    return true;
+  }
   const hay = haystack(p);
   return q.split(/\s+/).every((tok) => hay.includes(tok));
 }
@@ -90,16 +92,22 @@ export default function ParameterPicker({
   // The next selectable row at or after `start` in direction `dir` (+1/−1), or −1 if none.
   function findEnabled(start: number, dir: number): number {
     for (let i = start; i >= 0 && i < filtered.length; i += dir) {
-      if (!disabledFlags[i]) return i;
+      if (!disabledFlags[i]) {
+        return i;
+      }
     }
     return -1;
   }
 
   // Close on an outside click so the dropdown behaves like a native control.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     function onDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
@@ -123,7 +131,9 @@ export default function ParameterPicker({
   }, [filtered, disabledFlags]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     const el = listRef.current?.children[highlight] as HTMLElement | undefined;
     el?.scrollIntoView({ block: 'nearest' });
   }, [highlight, open]);
@@ -137,15 +147,21 @@ export default function ParameterPicker({
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       const next = findEnabled(highlight + 1, 1);
-      if (next !== -1) setHighlight(next);
+      if (next !== -1) {
+        setHighlight(next);
+      }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       const prev = findEnabled(highlight - 1, -1);
-      if (prev !== -1) setHighlight(prev);
+      if (prev !== -1) {
+        setHighlight(prev);
+      }
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const p = filtered[highlight];
-      if (p && !disabledFlags[highlight]) choose(p);
+      if (p && !disabledFlags[highlight]) {
+        choose(p);
+      }
     } else if (e.key === 'Escape') {
       e.preventDefault();
       setOpen(false);
@@ -215,10 +231,14 @@ export default function ParameterPicker({
                     aria-selected={isSelected}
                     aria-disabled={rowDisabled}
                     onClick={() => {
-                      if (!rowDisabled) choose(p);
+                      if (!rowDisabled) {
+                        choose(p);
+                      }
                     }}
                     onMouseEnter={() => {
-                      if (!rowDisabled) setHighlight(i);
+                      if (!rowDisabled) {
+                        setHighlight(i);
+                      }
                     }}
                     title={rowDisabled ? disabledHint : undefined}
                     className={`flex items-center gap-2 px-3 py-1.5 text-sm ${

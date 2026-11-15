@@ -37,13 +37,17 @@ function apiError(err: unknown): string {
       if (inner && typeof inner === 'object' && 'error' in inner) {
         return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner;
+      if (typeof inner === 'string') {
+        return inner;
+      }
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
       return `HTTP ${(err as { status: number }).status}`;
     }
   }
-  if (err instanceof Error) return err.message;
+  if (err instanceof Error) {
+    return err.message;
+  }
   return 'Unknown error';
 }
 
@@ -63,7 +67,9 @@ export default function DeviceHrdPage() {
   const [shown, setShown] = useState<Set<string>>(new Set());
 
   async function handleRead() {
-    if (reading) return;
+    if (reading) {
+      return;
+    }
     setReading(true);
     setError(null);
     try {
@@ -81,7 +87,9 @@ export default function DeviceHrdPage() {
   // CSV comes from the server, not from the rows already on this page: it is the same read decoded
   // the other way, so a file saved here is byte-for-byte what a script fetching the endpoint gets.
   async function handleDownloadCsv() {
-    if (downloading) return;
+    if (downloading) {
+      return;
+    }
     setDownloading(true);
     setError(null);
     try {
@@ -104,11 +112,15 @@ export default function DeviceHrdPage() {
   // the recording carries no timestamps), then one array per selected column.
   const chart = useMemo(() => {
     const empty = { data: [[]] as unknown as uPlot.AlignedData, labels: [] as string[] };
-    if (!recording || recording.samples.length === 0) return empty;
+    if (!recording || recording.samples.length === 0) {
+      return empty;
+    }
     const columns = recording.columns
       .map((name, i) => ({ name, i }))
       .filter(({ name }) => shown.has(name));
-    if (columns.length === 0) return empty;
+    if (columns.length === 0) {
+      return empty;
+    }
     const xs = recording.samples.map((_, i) => i);
     const ys = columns.map(({ i }) => recording.samples.map((row) => row[i]));
     return { data: [xs, ...ys] as uPlot.AlignedData, labels: columns.map((c) => c.name) };

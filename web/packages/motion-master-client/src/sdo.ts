@@ -51,9 +51,15 @@ const INT_ENC: Partial<Record<SdoType, { size: number; signed: boolean }>> = {
 // Signed hex is signed-magnitude ("-0x1"), not two's-complement — so a value round-trips through
 // the range check in encodeSdoValue regardless of the base it was entered in.
 export function parseIntegerFlexible(s: string): bigint | null {
-  if (/^-?[0-9]+$/.test(s)) return BigInt(s);
-  if (/^0[xX][0-9a-fA-F]+$/.test(s)) return BigInt(s);
-  if (/^-0[xX][0-9a-fA-F]+$/.test(s)) return -BigInt(s.slice(1));
+  if (/^-?[0-9]+$/.test(s)) {
+    return BigInt(s);
+  }
+  if (/^0[xX][0-9a-fA-F]+$/.test(s)) {
+    return BigInt(s);
+  }
+  if (/^-0[xX][0-9a-fA-F]+$/.test(s)) {
+    return -BigInt(s.slice(1));
+  }
   return null;
 }
 
@@ -73,29 +79,59 @@ export function encodeSdoValue(
   const meta = INT_ENC[type];
   if (meta) {
     const n = parseIntegerFlexible(s);
-    if (n === null) return { error: 'Not a valid integer' };
+    if (n === null) {
+      return { error: 'Not a valid integer' };
+    }
     const bits = BigInt(meta.size * 8);
     const min = meta.signed ? -(1n << (bits - 1n)) : 0n;
     const max = meta.signed ? (1n << (bits - 1n)) - 1n : (1n << bits) - 1n;
-    if (n < min || n > max) return { error: `Out of range for ${type} [${min}, ${max}]` };
+    if (n < min || n > max) {
+      return { error: `Out of range for ${type} [${min}, ${max}]` };
+    }
     const view = new DataView(new ArrayBuffer(meta.size));
-    if (meta.size === 1) meta.signed ? view.setInt8(0, Number(n)) : view.setUint8(0, Number(n));
-    else if (meta.size === 2)
-      meta.signed ? view.setInt16(0, Number(n), true) : view.setUint16(0, Number(n), true);
-    else if (meta.size === 4)
-      meta.signed ? view.setInt32(0, Number(n), true) : view.setUint32(0, Number(n), true);
-    else meta.signed ? view.setBigInt64(0, n, true) : view.setBigUint64(0, n, true);
+    if (meta.size === 1) {
+      if (meta.signed) {
+        view.setInt8(0, Number(n));
+      } else {
+        view.setUint8(0, Number(n));
+      }
+    } else if (meta.size === 2) {
+      if (meta.signed) {
+        view.setInt16(0, Number(n), true);
+      } else {
+        view.setUint16(0, Number(n), true);
+      }
+    } else if (meta.size === 4) {
+      if (meta.signed) {
+        view.setInt32(0, Number(n), true);
+      } else {
+        view.setUint32(0, Number(n), true);
+      }
+    } else {
+      if (meta.signed) {
+        view.setBigInt64(0, n, true);
+      } else {
+        view.setBigUint64(0, n, true);
+      }
+    }
     return { bytes: [...new Uint8Array(view.buffer)] };
   }
 
   if (type === 'float32' || type === 'float64') {
-    if (s === '') return { error: 'Value is empty' };
+    if (s === '') {
+      return { error: 'Value is empty' };
+    }
     const f = Number(s);
-    if (Number.isNaN(f)) return { error: 'Not a valid number' };
+    if (Number.isNaN(f)) {
+      return { error: 'Not a valid number' };
+    }
     const size = type === 'float32' ? 4 : 8;
     const view = new DataView(new ArrayBuffer(size));
-    if (type === 'float32') view.setFloat32(0, f, true);
-    else view.setFloat64(0, f, true);
+    if (type === 'float32') {
+      view.setFloat32(0, f, true);
+    } else {
+      view.setFloat64(0, f, true);
+    }
     return { bytes: [...new Uint8Array(view.buffer)] };
   }
 
@@ -105,7 +141,9 @@ export function encodeSdoValue(
 
   // raw: whitespace- or comma-separated hex bytes
   const bytes = parseHexBytes(s);
-  if (bytes === null) return { error: 'Not a valid even-length hex byte string' };
+  if (bytes === null) {
+    return { error: 'Not a valid even-length hex byte string' };
+  }
   return { bytes };
 }
 
@@ -177,7 +215,9 @@ export function interpretSdoBytes(bytes: number[]): SdoInterpretation[] {
     // VISIBLE_STRING is space-padded to a fixed width and may carry a terminating
     // NUL — neither is significant, so strip trailing 0x20/0x00 before display.
     let len = bytes.length;
-    while (len > 0 && (bytes[len - 1] === 0x00 || bytes[len - 1] === 0x20)) len--;
+    while (len > 0 && (bytes[len - 1] === 0x00 || bytes[len - 1] === 0x20)) {
+      len--;
+    }
     const str = new TextDecoder().decode(
       new Uint8Array(bytes.slice(0, len).filter((b) => b !== 0)),
     );
@@ -195,36 +235,56 @@ export function decodeSdoBytes(dataTypeName: string, bytes: number[]): number | 
     case 'BOOLEAN':
     case 'UNSIGNED8':
     case 'BYTE':
-      if (bytes.length >= 1) return view.getUint8(0);
+      if (bytes.length >= 1) {
+        return view.getUint8(0);
+      }
       break;
     case 'INTEGER8':
-      if (bytes.length >= 1) return view.getInt8(0);
+      if (bytes.length >= 1) {
+        return view.getInt8(0);
+      }
       break;
     case 'INTEGER16':
-      if (bytes.length >= 2) return view.getInt16(0, true);
+      if (bytes.length >= 2) {
+        return view.getInt16(0, true);
+      }
       break;
     case 'INTEGER32':
-      if (bytes.length >= 4) return view.getInt32(0, true);
+      if (bytes.length >= 4) {
+        return view.getInt32(0, true);
+      }
       break;
     case 'UNSIGNED16':
     case 'WORD':
-      if (bytes.length >= 2) return view.getUint16(0, true);
+      if (bytes.length >= 2) {
+        return view.getUint16(0, true);
+      }
       break;
     case 'UNSIGNED32':
     case 'DWORD':
-      if (bytes.length >= 4) return view.getUint32(0, true);
+      if (bytes.length >= 4) {
+        return view.getUint32(0, true);
+      }
       break;
     case 'REAL32':
-      if (bytes.length >= 4) return view.getFloat32(0, true);
+      if (bytes.length >= 4) {
+        return view.getFloat32(0, true);
+      }
       break;
     case 'REAL64':
-      if (bytes.length >= 8) return view.getFloat64(0, true);
+      if (bytes.length >= 8) {
+        return view.getFloat64(0, true);
+      }
       break;
     case 'INTEGER64':
-      if (bytes.length >= 8) return Number(view.getBigInt64(0, true));
+      if (bytes.length >= 8) {
+        return Number(view.getBigInt64(0, true));
+      }
       break;
     case 'UNSIGNED64':
-      if (bytes.length >= 8) return Number(view.getBigUint64(0, true));
+      if (bytes.length >= 8) {
+        return Number(view.getBigUint64(0, true));
+      }
       break;
     case 'VISIBLE_STRING':
     case 'UNICODE_STRING':

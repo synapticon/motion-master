@@ -61,7 +61,9 @@ function apiError(err: unknown): string {
 // fractionalSecondDigits counts as a component option, and passing it alone suppresses the default
 // hour/minute/second and formats the fraction on its own.
 function formatTime(epochMs?: number): string {
-  if (epochMs === undefined) return '—';
+  if (epochMs === undefined) {
+    return '—';
+  }
   return new Date(epochMs).toLocaleTimeString([], {
     hour12: false,
     hour: '2-digit',
@@ -73,7 +75,9 @@ function formatTime(epochMs?: number): string {
 
 // How long a finished run took, or how long the current one has been going.
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
+  if (ms < 1000) {
+    return `${ms} ms`;
+  }
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
 }
 
@@ -284,15 +288,21 @@ function ProcedureDetail({
   // duration comes from its own timestamps and needs no timer.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!running) return;
+    if (!running) {
+      return;
+    }
     const timer = setInterval(() => setNow(Date.now()), 100);
     return () => clearInterval(timer);
   }, [running]);
 
   const duration = useMemo(() => {
-    if (snapshot.startedAt === undefined) return null;
+    if (snapshot.startedAt === undefined) {
+      return null;
+    }
     const end = snapshot.finishedAt ?? (running ? now : undefined);
-    if (end === undefined) return null;
+    if (end === undefined) {
+      return null;
+    }
     return formatDuration(Math.max(0, end - snapshot.startedAt));
   }, [snapshot.startedAt, snapshot.finishedAt, running, now]);
 

@@ -29,13 +29,15 @@ export default function PwaUpdatePrompt() {
     needRefresh: [needRefresh, setNeedRefresh],
   } = useRegisterSW({
     onRegistered(r) {
-      r &&
+      // The check repeats every hour. A failed check, for example offline, waits for the next one.
+      if (r) {
         setInterval(
           () => {
-            r.update();
+            void r.update();
           },
           60 * 60 * 1000,
         );
+      }
     },
   });
   const [updating, setUpdating] = useState(false);
@@ -45,7 +47,9 @@ export default function PwaUpdatePrompt() {
     setNeedRefresh(false);
   };
 
-  if (!offlineReady && !needRefresh) return null;
+  if (!offlineReady && !needRefresh) {
+    return null;
+  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 bg-ocean-dark border border-white/20 px-4 py-3 shadow-overlay-2 text-white text-sm font-body">

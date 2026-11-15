@@ -28,7 +28,9 @@ function apiError(err: unknown): string {
       if (inner && typeof inner === 'object' && 'error' in inner) {
         return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner;
+      if (typeof inner === 'string') {
+        return inner;
+      }
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
       const { status } = err as { status: number };
@@ -40,8 +42,12 @@ function apiError(err: unknown): string {
 
 function parseHexOrDec(s: string): number | null {
   const t = s.trim();
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) return parseInt(t.slice(2), 16);
-  if (/^[0-9]+$/.test(t)) return parseInt(t, 10);
+  if (/^0[xX][0-9a-fA-F]+$/.test(t)) {
+    return parseInt(t.slice(2), 16);
+  }
+  if (/^[0-9]+$/.test(t)) {
+    return parseInt(t, 10);
+  }
   return null;
 }
 
@@ -97,7 +103,7 @@ export default function DataMonitoringsPage() {
     queryFn: () => api.getDevices(),
     enabled: hasScanned,
   });
-  const devices: DeviceInfo[] = devicesQuery.data?.data ?? [];
+  const devices: DeviceInfo[] = useMemo(() => devicesQuery.data?.data ?? [], [devicesQuery.data]);
 
   // Cached object dictionaries for every device, so we can resolve parameter names and offer
   // a pick-from-list in the form. Empty for devices whose OD has not been enumerated.
@@ -118,7 +124,9 @@ export default function DataMonitoringsPage() {
   const nameByKey = useMemo(() => {
     const map = new Map<string, string>();
     for (const [pos, params] of paramsByDevice) {
-      for (const p of params) map.set(paramKey(pos, p.index, p.subindex), p.name);
+      for (const p of params) {
+        map.set(paramKey(pos, p.index, p.subindex), p.name);
+      }
     }
     return map;
   }, [paramsByDevice]);
@@ -238,23 +246,33 @@ function MonitoringCard({
       params.map(
         (p) => `${p.devicePosition}·${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`,
       ),
+    // The memo is keyed on sig, the content of params, so a refetch that returns equal params keeps
+    // the chart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sig],
   );
   // Parameter names, positionally aligned with `labels`, surfaced as the legend row's hover title
   // (the legend itself shows the compact device·index:subindex key). Empty when the name is unknown.
   const titles = useMemo(
     () => params.map((p) => nameByKey.get(paramKey(p.devicePosition, p.index, p.subindex)) ?? ''),
+    // The memo is keyed on sig, the content of params, so a refetch that returns equal params keeps
+    // the chart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sig, nameByKey],
   );
 
   useEffect(() => {
     const onBatch = (rows: SampleRows) => {
-      if (!playingRef.current) return;
+      if (!playingRef.current) {
+        return;
+      }
       for (const row of rows) {
         // row[0] is the cycle timestamp in epoch microseconds. Plot microseconds elapsed since the
         // first sample so the x-axis keeps the data's resolution (the chart formats it as µs/ms/s).
         const ts = typeof row[0] === 'number' ? row[0] : 0;
-        if (t0Ref.current === null) t0Ref.current = ts;
+        if (t0Ref.current === null) {
+          t0Ref.current = ts;
+        }
         xsRef.current.push(ts - t0Ref.current);
         for (let i = 0; i < seriesCount; i++) {
           const v = row[i + 1];
@@ -264,7 +282,9 @@ function MonitoringCard({
       const overflow = xsRef.current.length - retentionRef.current;
       if (overflow > 0) {
         xsRef.current.splice(0, overflow);
-        for (const ys of ysRef.current) ys.splice(0, overflow);
+        for (const ys of ysRef.current) {
+          ys.splice(0, overflow);
+        }
       }
       setData([xsRef.current, ...ysRef.current] as uPlot.AlignedData);
       setCount(xsRef.current.length);
@@ -303,7 +323,9 @@ function MonitoringCard({
     const xs = xsRef.current;
     const ys = ysRef.current;
     const rowCount = xs.length;
-    if (rowCount === 0) return;
+    if (rowCount === 0) {
+      return;
+    }
     const header = [
       't_us',
       ...params.map((p) => `${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`),
@@ -426,7 +448,9 @@ function MonitoringCard({
               inputMode="numeric"
               onChange={(e) => {
                 const n = Number(e.target.value);
-                if (Number.isFinite(n) && n > 0) setRetention(Math.floor(n));
+                if (Number.isFinite(n) && n > 0) {
+                  setRetention(Math.floor(n));
+                }
               }}
             />
             samples

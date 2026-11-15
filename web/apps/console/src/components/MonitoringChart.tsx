@@ -113,7 +113,9 @@ export default function MonitoringChart({
   // refs, so it fires only when labelsKey changes — never on a per-batch data update.
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el) {
+      return;
+    }
 
     const series: uPlot.Series[] = [
       // x is never a wall-clock timestamp here — it is elapsed µs or a sample position — so the
@@ -169,10 +171,14 @@ export default function MonitoringChart({
   // Re-applied whenever the plot is rebuilt (labelsKey / colorsKey) or the names resolve (titlesKey).
   useEffect(() => {
     const rows = containerRef.current?.querySelectorAll<HTMLElement>('.u-legend tr.u-series');
-    if (!rows) return;
+    if (!rows) {
+      return;
+    }
     titlesRef.current.forEach((title, i) => {
       const row = rows[i + 1];
-      if (row) row.title = title;
+      if (row) {
+        row.title = title;
+      }
     });
   }, [titlesKey, labelsKey, colorsKey]);
 

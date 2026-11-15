@@ -9,8 +9,12 @@ import { wireTimeMs } from '@synapticon/motion-master-client';
 // Formats a millisecond duration: sub-10 ms keeps one decimal so a fast wire transaction does not
 // round to "0 ms"; larger values round to whole ms / two-decimal seconds.
 export function formatWireMs(ms: number): string {
-  if (ms < 10) return `${ms.toFixed(1)} ms`;
-  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 10) {
+    return `${ms.toFixed(1)} ms`;
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)} ms`;
+  }
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
@@ -38,7 +42,9 @@ export function WireTiming({
    */
   title?: string;
 }) {
-  if (!timing) return null;
+  if (!timing) {
+    return null;
+  }
   return (
     <span className={className ?? 'text-xs text-grey-500 font-mono whitespace-nowrap'}>
       {timing.wireMs !== null && (

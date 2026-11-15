@@ -21,7 +21,9 @@ function swaggerSpec(): Plugin {
   return {
     name: 'swagger-spec',
     resolveId(id) {
-      if (id === virtualId) return resolvedId;
+      if (id === virtualId) {
+        return resolvedId;
+      }
     },
     load(id) {
       if (id === resolvedId) {
@@ -44,9 +46,13 @@ function swaggerSpec(): Plugin {
     // restart. On a change to the spec, invalidate the virtual module and trigger a full reload so
     // the docs pick up new endpoints live.
     handleHotUpdate(ctx) {
-      if (ctx.file !== specPath) return;
+      if (ctx.file !== specPath) {
+        return;
+      }
       const mod = ctx.server.moduleGraph.getModuleById(resolvedId);
-      if (mod) ctx.server.moduleGraph.invalidateModule(mod);
+      if (mod) {
+        ctx.server.moduleGraph.invalidateModule(mod);
+      }
       ctx.server.ws.send({ type: 'full-reload' });
       return [];
     },

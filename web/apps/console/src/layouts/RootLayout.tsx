@@ -80,7 +80,9 @@ function alStateLabel(state?: DeviceState): string | null {
 const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8]);
 
 function mailboxActiveFor(state?: DeviceState): boolean | null {
-  if (!state) return null;
+  if (!state) {
+    return null;
+  }
   return MAILBOX_ACTIVE_STATES.has(state.alState);
 }
 

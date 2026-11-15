@@ -1,0 +1,6 @@
+# Generated from apps/motion_master/swagger.yml. The api-client-drift job compares it with a fresh
+# generation, so a reformat would fail that job.
+web/packages/motion-master-client/src/generated/
+
+**/dist/
+**/dev-dist/

@@ -6,6 +6,19 @@
     "dev": "pnpm --filter console dev",
     "build": "pnpm --filter @synapticon/motion-master-client generate && pnpm --filter console build",
     "generate-api": "pnpm --filter @synapticon/motion-master-client generate",
-    "build:client": "pnpm --filter @synapticon/motion-master-client generate && pnpm --filter @synapticon/motion-master-client build"
+    "build:client": "pnpm --filter @synapticon/motion-master-client generate && pnpm --filter @synapticon/motion-master-client build",
+    "format": "prettier --write --no-error-on-unmatched-pattern \"web/**/*.{ts,tsx,js,mjs,cjs}\" \"tools/**/*.{js,mjs}\" eslint.config.mjs",
+    "format:check": "prettier --check --no-error-on-unmatched-pattern \"web/**/*.{ts,tsx,js,mjs,cjs}\" \"tools/**/*.{js,mjs}\" eslint.config.mjs",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "^17.14.0",
+    "prettier": "3.10.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "8.72.2"
   }
 }

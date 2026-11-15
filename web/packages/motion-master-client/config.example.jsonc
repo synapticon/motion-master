@@ -1,0 +1,35 @@
+// Motion Master TypeScript client example configuration.
+//
+// Copy this file to config.jsonc and edit it for your setup:
+//     cp config.example.jsonc config.jsonc
+//
+// config.jsonc is git-ignored so your local adapter/MAC never gets committed.
+{
+  // Host running Motion Master. The default resolves to 127.0.0.1 and matches the bundled TLS cert.
+  // Motion Master is TLS-only, so both ports below are secure (https:// for the API, wss:// for the
+  // WebSocket).
+  "host": "local.motion-master.synapticon.com",
+
+  // Motion Master exposes two ports on separate event loops:
+  //   httpPort -> request/response HTTP API (init, scan, SDO, FoE, state, ...)
+  //   wsPort   -> monitoring WebSocket (live process-data batches, notifications)
+  "httpPort": 61447,
+  "wsPort": 62281,
+
+  // TLS certificate verification:
+  //   false -> skip verification (self-signed dev cert). This applies to the whole Node.js process.
+  //   true  -> verify. For a certificate of your own, start node with NODE_EXTRA_CA_CERTS=<cert.pem>.
+  "verify": false,
+
+  // The fieldbus driver that a program opens with POST /api/init when no driver is open. When a
+  // driver is open already, the program uses it and ignores this object.
+  "fieldbus": {
+    "driver": "soem", // soem or spoe
+    // SOEM: the network interface name (for example "eth0") or its MAC address. SOEM has no adapter
+    // auto-detect, so this is required.
+    "adapter": "aa:bb:cc:dd:ee:ff",
+    // SPoE: set "driver": "spoe" and give one IP address per drive in place of adapter. The list
+    // order is the position order.
+    // "ipAddresses": ["192.168.0.10"],
+  },
+}

@@ -268,8 +268,9 @@ Other methods:
 - `hardware_description(position)` returns the parsed `.hardware_description` of a device.
 - `read_value(position, obj)` reads one object and returns the value that the server decoded with
   the data type from the object dictionary.
-- `wait_for_value(position, obj, predicate)` reads one object until the predicate is true, and
-  raises `TimeoutError` with the last value when the time runs out.
+- `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object
+  until the predicate is true, and raises `TimeoutError` with the last value when the time runs
+  out.
 - `restart(target, positions)` restarts devices through INIT and walks them up to an AL state. The
   server does the walk.
 - `set_operation_mode()`, `set_target()`, `enable()`, `disable()` and `quick_stop()` drive the

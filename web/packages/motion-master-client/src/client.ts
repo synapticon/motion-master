@@ -4,9 +4,12 @@
 // — the HTTP API and the monitoring stream are the source of truth. Isomorphic: pass `WebSocket`
 // (and `customFetch`) to run under Node; both default to the platform globals in the browser.
 
+import createDebug from 'debug';
+import { AlState, alStateName } from './al-state';
+import { readConfig, type FieldbusSettings } from './config';
+import { StateError } from './errors';
 import { Api } from './generated/Api';
 import type { ApiConfig } from './generated/http-client';
-import { readConfig, type FieldbusSettings } from './config';
 import { API_BASE_URL, WS_URL } from './constants';
 import { fetchProcessDataDump, type MmpdFile } from './mmpd';
 import type { ObjectAddress } from './objects';
@@ -40,6 +43,76 @@ export interface MotionMasterClientOptions {
 
 export type { FieldbusSettings };
 
+// One line for each step a helper takes, such as "found 1 device(s)". Off by default. Turn it on with
+// DEBUG=motion-master-client in Node.js, or localStorage.debug = 'motion-master-client' in a
+// browser.
+const log = createDebug('motion-master-client');
+
+/** An AL state that a device can be commanded to. `UNKNOWN` is only ever reported. */
+export type TargetAlState = Exclude<AlState, typeof AlState.UNKNOWN>;
+
+type Data<K extends keyof Api> = Api[K] extends (...args: never[]) => Promise<{ data: infer D }>
+  ? D
+  : never;
+
+/** A scanned device, as `GET /api/devices` gives it. */
+export type DeviceInfo = Data<'getDevices'>[number];
+
+// The states a device climbs through, from the bottom. BOOT is not on it, because BOOT is reachable
+// only from INIT. satisfied() orders the states with it.
+const LADDER: AlState[] = [AlState.INIT, AlState.PREOP, AlState.SAFEOP, AlState.OP];
+
+/** Returns whether a device in `current` already meets `target`. */
+function satisfied(current: AlState, target: AlState, exact: boolean): boolean {
+  if (current === target) {
+    return true;
+  }
+  if (exact || current === AlState.BOOT || target === AlState.BOOT) {
+    return false;
+  }
+  return LADDER.indexOf(current) > LADDER.indexOf(target);
+}
+
+/** Says which devices of a state change did not reach `step`, and why. */
+function notReached(
+  result: Data<'transitionToState'> | Data<'restartDevices'>,
+  step: AlState,
+): string {
+  const failed = result.devices
+    .filter((d) => !d.reached)
+    .map(
+      (d) =>
+        `device ${d.slavePosition} in ${alStateName(d.alState)} with alStatusCode 0x` +
+        d.alStatusCode.toString(16).padStart(4, '0'),
+    )
+    .join(', ');
+  return `not every device reached ${alStateName(step)}: ${failed}`;
+}
+
+/** Waits `ms` milliseconds, or rejects with the reason of `signal` when it aborts first. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** Returns whether `error` is a response of the generated client with the HTTP status `status`. */
+function hasStatus(error: unknown, status: number): boolean {
+  return error instanceof Response && error.status === status;
+}
+
 export class MotionMasterClient {
   /**
    * The generated HTTP API client. Flat method surface: `client.api.getVersion()`,
@@ -53,7 +126,7 @@ export class MotionMasterClient {
    */
   readonly ws: WebSocketConnection;
 
-  /** The body of `POST /api/init`, from the options or from config.json. */
+  /** The body of `POST /api/init`, from the options or from config.jsonc. */
   readonly fieldbus?: FieldbusSettings;
 
   private readonly httpBaseUrl: string;
@@ -78,19 +151,84 @@ export class MotionMasterClient {
   }
 
   /**
-   * Builds a client from config.json. Node.js only.
+   * Builds a client from config.jsonc. Node.js only.
    *
-   * Without a path, it reads config.json in the current directory, and else config.json in the
+   * Without `path`, it reads config.jsonc in the current directory, and else config.jsonc in the
    * folder of the package. The first is for a client installed from npm. The second is for a clone
    * of the repository. The file gives the host, the two ports, the TLS verification and the
-   * `fieldbus` object, the body of `POST /api/init`. config.example.json is the template.
+   * `fieldbus` object, the body of `POST /api/init`. config.example.jsonc is the template.
    *
    * `verify: false` turns off TLS verification for the whole process, because the built-in fetch
    * and WebSocket of Node.js take no TLS option. A certificate file in `verify` is refused: start
    * node with `NODE_EXTRA_CA_CERTS` instead.
    */
-  static async fromConfig(path?: string): Promise<MotionMasterClient> {
-    return new MotionMasterClient(await readConfig(path));
+  static async fromConfig(options: { path?: string } = {}): Promise<MotionMasterClient> {
+    return new MotionMasterClient(await readConfig(options.path));
+  }
+
+  /**
+   * Opens the fieldbus driver, unless one is open already.
+   *
+   * Uses `fieldbus` when given, otherwise the settings of the client. Unlike `api.init`, a 409
+   * "already initialised" counts as success, so a program can call this every time it starts.
+   */
+  async init(options: { fieldbus?: FieldbusSettings } = {}): Promise<void> {
+    const body = options.fieldbus ?? this.fieldbus;
+    if (body === undefined) {
+      throw new Error('no fieldbus settings: pass them to MotionMasterClient or to init()');
+    }
+    try {
+      await this.api.init(body);
+      log('opened the %s driver', body.driver ?? 'soem');
+    } catch (error) {
+      if (!hasStatus(error, 409)) {
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Closes the fieldbus driver and forgets every device (`reset`).
+   *
+   * The server commands no AL state, so the devices stay in the state they are in. A reset with no
+   * driver open also succeeds. Call `init()` before the next step that needs the bus.
+   */
+  async reset(): Promise<void> {
+    await this.api.reset();
+    log('closed the driver and forgot every device');
+  }
+
+  /**
+   * Scans the bus and returns the number of devices found (`scan`).
+   *
+   * The devices stay in INIT. Call `init()` first. Unlike `ensureScanned()`, this scans every time
+   * and returns 0 rather than throwing when the bus is empty.
+   */
+  async scan(): Promise<number> {
+    const found = (await this.api.scan()).data.slaves;
+    log('found %d device(s)', found);
+    return found;
+  }
+
+  /**
+   * Returns the scanned devices, in bus order, as `GET /api/devices` gives them (`getDevices`).
+   * The list is empty before the first scan.
+   */
+  async devices(): Promise<DeviceInfo[]> {
+    return (await this.api.getDevices()).data;
+  }
+
+  /**
+   * Returns every parameter of a device, each with its value and metadata. The list is the object
+   * dictionary as the server enumerated it (`getDeviceParameters`).
+   */
+  async parameters(slavePosition: number): Promise<Data<'getDeviceParameters'>> {
+    return (await this.api.getDeviceParameters(slavePosition)).data;
+  }
+
+  /** Returns the .hardware_description of a device, parsed (`getDeviceHardwareDescription`). */
+  async hardwareDescription(slavePosition: number): Promise<Data<'getDeviceHardwareDescription'>> {
+    return (await this.api.getDeviceHardwareDescription(slavePosition)).data;
   }
 
   /**
@@ -100,6 +238,123 @@ export class MotionMasterClient {
   async readValue<T>(slavePosition: number, address: ObjectAddress<T>): Promise<T> {
     const response = await this.api.readParameter(slavePosition, address.index, address.subindex);
     return response.data.value as T;
+  }
+
+  /**
+   * Reads an object until `predicate(value)` is true, and returns that value.
+   *
+   * Each read is `readValue()`, so a PDO-mapped object of an exchanging device costs no bus
+   * transfer. `timeoutMs` is 1000 and `intervalMs` 50 when not given.
+   *
+   *     await client.waitForValue(1, Cia402.STATUSWORD, (sw) => (sw & 0x0400) !== 0); // target reached
+   *
+   * Throws a `DOMException` named `TimeoutError` with the last value when the predicate is still
+   * false after `timeoutMs`, and the reason of `signal` when it aborts.
+   */
+  async waitForValue<T>(
+    slavePosition: number,
+    address: ObjectAddress<T>,
+    predicate: (value: T) => unknown,
+    options: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal } = {},
+  ): Promise<T> {
+    const { timeoutMs = 1000, intervalMs = 50, signal } = options;
+    const deadline = performance.now() + timeoutMs;
+    for (;;) {
+      signal?.throwIfAborted();
+      const value = await this.readValue(slavePosition, address);
+      if (predicate(value)) {
+        return value;
+      }
+      if (performance.now() >= deadline) {
+        const index = address.index.toString(16).padStart(4, '0');
+        const subindex = address.subindex.toString(16).padStart(2, '0');
+        throw new DOMException(
+          `device ${slavePosition} 0x${index}:${subindex} is ${String(value)} after ${timeoutMs} ms`,
+          'TimeoutError',
+        );
+      }
+      await sleep(intervalMs, signal);
+    }
+  }
+
+  /**
+   * Scans when the last scan is missing or wrong, and moves no device.
+   *
+   * A program that needs the devices known but no AL state calls this instead of `ensureState()`,
+   * so that it leaves every device where it is, BOOT included. Call `init()` first.
+   *
+   * Throws a `StateError` when the scan finds no device.
+   */
+  async ensureScanned(): Promise<void> {
+    // Over SPoE, devicesOnWire is null, so `required` stays false before the first scan.
+    // devicesScanned is 0 until a scan ran on either driver.
+    const scan = (await this.api.getScanStatus()).data;
+    if (scan.required || scan.devicesScanned === 0) {
+      log('scanning the bus');
+      if ((await this.scan()) === 0) {
+        throw new StateError('no devices on the bus');
+      }
+    }
+  }
+
+  /**
+   * Brings the devices to the AL state a program needs.
+   *
+   * Scans when the last scan is missing or wrong, then asks the server to walk each device to
+   * `state` (`transitionToState`), one legal transition at a time. A device already above `state`
+   * stays where it is, because SAFEOP and OP keep the mailbox of PREOP. Pass `exact: true` when the
+   * program needs that one state. A target of BOOT is always exact. Without `positions`, every
+   * scanned device counts. Call `init()` first.
+   *
+   * Throws a `StateError` when a device does not answer or does not reach `state`.
+   */
+  async ensureState(
+    state: TargetAlState,
+    options: { positions?: number[]; exact?: boolean } = {},
+  ): Promise<void> {
+    const { positions, exact = false } = options;
+    await this.ensureScanned();
+
+    const query = positions?.length ? { positions: positions.join(',') } : undefined;
+    const devices = (await this.api.getDeviceStates(query)).data;
+    for (const d of devices) {
+      if (d.reachability !== 'answering') {
+        throw new StateError(`device ${d.slavePosition} is ${d.reachability}`);
+      }
+    }
+    const group = devices
+      .filter((d) => !satisfied(d.alState, state, exact))
+      .map((d) => d.slavePosition);
+    if (group.length === 0) {
+      return;
+    }
+    log('device(s) [%s] -> %s', group.join(', '), alStateName(state));
+    const result = (await this.api.transitionToState({ state, positions: group })).data;
+    if (!result.ok) {
+      throw new StateError(notReached(result, state));
+    }
+  }
+
+  /**
+   * Restarts devices through INIT, then walks them up to the AL state `target`.
+   *
+   * The server does the walk (`restartDevices`), one state at a time. Without `positions`, every
+   * scanned device restarts. Scans first when the last scan is missing or wrong. Call `init()`
+   * first. A restart drops each device out of process data exchange, so a drive that was enabled
+   * is disabled.
+   *
+   * Throws a `StateError` when a device does not reach a step.
+   */
+  async restart(target: TargetAlState, options: { positions?: number[] } = {}): Promise<void> {
+    const { positions } = options;
+    await this.ensureScanned();
+    const who = positions?.length ? `[${positions.join(', ')}]` : 'all';
+    log('restart device(s) %s -> %s', who, alStateName(target));
+    const body = positions?.length ? { target, positions } : { target };
+    const result = (await this.api.restartDevices(body)).data;
+    if (!result.ok) {
+      throw new StateError(notReached(result, result.step));
+    }
   }
 
   /**

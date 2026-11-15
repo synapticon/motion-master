@@ -57,17 +57,17 @@ The name `local.motion-master.synapticon.com` resolves to `127.0.0.1` in public 
 
 ## Settings from a file
 
-In Node.js, `MotionMasterClient.fromConfig()` builds a client from `config.json`. Copy the template and edit it:
+In Node.js, `MotionMasterClient.fromConfig()` builds a client from `config.jsonc`. Copy the template and edit it:
 
 ```bash
-cp config.example.json config.json
+cp config.example.jsonc config.jsonc
 ```
 
 ```ts
 const client = await MotionMasterClient.fromConfig()
 ```
 
-Without a path, `fromConfig` reads `config.json` in the current directory, and else `config.json` in the folder of the package. The file has these keys. They are the keys of `config.toml` of the Python client, in camelCase:
+Without `path`, `fromConfig({ path })` reads `config.jsonc` in the current directory, and else `config.jsonc` in the folder of the package. The file is JSON with comments, like the configuration of the server, and the template explains each key. It has these keys. They are the keys of `config.toml` of the Python client, in camelCase:
 
 | Key | Value |
 | --- | --- |
@@ -77,11 +77,11 @@ Without a path, `fromConfig` reads `config.json` in the current directory, and e
 | `verify` | `true` checks the certificate of the server. `false` turns off the check for the whole process, because the built-in `fetch` and `WebSocket` of Node.js take no TLS option. |
 | `fieldbus` | The body of `POST /api/init`: the driver, and the network adapter for SOEM or the IP addresses for SPoE. |
 
-`config.json` is ignored by git, so your adapter never gets committed. In a browser, pass the options to `new MotionMasterClient()` instead.
+`config.jsonc` is ignored by git, so your adapter never gets committed. In a browser, pass the options to `new MotionMasterClient()` instead.
 
 ## Examples
 
-The folder `examples/` holds one program per task, as the Python client does. Each program is a TypeScript file that runs in Node.js 22 with `tsx`. Create `config.json` first, then run a program from the folder of the package:
+The folder `examples/` holds one program per task, as the Python client does. Each program is a TypeScript file that runs in Node.js 22 with `tsx`. Create `config.jsonc` first, then run a program from the folder of the package:
 
 ```bash
 pnpm install
@@ -93,6 +93,40 @@ An example imports the package by its name, as a program that installed it from 
 | Program | What it does |
 | --- | --- |
 | `server-info.ts` | Prints the server version, the host, the network adapters and the game loop health. It opens no fieldbus driver. |
+| `scan.ts` | Scans the bus and lists the devices with their AL state. |
+| `reset.ts` | Closes the fieldbus driver and clears the device list. |
+| `read-parameter.ts` | Reads one parameter with its name, data type and value. `--cache` touches no bus. |
+| `read-hardware-description.ts` | Prints what a device says it is: its name, build descriptor, serial number and components. |
+| `transition-state.ts` | Moves the devices to an AL state, for example `--state op`. |
+| `restart-devices.ts` | Restarts devices through INIT up to an AL state. |
+
+Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another.
+
+## Helpers
+
+The client has helpers for the steps that most programs begin with. They have the same names and the same behaviour as the helpers of the Python client, in camelCase. A required argument is positional. An optional one goes into an options object, with the name it has in Python.
+
+- `init({ fieldbus })` opens the fieldbus driver, unless one is open already. Without `fieldbus`, it sends the settings of the client.
+- `reset()` closes the fieldbus driver and forgets every device. The devices stay in their AL state.
+- `scan()` scans the bus every time and returns the number of devices it found.
+- `devices()` returns the scanned devices, in bus order.
+- `parameters(slavePosition)` returns every parameter of a device, with its value and metadata.
+- `hardwareDescription(slavePosition)` returns the parsed `.hardware_description` of a device.
+- `readValue(slavePosition, address)` reads one object and returns the value that the server decoded.
+- `waitForValue(slavePosition, address, predicate, { timeoutMs, intervalMs, signal })` reads one object until the predicate is true. It throws a `DOMException` named `TimeoutError` with the last value when the time runs out, 1000 ms by default.
+- `ensureScanned()` scans when the last scan is missing or wrong, and moves no device.
+- `ensureState(state, { positions, exact })` scans when needed and brings the devices to an AL state. A device above that state stays where it is, unless `exact` is true.
+- `restart(target, { positions })` restarts devices through INIT and walks them up to an AL state.
+
+`ensureScanned`, `ensureState` and `restart` throw a `StateError` when a device does not answer or does not reach its state. A failed HTTP request throws the response, and `apiErrorMessage(error)` gives its reason.
+
+The helpers log each step they take, such as `found 1 device(s)`, through the [`debug`](https://www.npmjs.com/package/debug) package. The log is off by default. To turn it on in Node.js, set the environment variable:
+
+```bash
+DEBUG=motion-master-client pnpm example examples/scan.ts
+```
+
+In a browser, run `localStorage.debug = 'motion-master-client'` in the developer tools and reload the page.
 
 ## HTTP calls
 
@@ -223,7 +257,7 @@ Restart the server after the change.
 
 ## Use in Node.js
 
-The server certificate is valid, so Node.js connects with no options. A server with a self-signed certificate, for example a development build, needs the certificate check turned off. Set `"verify": false` in `config.json`, or start Node.js with `NODE_TLS_REJECT_UNAUTHORIZED=0`. Both turn off certificate checks for the whole process, for the HTTP requests and the WebSocket. Use this only against a development server.
+The server certificate is valid, so Node.js connects with no options. A server with a self-signed certificate, for example a development build, needs the certificate check turned off. Set `"verify": false` in `config.jsonc`, or start Node.js with `NODE_TLS_REJECT_UNAUTHORIZED=0`. Both turn off certificate checks for the whole process, for the HTTP requests and the WebSocket. Use this only against a development server.
 
 To turn off the check for the WebSocket only, inject the `ws` package:
 

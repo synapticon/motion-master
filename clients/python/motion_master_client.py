@@ -548,8 +548,8 @@ class MotionMasterClient:
         position: int,
         obj: ObjectAddress[_T],
         predicate: Callable[[_T], object],
-        timeout: float = 1.0,
-        interval: float = 0.05,
+        timeout_ms: int = 1000,
+        interval_ms: int = 50,
     ) -> _T:
         """Read an object until `predicate(value)` is true, and return that value.
 
@@ -558,10 +558,10 @@ class MotionMasterClient:
 
             client.wait_for_value(1, Cia402.STATUSWORD, lambda sw: sw & 0x0400)  # target reached
 
-        Raises TimeoutError with the last value when the predicate is still false after `timeout`
-        seconds.
+        Raises TimeoutError with the last value when the predicate is still false after
+        `timeout_ms`.
         """
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout_ms / 1000
         while True:
             value = self.read_value(position, obj)
             if predicate(value):
@@ -569,9 +569,10 @@ class MotionMasterClient:
             if time.monotonic() >= deadline:
                 index, subindex = obj
                 raise TimeoutError(
-                    f"device {position} 0x{index:04x}:{subindex:02x} is {value} after {timeout} s"
+                    f"device {position} 0x{index:04x}:{subindex:02x} is {value}"
+                    f" after {timeout_ms} ms"
                 )
-            time.sleep(interval)
+            time.sleep(interval_ms / 1000)
 
     def ensure_scanned(self):
         """Scan when the last scan is missing or wrong, and move no device.

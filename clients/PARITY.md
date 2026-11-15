@@ -14,6 +14,21 @@ order, and it returns the same shape.
 Each language keeps its own idiom. Python streams with generators and `with` blocks. TypeScript
 streams with listeners, `AsyncIterable` and promises.
 
+Three rules turn a Python signature into a TypeScript one:
+
+- A required argument is positional in both clients.
+- An optional argument is a keyword argument in Python and a field of a trailing options object in
+  TypeScript, with the same name: `ensure_state(state, positions=[1], exact=True)` is
+  `ensureState(state, { positions: [1], exact: true })`. A TypeScript helper that waits also takes
+  `signal`, an `AbortSignal`, in that object.
+- A time carries its unit in its name, in milliseconds unless the API uses another unit:
+  `timeout_ms` is `timeoutMs`.
+
+Both clients log each step a helper takes, such as "found 1 device(s)". The log is off by default.
+Python logs through the `motion_master_client` logger at INFO. TypeScript logs through the `debug`
+package under the name `motion-master-client`: set `DEBUG=motion-master-client` in Node.js, or
+`localStorage.debug = 'motion-master-client'` in a browser.
+
 This file is the parity table. `tools/check-client-parity.mjs` compares it with the public names
 of both clients and fails when they differ:
 
@@ -44,7 +59,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `Profile` | `Profile` | | |
 | `Somanet` | `Somanet` | | |
 | `ObjectAddress` | `ObjectAddress` | | |
-| `StateError` | — | pending | |
+| `StateError` | `StateError` | | |
 | `ProcedureError` | — | pending | |
 | `CaptureError` | — | pending | |
 | `ProcessDataDumpError` | — | pending | |
@@ -92,17 +107,17 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `from_config` | `fromConfig` | | |
 | `call` | — | | TypeScript calls an operation through the generated `client.api`, which the build types from `swagger.yml`. Python has no generated client, so `call` finds the operation in the spec of the running server. |
 | — | `close` | | Closes the WebSocket of `client.ws`. Python closes the WebSocket of each stream when the stream ends. |
-| `init` | — | pending | |
-| `reset` | — | pending | |
-| `scan` | — | pending | |
-| `devices` | — | pending | |
-| `parameters` | — | pending | |
-| `hardware_description` | — | pending | |
+| `init` | `init` | | |
+| `reset` | `reset` | | |
+| `scan` | `scan` | | |
+| `devices` | `devices` | | |
+| `parameters` | `parameters` | | |
+| `hardware_description` | `hardwareDescription` | | |
 | `read_value` | `readValue` | | |
-| `wait_for_value` | — | pending | |
-| `ensure_scanned` | — | pending | |
-| `ensure_state` | — | pending | |
-| `restart` | — | pending | |
+| `wait_for_value` | `waitForValue` | | |
+| `ensure_scanned` | `ensureScanned` | | |
+| `ensure_state` | `ensureState` | | |
+| `restart` | `restart` | | |
 | `set_operation_mode` | — | pending | |
 | `set_target` | — | pending | |
 | `enable` | — | pending | |

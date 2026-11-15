@@ -8,6 +8,7 @@ export * from './generated/data-contracts';
 export * from './generated/Api';
 
 export * from './api-error';
+export * from './errors';
 export * from './constants';
 export * from './web-socket-connection';
 export * from './client';

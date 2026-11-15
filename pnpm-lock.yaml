@@ -156,7 +156,17 @@ importers:
         version: 0.21.2(@vite-pwa/assets-generator@0.2.6)(vite@6.4.3(@types/node@25.9.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.23.15)(yaml@2.9.0))(workbox-build@7.4.1(@types/babel__core@7.20.5))(workbox-window@7.4.1)
 
   web/packages/motion-master-client:
+    dependencies:
+      debug:
+        specifier: 4.4.3
+        version: 4.4.3
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
     devDependencies:
+      '@types/debug':
+        specifier: 4.1.13
+        version: 4.1.13
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5

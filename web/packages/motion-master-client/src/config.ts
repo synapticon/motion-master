@@ -1,6 +1,6 @@
-// Reads the settings of a client from config.json, for `MotionMasterClient.fromConfig`. Node.js only:
-// it imports the Node.js modules when it runs, so a browser build that never calls it loads none of
-// them. The index does not export this file.
+// Reads the settings of a client from config.jsonc, for `MotionMasterClient.fromConfig`. Node.js
+// only: it imports the Node.js modules and the JSONC parser when it runs, so a browser build that
+// never calls it loads none of them. The index does not export this file.
 
 import type { Api } from './generated/Api';
 
@@ -21,8 +21,8 @@ interface NodeProcess {
 }
 
 /**
- * Imports a Node.js module by a name that a bundler cannot see, so that a browser build does not
- * try to resolve it.
+ * Imports a module by a name that a bundler cannot see, so that a browser build does not try to
+ * resolve it.
  */
 function importNode<T>(name: string): Promise<T> {
   return import(/* @vite-ignore */ name) as Promise<T>;
@@ -31,7 +31,7 @@ function importNode<T>(name: string): Promise<T> {
 /** The body of `POST /api/init`, for example `{ driver: 'soem', adapter: 'eth0' }`. */
 export type FieldbusSettings = NonNullable<Parameters<Api['init']>[0]>;
 
-/** The keys of config.json: the keys of config.toml of the Python client, in camelCase. */
+/** The keys of config.jsonc: the keys of config.toml of the Python client, in camelCase. */
 interface ConfigFile {
   host: string;
   httpPort: number;
@@ -46,15 +46,16 @@ export interface ClientSettings {
   fieldbus?: FieldbusSettings;
 }
 
-const CONFIG_NAME = 'config.json';
-const TEMPLATE_NAME = 'config.example.json';
+const CONFIG_NAME = 'config.jsonc';
+const TEMPLATE_NAME = 'config.example.jsonc';
 const TEMPLATE_URL =
-  'https://github.com/synapticon/motion-master/blob/main/web/packages/motion-master-client/config.example.json';
+  'https://github.com/synapticon/motion-master/blob/main/web/packages/motion-master-client/config.example.jsonc';
 
 /**
- * Reads config.json and returns the settings for the client. Without a path, it reads config.json
- * in the current directory, and else config.json in the folder of the package. The first is for a
- * client installed from npm. The second is for a clone of the repository.
+ * Reads config.jsonc and returns the settings for the client. Without a path, it reads config.jsonc
+ * in the current directory, and else config.jsonc in the folder of the package. The first is for a
+ * client installed from npm. The second is for a clone of the repository. The file is JSON with
+ * comments, and a trailing comma is allowed.
  */
 export async function readConfig(path?: string): Promise<ClientSettings> {
   const { existsSync, readFileSync } = await importNode<NodeModules['fs']>('node:fs');
@@ -80,7 +81,16 @@ export async function readConfig(path?: string): Promise<ClientSettings> {
     file = found;
   }
 
-  const config = JSON.parse(readFileSync(file, 'utf8')) as ConfigFile;
+  const { parse, printParseErrorCode } =
+    await importNode<typeof import('jsonc-parser')>('jsonc-parser');
+  const text = readFileSync(file, 'utf8');
+  const errors: import('jsonc-parser').ParseError[] = [];
+  const config = parse(text, errors, { allowTrailingComma: true }) as ConfigFile;
+  if (errors.length > 0) {
+    const { error, offset } = errors[0];
+    const line = text.slice(0, offset).split('\n').length;
+    throw new Error(`${file}:${line}: ${printParseErrorCode(error)}`);
+  }
   applyVerify(config.verify ?? false);
   return {
     baseUrl: `https://${config.host}:${config.httpPort}`,
@@ -99,8 +109,8 @@ function missingConfigMessage(
   // A clone has the template in the folder of the package. A package from npm does not.
   const make = existsSync(template)
     ? `copy the template: cp ${template} ${candidates[candidates.length - 1]}`
-    : `write config.json in the current directory from ${TEMPLATE_URL}`;
-  return `no config.json in ${looked} -- ${make}`;
+    : `write config.jsonc in the current directory from ${TEMPLATE_URL}`;
+  return `no config.jsonc in ${looked} -- ${make}`;
 }
 
 /**

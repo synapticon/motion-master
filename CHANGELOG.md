@@ -23,12 +23,19 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - The TypeScript client streams the batches of a monitoring with `streamMonitoring(topic)`, which a
   program reads with `for await`.
-- The TypeScript client builds a client from `config.json` with `MotionMasterClient.fromConfig()`,
-  in Node.js. The file has the keys of `config.toml` of the Python client, in camelCase.
+- The TypeScript client builds a client from `config.jsonc`, JSON with comments, with
+  `MotionMasterClient.fromConfig()`, in Node.js. The file has the keys of `config.toml` of the Python
+  client, in camelCase.
 - The TypeScript client has example programs in `examples/`, which run with `tsx`.
+- The TypeScript client has the device and AL state helpers of the Python client: `init`, `reset`,
+  `scan`, `devices`, `parameters`, `hardwareDescription`, `waitForValue`, `ensureScanned`,
+  `ensureState` and `restart`, and `StateError`. They log each step through the `debug` package,
+  off by default: set `DEBUG=motion-master-client` to see it.
 
 ### Changed
 
+- The Python client's `wait_for_value()` takes `timeout_ms` and `interval_ms`, in milliseconds. It
+  took `timeout` and `interval` in seconds.
 - The Python client streams the batches of a monitoring with `stream_monitoring(topic)`, which was
   `monitor(topic)`. The example `monitor.py` is now `stream-monitoring.py`. The new name tells it
   apart from `monitoring()`, which creates a monitoring and records it for a span.

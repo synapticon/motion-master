@@ -39,7 +39,7 @@ def main():
             ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             event = data.get("event", "?")
             rest = {k: v for k, v in data.items() if k != "event"}
-            print(f"  {ts}  {event}  {json.dumps(rest, ensure_ascii=False, separators=(",", ":"))}", flush=True)
+            print(f"  {ts}  {event}  {json.dumps(rest, ensure_ascii=False, separators=(',', ':'))}", flush=True)
             received += 1
             if args.count and received >= args.count:
                 break

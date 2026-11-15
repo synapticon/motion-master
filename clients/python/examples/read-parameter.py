@@ -47,7 +47,7 @@ def main():
     ).json()
     print(
         f"slave {args.slave} {object_address_text(p['index'], p['subindex'])} {p['name']} "
-        f"({p['dataTypeName']}) = {json.dumps(p['value'], ensure_ascii=False, separators=(",", ":"))}"
+        f"({p['dataTypeName']}) = {json.dumps(p['value'], ensure_ascii=False, separators=(',', ':'))}"
     )
 
 

@@ -141,7 +141,11 @@ export default function DataRecorderPage() {
     setLoading(true);
     setViewError(null);
     try {
-      const parsed = await client.fetchProcessDataDump();
+      const bytes = await client.processDataDump();
+      if (bytes === null) {
+        throw new Error('The server has no cycle to dump. Bring a device to SAFEOP or OP first.');
+      }
+      const parsed = parseMmpd(bytes);
       load(parsed, `Recorder ring — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
       setViewError(errorText(e));

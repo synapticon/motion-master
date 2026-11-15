@@ -345,45 +345,6 @@ function numericReader(dataType: number): ScalarReader | null {
 }
 
 /**
- * Fetches the live recorder dump (`GET /api/process-data/dump`) and parses it. `baseUrl` is the
- * HTTP API origin (e.g. `https://host:61447`). `from` and `to` limit the dump to a span, in epoch
- * microseconds of the server clock, both included: take them from `GET /api/process-data/mark`.
- * Throws on a non-OK response (the response body's `error` message when present). Pass `fetch`
- * to inject an implementation (Node, request logging).
- */
-export async function fetchProcessDataDump(
-  baseUrl: string,
-  options: { fetch?: typeof fetch; signal?: AbortSignal; from?: number; to?: number } = {},
-): Promise<MmpdFile> {
-  const doFetch = options.fetch ?? fetch;
-  const query = new URLSearchParams();
-  if (options.from !== undefined) {
-    query.set('from', String(options.from));
-  }
-  if (options.to !== undefined) {
-    query.set('to', String(options.to));
-  }
-  const search = query.toString() ? `?${query.toString()}` : '';
-  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/process-data/dump${search}`, {
-    headers: { Accept: 'application/octet-stream' },
-    signal: options.signal,
-  });
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) {
-        message = body.error;
-      }
-    } catch {
-      // Non-JSON error body — keep the status message.
-    }
-    throw new Error(message);
-  }
-  return parseMmpd(await res.arrayBuffer());
-}
-
-/**
  * Extracts `bitLength` bits starting at `bitOffset` from `src`, returning them LSB-aligned and
  * little-endian (padded to a byte boundary). Mirrors `extractBits` in libs/node/process_image.cc.
  */

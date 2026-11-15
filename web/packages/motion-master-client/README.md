@@ -109,6 +109,7 @@ An example imports the package by its name, as a program that installed it from 
 | `set-target.ts` | Sets the position, velocity or torque target of a drive. **A drive that is enabled moves.** |
 | `run-procedure.ts` | Lists the procedures of a device, describes one with `--describe`, or runs one by name with its parameters as `name=value`. Ctrl-C cancels the run. |
 | `device-locate.ts` | Blinks the LEDs of a device. Only SPoE offers the procedure. |
+| `dump-process-data.ts` | Saves the recorder of the server as a `.mmpd` file in `files/`. |
 | `capture.ts` | Records the EtherCAT frames on the bus adapter for `--seconds` and prints the summary of late frames. Linux and macOS servers only. |
 | `notifications.ts` | Prints the notifications of the server until Ctrl-C, or `--count` of them. It opens no fieldbus driver. |
 | `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`, prints it as a table, and saves every cycle as CSV in `files/`. **The motor turns.** |
@@ -136,6 +137,7 @@ The client has helpers for the steps that most programs begin with. They have th
 - `disable(slavePosition)` brings a drive to Switch On Disabled.
 - `quickStop(slavePosition)` sends a quick stop. The drive stops on its quick stop ramp.
 - `runProcedure(slavePosition, name, { params, pollIntervalMs, signal })` starts a procedure and yields its snapshot at every poll, 500 ms apart by default, until the run ends. Leaving the loop early, or an abort of `signal`, cancels the run. It throws a `ProcedureError` when the server refuses the start.
+- `processDataMark()` returns the recorder clock of the server, in epoch microseconds. `processDataDump({ fromUs, toUs })` returns the `.mmpd` dump of the cycles between two marks as bytes, or of the whole recorder without them, and `parseMmpd()` decodes it. It returns `null` when the server has no cycle to dump, and throws a `ProcessDataDumpError` for any other refusal.
 - `startCapture({ adapter, seconds })` starts a capture of the EtherCAT frames that runs until `stopCapture()`, which returns the path of the pcap file in the user cache and the summary of late frames. Linux and macOS servers only. Both throw a `CaptureError` with the server's reason.
 - `stepChanges(run)` yields each snapshot of a run as `[snapshot, changed]`, where `changed` lists the steps whose status changed. `formatStep(step)` turns a step into one line.
 

@@ -62,19 +62,18 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `StateError` | `StateError` | | |
 | `ProcedureError` | `ProcedureError` | | |
 | `CaptureError` | `CaptureError` | | |
-| `ProcessDataDumpError` | — | pending | |
+| `ProcessDataDumpError` | `ProcessDataDumpError` | | |
 | `step_changes` | `stepChanges` | | |
 | `format_step` | `formatStep` | | |
 | `error_line` | `apiErrorMessage` | pending | |
 | `run` | — | pending | |
 | `MMPD_FLAG_INCOMPLETE_START` | `MMPD_FLAG_INCOMPLETE_START` | | |
-| `mmpd_flags` | — | pending | |
-| — | `MmpdFile` | pending | |
-| — | `parseMmpd` | pending | |
-| — | `fetchProcessDataDump` | pending | |
-| — | `decodeMmpdValue` | pending | |
-| — | `extractBits` | pending | |
-| — | `isPlottableDataType` | pending | |
+| `mmpd_flags` | — | | Returns the flags of a `.mmpd` file. TypeScript reads them from the header that `parseMmpd()` decodes: `parseMmpd(bytes).header.flags`. |
+| — | `MmpdFile` | | The decoded `.mmpd` file. The Console plots a dump in the browser, and the Python client has no decoder of the format yet. |
+| — | `parseMmpd` | | Decodes a `.mmpd` file. As `MmpdFile`. |
+| — | `decodeMmpdValue` | | Decodes one value of a `.mmpd` row. As `MmpdFile`. |
+| — | `extractBits` | | Takes the bits of one value out of a `.mmpd` row. As `MmpdFile`. |
+| — | `isPlottableDataType` | | Says whether the Console can plot a data type. As `MmpdFile`. |
 | — | `fetchEni` | pending | |
 | — | `parseEni` | pending | |
 | `NOTIFICATION_TOPIC` | `NOTIFICATION_TOPIC` | | |
@@ -129,8 +128,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `notifications` | `notifications` | | |
 | `start_capture` | `startCapture` | | |
 | `stop_capture` | `stopCapture` | | |
-| `process_data_mark` | `readProcessDataMark` | pending | |
-| `process_data_dump` | `fetchProcessDataDump` | pending | |
+| `process_data_mark` | `processDataMark` | | |
+| `process_data_dump` | `processDataDump` | | |
 
 ## MonitoringRecording
 

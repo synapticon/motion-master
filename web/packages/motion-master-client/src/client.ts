@@ -8,12 +8,11 @@ import createDebug from 'debug';
 import { AlState, alStateName } from './al-state';
 import type { Cia402State, OperationMode } from './cia402';
 import { readConfig, type FieldbusSettings } from './config';
-import { CaptureError, ProcedureError, StateError } from './errors';
+import { CaptureError, ProcedureError, ProcessDataDumpError, StateError } from './errors';
 import { Api } from './generated/Api';
 import type { Cia402Status, ProcedureRequest, ProcedureSnapshot } from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
-import { fetchProcessDataDump, type MmpdFile } from './mmpd';
 import { MonitoringRecording } from './monitoring-recording';
 import type { ObjectAddress } from './objects';
 import { type DeviceParameterAddress, parameterTriple } from './parameter-address';
@@ -132,6 +131,23 @@ function uniqueTopic(): string {
 function reasonOf(response: Response): string {
   const body = (response as { error?: { error?: unknown } }).error;
   return typeof body?.error === 'string' ? body.error : response.statusText;
+}
+
+/**
+ * Returns the server's reason for a refused request that `fetch` sent: the `error` of its JSON body,
+ * or its text, or the status text when the body is empty.
+ */
+async function fetchReasonOf(response: Response): Promise<string> {
+  const text = (await response.text()).trim();
+  try {
+    const body = JSON.parse(text) as { error?: unknown };
+    if (typeof body.error === 'string') {
+      return body.error;
+    }
+  } catch {
+    // Not JSON: the text itself is the reason.
+  }
+  return text || response.statusText;
 }
 
 /** Returns whether `error` is a response of the generated client with the HTTP status `status`. */
@@ -686,23 +702,56 @@ export class MotionMasterClient {
   }
 
   /**
-   * Reads the recorder clock of the server (`GET /api/process-data/mark`), in epoch microseconds.
-   * Pass it as `from` or `to` of `fetchProcessDataDump` to dump one part of a run.
+   * Returns the recorder clock of the server now, in epoch microseconds (`getProcessDataMark`).
+   *
+   * Pass it as `fromUs` or `toUs` of `processDataDump()` to dump one part of a run. It is the
+   * server's clock, the one that stamps every recorded cycle, so it matches the cycles also when this
+   * client runs on another computer.
    */
-  async readProcessDataMark(): Promise<number> {
-    const response = await this.api.getProcessDataMark();
-    return response.data.timestampUs;
+  async processDataMark(): Promise<number> {
+    return (await this.api.getProcessDataMark()).data.timestampUs;
   }
 
   /**
-   * Fetches and parses the live recorder dump (`GET /api/process-data/dump`) as an `MmpdFile`.
-   * `from` and `to` limit it to a span, from `readProcessDataMark`. Without them it is the whole
-   * recorder.
+   * Returns the .mmpd dump of the recorder ring as bytes (`streamProcessDataDump`).
+   *
+   * `fromUs` and `toUs` limit it to the cycles of a span, both included, in epoch microseconds of the
+   * server clock: take them from `processDataMark()`. Without them the dump is the whole ring.
+   * `parseMmpd()` decodes the bytes. When the server no longer held every cycle right after
+   * `fromUs`, the flags of the header have `MMPD_FLAG_INCOMPLETE_START` set.
+   *
+   * Returns `null` when the server has no cycle to dump: no process image was ever mapped, or no
+   * cycle is in the span (409). Throws a `ProcessDataDumpError` for every other refusal.
    */
-  fetchProcessDataDump(
-    options: { signal?: AbortSignal; from?: number; to?: number } = {},
-  ): Promise<MmpdFile> {
-    return fetchProcessDataDump(this.httpBaseUrl, { fetch: this.customFetch, ...options });
+  async processDataDump(
+    options: { fromUs?: number; toUs?: number; signal?: AbortSignal } = {},
+  ): Promise<Uint8Array | null> {
+    const { fromUs, toUs, signal } = options;
+    const query = new URLSearchParams();
+    if (fromUs !== undefined) {
+      query.set('from', String(fromUs));
+    }
+    if (toUs !== undefined) {
+      query.set('to', String(toUs));
+    }
+    const search = query.size > 0 ? `?${query.toString()}` : '';
+    // The generated client reads no error body of a binary request, so this one goes by fetch.
+    const doFetch = this.customFetch ?? fetch;
+    const response = await doFetch(`${this.httpBaseUrl}/api/process-data/dump${search}`, {
+      headers: { Accept: 'application/octet-stream' },
+      signal,
+    });
+    if (response.status === 409) {
+      log('no process-data dump: %s', await fetchReasonOf(response));
+      return null;
+    }
+    if (!response.ok) {
+      const reason = await fetchReasonOf(response);
+      throw new ProcessDataDumpError(
+        `the process-data dump failed: ${reason} (HTTP ${response.status})`,
+      );
+    }
+    return new Uint8Array(await response.arrayBuffer());
   }
 
   /** Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown. */

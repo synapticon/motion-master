@@ -1,0 +1,35 @@
+// Save the recorder of the server as a .mmpd file (GET /api/process-data/dump).
+//
+// The server records the process data of every cycle in a ring. The dump holds every cycle that the
+// ring still has, with the layout of the process image in its header, so that a reader can decode it
+// offline. The Console and parseMmpd() of this client read .mmpd files. The file goes into the
+// git-ignored files/ directory next to the client. Pass --output for a different path.
+//
+// Opens the fieldbus driver, scans and moves the device to SAFEOP first when needed, because the
+// recorder holds cycles only once the process data is exchanged. A device in OP stays there.
+//
+//     pnpm example examples/dump-process-data.ts
+//     pnpm example examples/dump-process-data.ts --output /tmp/bus.mmpd
+
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { parseArgs } from 'node:util';
+import { AlState, MotionMasterClient, parseMmpd } from '@synapticon/motion-master-client';
+import { FILES_DIR, fileStamp } from './files';
+
+const { values: args } = parseArgs({ options: { output: { type: 'string' } } });
+
+const client = await MotionMasterClient.fromConfig();
+await client.init();
+await client.ensureState(AlState.SAFEOP);
+
+const content = await client.processDataDump();
+if (content === null) {
+  console.error('the server has no cycle to dump');
+  process.exit(1);
+}
+
+const out = args.output ?? `${FILES_DIR}/process-data-${fileStamp()}.mmpd`;
+mkdirSync(dirname(out), { recursive: true });
+writeFileSync(out, content);
+console.log(`saved ${content.length} byte(s), ${parseMmpd(content).rowCount} cycle(s) -> ${out}`);

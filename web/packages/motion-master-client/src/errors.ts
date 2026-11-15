@@ -15,3 +15,8 @@ export class ProcedureError extends Error {
 export class CaptureError extends Error {
   override name = 'CaptureError';
 }
+
+/** The server could not produce a process-data dump. The message is the server's reason. */
+export class ProcessDataDumpError extends Error {
+  override name = 'ProcessDataDumpError';
+}

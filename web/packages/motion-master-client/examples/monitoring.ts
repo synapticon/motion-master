@@ -26,7 +26,6 @@
 //     pnpm example examples/monitoring.ts --slave 2 --velocity 500 --seconds 3 --output /tmp/move.csv
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   AlState,
@@ -36,8 +35,7 @@ import {
   OperationMode,
   Somanet,
 } from '@synapticon/motion-master-client';
-
-const FILES_DIR = fileURLToPath(new URL('../files', import.meta.url));
+import { FILES_DIR, fileStamp } from './files';
 
 // The monitored objects, in the order of the columns.
 const OBJECTS = [
@@ -137,7 +135,6 @@ m.names.forEach((name, i) => {
 m.printTable({ everyMs: Number(args.every) });
 printSummary(m, slave, velocity);
 
-const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
-const out = args.output ?? `${FILES_DIR}/monitoring-${stamp}.csv`;
+const out = args.output ?? `${FILES_DIR}/monitoring-${fileStamp()}.csv`;
 await m.writeCsv(out);
 console.log(`saved ${m.rows.length} row(s) -> ${out}`);

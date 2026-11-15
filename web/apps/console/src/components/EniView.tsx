@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import {
   formatHex,
+  objectAddressText,
   type EniCoeCmd,
   type EniInitCmd,
   type EniParseResult,
@@ -254,9 +255,7 @@ function CoeCmdTable({ cmds }: { cmds: EniCoeCmd[] }) {
             <tr key={i} className="border-b border-grey-100 last:border-0">
               <td className="px-3 py-2 font-mono">{cmd.transitions.join(' ')}</td>
               <td className="px-3 py-2">{cmd.ccsName}</td>
-              <td className="px-3 py-2 font-mono">
-                {formatHex(cmd.index)}:{String(cmd.subindex).padStart(2, '0')}
-              </td>
+              <td className="px-3 py-2 font-mono">{objectAddressText(cmd.index, cmd.subindex)}</td>
               <td className="px-3 py-2 font-mono text-grey-500 break-all">
                 {cmd.data?.hex ?? '—'}
               </td>
@@ -378,7 +377,7 @@ function SlaveCard({ slave, position }: { slave: EniSlave; position: number }) {
                             {entry.index === 0 ? (
                               <span className="text-grey-400">padding</span>
                             ) : (
-                              `${formatHex(entry.index)}:${String(entry.subindex).padStart(2, '0')}`
+                              objectAddressText(entry.index, entry.subindex)
                             )}
                           </td>
                           <td className="px-3 py-2">{entry.name ?? '—'}</td>
@@ -574,7 +573,7 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                               </td>
                               <td className="px-3 py-2 font-mono text-grey-700">
                                 {object ? (
-                                  `${formatHex(object.index)}:${String(object.subindex).padStart(2, '0')}`
+                                  objectAddressText(object.index, object.subindex)
                                 ) : (
                                   <span className="text-grey-400">—</span>
                                 )}

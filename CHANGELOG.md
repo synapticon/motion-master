@@ -23,6 +23,9 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - The TypeScript client streams the batches of a monitoring with `streamMonitoring(topic)`, which a
   program reads with `for await`.
+- The TypeScript client builds a client from `config.json` with `MotionMasterClient.fromConfig()`,
+  in Node.js. The file has the keys of `config.toml` of the Python client, in camelCase.
+- The TypeScript client has example programs in `examples/`, which run with `tsx`.
 
 ### Changed
 

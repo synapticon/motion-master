@@ -26,7 +26,7 @@ The check reads these names:
 | Section | Python | TypeScript |
 | --- | --- | --- |
 | Module | The public classes, functions and `UPPER_CASE` constants of `motion_master_client.py`, and the names it imports from `motion_master_objects.py` | The exports of `src/index.ts`, except the generated `Api`, `HttpClient` and `ContentType` |
-| A class | The public methods and properties of the class | The public methods and getters of the class |
+| A class | The public methods, class methods and properties of the class | The public methods, static methods and getters of the class |
 
 A row with a name in one column only belongs to that language. Its reason says why. A row marked
 `pending` is not built yet.
@@ -89,7 +89,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 
 | Python | TypeScript | Status | Reason |
 | --- | --- | --- | --- |
-| `from_config` | — | pending | |
+| `from_config` | `fromConfig` | | |
 | `call` | — | | TypeScript calls an operation through the generated `client.api`, which the build types from `swagger.yml`. Python has no generated client, so `call` finds the operation in the spec of the running server. |
 | — | `close` | | Closes the WebSocket of `client.ws`. Python closes the WebSocket of each stream when the stream ends. |
 | `init` | — | pending | |

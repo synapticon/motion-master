@@ -1,0 +1,13 @@
+// The examples are Node.js programs. They import the package by its name, as a program that
+// installed it from npm does, and the name resolves to the source in src/.
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@synapticon/motion-master-client": ["../src/index.ts"]
+    }
+  },
+  "include": ["."]
+}

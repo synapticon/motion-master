@@ -72,7 +72,8 @@ function readPythonNames() {
 
 function isPublicMember(member) {
   const flags = ts.getCombinedModifierFlags(member);
-  if (flags & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected | ts.ModifierFlags.Static)) {
+  // A static method counts, because Python has the class method from_config.
+  if (flags & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected)) {
     return false;
   }
   if (!member.name || ts.isPrivateIdentifier(member.name)) {

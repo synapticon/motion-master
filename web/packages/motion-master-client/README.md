@@ -55,6 +55,45 @@ Without options, the client connects to a server on the same machine:
 
 The name `local.motion-master.synapticon.com` resolves to `127.0.0.1` in public DNS. The certificate that ships with the server covers it, so no setup is necessary.
 
+## Settings from a file
+
+In Node.js, `MotionMasterClient.fromConfig()` builds a client from `config.json`. Copy the template and edit it:
+
+```bash
+cp config.example.json config.json
+```
+
+```ts
+const client = await MotionMasterClient.fromConfig()
+```
+
+Without a path, `fromConfig` reads `config.json` in the current directory, and else `config.json` in the folder of the package. The file has these keys. They are the keys of `config.toml` of the Python client, in camelCase:
+
+| Key | Value |
+| --- | --- |
+| `host` | The host of the server, for example `local.motion-master.synapticon.com`. |
+| `httpPort` | The port of the HTTP API, 61447. |
+| `wsPort` | The port of the WebSocket, 62281. |
+| `verify` | `true` checks the certificate of the server. `false` turns off the check for the whole process, because the built-in `fetch` and `WebSocket` of Node.js take no TLS option. |
+| `fieldbus` | The body of `POST /api/init`: the driver, and the network adapter for SOEM or the IP addresses for SPoE. |
+
+`config.json` is ignored by git, so your adapter never gets committed. In a browser, pass the options to `new MotionMasterClient()` instead.
+
+## Examples
+
+The folder `examples/` holds one program per task, as the Python client does. Each program is a TypeScript file that runs in Node.js 22 with `tsx`. Create `config.json` first, then run a program from the folder of the package:
+
+```bash
+pnpm install
+pnpm example examples/server-info.ts
+```
+
+An example imports the package by its name, as a program that installed it from npm does. `examples/tsconfig.json` points that name to the source in `src/`, so the examples need no build. `pnpm typecheck:examples` checks them.
+
+| Program | What it does |
+| --- | --- |
+| `server-info.ts` | Prints the server version, the host, the network adapters and the game loop health. It opens no fieldbus driver. |
+
 ## HTTP calls
 
 Each operation of the API is a method of `client.api`. The method name is the `operationId` of the operation in the OpenAPI specification. A method returns a promise of a response object. The response body is in `data`.
@@ -184,10 +223,9 @@ Restart the server after the change.
 
 ## Use in Node.js
 
-The server certificate is valid, so Node.js connects with no options. A server with a self-signed certificate, for example a development build, needs two changes:
+The server certificate is valid, so Node.js connects with no options. A server with a self-signed certificate, for example a development build, needs the certificate check turned off. Set `"verify": false` in `config.json`, or start Node.js with `NODE_TLS_REJECT_UNAUTHORIZED=0`. Both turn off certificate checks for the whole process, for the HTTP requests and the WebSocket. Use this only against a development server.
 
-- For HTTP, start Node.js with `NODE_TLS_REJECT_UNAUTHORIZED=0`. This turns off certificate checks for the whole process. Use it only against a development server.
-- For the WebSocket, inject the `ws` package and turn off its certificate check:
+To turn off the check for the WebSocket only, inject the `ws` package:
 
 ```ts
 import WebSocket from 'ws'

@@ -33,6 +33,9 @@ jobs:
       - name: The two clients match the parity table
         run: node tools/check-client-parity.mjs
 
+      - name: Typecheck the examples
+        run: pnpm --filter @synapticon/motion-master-client typecheck:examples
+
       - name: Build the client
         run: pnpm run build:client
 

@@ -6,6 +6,7 @@
 
 import { Api } from './generated/Api';
 import type { ApiConfig } from './generated/http-client';
+import { readConfig, type FieldbusSettings } from './config';
 import { API_BASE_URL, WS_URL } from './constants';
 import { fetchProcessDataDump, type MmpdFile } from './mmpd';
 import type { ObjectAddress } from './objects';
@@ -33,7 +34,11 @@ export interface MotionMasterClientOptions {
   webSocketOptions?: unknown;
   /** Custom `fetch` forwarded to the HTTP client (e.g. request logging in tests). */
   customFetch?: ApiConfig['customFetch'];
+  /** The body of `POST /api/init`, for example `{ driver: 'soem', adapter: 'eth0' }`. */
+  fieldbus?: FieldbusSettings;
 }
+
+export type { FieldbusSettings };
 
 export class MotionMasterClient {
   /**
@@ -48,12 +53,16 @@ export class MotionMasterClient {
    */
   readonly ws: WebSocketConnection;
 
+  /** The body of `POST /api/init`, from the options or from config.json. */
+  readonly fieldbus?: FieldbusSettings;
+
   private readonly httpBaseUrl: string;
   private readonly customFetch?: ApiConfig['customFetch'];
 
   constructor(options: MotionMasterClientOptions = {}) {
     this.httpBaseUrl = options.baseUrl ?? API_BASE_URL;
     this.customFetch = options.customFetch;
+    this.fieldbus = options.fieldbus;
     // The generated HttpClient copies its config onto itself with Object.assign, so a
     // `customFetch: undefined` replaces its default fetch and every request fails with
     // "this.customFetch is not a function". Pass the key only when there is a value.
@@ -66,6 +75,22 @@ export class MotionMasterClient {
       WebSocket: options.WebSocket,
       protocolsOrOptions: options.webSocketOptions,
     });
+  }
+
+  /**
+   * Builds a client from config.json. Node.js only.
+   *
+   * Without a path, it reads config.json in the current directory, and else config.json in the
+   * folder of the package. The first is for a client installed from npm. The second is for a clone
+   * of the repository. The file gives the host, the two ports, the TLS verification and the
+   * `fieldbus` object, the body of `POST /api/init`. config.example.json is the template.
+   *
+   * `verify: false` turns off TLS verification for the whole process, because the built-in fetch
+   * and WebSocket of Node.js take no TLS option. A certificate file in `verify` is refused: start
+   * node with `NODE_EXTRA_CA_CERTS` instead.
+   */
+  static async fromConfig(path?: string): Promise<MotionMasterClient> {
+    return new MotionMasterClient(await readConfig(path));
   }
 
   /**

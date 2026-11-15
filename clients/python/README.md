@@ -252,7 +252,7 @@ Other methods:
   dump, and raises `ProcessDataDumpError` for any other refusal. `mmpd_flags()` of the result has
   `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after the
   start.
-- `run_procedure()` runs a procedure to its end.
+- `run_procedure(position, name, params, poll_interval_ms=500)` runs a procedure to its end.
 - `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
   WebSocket.
 - `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,

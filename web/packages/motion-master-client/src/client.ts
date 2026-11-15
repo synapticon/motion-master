@@ -8,9 +8,9 @@ import createDebug from 'debug';
 import { AlState, alStateName } from './al-state';
 import type { Cia402State, OperationMode } from './cia402';
 import { readConfig, type FieldbusSettings } from './config';
-import { StateError } from './errors';
+import { ProcedureError, StateError } from './errors';
 import { Api } from './generated/Api';
-import type { Cia402Status } from './generated/data-contracts';
+import type { Cia402Status, ProcedureRequest, ProcedureSnapshot } from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
 import { fetchProcessDataDump, type MmpdFile } from './mmpd';
@@ -426,6 +426,58 @@ export class MotionMasterClient {
     state: Extract<Cia402State, 'OperationEnabled' | 'SwitchOnDisabled'>,
   ): Promise<Cia402Status> {
     return (await this.api.transitionToCia402State(slavePosition, { state })).data;
+  }
+
+  /**
+   * Starts a procedure on a device and yields its snapshot at every poll until the run ends.
+   *
+   * The last snapshot yielded has the final status: succeeded, failed or cancelled. Polling is
+   * lossless, because every finished step keeps its status and value, so a step that starts and
+   * ends between two polls still shows. When the caller leaves the loop before the run ends, the
+   * run is cancelled, so that the drive does not continue alone. `pollIntervalMs` is 500 when not
+   * given. An abort of `signal` ends the loop with its reason, and cancels the run too.
+   *
+   *     for await (const [snapshot, changed] of stepChanges(client.runProcedure(1, 'offset-detection'))) { ... }
+   *
+   * Throws a `ProcedureError` when the server refuses the start: 409 when another procedure runs on
+   * the device, 404 when the device has no procedure of that name, 400 for a parameter the
+   * procedure refuses.
+   */
+  async *runProcedure(
+    slavePosition: number,
+    name: string,
+    options: { params?: ProcedureRequest; pollIntervalMs?: number; signal?: AbortSignal } = {},
+  ): AsyncGenerator<ProcedureSnapshot, void, undefined> {
+    const { params = {}, pollIntervalMs = 500, signal } = options;
+    let snapshot: ProcedureSnapshot;
+    try {
+      snapshot = (await this.api.startProcedure(slavePosition, name, params)).data;
+    } catch (error) {
+      if (!(error instanceof Response)) {
+        throw error;
+      }
+      const body = (error as { error?: { error?: unknown } }).error;
+      const reason = typeof body?.error === 'string' ? body.error : error.statusText;
+      throw new ProcedureError(
+        `${name} on device ${slavePosition}: ${reason} (HTTP ${error.status})`,
+      );
+    }
+    try {
+      for (;;) {
+        yield snapshot;
+        if (snapshot.status !== 'running') {
+          return;
+        }
+        await sleep(pollIntervalMs, signal);
+        snapshot = (await this.api.getProcedure(slavePosition, name)).data;
+      }
+    } finally {
+      if (snapshot.status === 'running') {
+        log('cancelling %s on device %d', name, slavePosition);
+        // A failed cancel has nothing to add to the error or the early exit that brought the run here.
+        await this.api.cancelProcedure(slavePosition, name).catch(() => {});
+      }
+    }
   }
 
   /**

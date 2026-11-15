@@ -33,11 +33,17 @@ the HTTP/WebSocket API may break between any two alphas.
   off by default: set `DEBUG=motion-master-client` to see it.
 - The TypeScript client has the CiA402 helpers of the Python client: `setOperationMode`,
   `setTarget`, `enable`, `disable` and `quickStop`.
+- The TypeScript client runs a procedure with `runProcedure`, `stepChanges` and `formatStep`, as
+  the Python client does, and throws `ProcedureError` when the server refuses the start.
 
 ### Changed
 
 - The Python client's `wait_for_value()` takes `timeout_ms` and `interval_ms`, in milliseconds. It
   took `timeout` and `interval` in seconds.
+- The Python client's `run_procedure()` takes `poll_interval_ms`, in milliseconds. It took
+  `poll_interval` in seconds.
+- The Python client's `format_step()` writes a value with no space after `,` and `:`, as the
+  TypeScript client's `formatStep()` does.
 - The Python client streams the batches of a monitoring with `stream_monitoring(topic)`, which was
   `monitor(topic)`. The example `monitor.py` is now `stream-monitoring.py`. The new name tells it
   apart from `monitoring()`, which creates a monitoring and records it for a span.

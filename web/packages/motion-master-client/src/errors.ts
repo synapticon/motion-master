@@ -5,3 +5,8 @@
 export class StateError extends Error {
   override name = 'StateError';
 }
+
+/** The server refuses to start a procedure. The message is the server's reason. */
+export class ProcedureError extends Error {
+  override name = 'ProcedureError';
+}

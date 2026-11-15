@@ -101,6 +101,8 @@ An example imports the package by its name, as a program that installed it from 
 | `restart-devices.ts` | Restarts devices through INIT up to an AL state. |
 | `cia402-state.ts` | Prints the CiA 402 state of a drive, with its actual and target values. |
 | `set-target.ts` | Sets the position, velocity or torque target of a drive. **A drive that is enabled moves.** |
+| `run-procedure.ts` | Lists the procedures of a device, describes one with `--describe`, or runs one by name with its parameters as `name=value`. Ctrl-C cancels the run. |
+| `device-locate.ts` | Blinks the LEDs of a device. Only SPoE offers the procedure. |
 
 Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another.
 
@@ -124,6 +126,16 @@ The client has helpers for the steps that most programs begin with. They have th
 - `enable(slavePosition)` brings a drive to Operation Enabled. The device must exchange process data.
 - `disable(slavePosition)` brings a drive to Switch On Disabled.
 - `quickStop(slavePosition)` sends a quick stop. The drive stops on its quick stop ramp.
+- `runProcedure(slavePosition, name, { params, pollIntervalMs, signal })` starts a procedure and yields its snapshot at every poll, 500 ms apart by default, until the run ends. Leaving the loop early, or an abort of `signal`, cancels the run. It throws a `ProcedureError` when the server refuses the start.
+- `stepChanges(run)` yields each snapshot of a run as `[snapshot, changed]`, where `changed` lists the steps whose status changed. `formatStep(step)` turns a step into one line.
+
+```ts
+for await (const [snapshot, changed] of stepChanges(client.runProcedure(1, 'store-parameters'))) {
+  for (const step of changed) {
+    console.log(formatStep(step));
+  }
+}
+```
 
 `ensureScanned`, `ensureState` and `restart` throw a `StateError` when a device does not answer or does not reach its state. A failed HTTP request throws the response, and `apiErrorMessage(error)` gives its reason.
 

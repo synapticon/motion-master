@@ -270,7 +270,8 @@ def format_step(step):
     """Return one line for a step of a procedure: its id, its status, and its value or error."""
     line = f"  {step['id']:<36} {step['status']}"
     if "value" in step:
-        line += f"  {json.dumps(step['value'], ensure_ascii=False)}"
+        # The separators of JSON.stringify, so that both clients print the same line.
+        line += f"  {json.dumps(step['value'], ensure_ascii=False, separators=(',', ':'))}"
     if "error" in step:
         line += f"  {step['error']}"
     return line
@@ -680,14 +681,14 @@ class MotionMasterClient:
         body = {"state": state}
         return self.call("transitionToCia402State", path=_path(position), body=body).json()
 
-    def run_procedure(self, position, name, params=None, poll_interval=0.5):
+    def run_procedure(self, position, name, params=None, poll_interval_ms=500):
         """Start a procedure on a device and yield its snapshot at every poll until the run ends.
 
         The last snapshot yielded has the final status: succeeded, failed or cancelled. Polling is
         lossless, because every finished step keeps its status and value, so a step that starts
         and ends between two polls still shows. When the caller stops iterating before the run
         ends, for example on Ctrl-C, the run is cancelled, so that the drive does not continue
-        alone.
+        alone. `poll_interval_ms` is the time between two polls.
 
         Raises ProcedureError when the server refuses the start: 409 when another procedure runs
         on the device, 404 when the device has no procedure of that name, 400 for a parameter the
@@ -707,7 +708,7 @@ class MotionMasterClient:
                 yield snapshot
                 if snapshot["status"] != "running":
                     return
-                time.sleep(poll_interval)
+                time.sleep(poll_interval_ms / 1000)
                 snapshot = self.call("getProcedure", path=path).json()
         finally:
             if snapshot["status"] == "running":

@@ -60,11 +60,11 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `Somanet` | `Somanet` | | |
 | `ObjectAddress` | `ObjectAddress` | | |
 | `StateError` | `StateError` | | |
-| `ProcedureError` | — | pending | |
+| `ProcedureError` | `ProcedureError` | | |
 | `CaptureError` | — | pending | |
 | `ProcessDataDumpError` | — | pending | |
-| `step_changes` | — | pending | |
-| `format_step` | — | pending | |
+| `step_changes` | `stepChanges` | | |
+| `format_step` | `formatStep` | | |
 | `error_line` | `apiErrorMessage` | pending | |
 | `run` | — | pending | |
 | `MMPD_FLAG_INCOMPLETE_START` | `MMPD_FLAG_INCOMPLETE_START` | | |
@@ -123,7 +123,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `enable` | `enable` | | |
 | `disable` | `disable` | | |
 | `quick_stop` | `quickStop` | | |
-| `run_procedure` | — | pending | |
+| `run_procedure` | `runProcedure` | | |
 | `monitoring` | — | pending | |
 | `stream_monitoring` | `streamMonitoring` | | |
 | `notifications` | — | pending | |

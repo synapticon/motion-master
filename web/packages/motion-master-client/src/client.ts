@@ -143,6 +143,35 @@ function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {
   return new Request(input, { method: init?.method, headers: init?.headers });
 }
 
+/**
+ * Returns a `fetch` that throws a `ConnectionError` when a request does not reach the server and an
+ * `HttpError` when the server refuses it. Every request of the client goes through it, `client.api`
+ * included. The global `fetch` stays as it is.
+ *
+ * @param customFetch The `fetch` to wrap. Without it, the global `fetch` is read at each request, so
+ *   a tool that replaces it later, such as MSW in the tests, still gets the requests.
+ */
+function throwingFetch(customFetch?: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    const doFetch = customFetch ?? globalThis.fetch;
+    let response: Response;
+    try {
+      response = await doFetch(input, init);
+    } catch (error) {
+      // fetch rejects with a TypeError when the request does not reach the server. An abort rejects
+      // with an AbortError, which stays as it is.
+      if (error instanceof TypeError) {
+        throw new ConnectionError(requestOf(input, init), { cause: error });
+      }
+      throw error;
+    }
+    if (!response.ok) {
+      throw await HttpError.from(requestOf(input, init), response);
+    }
+    return response;
+  };
+}
+
 export class MotionMasterClient {
   /**
    * The generated HTTP API client. Flat method surface: `client.api.getVersion()`,
@@ -160,33 +189,13 @@ export class MotionMasterClient {
   readonly fieldbus?: FieldbusSettings;
 
   private readonly httpBaseUrl: string;
-  // The fetch of this client: customFetch or the global fetch, wrapped to throw a ConnectionError or
-  // an HttpError. Only this client uses the wrapper; the global fetch stays as it is.
+  /** The fetch of this client. See `throwingFetch`. */
   private readonly fetch: typeof fetch;
 
   constructor(options: MotionMasterClientOptions = {}) {
     this.httpBaseUrl = options.baseUrl ?? API_BASE_URL;
     this.fieldbus = options.fieldbus;
-    this.fetch = async (input, init) => {
-      // Read the global fetch at each request, not once: a tool that replaces it after this client
-      // was built, as MSW does in the tests, then still gets the requests.
-      const doFetch = options.customFetch ?? globalThis.fetch;
-      let response: Response;
-      try {
-        response = await doFetch(input, init);
-      } catch (error) {
-        // fetch rejects with a TypeError when the request does not reach the server. An abort
-        // rejects with an AbortError, which stays as it is.
-        if (error instanceof TypeError) {
-          throw new ConnectionError(requestOf(input, init), { cause: error });
-        }
-        throw error;
-      }
-      if (!response.ok) {
-        throw await HttpError.from(requestOf(input, init), response);
-      }
-      return response;
-    };
+    this.fetch = throwingFetch(options.customFetch);
     this.api = new Api({ baseUrl: this.httpBaseUrl, customFetch: this.fetch });
     this.ws = new WebSocketConnection({
       url: options.wsUrl ?? WS_URL,

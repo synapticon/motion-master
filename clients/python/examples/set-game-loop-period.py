@@ -10,17 +10,17 @@ The script needs no fieldbus driver, so it opens none.
     python set-game-loop-period.py --period 2000
 """
 
-import argparse
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--period", type=int, required=True, help="cycle period in microseconds")
+    ap = parser(__doc__)
+    ap.add_argument("--period", type=integer, required=True, help="cycle period in microseconds")
     args = ap.parse_args()
 
     client = MotionMasterClient.from_config()

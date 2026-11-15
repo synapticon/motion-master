@@ -13,7 +13,6 @@ that has nothing to report sends nothing, so on a healthy bus the script can pri
     python notifications.py --count 5
 """
 
-import argparse
 import json
 import sys
 from datetime import datetime
@@ -21,12 +20,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = parser(__doc__)
     ap.add_argument(
-        "--count", type=int, default=0, help="stop after N notifications (0 = until Ctrl-C)"
+        "--count", type=integer, default=0, help="stop after N notifications (0 = until Ctrl-C)"
     )
     args = ap.parse_args()
 

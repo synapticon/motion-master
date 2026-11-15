@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-  const files = (await client.api.listDeviceFiles(slave)).data;
+  const files = await client.listFiles(slave);
   for (const f of files) {
     const size =
       f.byteCount === undefined ? ' '.repeat(14) : `${String(f.byteCount).padStart(8)} bytes`;

@@ -12,6 +12,7 @@
 
 import {
   formatHex,
+  formatHexBytes,
   integerFromBytes,
   MotionMasterClient,
   run,
@@ -40,8 +41,7 @@ async function main(): Promise<void> {
 
   const { data } = (await client.api.readRegister(slave, address, { length })).data;
 
-  const bytes = data.map((b) => b.toString(16).padStart(2, '0')).join(' ');
-  let line = `slave ${slave} ${formatHex(address)}: ${bytes}`;
+  let line = `slave ${slave} ${formatHex(address)}: ${formatHexBytes(data)}`;
   if (data.length <= 8) {
     const value = integerFromBytes(data);
     line += ` = ${value} (0x${value.toString(16)})`;

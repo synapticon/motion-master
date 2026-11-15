@@ -14,7 +14,13 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { AlState, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import {
+  AlState,
+  formatHex,
+  MotionMasterClient,
+  objectAddressText,
+  run,
+} from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
 
 async function main(): Promise<void> {
@@ -47,7 +53,7 @@ async function main(): Promise<void> {
         const name = names.get(`${e.index}:${e.subindex}`) ?? '';
         console.log(
           `    bit ${String(e.bitOffset).padStart(4)}  ${String(e.bitLength).padStart(2)} bit(s)  ` +
-            `${formatHex(e.index)}:${formatHex(e.subindex, 2, false)}  ${name}`,
+            `${objectAddressText(e.index, e.subindex)}  ${name}`,
         );
       }
     }

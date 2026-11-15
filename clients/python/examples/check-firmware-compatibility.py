@@ -13,18 +13,20 @@ SAFEOP or OP stays there. A device in BOOT goes through INIT to PREOP.
     python check-firmware-compatibility.py --filename package_ACTILINK_6000-05-2423-1_motion-drive_v5.6.11.zip
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--filename", required=True, help="the package filename, a path is allowed")
     args = ap.parse_args()
 

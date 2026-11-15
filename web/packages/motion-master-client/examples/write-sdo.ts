@@ -12,53 +12,31 @@
 
 import {
   AlState,
-  formatHex,
+  formatHexBytes,
   MotionMasterClient,
-  parseIntegerFlexible,
+  objectAddressText,
   run,
 } from '@synapticon/motion-master-client';
-import { cli, integer } from './options';
-
-/** Parses a decimal or a 0x-prefixed hex integer. */
-function parseInteger(text: string): number {
-  const value = parseIntegerFlexible(text.trim());
-  if (value === null) {
-    throw new Error(`'${text}' is not an integer`);
-  }
-  return Number(value);
-}
-
-/** Returns the bytes as lowercase hex, separated by spaces. */
-function hexBytes(bytes: number[]): string {
-  return bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
-}
+import { byteList, cli, integer } from './options';
 
 async function main(): Promise<void> {
-  const {
-    slave,
-    index,
-    subindex,
-    data: text,
-  } = cli()
+  const { slave, index, subindex, data } = cli()
     .description(
       'Write raw bytes to one object with an SDO download (PUT .../sdo/{index}/{subindex}).',
     )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--index <n>', 'the index of the object', integer)
     .requiredOption('--subindex <n>', 'the subindex of the object', integer)
-    .requiredOption('--data <bytes>', 'bytes separated by commas, such as 0x10,0x27')
+    .requiredOption('--data <bytes>', 'bytes separated by commas, such as 0x10,0x27', byteList)
     .parse()
-    .opts<{ slave: number; index: number; subindex: number; data: string }>();
-  const data = text.split(',').map(parseInteger);
+    .opts<{ slave: number; index: number; subindex: number; data: number[] }>();
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-  await client.api.sdoDownload(slave, index, subindex, { data });
-  console.log(
-    `slave ${slave} ${formatHex(index)}:${formatHex(subindex, 2, false)} <- ${hexBytes(data)}`,
-  );
+  await client.writeSdo(slave, index, subindex, data);
+  console.log(`slave ${slave} ${objectAddressText(index, subindex)} <- ${formatHexBytes(data)}`);
 }
 
 await run(main);

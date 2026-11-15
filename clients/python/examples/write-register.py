@@ -13,27 +13,27 @@ which only a write or a power cycle clears.
     python write-register.py --address 0x0300 --data 0,0,0,0,0,0,0,0
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
-
-
-def auto_int(text):
-    """Parse a decimal or 0x-prefixed hex integer."""
-    return int(text, 0)
+from options import byte_list, integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--address", type=auto_int, required=True)
-    ap.add_argument("--data", required=True, help="bytes separated by commas, such as 0,0")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument(
+        "--address", type=integer, required=True, help="the address of the register"
+    )
+    ap.add_argument(
+        "--data", type=byte_list, required=True, help="bytes separated by commas, such as 0,0"
+    )
     args = ap.parse_args()
-    data = [int(b, 0) for b in args.data.split(",")]
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
@@ -43,9 +43,9 @@ def main():
     client.call(
         "writeRegister",
         path={"slavePosition": args.slave, "address": args.address},
-        body={"data": data},
+        body={"data": args.data},
     )
-    print(f"slave {args.slave} 0x{args.address:04X} <- {bytes(data).hex(' ')}")
+    print(f"slave {args.slave} 0x{args.address:04X} <- {bytes(args.data).hex(' ').upper()}")
 
 
 if __name__ == "__main__":

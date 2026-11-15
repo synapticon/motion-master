@@ -31,9 +31,7 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-  // No response format: the generated client returns the answer with its body unread.
-  const response = await client.api.foeReadFile(slave, filename);
-  const content = new Uint8Array(await response.arrayBuffer());
+  const content = await client.readFile(slave, filename);
 
   const out = output || `${FILES_DIR}/${basename(filename)}`;
   mkdirSync(dirname(out), { recursive: true });

@@ -592,6 +592,70 @@ class MotionMasterClient:
         path = _path(position, index=index, subindex=subindex)
         return self.call("readParameter", path=path).json()["value"]
 
+    def write_value(self, position: int, obj: ObjectAddress[_T], value: _T) -> _T:
+        """Write one object, converted by the server to its data type, and return the value read back.
+
+        The twin of read_value(). The server writes a PDO-mapped object of an exchanging device into
+        the process data, and any other object with an SDO download.
+        """
+        index, subindex = obj
+        path = _path(position, index=index, subindex=subindex)
+        return self.call("writeParameter", path=path, body={"value": value}).json()["value"]
+
+    def read_sdo(self, position, index, subindex):
+        """Return the raw bytes of one object, read with an SDO upload (sdoUpload).
+
+        read_value() decodes the value by its data type instead, and int.from_bytes(data, "little")
+        turns bytes into an integer.
+        """
+        path = _path(position, index=index, subindex=subindex)
+        return bytes(self.call("sdoUpload", path=path).json()["data"])
+
+    def write_sdo(self, position, index, subindex, data):
+        """Write raw bytes, a bytes object or a list of ints, to one object with an SDO download."""
+        path = _path(position, index=index, subindex=subindex)
+        self.call("sdoDownload", path=path, body={"data": list(data)})
+
+    def list_files(self, position):
+        """Return the files on a device (listDeviceFiles), each with the size the device reports.
+
+        Each file is {"name": ..., "byteCount": ...}. byteCount is missing when the device reports a
+        name without a size.
+        """
+        return self.call("listDeviceFiles", path=_path(position)).json()
+
+    def read_file(self, position, name, format="bytes"):
+        """Read a file from a device over FoE (foeReadFile).
+
+        `format` says what to return: "bytes" (the default), "text", the file decoded as UTF-8, such
+        as a CSV, or "json", the file parsed as JSON.
+        """
+        if format not in ("bytes", "text", "json"):
+            raise ValueError(f"format must be bytes, text or json, not {format!r}")
+        content = self.call("foeReadFile", path=_path(position, filename=name)).content
+        if format == "text":
+            return content.decode("utf-8")
+        if format == "json":
+            return json.loads(content)
+        return content
+
+    def write_file(self, position, name, content):
+        """Write a file to a device over FoE (foeWriteFile), and replace a file of the same name.
+
+        `content` is bytes, or a str, which is written as UTF-8.
+        """
+        data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+        self.call(
+            "foeWriteFile",
+            path=_path(position, filename=name),
+            data=data,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    def remove_file(self, position, name):
+        """Remove a file from the flash of a device (deleteDeviceFile)."""
+        self.call("deleteDeviceFile", path=_path(position, filename=name))
+
     def wait_for_value(
         self,
         position: int,
@@ -877,9 +941,14 @@ def _object_names():
     return names
 
 
-def _object_name(index, subindex):
-    """Return the generated name of an object, or 0xIIII:SS when it has none."""
-    return _object_names().get((index, subindex), f"0x{index:04X}:{subindex:02X}")
+def object_name(index, subindex):
+    """Return the generated name of an object, such as STATUSWORD, or its address when it has none."""
+    return _object_names().get((index, subindex), object_address_text(index, subindex))
+
+
+def object_address_text(index, subindex):
+    """Return the address of an object in hex, such as 0x6041:00."""
+    return f"0x{index:04X}:{subindex:02X}"
 
 
 class MonitoringRecording:
@@ -969,7 +1038,7 @@ class MonitoringRecording:
         generated name. write_csv() and print_table() name their columns with these.
         """
         return [
-            f"{p['devicePosition']}:{_object_name(p['index'], p['subindex'])}"
+            f"{p['devicePosition']}:{object_name(p['index'], p['subindex'])}"
             for p in self.parameters
         ]
 

@@ -18,46 +18,22 @@
 
 import {
   AlState,
-  formatHex,
   MotionMasterClient,
+  objectAddressText,
   type ParameterValue,
-  parseIntegerFlexible,
   run,
 } from '@synapticon/motion-master-client';
-import { cli, integer } from './options';
-
-/** Parses a decimal or a 0x-prefixed hex integer. */
-function parseInteger(text: string): number {
-  const value = parseIntegerFlexible(text.trim());
-  if (value === null) {
-    throw new Error(`'${text}' is not an integer`);
-  }
-  // The request is JSON, and a JSON number from JavaScript holds an integer exactly only up to
-  // 2^53 - 1. Python's int has no such limit.
-  if (!Number.isSafeInteger(Number(value))) {
-    throw new Error(`'${text}' is beyond 2^53 - 1, which a JavaScript number cannot hold exactly`);
-  }
-  return Number(value);
-}
-
-/** Parses a real number. */
-function parseReal(text: string): number {
-  const value = Number(text);
-  if (text.trim() === '' || Number.isNaN(value)) {
-    throw new Error(`'${text}' is not a number`);
-  }
-  return value;
-}
+import { byteList, cli, float, integer } from './options';
 
 /** Converts the text of --value to the JSON type of the current value of the parameter. */
 function convert(current: ParameterValue, dataTypeName: string, text: string): ParameterValue {
   if (typeof current === 'number') {
     // A JSON number does not say whether it is an integer, because 1.0 reads as 1. The data type
     // says it.
-    return dataTypeName.startsWith('REAL') ? parseReal(text) : parseInteger(text);
+    return dataTypeName.startsWith('REAL') ? float(text) : integer(text);
   }
   if (Array.isArray(current)) {
-    return text.split(',').map(parseInteger);
+    return byteList(text);
   }
   return text;
 }
@@ -92,10 +68,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const after = (await client.api.writeParameter(slave, index, subindex, { value })).data;
+  const after = await client.writeValue<ParameterValue>(slave, { index, subindex }, value);
   console.log(
-    `slave ${slave} ${formatHex(index)}:${formatHex(subindex, 2, false)} ${after.name} ` +
-      `(${after.dataTypeName}): ${JSON.stringify(before.value)} -> ${JSON.stringify(after.value)}`,
+    `slave ${slave} ${objectAddressText(index, subindex)} ${before.name} ` +
+      `(${before.dataTypeName}): ${JSON.stringify(before.value)} -> ${JSON.stringify(after)}`,
   );
 }
 

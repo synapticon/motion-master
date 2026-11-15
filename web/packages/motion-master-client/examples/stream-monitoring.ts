@@ -20,7 +20,12 @@
 //     pnpm example examples/stream-monitoring.ts --count 10
 //     pnpm example examples/stream-monitoring.ts --slave 2 --interval 500     # runs until Ctrl-C
 
-import { AlState, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import {
+  AlState,
+  MotionMasterClient,
+  objectAddressText,
+  run,
+} from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
 
 const TOPIC = 'typescript-example';
@@ -67,7 +72,7 @@ async function main(): Promise<void> {
   try {
     const order = (await client.api.getMonitoring(TOPIC)).data.parameters;
     const header = order
-      .map((p) => `${formatHex(p.index)}:${formatHex(p.subindex, 2, false)}(${p.source})`)
+      .map((p) => `${objectAddressText(p.index, p.subindex)}(${p.source})`)
       .join(', ');
     console.log(`subscribed to '${TOPIC}' [${header}] -- Ctrl-C to stop`);
 

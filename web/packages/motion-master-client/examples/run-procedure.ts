@@ -27,30 +27,15 @@
 //     pnpm example examples/run-procedure.ts offset-detection --state op --slave 2
 
 import { readFileSync } from 'node:fs';
-import {
-  AlState,
-  formatStep,
-  MotionMasterClient,
-  type ProcedureRequest,
-  type ProcedureSnapshot,
-  run,
-  stepChanges,
-  type TargetAlState,
-} from '@synapticon/motion-master-client';
+import { MotionMasterClient, type ProcedureRequest, run } from '@synapticon/motion-master-client';
 import { Option } from 'commander';
-import { cli, integer } from './options';
+import { AL_STATES, byteList, cli, integer } from './options';
+import { runToEnd } from './procedures';
 
 type Descriptor = Awaited<
   ReturnType<MotionMasterClient['api']['listProcedures']>
 >['data'][number]['descriptor'];
 type Parameter = Descriptor['parameters'][number];
-
-// The states a device can be commanded to, by their names in lowercase: init, preop, boot, ...
-const STATES = Object.fromEntries(
-  Object.entries(AlState)
-    .filter(([name]) => name !== 'UNKNOWN')
-    .map(([name, value]) => [name.toLowerCase(), value]),
-) as Record<string, TargetAlState>;
 
 /** Prints `message` on stderr and ends the program with 1. */
 function fail(message: string): never {
@@ -62,7 +47,7 @@ function fail(message: string): never {
 function convert(param: Parameter, text: string): unknown {
   switch (param.type) {
     case 'integer':
-      return parseInteger(text);
+      return integer(text);
     case 'boolean':
       if (!['true', 'false'].includes(text.toLowerCase())) {
         throw new Error('expected true or false');
@@ -77,7 +62,7 @@ function convert(param: Parameter, text: string): unknown {
       return option.value;
     }
     case 'byteArray':
-      return text.split(',').map(parseInteger);
+      return byteList(text);
     case 'stringArray':
       return text ? text.split(',') : [];
     case 'file':
@@ -85,15 +70,6 @@ function convert(param: Parameter, text: string): unknown {
     default:
       return text;
   }
-}
-
-/** Parses a decimal or a 0x-prefixed hex integer. */
-function parseInteger(text: string): number {
-  const value = Number(text);
-  if (!Number.isInteger(value)) {
-    throw new Error(`${text} is not an integer`);
-  }
-  return value;
 }
 
 /** Builds the request body from name=value arguments, checked against the descriptor. */
@@ -166,18 +142,18 @@ async function main(): Promise<void> {
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .addOption(
       new Option('--state <state>', 'the state to move the device to first')
-        .choices(Object.keys(STATES))
+        .choices(Object.keys(AL_STATES))
         .default('preop'),
     )
-    .option('--describe', 'describe the procedure, do not run it', false)
+    .option('--describe', 'describe the procedure, do not run it')
     .parse();
   const [name, ...assignments] = command.args;
   const {
     slave,
     state: stateName,
     describe: describeOnly,
-  } = command.opts<{ slave: number; state: string; describe: boolean }>();
-  const state = STATES[stateName];
+  } = command.opts<{ slave: number; state: string; describe?: boolean }>();
+  const state = AL_STATES[stateName];
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();
@@ -201,36 +177,7 @@ async function main(): Promise<void> {
 
   const params = buildParams(descriptor, assignments);
 
-  // Ctrl-C aborts the signal, so that runProcedure() cancels the run before the program ends.
-  const controller = new AbortController();
-  process.once('SIGINT', () => controller.abort(new Error('cancelled')));
-
-  let snapshot: ProcedureSnapshot | undefined;
-  try {
-    for await (const [current, changed] of stepChanges(
-      client.runProcedure(slave, name, { params, signal: controller.signal }),
-    )) {
-      snapshot = current;
-      for (const step of changed) {
-        console.log(formatStep(step));
-      }
-    }
-  } catch (e) {
-    if (controller.signal.aborted) {
-      console.error('\ncancelled');
-      process.exitCode = 1;
-      return;
-    }
-    throw e;
-  }
-
-  if (snapshot?.error) {
-    console.log(`error: ${snapshot.error}`);
-  }
-  console.log(`${name} ${snapshot?.status}`);
-  if (snapshot?.status !== 'succeeded') {
-    process.exitCode = 1;
-  }
+  await runToEnd(client, slave, name, params);
 }
 
 await run(main);

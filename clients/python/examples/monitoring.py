@@ -27,15 +27,14 @@ drop in it is not a restart of the drive. Use the row timestamp for the time of 
     python monitoring.py --slave 2 --velocity 500 --seconds 3 --output /tmp/move.csv
 """
 
-import argparse
 import contextlib
 import logging
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from files import FILES_DIR, file_stamp  # noqa: E402
 from motion_master_client import (  # noqa: E402
     AlState,
     Cia402,
@@ -44,8 +43,7 @@ from motion_master_client import (  # noqa: E402
     Somanet,
     run,
 )
-
-FILES_DIR = Path(__file__).resolve().parent.parent / "files"
+from options import integer, parser  # noqa: E402
 
 # The monitored objects, in the order of the columns.
 OBJECTS = [
@@ -63,11 +61,15 @@ AFTER_STOP_SECONDS = 1.0
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--velocity", type=int, default=250, help="target velocity, units of 0x60FF")
-    ap.add_argument("--seconds", type=float, default=2.0, help="how long to hold the velocity")
-    ap.add_argument("--every", type=int, default=100, help="print one line every N ms")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument(
+        "--velocity", type=integer, default=250, help="target velocity, units of 0x60FF"
+    )
+    ap.add_argument("--seconds", type=float, default=2, help="how long to hold the velocity")
+    ap.add_argument("--every", type=integer, default=100, help="print one line every N ms")
     ap.add_argument("--output", help="CSV file (default: files/monitoring-<time>.csv)")
     args = ap.parse_args()
 
@@ -106,7 +108,7 @@ def main():
     if args.output:
         out = Path(args.output)
     else:
-        out = FILES_DIR / f"monitoring-{datetime.now():%Y%m%d-%H%M%S}.csv"
+        out = FILES_DIR / f"monitoring-{file_stamp()}.csv"
     m.write_csv(out)
     print(f"saved {len(m.rows)} row(s) -> {out}")
 

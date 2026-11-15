@@ -12,17 +12,17 @@ The script needs no bus and no fieldbus driver, so it opens none and leaves the 
     python parse-esi.py somanet.xml --output files/esi.json
 """
 
-import argparse
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = parser(__doc__)
     ap.add_argument("esi", help="path to the ESI XML file")
     ap.add_argument("--output", help="save the whole parsed response as JSON to this path")
     args = ap.parse_args()

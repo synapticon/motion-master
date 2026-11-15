@@ -17,15 +17,9 @@
 //     pnpm example examples/offset-detection.ts
 //     pnpm example examples/offset-detection.ts --slave 2
 
-import {
-  AlState,
-  formatStep,
-  MotionMasterClient,
-  type ProcedureSnapshot,
-  run,
-  stepChanges,
-} from '@synapticon/motion-master-client';
+import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
+import { runToEnd } from './procedures';
 
 const PROCEDURE = 'offset-detection';
 
@@ -40,36 +34,7 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureState(AlState.OP, { positions: [slave] });
 
-  // Ctrl-C aborts the signal, so that runProcedure() cancels the run before the program ends.
-  const controller = new AbortController();
-  process.once('SIGINT', () => controller.abort(new Error('cancelled')));
-
-  let snapshot: ProcedureSnapshot | undefined;
-  try {
-    for await (const [current, changed] of stepChanges(
-      client.runProcedure(slave, PROCEDURE, { signal: controller.signal }),
-    )) {
-      snapshot = current;
-      for (const step of changed) {
-        console.log(formatStep(step));
-      }
-    }
-  } catch (e) {
-    if (controller.signal.aborted) {
-      console.error('\ncancelled');
-      process.exitCode = 1;
-      return;
-    }
-    throw e;
-  }
-
-  if (snapshot?.error) {
-    console.log(`error: ${snapshot.error}`);
-  }
-  console.log(`${PROCEDURE} ${snapshot?.status}`);
-  if (snapshot?.status !== 'succeeded') {
-    process.exitCode = 1;
-  }
+  await runToEnd(client, slave, PROCEDURE);
 }
 
 await run(main);

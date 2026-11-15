@@ -7,16 +7,16 @@ script needs no fieldbus driver, so it opens none and leaves the server as it is
     python server-info.py
 """
 
-import argparse
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import parser  # noqa: E402
 
 
 def main():
-    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
+    parser(__doc__).parse_args()
 
     client = MotionMasterClient.from_config()
 

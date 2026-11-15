@@ -15,26 +15,23 @@ The defaults read the Statusword, 0x6041:00.
     python read-parameter.py --index 0x2031 --subindex 1 --cache
 """
 
-import argparse
 import json
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
-
-
-def auto_int(text):
-    """Parse a decimal or 0x-prefixed hex integer."""
-    return int(text, 0)
+from motion_master_client import AlState, MotionMasterClient, object_address_text, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--index", type=auto_int, default=0x6041)
-    ap.add_argument("--subindex", type=auto_int, default=0)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument("--index", type=integer, default="0x6041", help="the index of the object")
+    ap.add_argument("--subindex", type=integer, default=0, help="the subindex of the object")
     ap.add_argument("--cache", action="store_true", help="return the cached value, read no bus")
     args = ap.parse_args()
 
@@ -49,7 +46,7 @@ def main():
         query={"source": "cache"} if args.cache else None,
     ).json()
     print(
-        f"slave {args.slave} 0x{p['index']:04X}:{p['subindex']:02X} {p['name']} "
+        f"slave {args.slave} {object_address_text(p['index'], p['subindex'])} {p['name']} "
         f"({p['dataTypeName']}) = {json.dumps(p['value'], ensure_ascii=False, separators=(",", ":"))}"
     )
 

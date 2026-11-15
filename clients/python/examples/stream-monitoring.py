@@ -19,7 +19,6 @@ otherwise. The header line shows which, as (pdo) or (sdo).
     python stream-monitoring.py --slave 2 --interval 500     # runs until Ctrl-C
 """
 
-import argparse
 import json
 import logging
 import sys
@@ -27,16 +26,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, object_address_text, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 TOPIC = "python-example"
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--interval", type=int, default=100, help="flush cadence in ms (5-2000)")
-    ap.add_argument("--count", type=int, default=0, help="stop after N batches (0 = until Ctrl-C)")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument("--interval", type=integer, default=100, help="flush cadence in ms (5-2000)")
+    ap.add_argument(
+        "--count", type=integer, default=0, help="stop after N batches (0 = until Ctrl-C)"
+    )
     args = ap.parse_args()
 
     # Each parameter is [devicePosition, index, subindex].
@@ -61,7 +65,9 @@ def main():
     )
 
     order = client.call("getMonitoring", path={"topic": TOPIC}).json()["parameters"]
-    header = ", ".join(f"0x{p['index']:04X}:{p['subindex']:02X}({p['source']})" for p in order)
+    header = ", ".join(
+        f"{object_address_text(p['index'], p['subindex'])}({p['source']})" for p in order
+    )
     print(f"subscribed to '{TOPIC}' [{header}] -- Ctrl-C to stop")
 
     batches = 0

@@ -10,21 +10,21 @@ stops the script with its AL status code.
     python transition-state.py --state preop --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
-
-STATES = {s.name.lower(): s for s in AlState if s}
+from options import AL_STATES, integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--state", required=True, choices=STATES)
-    ap.add_argument("--slave", type=int, help="one device position (default: every device)")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--state", required=True, choices=AL_STATES, help="the AL state to move the devices to"
+    )
+    ap.add_argument("--slave", type=integer, help="one device position (default: every device)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -32,7 +32,7 @@ def main():
     client.init()
 
     positions = [args.slave] if args.slave else None
-    client.ensure_state(STATES[args.state], positions=positions, exact=True)
+    client.ensure_state(AL_STATES[args.state], positions=positions, exact=True)
 
     query = {"positions": str(args.slave)} if args.slave else None
     for d in client.call("getDeviceStates", query=query).json():

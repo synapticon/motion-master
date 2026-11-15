@@ -7,35 +7,22 @@
 //     pnpm example examples/transition-state.ts --state op
 //     pnpm example examples/transition-state.ts --state preop --slave 2
 
-import {
-  AlState,
-  alStateName,
-  MotionMasterClient,
-  run,
-  type TargetAlState,
-} from '@synapticon/motion-master-client';
+import { alStateName, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { Option } from 'commander';
-import { cli, integer } from './options';
-
-// The states a device can be commanded to, by their names in lowercase: init, preop, boot, ...
-const STATES = Object.fromEntries(
-  Object.entries(AlState)
-    .filter(([name]) => name !== 'UNKNOWN')
-    .map(([name, value]) => [name.toLowerCase(), value]),
-) as Record<string, TargetAlState>;
+import { AL_STATES, cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { state: name, slave } = cli()
     .description('Move the devices to an EtherCAT AL state.')
     .addOption(
       new Option('--state <state>', 'the AL state to move the devices to')
-        .choices(Object.keys(STATES))
+        .choices(Object.keys(AL_STATES))
         .makeOptionMandatory(),
     )
     .option('--slave <n>', 'one device position (default: every device)', integer)
     .parse()
     .opts<{ state: string; slave?: number }>();
-  const state = STATES[name];
+  const state = AL_STATES[name];
   const positions = slave ? [slave] : undefined;
 
   const client = await MotionMasterClient.fromConfig();

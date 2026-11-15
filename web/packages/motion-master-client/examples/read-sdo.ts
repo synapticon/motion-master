@@ -11,9 +11,9 @@
 
 import {
   AlState,
-  formatHex,
   integerFromBytes,
   MotionMasterClient,
+  objectAddressText,
   run,
 } from '@synapticon/motion-master-client';
 import { Option } from 'commander';
@@ -38,11 +38,11 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-  const { data } = (await client.api.sdoUpload(slave, index, subindex)).data;
+  const data = await client.readSdo(slave, index, subindex);
 
   const value = integerFromBytes(data);
   console.log(
-    `slave ${slave} ${formatHex(index)}:${formatHex(subindex, 2, false)} = ` +
+    `slave ${slave} ${objectAddressText(index, subindex)} = ` +
       `${value} (0x${value.toString(16)}), ${data.length} byte(s): [${data.join(', ')}]`,
   );
 }

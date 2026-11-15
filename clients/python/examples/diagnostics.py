@@ -12,20 +12,20 @@ Opens the fieldbus driver and scans first when needed, and moves no device.
     python diagnostics.py --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 PORT_COUNTERS = ("rxError", "invalidFrame", "forwardedError", "lostLink")
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, help="one device position (default: every device)")
+    ap = parser(__doc__)
+    ap.add_argument("--slave", type=integer, help="one device position (default: every device)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")

@@ -19,7 +19,12 @@ import {
   StateError,
 } from './errors';
 import { Api } from './generated/Api';
-import type { Cia402Status, ProcedureRequest, ProcedureSnapshot } from './generated/data-contracts';
+import type {
+  Cia402Status,
+  DeviceFile,
+  ProcedureRequest,
+  ProcedureSnapshot,
+} from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
 import { MonitoringRecording } from './monitoring-recording';
@@ -325,6 +330,113 @@ export class MotionMasterClient {
   async readValue<T>(slavePosition: number, address: ObjectAddress<T>): Promise<T> {
     const response = await this.api.readParameter(slavePosition, address.index, address.subindex);
     return response.data.value as T;
+  }
+
+  /**
+   * Writes one object, converted by the server to its data type (`writeParameter`), and returns the
+   * value that the server reads back. The server writes a PDO-mapped object of an exchanging device
+   * into the process data, and any other object with an SDO download.
+   *
+   *     await client.writeValue(1, Cia402.TARGET_VELOCITY, 0);
+   */
+  async writeValue<T>(slavePosition: number, address: ObjectAddress<T>, value: T): Promise<T> {
+    const body = { value: value as Data<'writeParameter'>['value'] };
+    const response = await this.api.writeParameter(
+      slavePosition,
+      address.index,
+      address.subindex,
+      body,
+    );
+    return response.data.value as T;
+  }
+
+  /**
+   * Returns the raw bytes of one object, read with an SDO upload (`sdoUpload`). `readValue()`
+   * decodes the value by its data type instead, and `integerFromBytes()` turns bytes into an integer.
+   */
+  async readSdo(slavePosition: number, index: number, subindex: number): Promise<Uint8Array> {
+    return new Uint8Array((await this.api.sdoUpload(slavePosition, index, subindex)).data.data);
+  }
+
+  /** Writes raw bytes to one object with an SDO download (`sdoDownload`). */
+  async writeSdo(
+    slavePosition: number,
+    index: number,
+    subindex: number,
+    data: Uint8Array | readonly number[],
+  ): Promise<void> {
+    await this.api.sdoDownload(slavePosition, index, subindex, { data: [...data] });
+  }
+
+  /**
+   * Returns the files on a device (`listDeviceFiles`), each with the size that the device reports.
+   * `byteCount` is missing when the device reports a name without a size.
+   */
+  async listFiles(slavePosition: number): Promise<DeviceFile[]> {
+    return (await this.api.listDeviceFiles(slavePosition)).data;
+  }
+
+  /**
+   * Reads a file from a device over FoE (`foeReadFile`). `format` says what to return: `'bytes'`, a
+   * `Uint8Array` (the default), `'text'`, the file decoded as UTF-8, such as a CSV, or `'json'`, the
+   * file parsed as JSON. The names are those of the methods of a `fetch` response.
+   */
+  readFile(
+    slavePosition: number,
+    name: string,
+    options?: { format?: 'bytes'; signal?: AbortSignal },
+  ): Promise<Uint8Array>;
+  readFile(
+    slavePosition: number,
+    name: string,
+    options: { format: 'text'; signal?: AbortSignal },
+  ): Promise<string>;
+  readFile(
+    slavePosition: number,
+    name: string,
+    options: { format: 'json'; signal?: AbortSignal },
+  ): Promise<unknown>;
+  async readFile(
+    slavePosition: number,
+    name: string,
+    options: { format?: 'bytes' | 'text' | 'json'; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const { format = 'bytes', signal } = options;
+    // No response format: the generated client returns the answer with its body unread.
+    const response = await this.api.foeReadFile(slavePosition, name, { signal });
+    if (format === 'text') {
+      return response.text();
+    }
+    if (format === 'json') {
+      return response.json();
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  /**
+   * Writes a file to a device over FoE (`foeWriteFile`), and replaces a file of the same name. A
+   * string is written as UTF-8.
+   */
+  async writeFile(
+    slavePosition: number,
+    name: string,
+    content: Uint8Array | string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    // The generated foeWriteFile sends a body it has no formatter for as JSON, so the bytes go with
+    // the fetch of this client.
+    const body = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+    await this.fetch(`${this.httpBaseUrl}/api/devices/${slavePosition}/files/${name}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: body.slice(),
+      signal: options.signal,
+    });
+  }
+
+  /** Removes a file from the flash of a device (`deleteDeviceFile`). */
+  async removeFile(slavePosition: number, name: string): Promise<void> {
+    await this.api.deleteDeviceFile(slavePosition, name);
   }
 
   /**

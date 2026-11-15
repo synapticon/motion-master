@@ -42,7 +42,7 @@ The check reads these names:
 | --- | --- | --- |
 | Module | The public classes, functions and `UPPER_CASE` constants of `motion_master_client.py`, and the names it imports from `motion_master_objects.py` | The exports of `src/index.ts`, except the generated `Api`, `HttpClient` and `ContentType` |
 | A class | The public methods, class methods and properties of the class | The public methods, static methods and getters of the class |
-| Examples | The programs in `clients/python/examples/` | The programs in `web/packages/motion-master-client/examples/`, except the helpers `files.ts` and `options.ts` |
+| Examples | The programs in `clients/python/examples/`, except the helpers `files.py`, `options.py` and `procedures.py` | The programs in `web/packages/motion-master-client/examples/`, except the helpers `files.ts`, `options.ts` and `procedures.ts` |
 
 A row with a name in one column only belongs to that language. Its reason says why.
 
@@ -67,6 +67,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `ConnectionError` | Python raises `requests.ConnectionError`, which carries the URL of the request. `fetch` throws a bare `TypeError`, so the TypeScript client throws its own error. |
 | — | `HttpError` | Python raises `requests.HTTPError`, which carries the method, the status and the body. A refused `fetch` throws nothing, so the TypeScript client throws its own error. |
 | `step_changes` | `stepChanges` | |
+| `object_name` | `objectName` | |
+| `object_address_text` | `objectAddressText` | |
 | `format_step` | `formatStep` | |
 | `error_line` | `errorLine` | |
 | — | `apiErrorMessage` | Returns a message for any error, with a fallback, for a page to show. `errorLine` returns `null` for a bug, so that a program shows its stack trace. |
@@ -91,6 +93,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `WIRE_TIME_HEADER` | The Console shows the time a request spent on the wire. A Python script reads the header from `response.headers`. |
 | — | `wireTimeMs` | As `WIRE_TIME_HEADER`. |
 | — | `formatHex` | The hex input fields of the Console. Python formats and parses hex with `f"{value:#x}"` and `int(text, 16)`. |
+| — | `formatHexBytes` | Python writes the same with `data.hex(" ").upper()`. |
 | — | `parseHexBytes` | As `formatHex`. |
 | — | `parseIntegerFlexible` | As `formatHex`. |
 | — | `integerFromBytes` | Python has `int.from_bytes(data, "little", signed=...)` built in. |
@@ -116,6 +119,13 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `parameters` | `parameters` | |
 | `hardware_description` | `hardwareDescription` | |
 | `read_value` | `readValue` | |
+| `write_value` | `writeValue` | |
+| `read_sdo` | `readSdo` | |
+| `write_sdo` | `writeSdo` | |
+| `list_files` | `listFiles` | |
+| `read_file` | `readFile` | |
+| `write_file` | `writeFile` | |
+| `remove_file` | `removeFile` | |
 | `wait_for_value` | `waitForValue` | |
 | `ensure_scanned` | `ensureScanned` | |
 | `ensure_state` | `ensureState` | |

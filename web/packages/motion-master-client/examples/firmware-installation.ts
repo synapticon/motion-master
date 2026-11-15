@@ -22,27 +22,12 @@
 
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import {
-  AlState,
-  formatStep,
-  HttpError,
-  MotionMasterClient,
-  type ProcedureSnapshot,
-  run,
-  stepChanges,
-  type TargetAlState,
-} from '@synapticon/motion-master-client';
+import { HttpError, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { Option } from 'commander';
-import { cli, integer } from './options';
+import { AL_STATES, cli, integer } from './options';
+import { runToEnd } from './procedures';
 
 const PROCEDURE = 'firmware-installation';
-
-// The states a device can be left in, by their names in lowercase: init, preop, boot, ...
-const STATES = Object.fromEntries(
-  Object.entries(AlState)
-    .filter(([name]) => name !== 'UNKNOWN')
-    .map(([name, value]) => [name.toLowerCase(), value]),
-) as Record<string, TargetAlState>;
 
 async function main(): Promise<void> {
   const {
@@ -55,12 +40,12 @@ async function main(): Promise<void> {
     .requiredOption('--package <path>', 'path to the .zip firmware package')
     .addOption(
       new Option('--final-state <state>', 'the state to leave the device in')
-        .choices(Object.keys(STATES))
+        .choices(Object.keys(AL_STATES))
         .default('preop'),
     )
     .parse()
     .opts<{ slave: number; package: string; finalState: string }>();
-  const finalState = STATES[finalStateName];
+  const finalState = AL_STATES[finalStateName];
   const packageName = basename(packagePath);
 
   const client = await MotionMasterClient.fromConfig();
@@ -95,36 +80,7 @@ async function main(): Promise<void> {
   console.log(`uploaded ${packageName}`);
   const params = { packageFilename: packageName, finalState };
 
-  // Ctrl-C aborts the signal, so that runProcedure() cancels the run before the program ends.
-  const controller = new AbortController();
-  process.once('SIGINT', () => controller.abort(new Error('cancelled')));
-
-  let snapshot: ProcedureSnapshot | undefined;
-  try {
-    for await (const [current, changed] of stepChanges(
-      client.runProcedure(slave, PROCEDURE, { params, signal: controller.signal }),
-    )) {
-      snapshot = current;
-      for (const step of changed) {
-        console.log(formatStep(step));
-      }
-    }
-  } catch (e) {
-    if (controller.signal.aborted) {
-      console.error('\ncancelled');
-      process.exitCode = 1;
-      return;
-    }
-    throw e;
-  }
-
-  if (snapshot?.error) {
-    console.log(`error: ${snapshot.error}`);
-  }
-  console.log(`${PROCEDURE} ${snapshot?.status}`);
-  if (snapshot?.status !== 'succeeded') {
-    process.exitCode = 1;
-  }
+  await runToEnd(client, slave, PROCEDURE, params);
 }
 
 await run(main);

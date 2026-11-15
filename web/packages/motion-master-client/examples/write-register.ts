@@ -13,46 +13,27 @@
 
 import {
   formatHex,
+  formatHexBytes,
   MotionMasterClient,
-  parseIntegerFlexible,
   run,
 } from '@synapticon/motion-master-client';
-import { cli, integer } from './options';
-
-/** Parses a decimal or a 0x-prefixed hex integer. */
-function parseInteger(text: string): number {
-  const value = parseIntegerFlexible(text.trim());
-  if (value === null) {
-    throw new Error(`'${text}' is not an integer`);
-  }
-  return Number(value);
-}
-
-/** Returns the bytes as lowercase hex, separated by spaces. */
-function hexBytes(bytes: number[]): string {
-  return bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
-}
+import { byteList, cli, integer } from './options';
 
 async function main(): Promise<void> {
-  const {
-    slave,
-    address,
-    data: text,
-  } = cli()
+  const { slave, address, data } = cli()
     .description('Write bytes to an ESC register of a device (POST .../registers/{address}).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--address <n>', 'the address of the register', integer)
-    .requiredOption('--data <bytes>', 'bytes separated by commas, such as 0,0')
+    .requiredOption('--data <bytes>', 'bytes separated by commas, such as 0,0', byteList)
     .parse()
-    .opts<{ slave: number; address: number; data: string }>();
-  const data = text.split(',').map(parseInteger);
+    .opts<{ slave: number; address: number; data: number[] }>();
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();
   await client.ensureScanned();
 
   await client.api.writeRegister(slave, address, { data });
-  console.log(`slave ${slave} ${formatHex(address)} <- ${hexBytes(data)}`);
+  console.log(`slave ${slave} ${formatHex(address)} <- ${formatHexBytes(data)}`);
 }
 
 await run(main);

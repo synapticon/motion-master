@@ -11,23 +11,9 @@
 //     pnpm example examples/restart-devices.ts
 //     pnpm example examples/restart-devices.ts --state preop --slave 2
 
-import {
-  AlState,
-  alStateName,
-  formatHex,
-  MotionMasterClient,
-  run,
-  type TargetAlState,
-} from '@synapticon/motion-master-client';
+import { alStateName, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { Option } from 'commander';
-import { cli, integer } from './options';
-
-// The states a device can be commanded to, by their names in lowercase: init, preop, boot, ...
-const STATES = Object.fromEntries(
-  Object.entries(AlState)
-    .filter(([name]) => name !== 'UNKNOWN')
-    .map(([name, value]) => [name.toLowerCase(), value]),
-) as Record<string, TargetAlState>;
+import { AL_STATES, cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { state, slave } = cli()
@@ -36,13 +22,13 @@ async function main(): Promise<void> {
     )
     .addOption(
       new Option('--state <state>', 'the AL state to restart to')
-        .choices(Object.keys(STATES))
+        .choices(Object.keys(AL_STATES))
         .default('op'),
     )
     .option('--slave <n>', 'one device position (default: every device)', integer)
     .parse()
     .opts<{ state: string; slave?: number }>();
-  const target = STATES[state];
+  const target = AL_STATES[state];
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();

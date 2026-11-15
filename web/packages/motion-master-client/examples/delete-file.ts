@@ -14,12 +14,6 @@
 import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
 
-// The server does not URL-decode a path parameter, so the program keeps = as it is: a name such as
-// fs-stackunlock=DD1317 must reach the device unchanged.
-function encodeFilename(name: string): string {
-  return encodeURIComponent(name).replace(/%3D/g, '=');
-}
-
 async function main(): Promise<void> {
   const { slave, filename } = cli()
     .description('Delete a file from the flash of a SOMANET device (DELETE .../files/{filename}).')
@@ -32,7 +26,7 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-  await client.api.deleteDeviceFile(slave, encodeFilename(filename));
+  await client.removeFile(slave, filename);
   console.log(`slave ${slave}:${filename} is gone`);
 }
 

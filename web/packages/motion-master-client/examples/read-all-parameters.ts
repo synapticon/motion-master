@@ -13,17 +13,13 @@
 import {
   AlState,
   type DeviceParameter,
-  formatHex,
+  formatHexBytes,
   integerFromBytes,
   MotionMasterClient,
+  objectAddressText,
   run,
 } from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
-
-/** Returns the bytes as lowercase hex, separated by spaces. */
-function hexBytes(bytes: number[]): string {
-  return bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
-}
 
 /**
  * Renders the value of a DeviceParameter, and decodes a raw byte array by its data type.
@@ -40,7 +36,7 @@ function decodeValue(param: DeviceParameter): string {
   }
 
   const name = param.dataTypeName;
-  const hexs = hexBytes(value);
+  const hexs = formatHexBytes(value);
 
   if (name.startsWith('INTEGER')) {
     return `${integerFromBytes(value, { signed: true })}  (0x ${hexs})`;
@@ -79,7 +75,7 @@ async function main(): Promise<void> {
 
   for (const p of params) {
     console.log(
-      `  ${formatHex(p.index)}:${formatHex(p.subindex, 2, false)}  ` +
+      `  ${objectAddressText(p.index, p.subindex)}  ` +
         `${p.dataTypeName.padEnd(14)}  ${decodeValue(p).padEnd(24)}  ${p.name}`,
     );
   }

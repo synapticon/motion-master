@@ -23,6 +23,7 @@ import {
   MotionMasterClient,
   type PdoMapping,
   type PdoMappingRequestObject,
+  objectAddressText,
   run,
 } from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
@@ -94,7 +95,7 @@ async function main(): Promise<void> {
     console.log(`${direction}:`);
     for (const pdo of readBack[direction]) {
       const entries = pdo.entries
-        .map((e) => `${formatHex(e.index)}:${formatHex(e.subindex, 2, false)}/${e.bitLength}`)
+        .map((e) => `${objectAddressText(e.index, e.subindex)}/${e.bitLength}`)
         .join(', ');
       console.log(`  ${formatHex(pdo.pdoIndex)}  ${entries}`);
     }

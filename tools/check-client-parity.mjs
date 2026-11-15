@@ -27,7 +27,8 @@ const EXAMPLES = 'Examples';
 // The example programs of each client. A helper module that the examples import is no example.
 const pythonExamplesDir = join(root, 'clients', 'python', 'examples');
 const typescriptExamplesDir = join(packageDir, 'examples');
-const TYPESCRIPT_EXAMPLE_HELPERS = new Set(['files.ts', 'options.ts']);
+const TYPESCRIPT_EXAMPLE_HELPERS = new Set(['files.ts', 'options.ts', 'procedures.ts']);
+const PYTHON_EXAMPLE_HELPERS = new Set(['files.py', 'options.py', 'procedures.py']);
 
 /** Parses the table into rows, each with its section: the module, or the name of a class. */
 function readTable() {
@@ -76,7 +77,7 @@ function readExamples() {
       .filter((entry) => entry.isFile() && entry.name.endsWith(extension))
       .map((entry) => entry.name);
   return {
-    python: files(pythonExamplesDir, '.py'),
+    python: files(pythonExamplesDir, '.py').filter((name) => !PYTHON_EXAMPLE_HELPERS.has(name)),
     typescript: files(typescriptExamplesDir, '.ts').filter(
       (name) => !TYPESCRIPT_EXAMPLE_HELPERS.has(name),
     ),

@@ -12,25 +12,24 @@ The defaults read the type, revision and build of the ESC, 4 bytes at 0x0000.
     python read-register.py --address 0x0130 --length 2 --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import MotionMasterClient, run  # noqa: E402
-
-
-def auto_int(text):
-    """Parse a decimal or 0x-prefixed hex integer."""
-    return int(text, 0)
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--address", type=auto_int, default=0x0000)
-    ap.add_argument("--length", type=auto_int, default=4, help="number of bytes")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument(
+        "--address", type=integer, default="0x0000", help="the address of the register"
+    )
+    ap.add_argument("--length", type=integer, default=4, help="number of bytes")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -44,7 +43,7 @@ def main():
         query={"length": args.length},
     ).json()["data"]
 
-    line = f"slave {args.slave} 0x{args.address:04X}: {bytes(data).hex(' ')}"
+    line = f"slave {args.slave} 0x{args.address:04X}: {bytes(data).hex(' ').upper()}"
     if len(data) <= 8:
         value = int.from_bytes(bytes(data), "little")
         line += f" = {value} (0x{value:x})"

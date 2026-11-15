@@ -14,20 +14,29 @@ SAFEOP or OP stays there.
     python set-target.py --target position --value 0 --slave 2
 """
 
-import argparse
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from options import integer, parser  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
-    ap.add_argument("--target", choices=["position", "velocity", "torque"], required=True)
-    ap.add_argument("--value", type=int, required=True, help="signed, in the units of the object")
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
+    ap.add_argument(
+        "--target",
+        choices=["position", "velocity", "torque"],
+        required=True,
+        help="the target to set",
+    )
+    ap.add_argument(
+        "--value", type=integer, required=True, help="signed, in the units of the object"
+    )
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")

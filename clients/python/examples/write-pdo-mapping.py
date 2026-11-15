@@ -17,7 +17,6 @@ Opens the fieldbus driver and scans first when needed.
     python write-pdo-mapping.py --file files/pdo-mapping.json
 """
 
-import argparse
 import json
 import logging
 import sys
@@ -26,7 +25,14 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, error_line, run  # noqa: E402
+from motion_master_client import (  # noqa: E402
+    AlState,
+    MotionMasterClient,
+    error_line,
+    object_address_text,
+    run,
+)
+from options import integer, parser  # noqa: E402
 
 
 def request_objects(objects):
@@ -44,8 +50,10 @@ def request_objects(objects):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--slave", type=int, default=1)
+    ap = parser(__doc__)
+    ap.add_argument(
+        "--slave", type=integer, default=1, help="the position of the device on the bus"
+    )
     ap.add_argument("--file", required=True, help="the mapping as JSON")
     args = ap.parse_args()
     mapping = json.loads(Path(args.file).read_text())
@@ -88,7 +96,8 @@ def main():
         print(f"{direction}:")
         for pdo in read_back[direction]:
             entries = ", ".join(
-                f"0x{e['index']:04X}:{e['subindex']:02X}/{e['bitLength']}" for e in pdo["entries"]
+                f"{object_address_text(e['index'], e['subindex'])}/{e['bitLength']}"
+                for e in pdo["entries"]
             )
             print(f"  0x{pdo['pdoIndex']:04X}  {entries}")
 

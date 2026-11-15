@@ -13,14 +13,8 @@
 
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { AlState, HttpError, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
-
-// The server does not URL-decode a path parameter, so the program keeps = as it is: a name such as
-// fs-stackunlock=DD1317 must reach the device unchanged.
-function encodeFilename(name: string): string {
-  return encodeURIComponent(name).replace(/%3D/g, '=');
-}
 
 async function main(): Promise<void> {
   const {
@@ -44,16 +38,7 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-  // The generated foeWriteFile encodes the body as JSON, so the program sends the raw bytes itself.
-  const url = `${client.api.baseUrl}/api/devices/${slave}/files/${encodeFilename(filename)}`;
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: new Uint8Array(content),
-  });
-  if (!response.ok) {
-    throw await HttpError.from(new Request(url, { method: 'PUT' }), response);
-  }
+  await client.writeFile(slave, filename, content);
   console.log(`wrote ${content.length} byte(s) from ${local} -> slave ${slave}:${filename}`);
 }
 

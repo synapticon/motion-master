@@ -519,7 +519,7 @@ export class MotionMasterClient {
   ): Promise<MonitoringRecording> {
     const { intervalMs = 50, topic = uniqueTopic(), name } = options;
     // Throws when there is no WebSocket, such as in Node.js 20, before the monitoring exists.
-    this.ws.connect();
+    this.ws.assertAvailable();
     const body = {
       topic,
       interval: intervalMs,
@@ -559,8 +559,9 @@ export class MotionMasterClient {
     let unsubscribe = () => {};
     let stopWatching = () => {};
     const stop = async () => {
-      unsubscribe();
+      // Stop watching first: the last unsubscribe can close the socket, which is no failure.
       stopWatching();
+      unsubscribe();
       await this.api.deleteMonitoring(topic).catch(() => {});
     };
 

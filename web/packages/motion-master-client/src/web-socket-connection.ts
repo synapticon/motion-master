@@ -113,6 +113,9 @@ export class WebSocketConnection {
   private socket: WebSocketLike | null = null;
   private state: ReadyState = 'closed';
   private closedByUser = false;
+  // True once a caller asked for the connection with connect(). A connection that only a listener
+  // opened closes when the last listener leaves, so that a Node.js program can end.
+  private keepOpen = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -139,9 +142,19 @@ export class WebSocketConnection {
    * socket.
    */
   connect(): void {
-    if (this.socket || this.state === 'connecting') {
-      return;
-    }
+    this.keepOpen = true;
+    this.open();
+  }
+
+  /**
+   * Throws when no WebSocket implementation is available, such as in Node.js 20 without the `ws`
+   * package. A caller that is about to create something on the server checks this first.
+   */
+  assertAvailable(): void {
+    this.implementation();
+  }
+
+  private implementation(): WebSocketConstructor {
     const Impl =
       this.WebSocketImpl ?? (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
     if (!Impl) {
@@ -150,6 +163,15 @@ export class WebSocketConnection {
           '`ws` package on Node < 22).',
       );
     }
+    return Impl;
+  }
+
+  /** Opens the socket unless it is open or opening. */
+  private open(): void {
+    if (this.socket || this.state === 'connecting') {
+      return;
+    }
+    const Impl = this.implementation();
     this.closedByUser = false;
     this.setState('connecting');
     let socket: WebSocketLike;
@@ -188,6 +210,7 @@ export class WebSocketConnection {
    */
   close(): void {
     this.closedByUser = true;
+    this.keepOpen = false;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -217,7 +240,7 @@ export class WebSocketConnection {
       this.send({ subscribe: topic });
     }
     listeners.add(listener);
-    this.connect();
+    this.open();
 
     return () => {
       const current = this.topicListeners.get(topic);
@@ -229,6 +252,7 @@ export class WebSocketConnection {
         this.topicListeners.delete(topic);
         this.send({ unsubscribe: topic });
       }
+      this.closeIfIdle();
     };
   }
 
@@ -243,12 +267,13 @@ export class WebSocketConnection {
       this.send({ subscribe: NOTIFICATION_TOPIC });
     }
     this.notificationListeners.add(listener);
-    this.connect();
+    this.open();
     return () => {
       this.notificationListeners.delete(listener);
       if (this.notificationListeners.size === 0) {
         this.send({ unsubscribe: NOTIFICATION_TOPIC });
       }
+      this.closeIfIdle();
     };
   }
 
@@ -258,9 +283,10 @@ export class WebSocketConnection {
    */
   onProgress(listener: ProgressListener): () => void {
     this.progressListeners.add(listener);
-    this.connect();
+    this.open();
     return () => {
       this.progressListeners.delete(listener);
+      this.closeIfIdle();
     };
   }
 
@@ -270,6 +296,33 @@ export class WebSocketConnection {
     return () => {
       this.stateListeners.delete(listener);
     };
+  }
+
+  /**
+   * Closes a socket that only listeners opened once none is left. A later listener opens it again.
+   */
+  private closeIfIdle(): void {
+    const idle =
+      this.topicListeners.size === 0 &&
+      this.notificationListeners.size === 0 &&
+      this.progressListeners.size === 0;
+    if (this.keepOpen || !idle) {
+      return;
+    }
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.close();
+    }
+    this.setState('closed');
   }
 
   private setState(state: ReadyState): void {
@@ -308,7 +361,7 @@ export class WebSocketConnection {
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      this.open();
     }, delay);
   }
 

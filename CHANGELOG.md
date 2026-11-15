@@ -37,7 +37,7 @@ the HTTP/WebSocket API may break between any two alphas.
   the Python client does, and throws `ProcedureError` when the server refuses the start.
 - The TypeScript client records a monitoring for a span with `monitoring(parameters, span)`, as the
   Python client does with a `with` block. The `MonitoringRecording` it returns has `column`,
-  `values`, `first`, `printTable` and `writeCsv`, which write the same output as in Python.
+  `values`, `first`, `printTable` and `writeCsv`, which write the same layout as in Python.
 - The TypeScript client starts and stops a capture with `startCapture()` and `stopCapture()`, and
   throws `CaptureError` when the server refuses, as the Python client does.
 - The TypeScript client yields the notifications of the server with `notifications()`, which a
@@ -65,7 +65,8 @@ the HTTP/WebSocket API may break between any two alphas.
   threw the response object. Both errors carry the `request`, and `HttpError` also carries the
   `response`, its `status` and the server's `reason`, as `requests.ConnectionError` and
   `requests.HTTPError` of the Python client do. The `request` has no body. `apiErrorMessage()`
-  reads only these errors now. The Console pages use it in place of their own copies.
+  returns the reason of an `HttpError` and the message of any other error. The Console pages use it
+  in place of their own copies.
 - `monitoring()` of both clients raises or throws a `MonitoringError` when the server refuses the
   monitoring, when no row arrives, when the rows of the last flush do not arrive, and when the
   WebSocket closes during the recording. It raised `RuntimeError` or `TimeoutError` in Python, and
@@ -83,6 +84,9 @@ the HTTP/WebSocket API may break between any two alphas.
   Ctrl-C, so that the program disables the drive and deletes the monitoring. Node.js ended at once
   on Ctrl-C and left the drive enabled and turning.
 - `runProcedure()` of the TypeScript client starts no run when its `signal` is aborted already.
+- The TypeScript client closes a WebSocket that only its listeners opened when the last listener
+  leaves, so that a Node.js program ends. `client.ws.connect()` keeps the socket open until
+  `client.close()`, as the Console needs.
 - Both clients and their examples write hex in capitals, as `formatHex()` does: `alStatusCode
   0x001D` and `0x6041:00` in a message, and every address, revision and status code an example
   prints.

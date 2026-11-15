@@ -184,7 +184,7 @@ Three values in that column are not states:
 
 | Script | What it does | AL state |
 | --- | --- | --- |
-| `cia402-state.py` | Prints the CiA 402 state of the drive with its actual and target values. | PREOP |
+| `cia402-state.py` | Prints the CiA402 state of the drive with its actual and target values. | PREOP |
 | `set-target.py` | Sets the position, velocity or torque target. **An enabled drive moves to it at once.** | PREOP |
 | `release-brake.py` | Releases the brake of a SOMANET drive. It releases only while the drive is in Operation Enabled, and stays released. | PREOP |
 | `engage-brake.py` | Engages the brake of a SOMANET drive. | PREOP |
@@ -231,7 +231,8 @@ client.call("sdoUpload", path={"slavePosition": 1, "index": 0x6041, "subindex": 
 
 The client has helpers for the steps that most scripts begin with. They have the same names and the
 same behaviour as the helpers of the TypeScript client, in `snake_case`. A required argument is
-positional. An optional one is a keyword argument, with the name it has in TypeScript.
+positional. An optional one is a keyword argument, with the same name as in TypeScript, in
+`snake_case`.
 `clients/PARITY.md` lists both sets.
 
 ```python
@@ -281,11 +282,14 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   WebSocket.
 - `monitoring(parameters, interval_ms=50, topic=None, name=None)` returns a `MonitoringRecording`
   for a `with` block. It creates the monitoring, keeps every row while the block runs, and deletes
-  the monitoring at the end. Then `column()` returns the values of one object with their
-  timestamps, `values()` returns the values in a time window, `first()` returns the time of the
-  first value that meets a condition, `print_table()` prints one row every `every_ms`, with the
-  CiA402 state beside a statusword, and `write_csv(path)` writes every row to a CSV file. Both name
-  a column like `1:STATUSWORD`, as `names` lists them.
+  the monitoring at the end. The recording has these methods:
+  - `column()` returns the values of one object with their timestamps.
+  - `values()` returns the values in a time window.
+  - `first()` returns the time of the first value that meets a condition.
+  - `print_table()` prints one row every `every_ms`, with the CiA402 state beside a statusword.
+  - `write_csv(path)` writes every row to a CSV file.
+  - `names` gives the name of each column, such as `1:STATUSWORD`, which `print_table()` and
+    `write_csv()` use. `sources` gives where each value comes from, `pdo` or `sdo`.
 - `notifications()` streams the notifications from the WebSocket.
 
 `monitoring()` raises `MonitoringError` when the server refuses the monitoring, when no row arrives
@@ -318,7 +322,7 @@ The module names objects and states with classes:
 
 - `Profile`, `Cia402` and `Somanet` name every object of a SOMANET device as an address, for example
   `Cia402.STATUSWORD`. `Profile` holds the CiA 301 communication area (0x1xxx) and the standard MDP
-  objects, `Cia402` the CiA 402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area
+  objects, `Cia402` the CiA402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area
   (0x2xxx) and FSoE. An address unpacks to `(index, subindex)`, so `read_value(1, Cia402.STATUSWORD)`
   and the monitoring parameter `(1, *Cia402.STATUSWORD)` name the object the same way. An address
   also carries the type of the value, for a type checker. The names are the same as in the
@@ -393,7 +397,7 @@ The cost is one request at startup, and the server must be reachable when the cl
 | --- | --- |
 | `motion_master_client.py` | `MotionMasterClient`, which calls the HTTP API and the WebSocket. See [Calls by operationId](#calls-by-operationid). |
 | `setup.sh` | Creates and activates the virtual environment. See [Setup](#setup). |
-| `motion_master_objects.py` | The generated object addresses. See [Calls by operationId](#calls-by-operationid). |
+| `motion_master_objects.py` | The generated object addresses. See [Objects and states](#objects-and-states). |
 | `requirements.txt` | The Python packages that the client needs. Keep it the same as the dependencies in `pyproject.toml`. |
 | `pyproject.toml` | The package that a release publishes to PyPI. The version is set by `tools/bump-version.sh`. |
 | `LICENSE` | A copy of the GPL v3 licence of the repository, which the package carries. |

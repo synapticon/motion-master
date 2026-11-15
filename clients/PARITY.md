@@ -83,10 +83,10 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `operationModeName` | Python reads the name from the enum: `OperationMode(9).name`. |
 | — | `API_BASE_URL` | The default address of the HTTP API for a web app. Python reads the host and the ports from `config.toml`. |
 | — | `WS_URL` | The default address of the WebSocket for a web app. Python reads the host and the ports from `config.toml`. |
-| — | `LAN_DOMAIN` | Browser only. A browser reaches a server on another computer under a name that the bundled certificate covers. |
-| — | `lanAddress` | Browser only, as `LAN_DOMAIN`. |
-| — | `lanHostname` | Browser only, as `LAN_DOMAIN`. |
-| — | `isIpv4` | Browser only, as `LAN_DOMAIN`. |
+| — | `LAN_DOMAIN` | A program reaches a server on another computer under a name that the bundled certificate covers. Python takes the host from `config.toml`, so a script writes that name there. |
+| — | `lanAddress` | As `LAN_DOMAIN`. |
+| — | `lanHostname` | As `LAN_DOMAIN`. |
+| — | `isIpv4` | As `LAN_DOMAIN`. |
 | — | `WIRE_TIME_HEADER` | The Console shows the time a request spent on the wire. A Python script reads the header from `response.headers`. |
 | — | `wireTimeMs` | As `WIRE_TIME_HEADER`. |
 | — | `formatHex` | The hex input fields of the Console. Python formats and parses hex with `f"{value:#x}"` and `int(text, 16)`. |
@@ -105,7 +105,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | Python | TypeScript | Reason |
 | --- | --- | --- |
 | `from_config` | `fromConfig` | |
-| `call` | — | TypeScript calls an operation through the generated `client.api`, which the build types from `swagger.yml`. Python has no generated client, so `call` finds the operation in the spec of the running server. |
+| `call` | — | TypeScript calls an operation through the generated `client.api`, which `pnpm generate` writes from `swagger.yml`. Python has no generated client, so `call` finds the operation in the spec of the running server. |
 | — | `close` | Closes the WebSocket of `client.ws`. Python closes the WebSocket of each stream when the stream ends. |
 | `init` | `init` | |
 | `reset` | `reset` | |

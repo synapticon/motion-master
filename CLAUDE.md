@@ -1138,7 +1138,8 @@ Three rules turn a Python signature into a TypeScript one:
 - A required argument is positional in both clients.
 - An optional argument is a keyword argument in Python and a field of a trailing options object in
   TypeScript, with the same name. A TypeScript helper that waits also takes `signal`.
-- A time carries its unit in its name, in milliseconds: `timeout_ms` is `timeoutMs`.
+- A time carries its unit in its name, in milliseconds unless the API uses another unit:
+  `timeout_ms` is `timeoutMs`.
 
 **`clients/PARITY.md` is the table, and `tools/check-client-parity.mjs` enforces it.** The check
 reads the public names of both clients and fails `client-package.yml` when one is not in the table.

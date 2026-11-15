@@ -470,7 +470,7 @@ export class MotionMasterClient {
    * `OperationMode.CYCLIC_SYNC_VELOCITY`.
    *
    * The server waits until 0x6061 shows the mode, so the drive runs in it when this returns.
-   * Returns the CiA402 status. Throws the response, 409, when the drive does not take the mode.
+   * Returns the CiA402 status. Throws an `HttpError`, 409, when the drive does not take the mode.
    */
   async setOperationMode(slavePosition: number, mode: OperationMode): Promise<Cia402Status> {
     return (await this.api.setCia402OperationMode(slavePosition, { mode })).data;

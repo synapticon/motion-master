@@ -2,11 +2,12 @@
 
 The TypeScript client for [Motion Master](https://github.com/synapticon/motion-master), the motion control software for SOMANET servo drives. It runs in a browser and in Node.js.
 
-The package contains three parts:
+The package contains four parts:
 
 - `client.api`: an HTTP client for every operation of the Motion Master API. It is generated from the OpenAPI specification of the server.
 - `client.ws`: a connection to the WebSocket of the server. It delivers monitoring data and notifications.
-- Helpers: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, ENI export and parse, and the host names for a server on another machine.
+- The helper methods of the client, for the steps that most programs take. [Helpers](#helpers) lists them.
+- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, and the host names for a server on another machine.
 
 The licence is GPL v3, the licence of the whole Motion Master repository.
 
@@ -88,7 +89,7 @@ pnpm install
 pnpm example examples/server-info.ts
 ```
 
-The examples that use the WebSocket, such as `monitoring.ts`, need Node.js 22, because older versions have no global `WebSocket`. Check with `node --version`. On Fedora, `node` can stay at an older version after a system upgrade. This makes Node.js 22 the default:
+The examples need Node.js 22 or later. Check with `node --version`. On Fedora, `node` can stay at an older version after a system upgrade. This makes Node.js 22 the default:
 
 ```bash
 sudo dnf install --allowerasing nodejs22-bin nodejs22-npm-bin
@@ -105,7 +106,7 @@ An example imports the package by its name, as a program that installed it from 
 | `read-hardware-description.ts` | Prints what a device says it is: its name, build descriptor, serial number and components. |
 | `transition-state.ts` | Moves the devices to an AL state, for example `--state op`. |
 | `restart-devices.ts` | Restarts devices through INIT up to an AL state. |
-| `cia402-state.ts` | Prints the CiA 402 state of a drive, with its actual and target values. |
+| `cia402-state.ts` | Prints the CiA402 state of a drive, with its actual and target values. |
 | `set-target.ts` | Sets the position, velocity or torque target of a drive. **A drive that is enabled moves.** |
 | `run-procedure.ts` | Lists the procedures of a device, describes one with `--describe`, or runs one by name with its parameters as `name=value`. Ctrl-C cancels the run. |
 | `device-locate.ts` | Blinks the LEDs of a device. Only SPoE offers the procedure. |
@@ -115,11 +116,11 @@ An example imports the package by its name, as a program that installed it from 
 | `notifications.ts` | Prints the notifications of the server until Ctrl-C, or `--count` of them. It opens no fieldbus driver. |
 | `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`, prints it as a table, and saves every cycle as CSV in `files/`. **The motor turns.** |
 
-Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another. Each one runs its `main()` through `run()`, so an error a user can act on, such as a server that is not running, ends the program with one line instead of a stack trace.
+Each program brings the server to the state it needs, so no program has to run before another. Each one runs its `main()` through `run()`. An error a user can act on, such as a server that is not running, then ends the program with one line instead of a stack trace.
 
 ## Helpers
 
-The client has helpers for the steps that most programs begin with. They have the same names and the same behaviour as the helpers of the Python client, in camelCase. A required argument is positional. An optional one goes into an options object, with the name it has in Python. `clients/PARITY.md` in the repository lists both sets.
+The client has helpers for the steps that most programs begin with. They have the same names and the same behaviour as the helpers of the Python client, in camelCase. A required argument is positional. An optional one goes into an options object, with the same name as in Python, in camelCase. `clients/PARITY.md` in the repository lists both sets.
 
 - `init({ fieldbus })` opens the fieldbus driver, unless one is open already. Without `fieldbus`, it sends the settings of the client.
 - `reset()` closes the fieldbus driver and forgets every device. The devices stay in their AL state.
@@ -138,7 +139,7 @@ The client has helpers for the steps that most programs begin with. They have th
 - `disable(slavePosition)` brings a drive to Switch On Disabled.
 - `quickStop(slavePosition)` sends a quick stop. The drive stops on its quick stop ramp.
 - `runProcedure(slavePosition, name, { params, pollIntervalMs, signal })` starts a procedure and yields its snapshot at every poll, 500 ms apart by default, until the run ends. Leaving the loop early, or an abort of `signal`, cancels the run. It throws a `ProcedureError` when the server refuses the start.
-- `processDataMark()` returns the recorder clock of the server, in epoch microseconds. `processDataDump({ fromUs, toUs })` returns the `.mmpd` dump of the cycles between two marks as bytes, or of the whole recorder without them, and `parseMmpd()` decodes it. It returns `null` when the server has no cycle to dump, and throws a `ProcessDataDumpError` for any other refusal.
+- `processDataMark()` returns the recorder clock of the server, in epoch microseconds. `processDataDump({ fromUs, toUs })` returns the `.mmpd` dump of the cycles between two marks as bytes, or of the whole recorder without them, and `parseMmpd()` decodes it. `processDataDump` returns `null` when the server has no cycle to dump, and throws a `ProcessDataDumpError` for any other refusal. `parseMmpd(bytes).header.flags` has `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after `fromUs`.
 - `exportEni()` returns the bus as an ENI document, `{ xml, warnings }`. `parseEni(xml)` reads an ENI document and returns its network with each datagram annotated.
 - `startCapture({ adapter, seconds })` starts a capture of the EtherCAT frames that runs until `stopCapture()`, which returns the path of the pcap file in the user cache and the summary of late frames. Linux and macOS servers only. Both throw a `CaptureError` with the server's reason.
 - `streamMonitoring(topic)`, `monitoring(parameters, span)` and `notifications()` read from the WebSocket. [Monitoring](#monitoring) and [Notifications](#notifications) describe them.
@@ -198,7 +199,7 @@ The server serves its OpenAPI specification at `GET /api/swagger.yml`. The Motio
 
 ## Objects and states
 
-`Profile`, `Cia402` and `Somanet` name every object of a SOMANET device as an address: an index, a subindex and the type of the value. `Profile` holds the CiA 301 communication area (0x1xxx) and the standard MDP objects, `Cia402` the CiA 402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area (0x2xxx) and FSoE. The names are the same as in the Python client, and the C++ names of the server without their `k`, in capitals. `readValue` takes an address and returns a value of its type:
+`Profile`, `Cia402` and `Somanet` name every object of a SOMANET device as an address: an index, a subindex and the type of the value. `Profile` holds the CiA 301 communication area (0x1xxx) and the standard MDP objects, `Cia402` the CiA402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area (0x2xxx) and FSoE. The names are the same as in the Python client, and the C++ names of the server without their `k`, in capitals. `readValue` takes an address and returns a value of its type:
 
 ```ts
 import { AlState, Cia402, Somanet } from '@synapticon/motion-master-client';
@@ -250,7 +251,16 @@ const velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE); // [timestampUs, val
 
 `monitoring()` throws a `MonitoringError` when the server refuses the monitoring, when no row arrives within 5000 ms, when the rows of the last flush do not arrive, and when the WebSocket closes during the recording. An error of the span wins over them. Pass `signal` to stop the waits on an abort, and pass the same signal to what the span waits for. In Node.js, Ctrl-C ends a program at once and runs no `finally` block, so a program that moves a motor aborts the signal on `SIGINT`, as `examples/monitoring.ts` does.
 
-The result is a `MonitoringRecording`. `column()` returns the values of one object with their timestamps, `values()` the values in a time window, and `first()` the time of the first value that meets a condition. `printTable()` prints one row every `everyMs`, with the CiA402 state beside a statusword, and `writeCsv(path)` writes every row to a CSV file in Node.js. Both name a column like `1:STATUSWORD`. A parameter is `[devicePosition, index, subindex]` or `[devicePosition, address]`.
+`intervalMs` is the flush interval, 50 when not given. The result is a `MonitoringRecording`:
+
+- `column()` returns the values of one object with their timestamps.
+- `values()` returns the values in a time window.
+- `first()` returns the time of the first value that meets a condition.
+- `printTable()` prints one row every `everyMs`, with the CiA402 state beside a statusword.
+- `writeCsv(path)` writes every row to a CSV file, in Node.js.
+- `names` gives the name of each column, such as `1:STATUSWORD`, which `printTable()` and `writeCsv()` use. `sources` gives where each value comes from, `pdo` or `sdo`.
+
+A parameter is `[devicePosition, index, subindex]` or `[devicePosition, address]`.
 
 `streamMonitoring` yields the batches of a monitoring that exists already. To get each batch in a callback instead, use `client.ws.subscribe(topic, listener)`, which returns the function that unsubscribes.
 

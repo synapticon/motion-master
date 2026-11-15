@@ -161,7 +161,7 @@ function check() {
         section === MODULE ? typescript.values : (typescript.classes[section] ?? []),
       ),
     };
-    // A row may name a TypeScript type, such as Cia402State, but the table must list only values.
+    // The table must list every runtime export. A row may also name a type, such as Cia402State.
     const existing = {
       python: inCode.python,
       typescript: section === MODULE ? new Set(typescript.all) : inCode.typescript,

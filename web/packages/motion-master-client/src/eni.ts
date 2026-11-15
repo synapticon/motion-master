@@ -2,7 +2,8 @@
 //
 // The generated client types `GET /api/eni` as a `File`, which is what swagger-typescript-api makes
 // of a binary response. An ENI is text, and what a caller wants is the document plus the warning
-// count that came with it, so `MotionMasterClient.exportEni` sends the request itself.
+// count that came with it, so `MotionMasterClient.exportEni` reads the body as text and the count
+// from the `X-Eni-Warnings` header.
 
 /** The result of an ENI export: the document, and how many parts the server could not read. */
 export interface EniExport {

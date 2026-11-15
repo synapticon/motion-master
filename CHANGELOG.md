@@ -38,6 +38,8 @@ the HTTP/WebSocket API may break between any two alphas.
 - The TypeScript client records a monitoring for a span with `monitoring(parameters, span)`, as the
   Python client does with a `with` block. The `MonitoringRecording` it returns has `column`,
   `values`, `first`, `printTable` and `writeCsv`, which write the same output as in Python.
+- The TypeScript client starts and stops a capture with `startCapture()` and `stopCapture()`, and
+  throws `CaptureError` when the server refuses, as the Python client does.
 - The TypeScript client yields the notifications of the server with `notifications()`, which a
   program reads with `for await`, as the Python client does.
 - The Python client names the notifications topic `NOTIFICATION_TOPIC`, as the TypeScript client

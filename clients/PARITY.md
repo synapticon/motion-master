@@ -61,7 +61,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `ObjectAddress` | `ObjectAddress` | | |
 | `StateError` | `StateError` | | |
 | `ProcedureError` | `ProcedureError` | | |
-| `CaptureError` | — | pending | |
+| `CaptureError` | `CaptureError` | | |
 | `ProcessDataDumpError` | — | pending | |
 | `step_changes` | `stepChanges` | | |
 | `format_step` | `formatStep` | | |
@@ -127,8 +127,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `monitoring` | `monitoring` | | |
 | `stream_monitoring` | `streamMonitoring` | | |
 | `notifications` | `notifications` | | |
-| `start_capture` | — | pending | |
-| `stop_capture` | — | pending | |
+| `start_capture` | `startCapture` | | |
+| `stop_capture` | `stopCapture` | | |
 | `process_data_mark` | `readProcessDataMark` | pending | |
 | `process_data_dump` | `fetchProcessDataDump` | pending | |
 

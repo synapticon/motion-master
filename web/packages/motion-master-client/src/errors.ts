@@ -10,3 +10,8 @@ export class StateError extends Error {
 export class ProcedureError extends Error {
   override name = 'ProcedureError';
 }
+
+/** The server refuses to start or to stop a capture. The message is the server's reason. */
+export class CaptureError extends Error {
+  override name = 'CaptureError';
+}

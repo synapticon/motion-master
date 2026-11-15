@@ -8,7 +8,7 @@ import createDebug from 'debug';
 import { AlState, alStateName } from './al-state';
 import type { Cia402State, OperationMode } from './cia402';
 import { readConfig, type FieldbusSettings } from './config';
-import { ProcedureError, StateError } from './errors';
+import { CaptureError, ProcedureError, StateError } from './errors';
 import { Api } from './generated/Api';
 import type { Cia402Status, ProcedureRequest, ProcedureSnapshot } from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
@@ -123,6 +123,15 @@ const LAST_FLUSH_TIMEOUT_MS = 2000;
 /** Returns a topic that no other monitoring has, such as `ts-1f3a9c0b7e2d`. */
 function uniqueTopic(): string {
   return `ts-${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+
+/**
+ * Returns the server's reason for a refused request: the `error` of its JSON body, or the status
+ * text when the body has none.
+ */
+function reasonOf(response: Response): string {
+  const body = (response as { error?: { error?: unknown } }).error;
+  return typeof body?.error === 'string' ? body.error : response.statusText;
 }
 
 /** Returns whether `error` is a response of the generated client with the HTTP status `status`. */
@@ -468,10 +477,8 @@ export class MotionMasterClient {
       if (!(error instanceof Response)) {
         throw error;
       }
-      const body = (error as { error?: { error?: unknown } }).error;
-      const reason = typeof body?.error === 'string' ? body.error : error.statusText;
       throw new ProcedureError(
-        `${name} on device ${slavePosition}: ${reason} (HTTP ${error.status})`,
+        `${name} on device ${slavePosition}: ${reasonOf(error)} (HTTP ${error.status})`,
         { cause: error },
       );
     }
@@ -545,11 +552,12 @@ export class MotionMasterClient {
       if (!(error instanceof Response)) {
         throw error;
       }
-      const body = (error as { error?: { error?: unknown } }).error;
-      const reason = typeof body?.error === 'string' ? body.error : error.statusText;
-      throw new Error(`cannot create monitoring ${topic}: ${reason} (HTTP ${error.status})`, {
-        cause: error,
-      });
+      throw new Error(
+        `cannot create monitoring ${topic}: ${reasonOf(error)} (HTTP ${error.status})`,
+        {
+          cause: error,
+        },
+      );
     }
     const recording = new MonitoringRecording(topic, created.parameters);
 
@@ -620,6 +628,61 @@ export class MotionMasterClient {
       throw socketError;
     }
     return recording;
+  }
+
+  /**
+   * Starts a capture of the EtherCAT frames that runs until `stopCapture()` (`startCapture`).
+   *
+   * Returns once the capture records, with the path of its pcap file in the user cache. The capture
+   * runs as a program of its own, so a reset, an init or a scan in between does not end it.
+   * `adapter` defaults to the adapter of the bus, so name it when no bus is up. `seconds` is the
+   * upper limit for a capture that is never stopped, 600 when not given.
+   *
+   * Throws a `CaptureError` with the server's reason when it refuses, for example while another
+   * capture runs (409) or on Windows (501).
+   */
+  async startCapture(options: { adapter?: string; seconds?: number } = {}): Promise<string> {
+    const { adapter, seconds } = options;
+    const body = {
+      ...(adapter ? { adapter } : {}),
+      ...(seconds === undefined ? {} : { seconds }),
+    };
+    try {
+      const started = (await this.api.startCapture(body)).data;
+      log('capturing on %s into %s', started.adapter, started.path);
+      return started.path;
+    } catch (error) {
+      if (!(error instanceof Response)) {
+        throw error;
+      }
+      throw new CaptureError(
+        `the capture did not start: ${reasonOf(error)} (HTTP ${error.status})`,
+        { cause: error },
+      );
+    }
+  }
+
+  /**
+   * Stops the started capture and returns its path and summary (`stopCapture`).
+   *
+   * The result is the body of `POST /api/captures/stop`: `path`, the pcap file in the user cache,
+   * and `summary`. Throws a `CaptureError` with the server's reason when no capture was started or
+   * the capture failed.
+   */
+  async stopCapture(): Promise<Data<'stopCapture'>> {
+    try {
+      const stopped = (await this.api.stopCapture()).data;
+      log('stopped the capture into %s', stopped.path);
+      return stopped;
+    } catch (error) {
+      if (!(error instanceof Response)) {
+        throw error;
+      }
+      throw new CaptureError(
+        `the capture did not stop cleanly: ${reasonOf(error)} (HTTP ${error.status})`,
+        { cause: error },
+      );
+    }
   }
 
   /**

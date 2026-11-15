@@ -97,11 +97,11 @@ describe('monitoring', () => {
     expect(server.calls()).toEqual(['POST /api/monitorings']);
   });
 
-  it('sends no request when there is no WebSocket, as in Node.js 20', async () => {
+  it('sends no request when there is no WebSocket class', async () => {
     vi.stubGlobal('WebSocket', undefined);
     const server = fakeServer(routes);
     await expect(server.client.monitoring([[1, 0x6041, 0]], () => {})).rejects.toThrow(
-      'No WebSocket implementation available',
+      'no WebSocket class',
     );
     expect(server.requests).toHaveLength(0);
   });

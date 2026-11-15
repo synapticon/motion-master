@@ -33,8 +33,8 @@ def main():
 
     s = client.call("getCia402Status", path={"slavePosition": args.slave}).json()
     print(
-        f"state {s['state']}, statusword 0x{s['statusword']:04x}, "
-        f"controlword 0x{s['controlword']:04x}"
+        f"state {s['state']}, statusword 0x{s['statusword']:04X}, "
+        f"controlword 0x{s['controlword']:04X}"
     )
     print(f"mode {s['modeName']} ({s['operationMode']}), error report {s['errorDescription']}")
     print(f"  position  actual {s['actualPosition']:>12}  target {s['targetPosition']:>12}")

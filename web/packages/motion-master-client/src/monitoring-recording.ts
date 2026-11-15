@@ -3,6 +3,7 @@
 
 import { Cia402 } from './cia402';
 import { csvLine } from './csv';
+import { formatHex } from './hex';
 import type { Monitoring } from './generated/data-contracts';
 import { importNode, type NodeModules } from './node-modules';
 import type { ObjectAddress } from './objects';
@@ -150,8 +151,7 @@ export class MonitoringRecording {
         if (value === null) {
           line.push(...(isStatusword[i] ? ['-', '-'] : ['-']));
         } else if (isStatusword[i]) {
-          const hex = value.toString(16).toUpperCase().padStart(4, '0');
-          line.push(`0x${hex}`, Cia402.state(value));
+          line.push(formatHex(value), Cia402.state(value));
         } else {
           line.push(String(value));
         }

@@ -1125,6 +1125,28 @@ of the union is the same text merged with itself. The generator warns when two d
 different types for one address and keeps the first. What it cannot see is one index reused for
 a different quantity of the same type. If that appears, the family needs a header per device.
 
+## Client Parity
+
+**The Python client and the TypeScript client offer the same helpers.** A helper has the same name
+in both, word by word: `snake_case` in Python, `camelCase` in TypeScript, so `wait_for_value` is
+`waitForValue`. It takes the same arguments in the same order and returns the same shape. Each
+language keeps its own idiom: generators and `with` blocks in Python, `AsyncIterable` and promises
+in TypeScript.
+
+Three rules turn a Python signature into a TypeScript one:
+
+- A required argument is positional in both clients.
+- An optional argument is a keyword argument in Python and a field of a trailing options object in
+  TypeScript, with the same name. A TypeScript helper that waits also takes `signal`.
+- A time carries its unit in its name, in milliseconds: `timeout_ms` is `timeoutMs`.
+
+**`clients/PARITY.md` is the table, and `tools/check-client-parity.mjs` enforces it.** The check
+reads the public names of both clients and fails `client-package.yml` when one is not in the table.
+A change that adds, renames or removes a helper in one client makes the same change in the other in
+the same commit. A helper that belongs to one language gets a row with the other column empty and
+the reason. A Console function that is not about the UI belongs in the TypeScript client, and then
+under this rule.
+
 ## Dependencies
 
 Managed by vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add one: edit

@@ -1,8 +1,8 @@
 // The MotionMasterClient facade: a single connection object that composes the generated HTTP API
 // (`client.api.*`, flat — e.g. `client.api.getVersion()`) with the WebSocket connection
 // (`client.ws`). It is a *connection, not a model*: it holds no mutable device/parameter/AL state
-// — the HTTP API and the monitoring stream are the source of truth. Isomorphic: pass `WebSocket`
-// (and `customFetch`) to run under Node; both default to the platform globals in the browser.
+// — the HTTP API and the monitoring stream are the source of truth. It runs in a browser and in
+// Node.js 22 or later with the global `fetch` and `WebSocket` of either.
 
 import createDebug from 'debug';
 import { AlState, alStateName } from './al-state';
@@ -38,13 +38,15 @@ export interface MotionMasterClientOptions {
   /** Full URL of the WebSocket connection. Default: the bundled localhost dev origin. */
   wsUrl?: string;
   /**
-   * WebSocket implementation for `client.ws`. Defaults to the global `WebSocket` (browsers,
-   * Node >= 22); inject the `ws` package's constructor on older Node.
+   * The WebSocket class for `client.ws`. Default: the global `WebSocket` of the browser or of
+   * Node.js. Pass the class of the `ws` package to give the WebSocket its own TLS options, through
+   * `webSocketOptions`.
    */
   WebSocket?: WebSocketConstructor;
   /**
-   * Second argument for the WebSocket constructor — e.g. `{ rejectUnauthorized: false }` for the
-   * Node `ws` client against a self-signed dev cert. Ignored by the browser global.
+   * The second argument of the WebSocket constructor, such as `{ rejectUnauthorized: false }` for
+   * the `ws` package. Set it only with `WebSocket` from `ws`: the global `WebSocket` takes no TLS
+   * option, and a browser refuses an object here.
    */
   webSocketOptions?: unknown;
   /** Custom `fetch` forwarded to the HTTP client (e.g. request logging in tests). */
@@ -565,7 +567,7 @@ export class MotionMasterClient {
     options: { intervalMs?: number; topic?: string; name?: string } = {},
   ): Promise<MonitoringRecording> {
     const { intervalMs = 50, topic = uniqueTopic(), name } = options;
-    // Throws when there is no WebSocket, such as in Node.js 20, before the monitoring exists.
+    // Throws when there is no WebSocket class, before the monitoring exists on the server.
     this.ws.assertAvailable();
     const body = {
       topic,

@@ -11,7 +11,7 @@
 //     pnpm example examples/cia402-state.ts --slave 2
 
 import { parseArgs } from 'node:util';
-import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { AlState, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
 
 async function main(): Promise<void> {
   const { values: args } = parseArgs({ options: { slave: { type: 'string', default: '1' } } });
@@ -22,10 +22,9 @@ async function main(): Promise<void> {
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
   const s = (await client.api.getCia402Status(slave)).data;
-  const hex = (value: number) => `0x${value.toString(16).padStart(4, '0')}`;
   const column = (value: number | null) => String(value).padStart(12);
   console.log(
-    `state ${s.state}, statusword ${hex(s.statusword)}, controlword ${hex(s.controlword)}`,
+    `state ${s.state}, statusword ${formatHex(s.statusword)}, controlword ${formatHex(s.controlword)}`,
   );
   console.log(`mode ${s.modeName} (${s.operationMode}), error report ${s.errorDescription}`);
   console.log(`  position  actual ${column(s.actualPosition)}  target ${column(s.targetPosition)}`);

@@ -79,15 +79,12 @@ export type WebSocketConstructor = new (url: string, protocolsOrOptions?: unknow
 export interface WebSocketConnectionOptions {
   /** Full WebSocket URL (e.g. `wss://host:62281`). */
   url: string;
-  /**
-   * WebSocket implementation. Defaults to the global `WebSocket` (browsers, Node >= 22). In older
-   * Node, inject the `ws` package's constructor.
-   */
+  /** The WebSocket class. Default: the global `WebSocket` of the browser or of Node.js. */
   WebSocket?: WebSocketConstructor;
   /**
-   * Extra argument forwarded as the constructor's second parameter — e.g.
-   * `{ rejectUnauthorized: false }` for the Node `ws` client against a self-signed dev cert. The
-   * browser global ignores it.
+   * The second argument of the WebSocket constructor, such as `{ rejectUnauthorized: false }` for
+   * the `ws` package. The global `WebSocket` takes no TLS option, and a browser refuses an object
+   * here.
    */
   protocolsOrOptions?: unknown;
   /**
@@ -142,8 +139,8 @@ export class WebSocketConnection {
   }
 
   /**
-   * Throws when no WebSocket implementation is available, such as in Node.js 20 without the `ws`
-   * package. A caller that is about to create something on the server checks this first.
+   * Throws when no WebSocket class is available: none was passed, and the runtime has no global
+   * `WebSocket`. A caller that is about to create something on the server checks this first.
    */
   assertAvailable(): void {
     this.implementation();
@@ -154,8 +151,8 @@ export class WebSocketConnection {
       this.WebSocketImpl ?? (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
     if (!Impl) {
       throw new Error(
-        'No WebSocket implementation available. Inject one via the `WebSocket` option (e.g. the ' +
-          '`ws` package on Node < 22).',
+        'no WebSocket class: this runtime has no global WebSocket, so pass one with the ' +
+          '`WebSocket` option, such as the class of the `ws` package',
       );
     }
     return Impl;

@@ -36,14 +36,14 @@ A CommonJS project can load the package in two ways:
 ## Quick start
 
 ```ts
-import { MotionMasterClient } from '@synapticon/motion-master-client'
+import { MotionMasterClient } from '@synapticon/motion-master-client';
 
-const client = new MotionMasterClient()
+const client = new MotionMasterClient();
 
-const { data } = await client.api.getVersion()
-console.log(data.version)
+const { data } = await client.api.getVersion();
+console.log(data.version);
 
-client.close()
+client.close();
 ```
 
 Without options, the client connects to a server on the same machine:
@@ -64,7 +64,7 @@ cp config.example.jsonc config.jsonc
 ```
 
 ```ts
-const client = await MotionMasterClient.fromConfig()
+const client = await MotionMasterClient.fromConfig();
 ```
 
 Without `path`, `fromConfig({ path })` reads `config.jsonc` in the current directory, and else `config.jsonc` in the folder of the package. The file is JSON with comments, like the configuration of the server, and the template explains each key. It has these keys. They are the keys of `config.toml` of the Python client, in camelCase:
@@ -119,7 +119,7 @@ Each program opens the fieldbus driver, scans and moves a device to the AL state
 
 ## Helpers
 
-The client has helpers for the steps that most programs begin with. They have the same names and the same behaviour as the helpers of the Python client, in camelCase. A required argument is positional. An optional one goes into an options object, with the name it has in Python.
+The client has helpers for the steps that most programs begin with. They have the same names and the same behaviour as the helpers of the Python client, in camelCase. A required argument is positional. An optional one goes into an options object, with the name it has in Python. `clients/PARITY.md` in the repository lists both sets.
 
 - `init({ fieldbus })` opens the fieldbus driver, unless one is open already. Without `fieldbus`, it sends the settings of the client.
 - `reset()` closes the fieldbus driver and forgets every device. The devices stay in their AL state.
@@ -141,6 +141,7 @@ The client has helpers for the steps that most programs begin with. They have th
 - `processDataMark()` returns the recorder clock of the server, in epoch microseconds. `processDataDump({ fromUs, toUs })` returns the `.mmpd` dump of the cycles between two marks as bytes, or of the whole recorder without them, and `parseMmpd()` decodes it. It returns `null` when the server has no cycle to dump, and throws a `ProcessDataDumpError` for any other refusal.
 - `exportEni()` returns the bus as an ENI document, `{ xml, warnings }`. `parseEni(xml)` reads an ENI document and returns its network with each datagram annotated.
 - `startCapture({ adapter, seconds })` starts a capture of the EtherCAT frames that runs until `stopCapture()`, which returns the path of the pcap file in the user cache and the summary of late frames. Linux and macOS servers only. Both throw a `CaptureError` with the server's reason.
+- `streamMonitoring(topic)`, `monitoring(parameters, span)` and `notifications()` read from the WebSocket. [Monitoring](#monitoring) and [Notifications](#notifications) describe them.
 - `stepChanges(run)` yields each snapshot of a run as `[snapshot, changed]`, where `changed` lists the steps whose status changed. `formatStep(step)` turns a step into one line.
 
 ```ts
@@ -168,9 +169,9 @@ In a browser, run `localStorage.debug = 'motion-master-client'` in the developer
 Each operation of the API is a method of `client.api`. The method name is the `operationId` of the operation in the OpenAPI specification. A method returns a promise of a response object. The response body is in `data`.
 
 ```ts
-const { data: devices } = await client.api.getDevices()
+const { data: devices } = await client.api.getDevices();
 
-const { data: value } = await client.api.readParameter(1, 0x6064, 0)
+const { data: value } = await client.api.readParameter(1, 0x6064, 0);
 ```
 
 Every request of the client, `client.api` included, throws an `Error` when it fails:
@@ -200,13 +201,13 @@ The server serves its OpenAPI specification at `GET /api/swagger.yml`. The Motio
 `Profile`, `Cia402` and `Somanet` name every object of a SOMANET device as an address: an index, a subindex and the type of the value. `Profile` holds the CiA 301 communication area (0x1xxx) and the standard MDP objects, `Cia402` the CiA 402 drive profile (0x6xxx), and `Somanet` the SOMANET vendor area (0x2xxx) and FSoE. The names are the same as in the Python client, and the C++ names of the server without their `k`, in capitals. `readValue` takes an address and returns a value of its type:
 
 ```ts
-import { AlState, Cia402, Somanet } from '@synapticon/motion-master-client'
+import { AlState, Cia402, Somanet } from '@synapticon/motion-master-client';
 
-const statusword = await client.readValue(1, Cia402.STATUSWORD)  // number
-const state = Cia402.state(statusword)                          // 'OperationEnabled', ...
-const temperature = await client.readValue(1, Somanet.CORE_TEMPERATURE_MEASURED_TEMPERATURE)
+const statusword = await client.readValue(1, Cia402.STATUSWORD); // number
+const state = Cia402.state(statusword); // 'OperationEnabled', ...
+const temperature = await client.readValue(1, Somanet.CORE_TEMPERATURE_MEASURED_TEMPERATURE);
 
-await client.api.transitionToState({ state: AlState.PREOP })
+await client.api.transitionToState({ state: AlState.PREOP });
 ```
 
 The list holds every object of every device in the ESI, so an address can name an object that the drive does not have. A read of it then fails. A 64-bit value is exact only up to 2^53, because JavaScript reads a JSON integer as a `number`.
@@ -225,17 +226,17 @@ await client.api.createMonitoring({
     [1, 0x6041, 0], // device position, index, subindex
     [1, 0x6064, 0],
   ],
-})
+});
 
 for await (const rows of client.streamMonitoring('my-axis')) {
   for (const [timestampUs, ...values] of rows) {
-    console.log(timestampUs, values)
+    console.log(timestampUs, values);
   }
   if (done()) {
-    break // leaving the loop unsubscribes
+    break; // leaving the loop unsubscribes
   }
 }
-await client.api.deleteMonitoring('my-axis')
+await client.api.deleteMonitoring('my-axis');
 ```
 
 To record a monitoring for a span and read its rows afterwards, use `monitoring()`. It creates the monitoring, waits for the first row, runs the span, waits for the last flush, and deletes the monitoring, also when the span throws:
@@ -282,13 +283,13 @@ The client opens the WebSocket when you first subscribe. If the connection drops
 The certificate of the server covers names under `ip.motion-master.synapticon.com`. Such a name holds the IP address with dashes in place of the dots. `lanHostname` makes the name from the address:
 
 ```ts
-import { MotionMasterClient, lanHostname } from '@synapticon/motion-master-client'
+import { MotionMasterClient, lanHostname } from '@synapticon/motion-master-client';
 
-const host = lanHostname('192.168.1.50') // 192-168-1-50.ip.motion-master.synapticon.com
+const host = lanHostname('192.168.1.50'); // 192-168-1-50.ip.motion-master.synapticon.com
 const client = new MotionMasterClient({
   baseUrl: `https://${host}:61447`,
   wsUrl: `wss://${host}:62281`,
-})
+});
 ```
 
 These names are not in public DNS. Add one line to the hosts file of the machine that runs the client:
@@ -316,12 +317,12 @@ The server certificate is valid, so Node.js connects with no options. A server w
 To turn off the check for the WebSocket only, inject the `ws` package:
 
 ```ts
-import WebSocket from 'ws'
+import WebSocket from 'ws';
 
 const client = new MotionMasterClient({
   WebSocket,
   webSocketOptions: { rejectUnauthorized: false },
-})
+});
 ```
 
 ## Licence

@@ -227,7 +227,12 @@ client.call("init", body={"driver": "soem", "adapter": "eth0"})
 client.call("sdoUpload", path={"slavePosition": 1, "index": 0x6041, "subindex": 0})
 ```
 
-The steps that most scripts begin with are methods on the client:
+## Helpers
+
+The client has helpers for the steps that most scripts begin with. They have the same names and the
+same behaviour as the helpers of the TypeScript client, in `snake_case`. A required argument is
+positional. An optional one is a keyword argument, with the name it has in TypeScript.
+`clients/PARITY.md` lists both sets.
 
 ```python
 client = MotionMasterClient.from_config()     # reads config.toml
@@ -235,51 +240,73 @@ client.init()                                 # opens the driver, or accepts the
 client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then moves device 1 up
 ```
 
-`ensure_scanned()` scans when needed and moves no device. `init()`, `ensure_scanned()` and
-`ensure_state()` log through the `motion_master_client` logger. Turn on logging at INFO to see
-each step.
-
-Other methods:
-
-- `reset()` closes the fieldbus driver and forgets every device. It commands no AL state.
+- `init(fieldbus=None)` opens the fieldbus driver, unless one is open already. Without `fieldbus`,
+  it sends the settings of the client.
+- `reset()` closes the fieldbus driver and forgets every device. The devices stay in their AL state.
 - `scan()` scans the bus every time and returns the number of devices it found.
-- `export_eni()` returns the bus as an ENI document, `{"xml": ..., "warnings": ...}`, and
-  `parse_eni(xml)` reads an ENI document and returns its network with each datagram annotated.
-- `start_capture(adapter, seconds)` starts a capture of the EtherCAT frames that runs until
-  `stop_capture()`, which returns the path of the pcap file in the user cache and the summary of
-  late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
-- `process_data_mark()` returns the recorder clock of the server, in epoch microseconds.
-  `process_data_dump(from_us, to_us)` returns the `.mmpd` dump of the cycles between two marks as
-  bytes, or of the whole recorder without them. It returns `None` when the server has no cycle to
-  dump, and raises `ProcessDataDumpError` for any other refusal. `mmpd_flags()` of the result has
-  `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after the
-  start.
-- `run_procedure(position, name, params, poll_interval_ms=500)` runs a procedure to its end.
-- `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
-  WebSocket.
-- `monitoring(parameters)` returns a `MonitoringRecording` for a `with` block. It creates the monitoring,
-  keeps every row while the block runs, and deletes the monitoring at the end. Then `column()`
-  returns the values of one object with their timestamps, `values()` returns the values in a time
-  window, `first()` returns the time of the first value that meets a condition,
-  `print_table()` prints one row every `every_ms`, with the CiA402 state beside a statusword, and
-  `write_csv(path)` writes every row to a CSV file. Both name a column like `1:STATUSWORD`, as
-  `names` lists them.
-- `notifications()` streams the notifications from the WebSocket.
-- `devices()` returns the scanned devices in bus order, as `GET /api/devices` gives them.
+- `devices()` returns the scanned devices, in bus order.
 - `parameters(position)` returns every parameter of a device, with its value and metadata.
 - `hardware_description(position)` returns the parsed `.hardware_description` of a device.
-- `read_value(position, obj)` reads one object and returns the value that the server decoded with
-  the data type from the object dictionary.
-- `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object
-  until the predicate is true, and raises `TimeoutError` with the last value when the time runs
-  out.
-- `restart(target, positions)` restarts devices through INIT and walks them up to an AL state. The
-  server does the walk.
-- `set_operation_mode()`, `set_target()`, `enable()`, `disable()` and `quick_stop()` drive the
-  CiA402 state machine and the targets of one drive, by its position.
-- `run(main)` calls `main` and prints an error that a user can correct as one line instead of a
-  traceback. An example is a server that is not running. Set `MM_TRACEBACK=1` to get the
-  traceback.
+- `read_value(position, obj)` reads one object and returns the value that the server decoded.
+- `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until
+  the predicate is true. It raises `TimeoutError` with the last value when the time runs out.
+- `ensure_scanned()` scans when the last scan is missing or wrong, and moves no device.
+- `ensure_state(state, positions=None, exact=False)` scans when needed and brings the devices to an
+  AL state. A device above that state stays where it is, unless `exact` is true.
+- `restart(target, positions=None)` restarts devices through INIT and walks them up to an AL state.
+- `set_operation_mode(position, mode)` writes the CiA402 operation mode, such as
+  `OperationMode.CYCLIC_SYNC_VELOCITY`, and returns when the drive shows it.
+- `set_target(position, kind, value)` writes the `"position"`, `"velocity"` or `"torque"` target, in
+  the units of its object.
+- `enable(position)` brings a drive to Operation Enabled. The device must exchange process data.
+- `disable(position)` brings a drive to Switch On Disabled.
+- `quick_stop(position)` sends a quick stop. The drive stops on its quick stop ramp.
+- `run_procedure(position, name, params=None, poll_interval_ms=500)` starts a procedure and yields
+  its snapshot at every poll until the run ends. Leaving the loop early cancels the run. It raises
+  `ProcedureError` when the server refuses the start.
+- `process_data_mark()` returns the recorder clock of the server, in epoch microseconds.
+  `process_data_dump(from_us=None, to_us=None)` returns the `.mmpd` dump of the cycles between two
+  marks as bytes, or of the whole recorder without them. It returns `None` when the server has no
+  cycle to dump, and raises `ProcessDataDumpError` for any other refusal. `mmpd_flags()` of the
+  result has `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after
+  the start.
+- `export_eni()` returns the bus as an ENI document, `{"xml": ..., "warnings": ...}`.
+  `parse_eni(xml)` reads an ENI document and returns its network with each datagram annotated.
+- `start_capture(adapter=None, seconds=None)` starts a capture of the EtherCAT frames that runs
+  until `stop_capture()`, which returns the path of the pcap file in the user cache and the summary
+  of late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
+- `step_changes(run)` yields each snapshot of a run as `(snapshot, changed)`, where `changed` lists
+  the steps whose status changed. `format_step(step)` turns a step into one line.
+- `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
+  WebSocket.
+- `monitoring(parameters, interval_ms=50, topic=None, name=None)` returns a `MonitoringRecording`
+  for a `with` block. It creates the monitoring, keeps every row while the block runs, and deletes
+  the monitoring at the end. Then `column()` returns the values of one object with their
+  timestamps, `values()` returns the values in a time window, `first()` returns the time of the
+  first value that meets a condition, `print_table()` prints one row every `every_ms`, with the
+  CiA402 state beside a statusword, and `write_csv(path)` writes every row to a CSV file. Both name
+  a column like `1:STATUSWORD`, as `names` lists them.
+- `notifications()` streams the notifications from the WebSocket.
+
+```python
+for snapshot, changed in step_changes(client.run_procedure(1, "store-parameters")):
+    for step in changed:
+        print(format_step(step))
+```
+
+`error_line(error)` returns one line for an error a user can act on, such as
+`POST /api/devices/state/transition: HTTP 409, …` or `cannot connect to …`, and `None` for a bug.
+`run(main)` calls `main` and ends the script with that line and exit code 1, while a bug keeps its
+traceback. Set `MM_TRACEBACK=1` to get the traceback for every error.
+
+`ensure_scanned`, `ensure_state` and `restart` raise a `StateError` when a device does not answer or
+does not reach its state. A failed HTTP request raises `requests.HTTPError`, and a server that the
+client cannot reach raises `requests.ConnectionError`.
+
+The helpers log each step they take, such as `found 1 device(s)`, through the
+`motion_master_client` logger. The log is off by default. Turn on logging at INFO to see it.
+
+## Objects and states
 
 The module names objects and states with classes:
 

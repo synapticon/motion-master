@@ -2,6 +2,7 @@
 // helpers that take a list of parameters, such as `MotionMasterClient.monitoring`.
 
 import { Cia402 } from './cia402';
+import { formatHex } from './hex';
 import { type ObjectAddress, Profile, Somanet } from './objects';
 
 /**
@@ -38,7 +39,8 @@ export function objectName(index: number, subindex: number): string {
       }
     }
   }
-  const hex = (value: number, width: number) =>
-    value.toString(16).toUpperCase().padStart(width, '0');
-  return objectNames.get(`${index}:${subindex}`) ?? `0x${hex(index, 4)}:${hex(subindex, 2)}`;
+  return (
+    objectNames.get(`${index}:${subindex}`) ??
+    `${formatHex(index)}:${formatHex(subindex, 2, false)}`
+  );
 }

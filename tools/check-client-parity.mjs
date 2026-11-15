@@ -49,9 +49,7 @@ function readTable() {
       section,
       python: name(cells[0]),
       typescript: name(cells[1]),
-      pending: cells[2] === 'pending',
-      status: cells[2],
-      reason: cells[3],
+      reason: cells[2],
     });
   }
   return rows;
@@ -132,17 +130,14 @@ function check() {
 
   // The shape of each row.
   for (const row of rows) {
-    if (row.status !== '' && !row.pending) {
-      fail(row, `the status is "${row.status}", and only "pending" or nothing is allowed`);
-    }
     if (row.python === null && row.typescript === null) {
       fail(row, 'the row names no helper');
-    } else if ((row.python === null || row.typescript === null) && !row.pending && !row.reason) {
+    } else if ((row.python === null || row.typescript === null) && !row.reason) {
       fail(
         row,
         `${row.python ?? row.typescript} is in one client only, and the row gives no reason`,
       );
-    } else if (row.python && row.typescript && !row.pending) {
+    } else if (row.python && row.typescript) {
       if (camelCase(row.python) !== row.typescript) {
         fail(
           row,
@@ -182,20 +177,19 @@ function check() {
       }
       for (const row of sectionRows) {
         const name = row[language];
-        if (name && !row.pending && !existing[language].has(name)) {
+        if (name && !existing[language].has(name)) {
           fail(row, `the ${language} client has no ${name}`);
         }
       }
     }
   }
-  const pending = rows.filter((row) => row.pending).length;
   if (errors.length > 0) {
     for (const error of errors) {
       console.error(error);
     }
     process.exit(1);
   }
-  console.log(`The clients match clients/PARITY.md: ${rows.length} rows, ${pending} pending.`);
+  console.log(`The clients match clients/PARITY.md: ${rows.length} rows.`);
 }
 
 check();

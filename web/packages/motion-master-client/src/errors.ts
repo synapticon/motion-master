@@ -1,15 +1,21 @@
 // The errors that the client throws. Every request of the client, `client.api` included, throws a
 // ConnectionError when it does not reach the server and an HttpError when the server refuses it.
 
-/** The client cannot reach the server. `cause` is the error of `fetch`. */
+/**
+ * The connection to the server fails: a request does not reach it, or the WebSocket of a stream
+ * closes. `cause` is the error underneath, when there is one.
+ */
 export class ConnectionError extends Error {
   override name = 'ConnectionError';
 
-  /** The request that did not reach the server: its URL, method and headers, without the body. */
-  readonly request: Request;
+  /**
+   * The request that did not reach the server: its URL, method and headers, without the body.
+   * `null` when the WebSocket closed.
+   */
+  readonly request: Request | null;
 
-  constructor(request: Request, options?: ErrorOptions) {
-    super(`cannot connect to ${new URL(request.url).origin}`, options);
+  constructor(message: string, request: Request | null = null, options?: ErrorOptions) {
+    super(message, options);
     this.request = request;
   }
 }
@@ -71,6 +77,14 @@ export class ProcedureError extends Error {
 /** The server refuses to start or to stop a capture. The message is the server's reason. */
 export class CaptureError extends Error {
   override name = 'CaptureError';
+}
+
+/**
+ * A recording of `monitoring()` fails: the server refuses the monitoring, no row arrives, the rows of
+ * the last flush do not arrive, or the WebSocket closes during the recording.
+ */
+export class MonitoringError extends Error {
+  override name = 'MonitoringError';
 }
 
 /** The server could not produce a process-data dump. The message is the server's reason. */

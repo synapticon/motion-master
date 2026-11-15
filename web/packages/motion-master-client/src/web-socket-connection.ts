@@ -129,9 +129,8 @@ export class WebSocketConnection {
   }
 
   /**
-   * Opens the socket if it is not already open or connecting. Idempotent — safe to call from every
-   * subscribe path. Connection is lazy: an HTTP-only consumer that never subscribes never opens a
-   * socket.
+   * Opens the socket and keeps it open after the last listener leaves, until `close()`. Without this
+   * call, a listener opens the socket, and the socket closes again when the last listener leaves.
    */
   connect(): void {
     this.keepOpen = true;
@@ -225,6 +224,8 @@ export class WebSocketConnection {
    * unsubscribe function.
    */
   subscribe(topic: string, listener: MonitoringListener): () => void {
+    // Throws before any state changes, so a listener is never left behind.
+    this.implementation();
     let listeners = this.topicListeners.get(topic);
     if (!listeners) {
       listeners = new Set();
@@ -255,6 +256,8 @@ export class WebSocketConnection {
    * removal function.
    */
   onNotification(listener: NotificationListener): () => void {
+    // Throws before any state changes, so a listener is never left behind.
+    this.implementation();
     if (this.notificationListeners.size === 0) {
       this.send({ subscribe: NOTIFICATION_TOPIC });
     }
@@ -267,6 +270,18 @@ export class WebSocketConnection {
       }
       this.closeIfIdle();
     };
+  }
+
+  /**
+   * Calls `listener` each time the socket closes, with `true` when `close()` closed it. Returns a
+   * removal function.
+   */
+  onClose(listener: (byUser: boolean) => void): () => void {
+    return this.onStateChange((state) => {
+      if (state === 'closed') {
+        listener(this.closedByUser);
+      }
+    });
   }
 
   /** Observes connection-state changes. Returns a removal function. */

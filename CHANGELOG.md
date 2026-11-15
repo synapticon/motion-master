@@ -66,6 +66,26 @@ the HTTP/WebSocket API may break between any two alphas.
   `response`, its `status` and the server's `reason`, as `requests.ConnectionError` and
   `requests.HTTPError` of the Python client do. The `request` has no body. `apiErrorMessage()`
   reads only these errors now. The Console pages use it in place of their own copies.
+- `monitoring()` of both clients raises or throws a `MonitoringError` when the server refuses the
+  monitoring, when no row arrives, when the rows of the last flush do not arrive, and when the
+  WebSocket closes during the recording. It raised `RuntimeError` or `TimeoutError` in Python, and
+  threw a plain `Error` or a `TimeoutError` in TypeScript. The wait for the last flush is two flush
+  intervals plus 2000 ms. It was 2000 ms, so a recording with an interval above 1000 ms lost its last
+  rows without an error. A clean close of the WebSocket during a recording is an error in Python
+  too. `errorLine()` and `error_line()` give one line for a `MonitoringError`, for a timeout of
+  `waitForValue()` or `wait_for_value()`, and for a WebSocket that closes.
+- A stream of `streamMonitoring()` or `notifications()` in the TypeScript client takes a `signal`,
+  which ends it also while it waits. `client.close()` ends it, and any other close of the WebSocket
+  throws a `ConnectionError`. The stream reconnected without a word and lost the messages sent
+  meanwhile. In the Python client, a close raises `ConnectionError`. A clean close ended the stream
+  without an error.
+- `monitoring()` of the TypeScript client takes a `signal`. `examples/monitoring.ts` aborts it on
+  Ctrl-C, so that the program disables the drive and deletes the monitoring. Node.js ended at once
+  on Ctrl-C and left the drive enabled and turning.
+- `runProcedure()` of the TypeScript client starts no run when its `signal` is aborted already.
+- The TypeScript client refuses a `baseUrl` that is not http or https, and a `wsUrl` that is not ws
+  or wss, such as `localhost:61447`. Such a URL failed at the first request as "cannot connect to
+  null". `fromConfig()` names a missing `host`, `httpPort` or `wsPort`.
 - The Python client's `wait_for_value()` takes `timeout_ms` and `interval_ms`, in milliseconds. It
   took `timeout` and `interval` in seconds.
 - The Python client's `run_procedure()` takes `poll_interval_ms`, in milliseconds. It took

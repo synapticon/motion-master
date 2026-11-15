@@ -248,9 +248,13 @@ const m = await client.monitoring([[1, Cia402.VELOCITY_ACTUAL_VALUE]], async () 
 const velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE); // [timestampUs, value][]
 ```
 
+`monitoring()` throws a `MonitoringError` when the server refuses the monitoring, when no row arrives within 5000 ms, when the rows of the last flush do not arrive, and when the WebSocket closes during the recording. An error of the span wins over them. Pass `signal` to stop the waits on an abort, and pass the same signal to what the span waits for. In Node.js, Ctrl-C ends a program at once and runs no `finally` block, so a program that moves a motor aborts the signal on `SIGINT`, as `examples/monitoring.ts` does.
+
 The result is a `MonitoringRecording`. `column()` returns the values of one object with their timestamps, `values()` the values in a time window, and `first()` the time of the first value that meets a condition. `printTable()` prints one row every `everyMs`, with the CiA402 state beside a statusword, and `writeCsv(path)` writes every row to a CSV file in Node.js. Both name a column like `1:STATUSWORD`. A parameter is `[devicePosition, index, subindex]` or `[devicePosition, address]`.
 
 `streamMonitoring` yields the batches of a monitoring that exists already. To get each batch in a callback instead, use `client.ws.subscribe(topic, listener)`, which returns the function that unsubscribes.
+
+A stream of `streamMonitoring()` or `notifications()` takes a `signal`, and an abort ends the loop with its reason, also while the loop waits. `client.close()` ends the loop. Any other close of the WebSocket throws a `ConnectionError`, because the messages sent while the socket was closed are lost.
 
 Each batch holds one row per cycle since the last batch. A row is the time in microseconds since the Unix epoch, then one value for each object, in the order of `parameters`. `GET /api/monitorings/{topic}` returns that order. A value is `null` while its device does not exchange process data, which starts in SAFEOP.
 
@@ -274,7 +278,7 @@ The `event` field of `data` gives the kind of event. Leaving the loop unsubscrib
 
 ## The WebSocket connection
 
-The client opens the WebSocket when you first subscribe. If the connection drops, the client connects again and subscribes again to every topic.
+The client opens the WebSocket when you first subscribe, and closes it when the last subscription ends, so that a Node.js program can end. `client.ws.connect()` keeps it open until `client.close()`. If the connection drops, the client connects again and subscribes again to every topic. A stream of `streamMonitoring()` or `notifications()` throws on the drop instead.
 
 `client.ws.onStateChange` reports the state: `connecting`, `open` or `closed`. `client.close()` closes the WebSocket. The HTTP client needs no close.
 

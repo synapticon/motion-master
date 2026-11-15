@@ -211,6 +211,14 @@ class CaptureError(Exception):
     """The server refuses to start or stop a capture. The message is the server's reason."""
 
 
+class MonitoringError(Exception):
+    """A recording of monitoring() fails.
+
+    The server refuses the monitoring, no row arrives, the rows of the last flush do not arrive, or
+    the WebSocket closes during the recording.
+    """
+
+
 class ProcessDataDumpError(Exception):
     """The server could not produce a process-data dump. The message is the server's reason."""
 
@@ -234,7 +242,7 @@ def _reason(response):
     try:
         return response.json()["error"]
     except (ValueError, KeyError, TypeError):
-        return response.text.strip()
+        return response.text.strip() or response.reason
 
 
 def _satisfied(current, target, exact):
@@ -298,9 +306,11 @@ def error_line(error):
         StateError,
         ProcedureError,
         CaptureError,
+        MonitoringError,
         ProcessDataDumpError,
         FileNotFoundError,
         ConnectionError,
+        TimeoutError,
     )
     if isinstance(error, user_errors):
         return str(error)
@@ -310,9 +320,10 @@ def error_line(error):
 def run(main):
     """Call main() and exit with one line on stderr when it fails with an error a user can act on.
 
-    Those errors are: no connection to the server, an HTTP error status, a StateError, a
-    ProcedureError, a CaptureError, a ProcessDataDumpError and a missing file. Any other error is a
-    bug, so it keeps its traceback. Set MM_TRACEBACK=1 to get the traceback for every error.
+    Those errors are: no connection to the server, an HTTP error status, a WebSocket that closes, a
+    StateError, a ProcedureError, a CaptureError, a MonitoringError, a ProcessDataDumpError, a
+    TimeoutError of wait_for_value() and a missing file. Any other error is a bug, so it keeps its
+    traceback. Set MM_TRACEBACK=1 to get the traceback for every error.
     """
     try:
         main()
@@ -755,7 +766,8 @@ class MotionMasterClient:
 
         Every notification source publishes to the one "notifications" topic, so one subscription
         receives every event, also a kind that a later server adds. data["event"] names the kind.
-        The caller stops by breaking out of the loop.
+        The caller stops by breaking out of the loop. A close of the WebSocket raises
+        ConnectionError, because the notifications sent meanwhile are lost.
         """
         for msg in self._subscribe(NOTIFICATION_TOPIC):
             if msg.get("type") == "notification":
@@ -767,13 +779,20 @@ class MotionMasterClient:
             raise RuntimeError("no ws_url configured on this client")
 
         # Lazy import so HTTP-only usage doesn't require the websockets package.
+        from websockets.exceptions import ConnectionClosed
         from websockets.sync.client import connect
 
         with connect(self.ws_url, ssl=self._ssl_context()) as ws:
             ws.send(json.dumps({"subscribe": topic}))
             try:
-                for message in ws:
-                    yield json.loads(message)
+                # Only the caller ends the stream, by breaking out of the loop. A close of the
+                # WebSocket loses the messages sent meanwhile, so it is an error.
+                try:
+                    for message in ws:
+                        yield json.loads(message)
+                except ConnectionClosed as error:
+                    raise ConnectionError("the WebSocket closed") from error
+                raise ConnectionError("the WebSocket closed")
             finally:
                 # Best-effort unsubscribe; the socket close below also ends it.
                 try:
@@ -800,7 +819,8 @@ class MotionMasterClient:
         A batch is a list of rows, [timestampUs, v0, v1, ...], with the values in the order of the
         parameters of the monitoring. The stream is lossless: a batch holds every cycle recorded
         since the batch before. The caller stops by breaking out of the loop, and that closes the
-        WebSocket.
+        WebSocket. A close of the WebSocket raises ConnectionError, because the batches sent
+        meanwhile are lost.
         """
         for msg in self._subscribe(topic):
             if msg.get("type") == "monitoring" and msg.get("topic") == topic:
@@ -843,13 +863,17 @@ class MonitoringRecording:
     Entering the block creates the monitoring, subscribes to its topic, and returns when the first
     row arrives, so nothing the block does is missed. Leaving the block waits for the rows of the
     last flush, closes the WebSocket and deletes the monitoring, also when the block raised. The
-    rows stay readable after the block. An error of the thread that reads the WebSocket is raised
-    when the block ends.
+    rows stay readable after the block.
+
+    Raises MonitoringError when the server refuses the monitoring, when no row arrives within
+    5000 ms, when the rows of the last flush do not arrive, and when the WebSocket closes during the
+    recording. An error of the block wins over them.
     """
 
-    # How long entering waits for the first row, and leaving for the last flush.
-    _FIRST_ROW_TIMEOUT = 5.0
-    _LAST_FLUSH_TIMEOUT = 2.0
+    # How long entering waits for the first row. Leaving waits two flush intervals for the last
+    # rows, and this margin on top.
+    _FIRST_ROW_TIMEOUT_MS = 5000
+    _LAST_FLUSH_MARGIN_MS = 2000
 
     def __init__(self, client, parameters, interval_ms, topic, name):
         self._client = client
@@ -868,6 +892,9 @@ class MonitoringRecording:
         self._connection = ExitStack()
         self._ws = None
         self._thread = None
+        # Set before _stop() closes the WebSocket, so that the reading thread takes that close for
+        # the end of the recording, and any other close for an error.
+        self._stopping = False
         self._error = None
 
     @property
@@ -984,12 +1011,8 @@ class MonitoringRecording:
             body["name"] = self._name
         r = self._client.call("createMonitoring", body=body, check=False)
         if r.status_code != 201:
-            try:
-                reason = r.json()["error"]
-            except (ValueError, KeyError):
-                reason = r.text
-            raise RuntimeError(
-                f"cannot create monitoring {self.topic}: {reason} (HTTP {r.status_code})"
+            raise MonitoringError(
+                f"cannot create monitoring {self.topic}: {_reason(r)} (HTTP {r.status_code})"
             )
         self.parameters = r.json()["parameters"]
         try:
@@ -1000,19 +1023,28 @@ class MonitoringRecording:
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        flushed = True
+        timeout_ms = 2 * self._interval_ms + self._LAST_FLUSH_MARGIN_MS
         try:
             if self._thread is not None and self._thread.is_alive():
                 # A row is in a batch only after the next flush, so wait for two more batches.
                 with self._lock:
                     target = self._batches + 2
-                    self._arrived.wait_for(
+                    flushed = self._arrived.wait_for(
                         lambda: self._batches >= target or self._error is not None,
-                        timeout=self._LAST_FLUSH_TIMEOUT,
+                        timeout=timeout_ms / 1000,
                     )
         finally:
             self._stop()
-        if self._error is not None and exc_type is None:
-            raise RuntimeError(f"monitoring {self.topic}: {self._error!r}") from self._error
+        if exc_type is not None:
+            return False
+        if self._error is not None:
+            raise self._error
+        if not flushed:
+            raise MonitoringError(
+                f"monitoring {self.topic}: the rows of the last flush did not arrive within "
+                f"{timeout_ms} ms"
+            )
         return False
 
     def _start(self):
@@ -1031,16 +1063,18 @@ class MonitoringRecording:
         self._thread.start()
         with self._lock:
             arrived = self._arrived.wait_for(
-                lambda: self.rows or self._error is not None, timeout=self._FIRST_ROW_TIMEOUT
+                lambda: self.rows or self._error is not None,
+                timeout=self._FIRST_ROW_TIMEOUT_MS / 1000,
             )
         if self._error is not None:
-            raise RuntimeError(f"monitoring {self.topic}: {self._error!r}") from self._error
+            raise self._error
         if not arrived:
-            raise TimeoutError(f"monitoring {self.topic}: no row after {self._FIRST_ROW_TIMEOUT} s")
+            raise MonitoringError(
+                f"monitoring {self.topic}: no row after {self._FIRST_ROW_TIMEOUT_MS} ms"
+            )
 
     def _read(self):
-        from websockets.exceptions import ConnectionClosedOK
-
+        cause = None
         try:
             for message in self._ws:
                 msg = json.loads(message)
@@ -1049,15 +1083,20 @@ class MonitoringRecording:
                         self.rows.extend(msg["data"])
                         self._batches += 1
                         self._arrived.notify_all()
-        except ConnectionClosedOK:
-            pass
         except Exception as error:
-            with self._lock:
-                self._error = error
-                self._arrived.notify_all()
+            cause = error
+        with self._lock:
+            if not self._stopping:
+                self._error = MonitoringError(
+                    f"monitoring {self.topic}: the WebSocket closed during the recording"
+                )
+                self._error.__cause__ = cause
+            self._arrived.notify_all()
 
     def _stop(self):
         # Closing the socket from this thread ends the loop of the reading thread.
+        with self._lock:
+            self._stopping = True
         self._connection.close()
         if self._thread is not None:
             self._thread.join(timeout=5)

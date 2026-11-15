@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Cia402, HttpError } from '../src/index';
+import { Cia402, ConnectionError, HttpError, MonitoringError } from '../src/index';
 import { type Answer, fakeServer, fakeSocket } from './fakes';
 
 const CREATED = {
@@ -90,6 +90,7 @@ describe('monitoring', () => {
         () => new Error('the monitoring was created'),
         (e: unknown) => e as Error,
       );
+    expect(error).toBeInstanceOf(MonitoringError);
     expect(error).toMatchObject({
       message: 'cannot create monitoring bad topic: invalid topic (HTTP 400)',
     });
@@ -112,7 +113,7 @@ describe('monitoring', () => {
     await expect(
       server.client.monitoring([[1, 0x6041, 0]], () => {}, { topic: 't1' }),
     ).rejects.toMatchObject({
-      name: 'TimeoutError',
+      name: 'MonitoringError',
       message: 'monitoring t1: no row after 5000 ms',
     });
     expect(server.calls().at(-1)).toBe('DELETE /api/monitorings/t1');
@@ -131,8 +132,83 @@ describe('monitoring', () => {
           }),
         { topic: 't1' },
       ),
-    ).rejects.toThrow('monitoring t1: the WebSocket closed during the recording');
+    ).rejects.toThrow(
+      new MonitoringError('monitoring t1: the WebSocket closed during the recording'),
+    );
     stop();
     expect(server.calls().at(-1)).toBe('DELETE /api/monitorings/t1');
+  });
+
+  it('fails when the rows of the last flush do not arrive', { timeout: 10_000 }, async () => {
+    const server = fakeServer(routes);
+    // One batch when the client subscribes, and none after it.
+    const socket = fakeSocket((message) => {
+      if ((message as { subscribe?: string }).subscribe === 't1') {
+        socket.send({ type: 'monitoring', topic: 't1', data: [[1_000_000, 0x0237]] });
+      }
+    });
+    await expect(
+      server.client.monitoring([[1, 0x6041, 0]], () => {}, { topic: 't1', intervalMs: 5 }),
+    ).rejects.toThrow(
+      new MonitoringError(
+        'monitoring t1: the rows of the last flush did not arrive within 2010 ms',
+      ),
+    );
+    expect(server.calls().at(-1)).toBe('DELETE /api/monitorings/t1');
+  });
+
+  it('stops the wait for the first row on an abort, and deletes the monitoring', async () => {
+    const server = fakeServer(routes);
+    fakeSocket();
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new Error('cancelled')), 20);
+    await expect(
+      server.client.monitoring([[1, 0x6041, 0]], () => {}, {
+        topic: 't1',
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('cancelled');
+    expect(server.calls()).toEqual(['POST /api/monitorings', 'DELETE /api/monitorings/t1']);
+  });
+
+  it('skips the wait for the last flush when the span ends on an abort', async () => {
+    const server = fakeServer(routes);
+    const { stop } = streamingSocket();
+    const controller = new AbortController();
+    const started = performance.now();
+    await expect(
+      server.client.monitoring(
+        [[1, 0x6041, 0]],
+        () => {
+          controller.abort(new Error('cancelled'));
+          throw controller.signal.reason;
+        },
+        { topic: 't1', intervalMs: 1000, signal: controller.signal },
+      ),
+    ).rejects.toThrow('cancelled');
+    stop();
+    // The flush wait would take 2 intervals, 2000 ms.
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(server.calls().at(-1)).toBe('DELETE /api/monitorings/t1');
+  });
+});
+
+describe('streamMonitoring', () => {
+  it('throws a ConnectionError when the WebSocket closes, instead of a silent reconnect', async () => {
+    const { client } = fakeServer({});
+    const { socket, stop } = streamingSocket();
+    const batches = [];
+    const error = await (async () => {
+      for await (const rows of client.streamMonitoring('t1')) {
+        batches.push(rows);
+        if (batches.length === 1) {
+          socket.close();
+        }
+      }
+    })().catch((e: unknown) => e);
+    stop();
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect(error).toMatchObject({ message: 'the WebSocket closed', request: null });
+    expect(client.ws.readyState).toBe('closed');
   });
 });

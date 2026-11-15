@@ -13,6 +13,7 @@ import {
   CaptureError,
   ConnectionError,
   HttpError,
+  MonitoringError,
   ProcedureError,
   ProcessDataDumpError,
   StateError,
@@ -33,9 +34,9 @@ import {
 } from './web-socket-connection';
 
 export interface MotionMasterClientOptions {
-  /** Origin (or `host:port`) of the HTTP API. Default: the bundled localhost dev origin. */
+  /** Origin of the HTTP API, such as `https://127.0.0.1:61447`. Default: the bundled localhost dev origin. */
   baseUrl?: string;
-  /** Full URL of the WebSocket connection. Default: the bundled localhost dev origin. */
+  /** URL of the WebSocket, such as `wss://127.0.0.1:62281`. Default: the bundled localhost dev origin. */
   wsUrl?: string;
   /**
    * The WebSocket class for `client.ws`. Default: the global `WebSocket` of the browser or of
@@ -125,13 +126,33 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-// How long monitoring() waits for the first row, and for the last flush after the span.
+// How long monitoring() waits for the first row. After the span it waits two flush intervals for the
+// last rows, and this margin on top.
 const FIRST_ROW_TIMEOUT_MS = 5000;
-const LAST_FLUSH_TIMEOUT_MS = 2000;
+const LAST_FLUSH_MARGIN_MS = 2000;
 
 /** Returns a topic that no other monitoring has, such as `ts-1f3a9c0b7e2d`. */
 function uniqueTopic(): string {
   return `ts-${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+
+/**
+ * Throws when `url` has none of `protocols`, such as `localhost:61447`, which parses as a URL of the
+ * scheme `localhost`. `fetch` and `WebSocket` find that only at the first request, and report it as
+ * a failed connection. A URL that does not parse at all passes, so that the Console, which builds
+ * its client from a host the user typed, keeps running and shows the failed requests.
+ */
+function checkUrl(option: string, url: string, protocols: readonly string[]): void {
+  let protocol: string;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    return;
+  }
+  if (!protocols.includes(protocol)) {
+    const schemes = protocols.map((p) => p.slice(0, -1)).join(' or ');
+    throw new Error(`${option} must be a URL that starts with ${schemes}: "${url}"`);
+  }
 }
 
 /**
@@ -163,7 +184,9 @@ function throwingFetch(customFetch?: typeof fetch): typeof fetch {
       // fetch rejects with a TypeError when the request does not reach the server. An abort rejects
       // with an AbortError, which stays as it is.
       if (error instanceof TypeError) {
-        throw new ConnectionError(requestOf(input, init), { cause: error });
+        const request = requestOf(input, init);
+        const origin = new URL(request.url).origin;
+        throw new ConnectionError(`cannot connect to ${origin}`, request, { cause: error });
       }
       throw error;
     }
@@ -196,11 +219,14 @@ export class MotionMasterClient {
 
   constructor(options: MotionMasterClientOptions = {}) {
     this.httpBaseUrl = options.baseUrl ?? API_BASE_URL;
+    const wsUrl = options.wsUrl ?? WS_URL;
+    checkUrl('baseUrl', this.httpBaseUrl, ['http:', 'https:']);
+    checkUrl('wsUrl', wsUrl, ['ws:', 'wss:']);
     this.fieldbus = options.fieldbus;
     this.fetch = throwingFetch(options.customFetch);
     this.api = new Api({ baseUrl: this.httpBaseUrl, customFetch: this.fetch });
     this.ws = new WebSocketConnection({
-      url: options.wsUrl ?? WS_URL,
+      url: wsUrl,
       WebSocket: options.WebSocket,
       protocolsOrOptions: options.webSocketOptions,
     });
@@ -421,10 +447,17 @@ export class MotionMasterClient {
    * before. Leaving the `for await` loop unsubscribes.
    *
    *     for await (const rows of client.streamMonitoring('left-leg')) { ... }
+   *
+   * An abort of `signal` ends the loop with its reason. `close()` ends the loop, and any other close
+   * of the WebSocket throws a `ConnectionError`, because the batches sent meanwhile are lost.
    */
-  streamMonitoring(topic: string): AsyncGenerator<MonitoringBatch, void, undefined> {
-    return listen((listener: (rows: MonitoringBatch) => void) =>
-      this.ws.subscribe(topic, listener),
+  streamMonitoring(
+    topic: string,
+    options: { signal?: AbortSignal } = {},
+  ): AsyncGenerator<MonitoringBatch, void, undefined> {
+    return listen(
+      (listener: (rows: MonitoringBatch) => void) => this.ws.subscribe(topic, listener),
+      { signal: options.signal, onClose: (listener) => this.ws.onClose(listener) },
     );
   }
 
@@ -500,6 +533,9 @@ export class MotionMasterClient {
     options: { params?: ProcedureRequest; pollIntervalMs?: number; signal?: AbortSignal } = {},
   ): AsyncGenerator<ProcedureSnapshot, void, undefined> {
     const { params = {}, pollIntervalMs = 500, signal } = options;
+    // An aborted signal starts no run. The start itself takes no signal: an abort while it is on
+    // the way could leave a run going that this loop never cancels.
+    signal?.throwIfAborted();
     let snapshot: ProcedureSnapshot;
     try {
       snapshot = (await this.api.startProcedure(slavePosition, name, params)).data;
@@ -519,7 +555,7 @@ export class MotionMasterClient {
           return;
         }
         await sleep(pollIntervalMs, signal);
-        snapshot = (await this.api.getProcedure(slavePosition, name)).data;
+        snapshot = (await this.api.getProcedure(slavePosition, name, { signal })).data;
       }
     } finally {
       if (snapshot.status === 'running') {
@@ -536,9 +572,17 @@ export class MotionMasterClient {
    * Every notification source publishes to the one `notifications` topic, so one subscription
    * receives every event, also a kind that a later server adds. `data.event` names the kind. Leaving
    * the `for await` loop unsubscribes.
+   *
+   * An abort of `signal` ends the loop with its reason. `close()` ends the loop, and any other close
+   * of the WebSocket throws a `ConnectionError`, because the notifications sent meanwhile are lost.
    */
-  notifications(): AsyncGenerator<NotificationData, void, undefined> {
-    return listen((listener: (data: NotificationData) => void) => this.ws.onNotification(listener));
+  notifications(
+    options: { signal?: AbortSignal } = {},
+  ): AsyncGenerator<NotificationData, void, undefined> {
+    return listen(
+      (listener: (data: NotificationData) => void) => this.ws.onNotification(listener),
+      { signal: options.signal, onClose: (listener) => this.ws.onClose(listener) },
+    );
   }
 
   /**
@@ -558,15 +602,21 @@ export class MotionMasterClient {
    *     });
    *     const velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE);
    *
-   * Throws when the server refuses the monitoring, when no row arrives within 5 s, and when the
-   * WebSocket closes during the recording. An error of `span` wins over them.
+   * Throws a `MonitoringError` when the server refuses the monitoring, when no row arrives within
+   * 5000 ms, when the rows of the last flush do not arrive, and when the WebSocket closes during the
+   * recording. An error of `span` wins over them.
+   *
+   * An abort of `signal` stops the wait for the first row and for the last flush, deletes the
+   * monitoring, and throws its reason. `span` gets no signal from here: pass the same signal to what
+   * `span` waits for, so that it ends too.
    */
   async monitoring(
     parameters: readonly DeviceParameterAddress[],
     span: () => unknown,
-    options: { intervalMs?: number; topic?: string; name?: string } = {},
+    options: { intervalMs?: number; topic?: string; name?: string; signal?: AbortSignal } = {},
   ): Promise<MonitoringRecording> {
-    const { intervalMs = 50, topic = uniqueTopic(), name } = options;
+    const { intervalMs = 50, topic = uniqueTopic(), name, signal } = options;
+    signal?.throwIfAborted();
     // Throws when there is no WebSocket class, before the monitoring exists on the server.
     this.ws.assertAvailable();
     const body = {
@@ -582,30 +632,36 @@ export class MotionMasterClient {
       if (!(error instanceof HttpError)) {
         throw error;
       }
-      throw new Error(`cannot create monitoring ${topic}: ${error.reason} (HTTP ${error.status})`, {
-        cause: error,
-      });
+      throw new MonitoringError(
+        `cannot create monitoring ${topic}: ${error.reason} (HTTP ${error.status})`,
+        { cause: error },
+      );
     }
     const recording = new MonitoringRecording(topic, created.parameters);
 
-    // The WebSocket listener counts the batches and wakes the one wait that runs at a time.
+    // The WebSocket listener counts the batches and wakes the one wait that runs at a time. A close
+    // of the WebSocket and an abort of the signal wake it too.
     let batches = 0;
-    let socketError: Error | null = null;
+    let socketError: MonitoringError | null = null;
     let wake = () => {};
+    const ended = () => socketError !== null || signal?.aborted === true;
     const waitFor = (condition: () => boolean, timeoutMs: number) =>
       new Promise<boolean>((resolve) => {
         const timer = setTimeout(() => resolve(condition()), timeoutMs);
         wake = () => {
-          if (condition()) {
+          if (condition() || ended()) {
             clearTimeout(timer);
-            resolve(true);
+            resolve(condition());
           }
         };
         wake();
       });
+    const onAbort = () => wake();
+    signal?.addEventListener('abort', onAbort);
     let unsubscribe = () => {};
     let stopWatching = () => {};
     const stop = async () => {
+      signal?.removeEventListener('abort', onAbort);
       // Stop watching first: the last unsubscribe can close the socket, which is no failure.
       stopWatching();
       unsubscribe();
@@ -614,45 +670,51 @@ export class MotionMasterClient {
 
     // From here on the monitoring exists, so every failure deletes it.
     try {
+      // Watch before subscribing, because subscribing opens the socket, which can fail at once.
+      stopWatching = this.ws.onStateChange((state) => {
+        if (state === 'closed') {
+          socketError = new MonitoringError(
+            `monitoring ${topic}: the WebSocket closed during the recording`,
+          );
+          wake();
+        }
+      });
       unsubscribe = this.ws.subscribe(topic, (rows) => {
         recording.rows.push(...rows);
         batches += 1;
         wake();
       });
-      stopWatching = this.ws.onStateChange((state) => {
-        if (state === 'closed') {
-          socketError = new Error(`monitoring ${topic}: the WebSocket closed during the recording`);
-          wake();
-        }
-      });
-      const arrived = await waitFor(
-        () => recording.rows.length > 0 || socketError !== null,
-        FIRST_ROW_TIMEOUT_MS,
-      );
+      const arrived = await waitFor(() => recording.rows.length > 0, FIRST_ROW_TIMEOUT_MS);
+      signal?.throwIfAborted();
       if (socketError !== null) {
         throw socketError;
       }
       if (!arrived) {
-        throw new DOMException(
-          `monitoring ${topic}: no row after ${FIRST_ROW_TIMEOUT_MS} ms`,
-          'TimeoutError',
-        );
+        throw new MonitoringError(`monitoring ${topic}: no row after ${FIRST_ROW_TIMEOUT_MS} ms`);
       }
     } catch (error) {
       await stop();
       throw error;
     }
 
+    let flushed: boolean;
+    const flushTimeoutMs = 2 * intervalMs + LAST_FLUSH_MARGIN_MS;
     try {
       await span();
     } finally {
       // A row is in a batch only after the next flush, so wait for two more batches.
       const target = batches + 2;
-      await waitFor(() => batches >= target || socketError !== null, LAST_FLUSH_TIMEOUT_MS);
+      flushed = await waitFor(() => batches >= target, flushTimeoutMs);
       await stop();
     }
+    signal?.throwIfAborted();
     if (socketError !== null) {
       throw socketError;
+    }
+    if (!flushed) {
+      throw new MonitoringError(
+        `monitoring ${topic}: the rows of the last flush did not arrive within ${flushTimeoutMs} ms`,
+      );
     }
     return recording;
   }

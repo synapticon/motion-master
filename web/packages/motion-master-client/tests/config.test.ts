@@ -44,6 +44,13 @@ describe('fromConfig', () => {
     );
   });
 
+  it('names a key that is missing', async () => {
+    const path = configFile('{ "host": "x", "wsPort": 2 }');
+    await expect(MotionMasterClient.fromConfig({ path })).rejects.toThrow(
+      `${path}: "httpPort" is missing`,
+    );
+  });
+
   it('says that a named file is missing', async () => {
     await expect(MotionMasterClient.fromConfig({ path: '/no/such/config.jsonc' })).rejects.toThrow(
       '/no/such/config.jsonc not found',

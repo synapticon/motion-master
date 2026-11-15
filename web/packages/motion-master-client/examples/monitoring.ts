@@ -105,6 +105,12 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureState(AlState.OP, { positions: [slave] });
 
+  // Ctrl-C aborts the signal. Without it, Node.js ends at once and skips the finally block below,
+  // which leaves the drive enabled and turning.
+  const controller = new AbortController();
+  const { signal } = controller;
+  process.once('SIGINT', () => controller.abort(new Error('cancelled')));
+
   const parameters = OBJECTS.map((address) => [slave, address] as const);
   let m: MonitoringRecording;
   try {
@@ -117,14 +123,21 @@ async function main(): Promise<void> {
         await client.enable(slave);
         console.log(`turning at ${velocity} for ${args.seconds} s`);
         await client.setTarget(slave, 'velocity', velocity);
-        await sleep(Number(args.seconds) * 1000);
+        await sleep(Number(args.seconds) * 1000, undefined, { signal });
         await client.setTarget(slave, 'velocity', 0);
-        await sleep(AFTER_STOP_MS);
+        await sleep(AFTER_STOP_MS, undefined, { signal });
       },
-      { intervalMs: 50 },
+      { intervalMs: 50, signal },
     );
+  } catch (error) {
+    if (signal.aborted) {
+      console.error('cancelled');
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
   } finally {
-    // Never leave the drive enabled, also when a step above failed.
+    // Never leave the drive enabled, also when a step above failed or Ctrl-C stopped it.
     await client.disable(slave).catch(() => {});
   }
 

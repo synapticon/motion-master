@@ -70,6 +70,11 @@ export async function readConfig(path?: string): Promise<ClientSettings> {
     const line = text.slice(0, offset).split('\n').length;
     throw new Error(`${file}:${line}: ${printParseErrorCode(error)}`);
   }
+  for (const key of ['host', 'httpPort', 'wsPort'] as const) {
+    if (config[key] === undefined) {
+      throw new Error(`${file}: "${key}" is missing`);
+    }
+  }
   applyVerify(config.verify ?? false);
   return {
     baseUrl: `https://${config.host}:${config.httpPort}`,

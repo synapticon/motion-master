@@ -20,6 +20,13 @@ function client(routes: Record<string, (body: unknown) => Answer>) {
 }
 
 describe('runProcedure', () => {
+  it('starts no run when the signal is aborted already', async () => {
+    const { client: c, server } = client({});
+    const run = c.runProcedure(1, 'store-parameters', { signal: AbortSignal.abort() });
+    await expect(run.next()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(server.calls()).toEqual([]);
+  });
+
   it('yields a snapshot at every poll until the run ends', async () => {
     const polls = [
       snapshot('running', [{ id: 'write', status: 'running' }]),

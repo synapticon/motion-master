@@ -6,6 +6,7 @@ import {
   ConnectionError,
   errorLine,
   HttpError,
+  MonitoringError,
   MotionMasterClient,
   ProcedureError,
   ProcessDataDumpError,
@@ -60,6 +61,9 @@ describe('errorLine', () => {
       new ProcedureError('offset-detection on device 1: busy (HTTP 409)'),
       new CaptureError('the capture did not start: busy (HTTP 409)'),
       new ProcessDataDumpError('the process-data dump failed: bad span (HTTP 400)'),
+      new MonitoringError('monitoring t1: no row after 5000 ms'),
+      new ConnectionError('the WebSocket closed'),
+      new DOMException('device 1 0x6041:00 is 592 after 1000 ms', 'TimeoutError'),
     ]) {
       expect(errorLine(error)).toBe(error.message);
     }
@@ -76,6 +80,17 @@ describe('errorLine', () => {
 });
 
 describe('the errors of a request', () => {
+  it('refuses a base URL without http or https before any request', () => {
+    expect(() => new MotionMasterClient({ baseUrl: 'localhost:61447' })).toThrow(
+      'baseUrl must be a URL that starts with http or https: "localhost:61447"',
+    );
+    expect(() => new MotionMasterClient({ wsUrl: 'https://127.0.0.1:62281' })).toThrow(
+      'wsUrl must be a URL that starts with ws or wss',
+    );
+    // A URL that does not parse goes through, so that the Console keeps running on a typo.
+    expect(() => new MotionMasterClient({ baseUrl: 'https://bad host:1' })).not.toThrow();
+  });
+
   it('throws an HttpError that keeps the answer unread, for its headers', async () => {
     server.use(
       http.get(`${HTTP_URL}/api/devices`, () =>

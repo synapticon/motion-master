@@ -288,6 +288,12 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   a column like `1:STATUSWORD`, as `names` lists them.
 - `notifications()` streams the notifications from the WebSocket.
 
+`monitoring()` raises `MonitoringError` when the server refuses the monitoring, when no row arrives
+within 5000 ms, when the rows of the last flush do not arrive, and when the WebSocket closes during
+the recording. An error of the `with` block wins over them. A close of the WebSocket during
+`stream_monitoring()` or `notifications()` raises `ConnectionError`, because the messages sent
+meanwhile are lost.
+
 ```python
 for snapshot, changed in step_changes(client.run_procedure(1, "store-parameters")):
     for step in changed:

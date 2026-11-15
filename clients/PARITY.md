@@ -61,6 +61,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `StateError` | `StateError` | |
 | `ProcedureError` | `ProcedureError` | |
 | `CaptureError` | `CaptureError` | |
+| `MonitoringError` | `MonitoringError` | |
 | `ProcessDataDumpError` | `ProcessDataDumpError` | |
 | — | `ConnectionError` | Python raises `requests.ConnectionError`, which carries the URL of the request. `fetch` throws a bare `TypeError`, so the TypeScript client throws its own error. |
 | — | `HttpError` | Python raises `requests.HTTPError`, which carries the method, the status and the body. A refused `fetch` throws nothing, so the TypeScript client throws its own error. |

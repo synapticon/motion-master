@@ -1,6 +1,6 @@
 // Framework-agnostic connection to Motion Master's single WebSocket — the one bidirectional
-// socket that carries server->client monitoring batches, notifications, and (planned) procedure
-// progress, and client->server topic subscribe/unsubscribe. It owns reconnection, multiplexes
+// socket that carries server->client monitoring batches and notifications, and client->server
+// topic subscribe/unsubscribe. It owns reconnection, multiplexes
 // per-topic subscriptions over the one socket (ref-counted: subscribe on the first listener,
 // unsubscribe on the last, re-subscribe everything on reconnect), and routes inbound frames by
 // type. Nothing arrives until something is subscribed: `subscribe(topic, cb)` for one monitoring's
@@ -28,25 +28,21 @@ export interface MonitoringMessage {
   data: MonitoringBatch;
 }
 
+/** The data of a notification. `event` names its kind, such as `short-working-counter`. */
+export interface NotificationData {
+  event: string;
+  [field: string]: unknown;
+}
+
 export interface NotificationMessage {
   type: 'notification';
-  data: unknown;
+  data: NotificationData;
 }
 
-/**
- * Procedure progress — reserved on the server, not yet on the wire. Routed already so callers can
- * register handlers today and start receiving the moment the backend publishes them.
- */
-export interface ProgressMessage {
-  type: 'progress';
-  data: unknown;
-}
-
-export type ServerMessage = MonitoringMessage | NotificationMessage | ProgressMessage;
+export type ServerMessage = MonitoringMessage | NotificationMessage;
 
 type MonitoringListener = (rows: MonitoringBatch) => void;
-type NotificationListener = (data: unknown) => void;
-type ProgressListener = (data: unknown) => void;
+type NotificationListener = (data: NotificationData) => void;
 type StateListener = (state: ReadyState) => void;
 
 /**
@@ -121,7 +117,6 @@ export class WebSocketConnection {
 
   private readonly topicListeners = new Map<string, Set<MonitoringListener>>();
   private readonly notificationListeners = new Set<NotificationListener>();
-  private readonly progressListeners = new Set<ProgressListener>();
   private readonly stateListeners = new Set<StateListener>();
 
   constructor(options: WebSocketConnectionOptions) {
@@ -277,19 +272,6 @@ export class WebSocketConnection {
     };
   }
 
-  /**
-   * Registers a listener for procedure progress messages (reserved; fires once the backend ships
-   * them). Connects lazily. Returns a removal function.
-   */
-  onProgress(listener: ProgressListener): () => void {
-    this.progressListeners.add(listener);
-    this.open();
-    return () => {
-      this.progressListeners.delete(listener);
-      this.closeIfIdle();
-    };
-  }
-
   /** Observes connection-state changes. Returns a removal function. */
   onStateChange(listener: StateListener): () => void {
     this.stateListeners.add(listener);
@@ -302,10 +284,7 @@ export class WebSocketConnection {
    * Closes a socket that only listeners opened once none is left. A later listener opens it again.
    */
   private closeIfIdle(): void {
-    const idle =
-      this.topicListeners.size === 0 &&
-      this.notificationListeners.size === 0 &&
-      this.progressListeners.size === 0;
+    const idle = this.topicListeners.size === 0 && this.notificationListeners.size === 0;
     if (this.keepOpen || !idle) {
       return;
     }
@@ -390,13 +369,11 @@ export class WebSocketConnection {
         }
       }
     } else if (type === 'notification') {
-      const { data } = msg as { data?: unknown };
-      for (const listener of this.notificationListeners) {
-        listener(data);
+      const { data } = msg as { data?: NotificationData };
+      if (typeof data !== 'object' || data === null) {
+        return;
       }
-    } else if (type === 'progress') {
-      const { data } = msg as { data?: unknown };
-      for (const listener of this.progressListeners) {
+      for (const listener of this.notificationListeners) {
         listener(data);
       }
     }

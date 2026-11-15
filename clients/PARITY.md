@@ -77,7 +77,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `isPlottableDataType` | pending | |
 | — | `fetchEni` | pending | |
 | — | `parseEni` | pending | |
-| — | `NOTIFICATION_TOPIC` | pending | |
+| `NOTIFICATION_TOPIC` | `NOTIFICATION_TOPIC` | | |
 | — | `WebSocketConnection` | | The WebSocket connection behind `client.ws`. It reconnects and routes each message to its listeners. Python opens one WebSocket for each stream and closes it when the stream ends. |
 | — | `alStateName` | | Python reads the name from the enum: `AlState(2).name`. |
 | — | `operationModeName` | | Python reads the name from the enum: `OperationMode(9).name`. |
@@ -126,7 +126,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `run_procedure` | `runProcedure` | | |
 | `monitoring` | `monitoring` | | |
 | `stream_monitoring` | `streamMonitoring` | | |
-| `notifications` | — | pending | |
+| `notifications` | `notifications` | | |
 | `start_capture` | — | pending | |
 | `stop_capture` | — | pending | |
 | `process_data_mark` | `readProcessDataMark` | pending | |

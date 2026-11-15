@@ -38,6 +38,10 @@ the HTTP/WebSocket API may break between any two alphas.
 - The TypeScript client records a monitoring for a span with `monitoring(parameters, span)`, as the
   Python client does with a `with` block. The `MonitoringRecording` it returns has `column`,
   `values`, `first`, `printTable` and `writeCsv`, which write the same output as in Python.
+- The TypeScript client yields the notifications of the server with `notifications()`, which a
+  program reads with `for await`, as the Python client does.
+- The Python client names the notifications topic `NOTIFICATION_TOPIC`, as the TypeScript client
+  does.
 
 ### Changed
 
@@ -52,6 +56,11 @@ the HTTP/WebSocket API may break between any two alphas.
 - The Python client streams the batches of a monitoring with `stream_monitoring(topic)`, which was
   `monitor(topic)`. The example `monitor.py` is now `stream-monitoring.py`. The new name tells it
   apart from `monitoring()`, which creates a monitoring and records it for a span.
+
+### Removed
+
+- The TypeScript client's `ws.onProgress()`. The server never sends procedure progress over the
+  WebSocket: a program polls a procedure with `runProcedure()`.
 
 ## [6.0.0-alpha.126] - 2026-11-15
 

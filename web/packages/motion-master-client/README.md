@@ -109,6 +109,7 @@ An example imports the package by its name, as a program that installed it from 
 | `set-target.ts` | Sets the position, velocity or torque target of a drive. **A drive that is enabled moves.** |
 | `run-procedure.ts` | Lists the procedures of a device, describes one with `--describe`, or runs one by name with its parameters as `name=value`. Ctrl-C cancels the run. |
 | `device-locate.ts` | Blinks the LEDs of a device. Only SPoE offers the procedure. |
+| `notifications.ts` | Prints the notifications of the server until Ctrl-C, or `--count` of them. It opens no fieldbus driver. |
 | `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`, prints it as a table, and saves every cycle as CSV in `files/`. **The motor turns.** |
 
 Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another.
@@ -244,15 +245,15 @@ The section "Monitoring WebSocket" in the description of the OpenAPI specificati
 
 ## Notifications
 
-The server sends events, such as a short working counter on the bus, as notifications. One listener receives every kind of event:
+The server sends events, such as a short working counter on the bus, as notifications. One subscription receives every kind of event, also a kind that a later server adds:
 
 ```ts
-const stop = client.ws.onNotification((data) => {
-  console.log(data)
-})
+for await (const data of client.notifications()) {
+  console.log(data.event, data);
+}
 ```
 
-The `event` field of `data` gives the kind of event.
+The `event` field of `data` gives the kind of event. Leaving the loop unsubscribes. To get each notification in a callback instead, use `client.ws.onNotification(listener)`, which returns the function that unsubscribes.
 
 ## The WebSocket connection
 

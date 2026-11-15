@@ -215,6 +215,9 @@ class ProcessDataDumpError(Exception):
     """The server could not produce a process-data dump. The message is the server's reason."""
 
 
+# The one topic that every notification source of the server publishes to.
+NOTIFICATION_TOPIC = "notifications"
+
 # A flag bit of a .mmpd file, at byte 6: the dump is of a span, and the server no longer held every
 # cycle right after its start. A re-map, a reset or a scan discarded some, or the ring overwrote
 # them. The rows are all in the span, but the first one is later than the span asked for.
@@ -722,7 +725,7 @@ class MotionMasterClient:
         receives every event, also a kind that a later server adds. data["event"] names the kind.
         The caller stops by breaking out of the loop.
         """
-        for msg in self._subscribe("notifications"):
+        for msg in self._subscribe(NOTIFICATION_TOPIC):
             if msg.get("type") == "notification":
                 yield msg["data"]
 

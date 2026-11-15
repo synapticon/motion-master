@@ -20,6 +20,7 @@ import { type DeviceParameterAddress, parameterTriple } from './parameter-addres
 import { listen } from './stream';
 import {
   type MonitoringBatch,
+  type NotificationData,
   WebSocketConnection,
   type WebSocketConstructor,
 } from './web-socket-connection';
@@ -138,7 +139,7 @@ export class MotionMasterClient {
 
   /**
    * The WebSocket connection: `client.ws.subscribe(topic, cb)`,
-   * `client.ws.onNotification(cb)`, `client.ws.onProgress(cb)`. Connects lazily.
+   * `client.ws.onNotification(cb)`. Connects lazily.
    */
   readonly ws: WebSocketConnection;
 
@@ -490,6 +491,17 @@ export class MotionMasterClient {
         await this.api.cancelProcedure(slavePosition, name).catch(() => {});
       }
     }
+  }
+
+  /**
+   * Subscribes to the notifications topic and yields the data of each notification.
+   *
+   * Every notification source publishes to the one `notifications` topic, so one subscription
+   * receives every event, also a kind that a later server adds. `data.event` names the kind. Leaving
+   * the `for await` loop unsubscribes.
+   */
+  notifications(): AsyncGenerator<NotificationData, void, undefined> {
+    return listen((listener: (data: NotificationData) => void) => this.ws.onNotification(listener));
   }
 
   /**

@@ -10,17 +10,21 @@ type BatchListener = (rows: SampleRows) => void;
 
 interface MonitoringSocketValue {
   readyState: ReadyState;
-  /// Subscribes @p listener to a topic's batches. The first subscriber to a topic sends a
-  /// `subscribe` frame; the last to unsubscribe sends `unsubscribe`. Returns an unsubscribe fn.
+  /**
+   * Subscribes @p listener to a topic's batches. The first subscriber to a topic sends a
+   * `subscribe` frame; the last to unsubscribe sends `unsubscribe`. Returns an unsubscribe fn.
+   */
   subscribe: (topic: string, listener: BatchListener) => () => void;
 }
 
 const MonitoringSocketContext = createContext<MonitoringSocketValue | null>(null);
 
-/// Surfaces the WebSocket of the connection's `MotionMasterClient` to the monitoring cards as
-/// `subscribe` and `readyState`. Reconnection, per-topic subscribe/unsubscribe multiplexing, and
-/// frame routing all live in the client's `WebSocketConnection`. `ConnectionProvider` owns the
-/// client and closes it, so this provider opens the socket and never closes it.
+/**
+ * Surfaces the WebSocket of the connection's `MotionMasterClient` to the monitoring cards as
+ * `subscribe` and `readyState`. Reconnection, per-topic subscribe/unsubscribe multiplexing, and
+ * frame routing all live in the client's `WebSocketConnection`. `ConnectionProvider` owns the
+ * client and closes it, so this provider opens the socket and never closes it.
+ */
 function MonitoringSocketProvider({ children }: { children: ReactNode }) {
   const { ws } = useConnection().client;
 
@@ -55,12 +59,14 @@ export function useMonitoringSocket(): MonitoringSocketValue {
   return ctx;
 }
 
-/// App-level provider. Mount it once at the root (inside `ConnectionProvider`); every page then
-/// shares one socket via `useMonitoringSocket()`. The connection multiplexes topics and ref-counts
-/// subscribe/unsubscribe, so subscriptions survive navigation with no reconnect churn — a live view
-/// starts streaming the moment it subscribes instead of waiting for a fresh socket to open. Keyed on
-/// the WebSocket URL, so changing it on the Connection page remounts the subtree against the new
-/// client.
+/**
+ * App-level provider. Mount it once at the root (inside `ConnectionProvider`); every page then
+ * shares one socket via `useMonitoringSocket()`. The connection multiplexes topics and ref-counts
+ * subscribe/unsubscribe, so subscriptions survive navigation with no reconnect churn — a live view
+ * starts streaming the moment it subscribes instead of waiting for a fresh socket to open. Keyed on
+ * the WebSocket URL, so changing it on the Connection page remounts the subtree against the new
+ * client.
+ */
 export function AppMonitoringSocketProvider({ children }: { children: ReactNode }) {
   const { host, wsPort } = useConnection();
   return (

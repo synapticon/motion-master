@@ -10,8 +10,10 @@ import { btnPrimary, btnOutline } from '../utils/styles';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
 
-/// Where the document on screen came from. It matters to the reader: an exported document describes
-/// the bus in front of them, a loaded one describes somebody else's.
+/**
+ * Where the document on screen came from. It matters to the reader: an exported document describes
+ * the bus in front of them, a loaded one describes somebody else's.
+ */
 type Source = { kind: 'export'; warnings: number } | { kind: 'file'; filename: string };
 
 export default function ToolsEniPage() {
@@ -25,8 +27,10 @@ export default function ToolsEniPage() {
   const [showSource, setShowSource] = useState(false);
   const supportsEsc = useSupportsEsc();
 
-  /// Parses a document and shows it. The same view serves both sources, because what a reader wants
-  /// to know about a document does not depend on who wrote it.
+  /**
+   * Parses a document and shows it. The same view serves both sources, because what a reader wants
+   * to know about a document does not depend on who wrote it.
+   */
   async function show(document: string, from: Source) {
     setParsed(await parseEni(api.baseUrl, document));
     setXml(document);

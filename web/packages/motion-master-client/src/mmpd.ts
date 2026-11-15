@@ -17,22 +17,22 @@
 const MAGIC = 0x4450_4d4d; // 'MMPD' as a little-endian u32 ('M','M','P','D')
 const SUPPORTED_FORMAT_VERSIONS = [1, 2];
 
-/// One PDO-mapped object recorded in the dump header.
+/** One PDO-mapped object recorded in the dump header. */
 export interface MmpdPdoEntry {
   index: number;
   subindex: number;
-  /// True for an RxPDO output (master→slave), false for a TxPDO input (slave→master).
+  /** True for an RxPDO output (master→slave), false for a TxPDO input (slave→master). */
   isOutput: boolean;
-  /// ETG.1020 data-type code, or 0 when the object dictionary was not enumerated (undecodable).
+  /** ETG.1020 data-type code, or 0 when the object dictionary was not enumerated (undecodable). */
   dataType: number;
   bitLength: number;
-  /// Absolute bit offset within its direction's image.
+  /** Absolute bit offset within its direction's image. */
   bitOffset: number;
-  /// Object name, or empty when the OD was not enumerated.
+  /** Object name, or empty when the OD was not enumerated. */
   name: string;
 }
 
-/// One device's identity and the PDO objects it contributes to the image.
+/** One device's identity and the PDO objects it contributes to the image. */
 export interface MmpdDevice {
   slavePosition: number;
   vendorId: number;
@@ -43,31 +43,35 @@ export interface MmpdDevice {
   entries: MmpdPdoEntry[];
 }
 
-/// A flag bit of `MmpdHeader.flags`: the dump is of a span, and the server no longer held every
-/// cycle right after its start. A re-map, a reset or a scan discarded some, or the ring overwrote
-/// them. The rows are all in the span, but the first one is later than the span asked for.
+/**
+ * A flag bit of `MmpdHeader.flags`: the dump is of a span, and the server no longer held every
+ * cycle right after its start. A re-map, a reset or a scan discarded some, or the ring overwrote
+ * them. The rows are all in the span, but the first one is later than the span asked for.
+ */
 export const MMPD_FLAG_INCOMPLETE_START = 0x0001;
 
-/// The embedded process-image header — everything needed to decode the rows offline.
+/** The embedded process-image header — everything needed to decode the rows offline. */
 export interface MmpdHeader {
   formatVersion: number;
-  /// `MMPD_FLAG_*` bits.
+  /** `MMPD_FLAG_*` bits. */
   flags: number;
-  /// Sequence number of the first row (oldest cycle in the span).
+  /** Sequence number of the first row (oldest cycle in the span). */
   startSequence: bigint;
-  /// Number of rows in the file.
+  /** Number of rows in the file. */
   rowCount: number;
-  /// The start of the span the dump asked for, in epoch nanoseconds, or `null` when it asked for
-  /// none, or the file is version 1.
+  /**
+   * The start of the span the dump asked for, in epoch nanoseconds, or `null` when it asked for
+   * none, or the file is version 1.
+   */
   spanFromNs: bigint | null;
-  /// The end of the span the dump asked for, in epoch nanoseconds, or `null` when it is open.
+  /** The end of the span the dump asked for, in epoch nanoseconds, or `null` when it is open. */
   spanToNs: bigint | null;
   inputBytes: number;
   outputBytes: number;
   devices: MmpdDevice[];
 }
 
-/// One recorded cycle. `inputs`/`outputs` are views into the source buffer (no copy).
+/** One recorded cycle. `inputs`/`outputs` are views into the source buffer (no copy). */
 export interface MmpdRow {
   sequence: bigint;
   timestampNs: bigint;
@@ -113,14 +117,16 @@ class Cursor {
   }
 }
 
-/// A parsed `.mmpd` dump. The header is read eagerly; row values are decoded on demand so a
-/// large file (a deep recorder ring) is not fully materialised up front.
+/**
+ * A parsed `.mmpd` dump. The header is read eagerly; row values are decoded on demand so a
+ * large file (a deep recorder ring) is not fully materialised up front.
+ */
 export class MmpdFile {
   constructor(
     readonly header: MmpdHeader,
     private readonly u8: Uint8Array,
     private readonly dv: DataView,
-    /// Byte offset of the first row within the buffer.
+    /** Byte offset of the first row within the buffer. */
     private readonly rowsStart: number,
   ) {}
 
@@ -128,12 +134,15 @@ export class MmpdFile {
     return this.header.rowCount;
   }
 
-  /// Per-row byte stride: u64 sequence + u64 timestampNs + inputs + outputs.
+  /** Per-row byte stride: u64 sequence + u64 timestampNs + inputs + outputs. */
   get rowStride(): number {
     return 16 + this.header.inputBytes + this.header.outputBytes;
   }
 
-  /// The raw record at row `i` (views into the source buffer; do not retain past the buffer's life).
+  /**
+   * The raw record at row `i` (views into the source buffer; do not retain past the buffer's
+   * life).
+   */
   rowAt(i: number): MmpdRow {
     const base = this.rowsStart + i * this.rowStride;
     const inputsAt = base + 16;
@@ -146,8 +155,10 @@ export class MmpdFile {
     };
   }
 
-  /// Epoch microseconds for every row (JS-exact in a Number until ~year 2255, matching the live
-  /// monitoring protocol). Sub-microsecond nanoseconds are dropped.
+  /**
+   * Epoch microseconds for every row (JS-exact in a Number until ~year 2255, matching the live
+   * monitoring protocol). Sub-microsecond nanoseconds are dropped.
+   */
   timestampsUs(): Float64Array {
     const out = new Float64Array(this.header.rowCount);
     for (let i = 0; i < out.length; i++) {
@@ -156,9 +167,11 @@ export class MmpdFile {
     return out;
   }
 
-  /// Decodes one entry's value for every row. Numeric types yield numbers (64-bit ints are coerced
-  /// to Number, lossy beyond 2^53); strings, undecodable (dataType 0), and unsupported types yield
-  /// null — so the result is always plottable.
+  /**
+   * Decodes one entry's value for every row. Numeric types yield numbers (64-bit ints are coerced
+   * to Number, lossy beyond 2^53); strings, undecodable (dataType 0), and unsupported types yield
+   * null — so the result is always plottable.
+   */
   decodeSeries(entry: MmpdPdoEntry): (number | null)[] {
     const out: (number | null)[] = new Array(this.header.rowCount);
     const reader = numericReader(entry.dataType);
@@ -190,8 +203,10 @@ export class MmpdFile {
   }
 }
 
-/// Parses a `.mmpd` dump. Throws on a bad magic or an unsupported format version. A file whose row
-/// region is shorter than `rowCount` implies (truncated transfer) is clamped to the rows present.
+/**
+ * Parses a `.mmpd` dump. Throws on a bad magic or an unsupported format version. A file whose row
+ * region is shorter than `rowCount` implies (truncated transfer) is clamped to the rows present.
+ */
 export function parseMmpd(data: ArrayBuffer | Uint8Array): MmpdFile {
   const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
@@ -329,11 +344,13 @@ function numericReader(dataType: number): ScalarReader | null {
   }
 }
 
-/// Fetches the live recorder dump (`GET /api/process-data/dump`) and parses it. `baseUrl` is the
-/// HTTP API origin (e.g. `https://host:61447`). `from` and `to` limit the dump to a span, in epoch
-/// microseconds of the server clock, both included: take them from `GET /api/process-data/mark`.
-/// Throws on a non-OK response (the response body's `error` message when present). Pass `fetch`
-/// to inject an implementation (Node, request logging).
+/**
+ * Fetches the live recorder dump (`GET /api/process-data/dump`) and parses it. `baseUrl` is the
+ * HTTP API origin (e.g. `https://host:61447`). `from` and `to` limit the dump to a span, in epoch
+ * microseconds of the server clock, both included: take them from `GET /api/process-data/mark`.
+ * Throws on a non-OK response (the response body's `error` message when present). Pass `fetch`
+ * to inject an implementation (Node, request logging).
+ */
 export async function fetchProcessDataDump(
   baseUrl: string,
   options: { fetch?: typeof fetch; signal?: AbortSignal; from?: number; to?: number } = {},
@@ -366,8 +383,10 @@ export async function fetchProcessDataDump(
   return parseMmpd(await res.arrayBuffer());
 }
 
-/// Extracts `bitLength` bits starting at `bitOffset` from `src`, returning them LSB-aligned and
-/// little-endian (padded to a byte boundary). Mirrors `extractBits` in libs/node/process_image.cc.
+/**
+ * Extracts `bitLength` bits starting at `bitOffset` from `src`, returning them LSB-aligned and
+ * little-endian (padded to a byte boundary). Mirrors `extractBits` in libs/node/process_image.cc.
+ */
 export function extractBits(src: Uint8Array, bitOffset: number, bitLength: number): Uint8Array {
   const out = new Uint8Array((bitLength + 7) >> 3);
   if (bitOffset % 8 === 0 && bitLength % 8 === 0) {
@@ -389,11 +408,13 @@ export function extractBits(src: Uint8Array, bitOffset: number, bitLength: numbe
   return out;
 }
 
-/// Decodes LSB-aligned little-endian `bytes` (as produced by `extractBits`) for the given ETG.1020
-/// `dataType`. Returns a number for fixed-width numerics, a bigint for 64-bit integers, a string
-/// for VISIBLE/UNICODE strings (trailing NULs/spaces stripped), or null when the type is unknown
-/// (dataType 0) or there are too few bytes. Unmapped codes fall back to an unsigned read of the
-/// available bytes (covers BITn fields).
+/**
+ * Decodes LSB-aligned little-endian `bytes` (as produced by `extractBits`) for the given ETG.1020
+ * `dataType`. Returns a number for fixed-width numerics, a bigint for 64-bit integers, a string
+ * for VISIBLE/UNICODE strings (trailing NULs/spaces stripped), or null when the type is unknown
+ * (dataType 0) or there are too few bytes. Unmapped codes fall back to an unsigned read of the
+ * available bytes (covers BITn fields).
+ */
 export function decodeMmpdValue(
   dataType: number,
   bytes: Uint8Array,
@@ -452,9 +473,11 @@ export function decodeMmpdValue(
   }
 }
 
-/// Whether `decodeSeries` yields plottable numbers for this ETG.1020 data-type code — a
-/// fixed-width integer/real or a bit field, but not a string, struct, or unenumerated type
-/// (dataType 0). Useful for offering only chartable objects in a UI.
+/**
+ * Whether `decodeSeries` yields plottable numbers for this ETG.1020 data-type code — a
+ * fixed-width integer/real or a bit field, but not a string, struct, or unenumerated type
+ * (dataType 0). Useful for offering only chartable objects in a UI.
+ */
 export function isPlottableDataType(dataType: number): boolean {
   return numericReader(dataType) !== null || (dataType >= 0x0030 && dataType <= 0x003f);
 }

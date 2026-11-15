@@ -57,13 +57,15 @@ export const SAMPLE_INDEX: XAxis = {
   ticks: (splits) => splits.map((v) => v.toLocaleString()),
 };
 
-/// Thin uPlot wrapper for a live time-series. Re-creates the plot when the series set changes and
-/// pushes new data via setData otherwise — so streaming updates never tear down the canvas.
-///
-/// The rebuild is keyed on the *content* of @p labels / @p titles, not their array identity, so a
-/// caller may pass a freshly-built array every render (the natural thing when projecting streamed
-/// data). Keying on reference instead would rebuild the canvas on every batch (~60×/s), collapsing
-/// the chart to zero height and yanking the page scroll back to the top.
+/**
+ * Thin uPlot wrapper for a live time-series. Re-creates the plot when the series set changes and
+ * pushes new data via setData otherwise — so streaming updates never tear down the canvas.
+ *
+ * The rebuild is keyed on the *content* of @p labels / @p titles, not their array identity, so a
+ * caller may pass a freshly-built array every render (the natural thing when projecting streamed
+ * data). Keying on reference instead would rebuild the canvas on every batch (~60×/s), collapsing
+ * the chart to zero height and yanking the page scroll back to the top.
+ */
 export default function MonitoringChart({
   data,
   labels,

@@ -57,23 +57,29 @@ function writeEndpoint(endpoint: Endpoint): void {
 interface ConnectionContextValue {
   host: string;
   httpPort: string;
-  /// WebSocket port — separate from the HTTP API port, since the backend runs the
-  /// monitoring/control socket on its own port and loop.
+  /**
+   * WebSocket port — separate from the HTTP API port, since the backend runs the
+   * monitoring/control socket on its own port and loop.
+   */
   wsPort: string;
   setHost: (host: string) => void;
   setHttpPort: (httpPort: string) => void;
   setWsPort: (wsPort: string) => void;
-  /// Reset host/httpPort/wsPort back to the built-in defaults (and persist them).
+  /** Reset host/httpPort/wsPort back to the built-in defaults (and persist them). */
   resetEndpoint: () => void;
-  /// The client for the current endpoint. A new endpoint gives a new client, and the old one is
-  /// closed.
+  /**
+   * The client for the current endpoint. A new endpoint gives a new client, and the old one is
+   * closed.
+   */
   client: MotionMasterClient;
-  /// The HTTP API of `client`.
+  /** The HTTP API of `client`. */
   api: Api;
-  /// True while the Motion Master HTTP API is reachable at the current endpoint.
-  /// Driven by a single `useApiHealth` probe here (the sole writer, so it also
-  /// stays the single writer of React Query's onlineManager) and consumed by
-  /// RootLayout (sidebar dot / link gating) and ConnectionPage (offline state).
+  /**
+   * True while the Motion Master HTTP API is reachable at the current endpoint.
+   * Driven by a single `useApiHealth` probe here (the sole writer, so it also
+   * stays the single writer of React Query's onlineManager) and consumed by
+   * RootLayout (sidebar dot / link gating) and ConnectionPage (offline state).
+   */
   online: boolean;
   driver: Driver;
   setDriver: (d: Driver) => void;
@@ -87,14 +93,18 @@ interface ConnectionContextValue {
   setSpoePort: (p: string) => void;
   hasScanned: boolean;
   setHasScanned: (val: boolean) => void;
-  /// True once the fieldbus driver is initialized on the server (after a
-  /// successful init, a 409 "already initialized", or when the on-open probe
-  /// found devices already present). Cleared on reset.
+  /**
+   * True once the fieldbus driver is initialized on the server (after a
+   * successful init, a 409 "already initialized", or when the on-open probe
+   * found devices already present). Cleared on reset.
+   */
   isInitialized: boolean;
   setIsInitialized: (val: boolean) => void;
-  /// True when init() was skipped because the fieldbus was already initialized
-  /// on the server — either a manual init returned 409, or the on-open probe
-  /// (ServerStateProbe) found an already-scanned bus from another instance.
+  /**
+   * True when init() was skipped because the fieldbus was already initialized
+   * on the server — either a manual init returned 409, or the on-open probe
+   * (ServerStateProbe) found an already-scanned bus from another instance.
+   */
   alreadyInitialized: boolean;
   setAlreadyInitialized: (val: boolean) => void;
 }

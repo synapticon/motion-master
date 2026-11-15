@@ -10,13 +10,15 @@
 // `ws` package) can be injected — there is no hard dependency on either, so the package stays
 // usable in both environments.
 
-/// Connection state, mirroring the three states the UI cares about.
+/** Connection state, mirroring the three states the UI cares about. */
 export type ReadyState = 'connecting' | 'open' | 'closed';
 
-/// One published monitoring batch for a topic: rows of `[timestampUs, v0, v1, ...]` — epoch
-/// microseconds followed by one value per parameter (positionally ordered; fetch the order once
-/// from `GET /api/monitorings/{topic}`). A value is `null` when its device was not exchanging at
-/// sample time. The stream is lossless: one row per recorded cycle since the last flush.
+/**
+ * One published monitoring batch for a topic: rows of `[timestampUs, v0, v1, ...]` — epoch
+ * microseconds followed by one value per parameter (positionally ordered; fetch the order once
+ * from `GET /api/monitorings/{topic}`). A value is `null` when its device was not exchanging at
+ * sample time. The stream is lossless: one row per recorded cycle since the last flush.
+ */
 export type MonitoringRow = (number | null)[];
 export type MonitoringBatch = MonitoringRow[];
 
@@ -31,8 +33,10 @@ export interface NotificationMessage {
   data: unknown;
 }
 
-/// Procedure progress — reserved on the server, not yet on the wire. Routed already so callers can
-/// register handlers today and start receiving the moment the backend publishes them.
+/**
+ * Procedure progress — reserved on the server, not yet on the wire. Routed already so callers can
+ * register handlers today and start receiving the moment the backend publishes them.
+ */
 export interface ProgressMessage {
   type: 'progress';
   data: unknown;
@@ -45,19 +49,25 @@ type NotificationListener = (data: unknown) => void;
 type ProgressListener = (data: unknown) => void;
 type StateListener = (state: ReadyState) => void;
 
-/// The numeric `readyState` value a WebSocket reports when it is open. Hard-coded (rather than read
-/// off a global) so the client never depends on a particular `WebSocket` implementation's statics.
+/**
+ * The numeric `readyState` value a WebSocket reports when it is open. Hard-coded (rather than read
+ * off a global) so the client never depends on a particular `WebSocket` implementation's statics.
+ */
 const WS_OPEN = 1;
 
-/// The one topic every server notification is published to. One topic rather than one per event, so
-/// a client subscribes once and keeps receiving events added in a later server version — uWebSockets
-/// matches topic names exactly, with no wildcard, so there is no way to ask for "all of them".
-/// Events are told apart by `data.event`, which is kebab-case.
+/**
+ * The one topic every server notification is published to. One topic rather than one per event, so
+ * a client subscribes once and keeps receiving events added in a later server version — uWebSockets
+ * matches topic names exactly, with no wildcard, so there is no way to ask for "all of them".
+ * Events are told apart by `data.event`, which is kebab-case.
+ */
 export const NOTIFICATION_TOPIC = 'notifications';
 
-/// Minimal structural shape of a WebSocket instance — satisfied by both the browser global and the
-/// Node `ws` package (which implements the same `on*` property setters) — so neither is a hard
-/// dependency.
+/**
+ * Minimal structural shape of a WebSocket instance — satisfied by both the browser global and the
+ * Node `ws` package (which implements the same `on*` property setters) — so neither is a hard
+ * dependency.
+ */
 export interface WebSocketLike {
   readyState: number;
   send(data: string): void;
@@ -71,19 +81,25 @@ export interface WebSocketLike {
 export type WebSocketConstructor = new (url: string, protocolsOrOptions?: unknown) => WebSocketLike;
 
 export interface WebSocketConnectionOptions {
-  /// Full WebSocket URL (e.g. `wss://host:62281`).
+  /** Full WebSocket URL (e.g. `wss://host:62281`). */
   url: string;
-  /// WebSocket implementation. Defaults to the global `WebSocket` (browsers, Node >= 22). In older
-  /// Node, inject the `ws` package's constructor.
+  /**
+   * WebSocket implementation. Defaults to the global `WebSocket` (browsers, Node >= 22). In older
+   * Node, inject the `ws` package's constructor.
+   */
   WebSocket?: WebSocketConstructor;
-  /// Extra argument forwarded as the constructor's second parameter — e.g.
-  /// `{ rejectUnauthorized: false }` for the Node `ws` client against a self-signed dev cert. The
-  /// browser global ignores it.
+  /**
+   * Extra argument forwarded as the constructor's second parameter — e.g.
+   * `{ rejectUnauthorized: false }` for the Node `ws` client against a self-signed dev cert. The
+   * browser global ignores it.
+   */
   protocolsOrOptions?: unknown;
-  /// Base reconnect backoff in ms (doubled each consecutive failure up to `maxReconnectDelayMs`).
-  /// Set to 0 to disable auto-reconnect. Default 1000.
+  /**
+   * Base reconnect backoff in ms (doubled each consecutive failure up to `maxReconnectDelayMs`).
+   * Set to 0 to disable auto-reconnect. Default 1000.
+   */
   reconnectDelayMs?: number;
-  /// Upper bound on the reconnect backoff in ms. Default 15000.
+  /** Upper bound on the reconnect backoff in ms. Default 15000. */
   maxReconnectDelayMs?: number;
 }
 
@@ -117,9 +133,11 @@ export class WebSocketConnection {
     return this.state;
   }
 
-  /// Opens the socket if it is not already open or connecting. Idempotent — safe to call from every
-  /// subscribe path. Connection is lazy: an HTTP-only consumer that never subscribes never opens a
-  /// socket.
+  /**
+   * Opens the socket if it is not already open or connecting. Idempotent — safe to call from every
+   * subscribe path. Connection is lazy: an HTTP-only consumer that never subscribes never opens a
+   * socket.
+   */
   connect(): void {
     if (this.socket || this.state === 'connecting') {
       return;
@@ -164,8 +182,10 @@ export class WebSocketConnection {
     socket.onerror = () => this.handleDisconnect();
   }
 
-  /// Permanently closes the socket and cancels any pending reconnect. Registered listeners are
-  /// kept, so a later `connect()` resumes them.
+  /**
+   * Permanently closes the socket and cancels any pending reconnect. Registered listeners are
+   * kept, so a later `connect()` resumes them.
+   */
   close(): void {
     this.closedByUser = true;
     if (this.reconnectTimer !== null) {
@@ -184,9 +204,11 @@ export class WebSocketConnection {
     this.setState('closed');
   }
 
-  /// Subscribes `listener` to a topic's monitoring batches. The first subscriber to a topic sends a
-  /// `subscribe` frame; the last to leave sends `unsubscribe`. Connects lazily. Returns an
-  /// unsubscribe function.
+  /**
+   * Subscribes `listener` to a topic's monitoring batches. The first subscriber to a topic sends a
+   * `subscribe` frame; the last to leave sends `unsubscribe`. Connects lazily. Returns an
+   * unsubscribe function.
+   */
   subscribe(topic: string, listener: MonitoringListener): () => void {
     let listeners = this.topicListeners.get(topic);
     if (!listeners) {
@@ -210,10 +232,12 @@ export class WebSocketConnection {
     };
   }
 
-  /// Registers a listener for server notifications (e.g. `{ event: 'short-working-counter' }`). Every
-  /// notification arrives on one topic, so the first listener subscribes and the last to leave
-  /// unsubscribes — the same ref-counting `subscribe` uses. Connects lazily. Returns a removal
-  /// function.
+  /**
+   * Registers a listener for server notifications (e.g. `{ event: 'short-working-counter' }`).
+   * Every notification arrives on one topic, so the first listener subscribes and the last to
+   * leave unsubscribes — the same ref-counting `subscribe` uses. Connects lazily. Returns a
+   * removal function.
+   */
   onNotification(listener: NotificationListener): () => void {
     if (this.notificationListeners.size === 0) {
       this.send({ subscribe: NOTIFICATION_TOPIC });
@@ -228,8 +252,10 @@ export class WebSocketConnection {
     };
   }
 
-  /// Registers a listener for procedure progress messages (reserved; fires once the backend ships
-  /// them). Connects lazily. Returns a removal function.
+  /**
+   * Registers a listener for procedure progress messages (reserved; fires once the backend ships
+   * them). Connects lazily. Returns a removal function.
+   */
   onProgress(listener: ProgressListener): () => void {
     this.progressListeners.add(listener);
     this.connect();
@@ -238,7 +264,7 @@ export class WebSocketConnection {
     };
   }
 
-  /// Observes connection-state changes. Returns a removal function.
+  /** Observes connection-state changes. Returns a removal function. */
   onStateChange(listener: StateListener): () => void {
     this.stateListeners.add(listener);
     return () => {

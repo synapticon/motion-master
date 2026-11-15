@@ -1,0 +1,8 @@
+# Commits that change only the layout. git blame skips them when it reads this file:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub reads it without any setting.
+
+# style(web): format every TypeScript and JavaScript file with Prettier
+7d59d4427a184f67340b9e406a0bb2620a370e29
+# style(web): write every doc comment as /** */
+b54188ff6e75677c5d33fc186d9cdf3f7ee64dd0

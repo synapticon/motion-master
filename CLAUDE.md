@@ -133,8 +133,8 @@ More workflows:
   to `/opt/motion-master/`. Certs are marked as config files so an upgrade never
   overwrites them. Two more jobs publish the clients, to npm and to PyPI, both with trusted
   publishing and no stored token.
-- **`lint.yml`** — clang-format, cpplint, cppcheck, the API client drift check, and the
-  Python client example.
+- **`lint.yml`** — clang-format, cpplint, cppcheck, the API client drift check, Prettier and
+  ESLint for the TypeScript and JavaScript files, and the Python client example.
 - **`client-package.yml`** — packs `@synapticon/motion-master-client`, installs the tarball in
   an empty project, and loads it with `import` and `require()`. The workspace links the client's
   TypeScript source, so this is the only check of what npm users get. A second job builds the
@@ -1359,6 +1359,38 @@ One sanctioned exception, not a template: `DeviceParameter::getValue<T>()`, beca
 `value()` would collide with the data member. `HttpServer::Config`'s `std::function` members are
 named as actions matching their HTTP verb, because a callback field is an action, not a
 property.
+
+### TypeScript and JavaScript
+
+**One style for every TypeScript and JavaScript file, set by tools.** Prettier sets the layout:
+semicolons, single quotes, a 2-space indent, 100 columns, and a trailing comma wherever the syntax
+allows one (`.prettierrc.json`). ESLint checks what a formatter cannot (`eslint.config.mjs`): the
+recommended rules of ESLint and typescript-eslint, braces on every `if` (`curly: all`), `===`
+except in `x == null`, no promise that nobody awaits, and the rules of React hooks. The
+`web-style` job in `lint.yml` fails on a file that Prettier would change and on any ESLint finding.
+
+```bash
+pnpm format        # format every file
+pnpm format:check  # what CI runs
+pnpm lint          # ESLint
+```
+
+- **Fix an ESLint finding. Suppress one only when the rule cannot see a fact that the code relies
+  on**, with `// eslint-disable-next-line <rule>` on its own line and the reason in the comment
+  above it.
+- **Write a doc comment as `/** */`**, never `///`. An editor shows only `/** */` in its hover help.
+- **Mark a promise that nobody awaits with `void`**, and only when the async function handles its
+  own errors.
+- **Prettier writes hex digits in lowercase**, such as `0x1b00`, and has no setting for it. The
+  C++ code keeps capitals.
+- **Prettier leaves the generated files alone** (`.prettierignore`): the API client in
+  `src/generated/` and `objects.ts`. Their checks compare them with the generator's output, so a
+  reformat would fail those checks.
+- **A commit that only changes the layout goes into `.git-blame-ignore-revs`**, with its full
+  hash, so that `git blame` skips it. The hash survives only a merge commit, not a squash or a
+  rebase.
+- **The tool versions are pinned exactly** in the root `package.json`, because a new version can
+  change the output.
 
 ## Static Analysis
 

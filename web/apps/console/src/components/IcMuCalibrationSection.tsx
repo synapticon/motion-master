@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   apiErrorMessage,
   type EncoderConfiguration,
@@ -9,40 +9,40 @@ import {
   type IcMuCalibrationValidation,
   type ProcedureSnapshot,
   type ProgressStep,
-} from '@synapticon/motion-master-client'
-import Callout from './Callout'
-import Checkbox from './Checkbox'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline, btnPrimary } from '../utils/styles'
+} from '@synapticon/motion-master-client';
+import Callout from './Callout';
+import Checkbox from './Checkbox';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline, btnPrimary } from '../utils/styles';
 
-const PROCEDURE = 'ic-mu-calibration'
+const PROCEDURE = 'ic-mu-calibration';
 
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 const BAND_CLASS: Record<IcMuCalibrationValidation['marginBand'], string> = {
   robust: 'text-status-good',
   'small-displacements': 'text-status-info',
   'avoid-displacements': 'text-status-warn',
   'too-high': 'text-status-bad',
-}
+};
 
 const STEP_DOT: Record<ProgressStep['status'], string> = {
   idle: 'bg-grey-300',
   running: 'bg-ocean',
   succeeded: 'bg-green-600',
   failed: 'bg-syn-red',
-}
+};
 
 function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find(step => step.id === id)?.value as T | undefined
+  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
 }
 
 // The iterations a run has finished, in order.
 function iterations(snapshot: ProcedureSnapshot): IcMuCalibrationIteration[] {
   return snapshot.steps
-    .filter(step => step.id.startsWith('iteration-') && step.status === 'succeeded')
-    .map(step => step.value as IcMuCalibrationIteration)
+    .filter((step) => step.id.startsWith('iteration-') && step.status === 'succeeded')
+    .map((step) => step.value as IcMuCalibrationIteration);
 }
 
 /**
@@ -54,24 +54,24 @@ export default function IcMuCalibrationSection({
   encoder,
   busy,
 }: {
-  slavePosition: number
-  encoder: EncoderConfiguration
-  busy: boolean
+  slavePosition: number;
+  encoder: EncoderConfiguration;
+  busy: boolean;
 }) {
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
-  const [health, setHealth] = useState(false)
-  const [ringPosition, setRingPosition] = useState<'inner' | 'outer'>('inner')
-  const external = encoder.sensorPort >= 3
-  const key = ['procedure', slavePosition, PROCEDURE]
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
+  const [health, setHealth] = useState(false);
+  const [ringPosition, setRingPosition] = useState<'inner' | 'outer'>('inner');
+  const external = encoder.sensorPort >= 3;
+  const key = ['procedure', slavePosition, PROCEDURE];
 
   const snapshotQuery = useQuery({
     queryKey: key,
-    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then(r => r.data),
-    refetchInterval: query => (query.state.data?.status === 'running' ? 500 : false),
+    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then((r) => r.data),
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 500 : false),
     refetchIntervalInBackground: true,
     retry: false,
-  })
+  });
   const start = useMutation({
     mutationFn: (measurementOnly: boolean) =>
       api.startProcedure(slavePosition, PROCEDURE, {
@@ -81,17 +81,18 @@ export default function IcMuCalibrationSection({
         ...(external ? { ringPosition } : {}),
       }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
-  })
+  });
   const cancel = useMutation({
     mutationFn: () => api.cancelProcedure(slavePosition, PROCEDURE),
     onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
-  })
+  });
 
-  const snapshot = snapshotQuery.data
-  const plan = stepValue<IcMuCalibrationPlan>(snapshot, 'validate')
+  const snapshot = snapshotQuery.data;
+  const plan = stepValue<IcMuCalibrationPlan>(snapshot, 'validate');
   // A run of another encoder is shown on that encoder's card, not here.
-  const mine = snapshot && snapshot.status !== 'idle' && plan?.encoderOrdinal === encoder.encoderOrdinal
-  const running = snapshot?.status === 'running'
+  const mine =
+    snapshot && snapshot.status !== 'idle' && plan?.encoderOrdinal === encoder.encoderOrdinal;
+  const running = snapshot?.status === 'running';
 
   return (
     <div className="px-5 py-4 border-t border-grey-100 space-y-4">
@@ -114,7 +115,7 @@ export default function IcMuCalibrationSection({
               id={`ring-${encoder.encoderOrdinal}`}
               className={inputCls}
               value={ringPosition}
-              onChange={event => setRingPosition(event.target.value as 'inner' | 'outer')}
+              onChange={(event) => setRingPosition(event.target.value as 'inner' | 'outer')}
             >
               <option value="inner">Inner</option>
               <option value="outer">Outer</option>
@@ -156,31 +157,35 @@ export default function IcMuCalibrationSection({
 
       {mine && snapshot && <CalibrationRun snapshot={snapshot} plan={plan} />}
     </div>
-  )
+  );
 }
 
 function CalibrationRun({
   snapshot,
   plan,
 }: {
-  snapshot: ProcedureSnapshot
-  plan: IcMuCalibrationPlan | undefined
+  snapshot: ProcedureSnapshot;
+  plan: IcMuCalibrationPlan | undefined;
 }) {
-  const done = iterations(snapshot)
-  const validation = stepValue<IcMuCalibrationValidation>(snapshot, 'validation')
-  const failed = snapshot.steps.find(step => step.status === 'failed')
+  const done = iterations(snapshot);
+  const validation = stepValue<IcMuCalibrationValidation>(snapshot, 'validation');
+  const failed = snapshot.steps.find((step) => step.status === 'failed');
   const warnings = [
     ...(plan?.warnings ?? []),
-    ...done.flatMap(i => (i.warning ? [i.warning] : [])),
+    ...done.flatMap((i) => (i.warning ? [i.warning] : [])),
     ...(validation?.commutationWarning ? [validation.commutationWarning] : []),
-  ]
-  const curves: Curve[] = []
+  ];
+  const curves: Curve[] = [];
   if (done.length > 0) {
-    curves.push({ label: 'Iteration 1', color: CURVE_COLOR.first, points: done[0].phaseError })
+    curves.push({ label: 'Iteration 1', color: CURVE_COLOR.first, points: done[0].phaseError });
   }
   if (done.length > 1) {
-    const last = done[done.length - 1]
-    curves.push({ label: `Iteration ${last.iteration}`, color: CURVE_COLOR.latest, points: last.phaseError })
+    const last = done[done.length - 1];
+    curves.push({
+      label: `Iteration ${last.iteration}`,
+      color: CURVE_COLOR.latest,
+      points: last.phaseError,
+    });
   }
   if (validation) {
     curves.push({
@@ -188,9 +193,9 @@ function CalibrationRun({
       color: CURVE_COLOR.validation,
       points: validation.phaseMargin,
       worst: validation.marginPercent,
-    })
+    });
   }
-  const limit = validation?.phaseRangeLimit ?? done[0]?.phaseRangeLimit
+  const limit = validation?.phaseRangeLimit ?? done[0]?.phaseRangeLimit;
 
   return (
     <div className="space-y-3">
@@ -201,23 +206,24 @@ function CalibrationRun({
             `${plan.velocityRpm.toFixed(2)} rpm on the driving shaft for ${plan.recordingMs / 1000} s`}
       </p>
       {failed?.error && <Callout variant="error">{failed.error}</Callout>}
-      {warnings.map(w => (
+      {warnings.map((w) => (
         <Callout key={w} variant="warning">
           {w}
         </Callout>
       ))}
       {validation && (
         <p className={`text-sm ${BAND_CLASS[validation.marginBand]}`}>
-          Margin {validation.marginPercent.toFixed(1)} % (lower {validation.lowerMarginPercent.toFixed(1)} %,
-          upper {validation.upperMarginPercent.toFixed(1)} %). {validation.marginMessage}
+          Margin {validation.marginPercent.toFixed(1)} % (lower{' '}
+          {validation.lowerMarginPercent.toFixed(1)} %, upper{' '}
+          {validation.upperMarginPercent.toFixed(1)} %). {validation.marginMessage}
         </p>
       )}
       {curves.length > 0 && limit !== undefined && <PhasePlot curves={curves} limit={limit} />}
       <table className="w-full text-xs">
         <tbody>
           {snapshot.steps
-            .filter(step => step.status !== 'idle')
-            .map(step => (
+            .filter((step) => step.status !== 'idle')
+            .map((step) => (
               <tr key={step.id} className="border-b border-grey-100 last:border-0 align-top">
                 <td className="py-1.5 w-5">
                   <span
@@ -234,47 +240,47 @@ function CalibrationRun({
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 // One line per iteration: which track passed at which tolerance.
 function iterationSummary(step: ProgressStep): string {
   if (!step.id.startsWith('iteration-') || step.status !== 'succeeded') {
-    return step.error ?? ''
+    return step.error ?? '';
   }
-  const value = step.value as IcMuCalibrationIteration
-  const track = (name: string, passed: boolean) => `${name} ${passed ? 'passed' : 'corrected'}`
+  const value = step.value as IcMuCalibrationIteration;
+  const track = (name: string, passed: boolean) => `${name} ${passed ? 'passed' : 'corrected'}`;
   return `tolerance ${value.tolerance} · ${track('master', value.master.passed)} · ${track(
     'nonius',
     value.nonius.passed,
-  )} · ${value.recordedRevolutions.toFixed(2)} ring turns`
+  )} · ${value.recordedRevolutions.toFixed(2)} ring turns`;
 }
 
 interface Curve {
-  label: string
-  color: string
-  points: IcMuCalibrationCurve
+  label: string;
+  color: string;
+  points: IcMuCalibrationCurve;
   /** The margin at the worst point, marked on the curve. Only the validation has one. */
-  worst?: number
+  worst?: number;
 }
 
 // Checked with the dataviz palette validator on the light surface: ocean and orange pass every check
 // (CVD ΔE 14.7, normal-vision ΔE 29.5). Iteration 1 is context, so it stays neutral. Red is kept for
 // the permissible error and used for nothing else.
-const CURVE_COLOR = { first: '#a9a9a9', latest: '#00849b', validation: '#eb6834' } as const
-const LIMIT_COLOR = '#8c072f'
+const CURVE_COLOR = { first: '#a9a9a9', latest: '#00849b', validation: '#eb6834' } as const;
+const LIMIT_COLOR = '#8c072f';
 
-const PLOT = { width: 760, height: 280, left: 48, right: 16, top: 12, bottom: 28 } as const
+const PLOT = { width: 760, height: 280, left: 48, right: 16, top: 12, bottom: 28 } as const;
 
 // The value nearest @p angle on a curve, for the hover readout.
 function nearest(points: IcMuCalibrationCurve, angle: number): number[] | undefined {
-  let best: number[] | undefined
+  let best: number[] | undefined;
   for (const point of points) {
     if (!best || Math.abs(point[0] - angle) < Math.abs(best[0] - angle)) {
-      best = point
+      best = point;
     }
   }
-  return best
+  return best;
 }
 
 /**
@@ -282,31 +288,34 @@ function nearest(points: IcMuCalibrationCurve, angle: number): number[] | undefi
  * is the one the run is judged by: its worst point sets the margin.
  */
 function PhasePlot({ curves, limit }: { curves: Curve[]; limit: number }) {
-  const [hover, setHover] = useState<number | null>(null)
-  const plotWidth = PLOT.width - PLOT.left - PLOT.right
-  const plotHeight = PLOT.height - PLOT.top - PLOT.bottom
-  const extreme = Math.max(limit, ...curves.flatMap(c => c.points.map(p => Math.abs(p[1]))))
-  const range = Math.ceil((extreme * 1.1) / 64) * 64
-  const x = (angle: number) => PLOT.left + (angle / 360) * plotWidth
-  const y = (value: number) => PLOT.top + plotHeight / 2 - (value / range) * (plotHeight / 2)
+  const [hover, setHover] = useState<number | null>(null);
+  const plotWidth = PLOT.width - PLOT.left - PLOT.right;
+  const plotHeight = PLOT.height - PLOT.top - PLOT.bottom;
+  const extreme = Math.max(limit, ...curves.flatMap((c) => c.points.map((p) => Math.abs(p[1]))));
+  const range = Math.ceil((extreme * 1.1) / 64) * 64;
+  const x = (angle: number) => PLOT.left + (angle / 360) * plotWidth;
+  const y = (value: number) => PLOT.top + plotHeight / 2 - (value / range) * (plotHeight / 2);
   const valueTicks = [-range, -limit, 0, limit, range].filter(
     (v, i, all) => all.indexOf(v) === i && Math.abs(v) <= range,
-  )
+  );
   const path = (points: IcMuCalibrationCurve) =>
     [...points]
       .sort((a, b) => a[0] - b[0])
-      .map(([angle, value], i) => `${i === 0 ? 'M' : 'L'}${x(angle).toFixed(1)},${y(value).toFixed(1)}`)
-      .join('')
-  const validation = curves.find(c => c.worst !== undefined)
+      .map(
+        ([angle, value], i) =>
+          `${i === 0 ? 'M' : 'L'}${x(angle).toFixed(1)},${y(value).toFixed(1)}`,
+      )
+      .join('');
+  const validation = curves.find((c) => c.worst !== undefined);
   const worstPoint = validation?.points.reduce(
     (worst, p) => (Math.abs(p[1]) > Math.abs(worst[1]) ? p : worst),
     validation.points[0],
-  )
+  );
 
   return (
     <figure className="max-w-4xl">
       <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2 text-xs text-grey-800">
-        {curves.map(curve => (
+        {curves.map((curve) => (
           <span key={curve.label} className="inline-flex items-center gap-1.5">
             <span className="inline-block h-0.5 w-4" style={{ background: curve.color }} />
             {curve.label}
@@ -321,26 +330,52 @@ function PhasePlot({ curves, limit }: { curves: Curve[]; limit: number }) {
       <svg
         viewBox={`0 0 ${PLOT.width} ${PLOT.height}`}
         className="w-full bg-white border border-grey-200 cursor-crosshair"
-        onMouseMove={event => {
-          const box = event.currentTarget.getBoundingClientRect()
-          const svgX = ((event.clientX - box.left) / box.width) * PLOT.width
-          const angle = ((svgX - PLOT.left) / plotWidth) * 360
-          setHover(angle >= 0 && angle <= 360 ? angle : null)
+        onMouseMove={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          const svgX = ((event.clientX - box.left) / box.width) * PLOT.width;
+          const angle = ((svgX - PLOT.left) / plotWidth) * 360;
+          setHover(angle >= 0 && angle <= 360 ? angle : null);
         }}
         onMouseLeave={() => setHover(null)}
       >
         {/* Beyond the permissible error, a light wash; inside it, the plain surface. */}
-        <rect x={PLOT.left} y={PLOT.top} width={plotWidth} height={y(limit) - PLOT.top} fill={LIMIT_COLOR} opacity={0.1} />
-        <rect x={PLOT.left} y={y(-limit)} width={plotWidth} height={PLOT.top + plotHeight - y(-limit)} fill={LIMIT_COLOR} opacity={0.1} />
-        {[0, 90, 180, 270, 360].map(angle => (
+        <rect
+          x={PLOT.left}
+          y={PLOT.top}
+          width={plotWidth}
+          height={y(limit) - PLOT.top}
+          fill={LIMIT_COLOR}
+          opacity={0.1}
+        />
+        <rect
+          x={PLOT.left}
+          y={y(-limit)}
+          width={plotWidth}
+          height={PLOT.top + plotHeight - y(-limit)}
+          fill={LIMIT_COLOR}
+          opacity={0.1}
+        />
+        {[0, 90, 180, 270, 360].map((angle) => (
           <g key={angle}>
-            <line x1={x(angle)} x2={x(angle)} y1={PLOT.top} y2={PLOT.top + plotHeight} stroke="#eeeeee" strokeWidth={1} />
-            <text x={x(angle)} y={PLOT.height - 8} textAnchor="middle" className="fill-grey-700 text-[11px]">
+            <line
+              x1={x(angle)}
+              x2={x(angle)}
+              y1={PLOT.top}
+              y2={PLOT.top + plotHeight}
+              stroke="#eeeeee"
+              strokeWidth={1}
+            />
+            <text
+              x={x(angle)}
+              y={PLOT.height - 8}
+              textAnchor="middle"
+              className="fill-grey-700 text-[11px]"
+            >
               {angle}°
             </text>
           </g>
         ))}
-        {valueTicks.map(value => (
+        {valueTicks.map((value) => (
           <g key={value}>
             <line
               x1={PLOT.left}
@@ -350,12 +385,17 @@ function PhasePlot({ curves, limit }: { curves: Curve[]; limit: number }) {
               stroke={Math.abs(value) === limit ? LIMIT_COLOR : '#eeeeee'}
               strokeWidth={1}
             />
-            <text x={PLOT.left - 6} y={y(value) + 4} textAnchor="end" className="fill-grey-700 text-[11px]">
+            <text
+              x={PLOT.left - 6}
+              y={y(value) + 4}
+              textAnchor="end"
+              className="fill-grey-700 text-[11px]"
+            >
               {value}
             </text>
           </g>
         ))}
-        {curves.map(curve => (
+        {curves.map((curve) => (
           <path
             key={curve.label}
             d={path(curve.points)}
@@ -366,24 +406,32 @@ function PhasePlot({ curves, limit }: { curves: Curve[]; limit: number }) {
             strokeLinecap="round"
           />
         ))}
-        {validation && worstPoint && (
+        {validation &&
+          worstPoint &&
           // The margin is the headroom between the worst point and the limit on its side, so the
           // bracket draws exactly that distance.
           (() => {
-            const px = x(worstPoint[0])
-            const py = y(worstPoint[1])
-            const ly = y(worstPoint[1] >= 0 ? limit : -limit)
-            const midY = (py + ly) / 2
-            const left = worstPoint[0] > 300
-            const label = `${validation.worst?.toFixed(1)} % margin`
-            const labelWidth = label.length * 6.4 + 12
-            const labelX = left ? px - 10 - labelWidth : px + 10
+            const px = x(worstPoint[0]);
+            const py = y(worstPoint[1]);
+            const ly = y(worstPoint[1] >= 0 ? limit : -limit);
+            const midY = (py + ly) / 2;
+            const left = worstPoint[0] > 300;
+            const label = `${validation.worst?.toFixed(1)} % margin`;
+            const labelWidth = label.length * 6.4 + 12;
+            const labelX = left ? px - 10 - labelWidth : px + 10;
             return (
               <g>
                 <line x1={px} x2={px} y1={py} y2={ly} stroke="#191817" strokeWidth={1.5} />
                 <line x1={px - 5} x2={px + 5} y1={ly} y2={ly} stroke="#191817" strokeWidth={1.5} />
                 <circle cx={px} cy={py} r={9} fill="#ffffff" opacity={0.85} />
-                <circle cx={px} cy={py} r={6} fill={validation.color} stroke="#191817" strokeWidth={2} />
+                <circle
+                  cx={px}
+                  cy={py}
+                  r={6}
+                  fill={validation.color}
+                  stroke="#191817"
+                  strokeWidth={2}
+                />
                 <rect
                   x={labelX}
                   y={midY - 10}
@@ -394,29 +442,39 @@ function PhasePlot({ curves, limit }: { curves: Curve[]; limit: number }) {
                   stroke="#191817"
                   strokeWidth={1}
                 />
-                <text x={labelX + 6} y={midY + 4} className="fill-grey-900 text-[11px] font-semibold">
+                <text
+                  x={labelX + 6}
+                  y={midY + 4}
+                  className="fill-grey-900 text-[11px] font-semibold"
+                >
                   {label}
                 </text>
               </g>
-            )
-          })()
-        )}
+            );
+          })()}
         {hover !== null && (
-          <line x1={x(hover)} x2={x(hover)} y1={PLOT.top} y2={PLOT.top + plotHeight} stroke="#656565" strokeWidth={1} />
+          <line
+            x1={x(hover)}
+            x2={x(hover)}
+            y1={PLOT.top}
+            y2={PLOT.top + plotHeight}
+            stroke="#656565"
+            strokeWidth={1}
+          />
         )}
       </svg>
       <div className="h-5 mt-1 text-xs text-grey-700">
         {hover !== null &&
           `${hover.toFixed(1)}° · ` +
             curves
-              .map(curve => `${curve.label} ${nearest(curve.points, hover)?.[1] ?? '—'}`)
+              .map((curve) => `${curve.label} ${nearest(curve.points, hover)?.[1] ?? '—'}`)
               .join(' · ')}
       </div>
       <figcaption className="text-xs text-grey-600">
-        Phase over one turn of the ring, in the unit of the permissible error. The iterations show the
-        phase error MU_3SL reports for each recording; the validation shows the phase margin, and its
-        worst point sets the margin of the run.
+        Phase over one turn of the ring, in the unit of the permissible error. The iterations show
+        the phase error MU_3SL reports for each recording; the validation shows the phase margin,
+        and its worst point sets the margin of the run.
       </figcaption>
     </figure>
-  )
+  );
 }

@@ -1,45 +1,49 @@
-import { useEffect, useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import type { CaptureSummary, DeviceDiagnostics, PortDiagnostics } from '@synapticon/motion-master-client'
-import FilePickerButton from '../components/FilePickerButton'
-import { encodeUserCachePath, userCacheUrl } from '../utils/userCache'
-import PageHeader from '../components/PageHeader'
-import DiagnosticsExplainer from '../components/DiagnosticsExplainer'
-import SlavePositionBadge from '../components/SlavePositionBadge'
-import { WireTiming, useWireTiming } from '../components/WireTiming'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
-import NoEscNotice from '../components/NoEscNotice'
-import { useSupportsEsc } from '../hooks/useSupportsEsc'
+import { useEffect, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type {
+  CaptureSummary,
+  DeviceDiagnostics,
+  PortDiagnostics,
+} from '@synapticon/motion-master-client';
+import FilePickerButton from '../components/FilePickerButton';
+import { encodeUserCachePath, userCacheUrl } from '../utils/userCache';
+import PageHeader from '../components/PageHeader';
+import DiagnosticsExplainer from '../components/DiagnosticsExplainer';
+import SlavePositionBadge from '../components/SlavePositionBadge';
+import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
+import NoEscNotice from '../components/NoEscNotice';
+import { useSupportsEsc } from '../hooks/useSupportsEsc';
 
 // Unwraps the {error: {error: "..."}} shape the generated client rejects with.
 function apiError(err: unknown): string {
   if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error
+    const inner = (err as { error: unknown }).error;
     if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error)
+      return String((inner as { error: unknown }).error);
     }
   }
-  return 'Unknown error'
+  return 'Unknown error';
 }
 
 // Trims the float milliseconds (ticks × base, e.g. 100.0) to a tidy string.
-const formatMs = (ms: number): string => Number(ms.toFixed(3)).toString()
+const formatMs = (ms: number): string => Number(ms.toFixed(3)).toString();
 
 // A port is worth showing when it carries a link or has accumulated any error — unused ports on a
 // 4-port ESC stay linkless with zero counters and would only add noise.
 const portInUse = (p: PortDiagnostics): boolean =>
-  p.linkUp || p.invalidFrame > 0 || p.rxError > 0 || p.forwardedError > 0 || p.lostLink > 0
+  p.linkUp || p.invalidFrame > 0 || p.rxError > 0 || p.forwardedError > 0 || p.lostLink > 0;
 
 const portErrors = (p: PortDiagnostics): number =>
-  p.invalidFrame + p.rxError + p.forwardedError + p.lostLink
+  p.invalidFrame + p.rxError + p.forwardedError + p.lostLink;
 
 const deviceErrors = (d: DeviceDiagnostics): number =>
   d.ports.reduce((sum, p) => sum + portErrors(p), 0) +
   d.processingUnitError +
   d.pdiError +
   d.processDataWatchdog +
-  d.pdiWatchdog
+  d.pdiWatchdog;
 
 // Non-zero counters are the signal — render them bold red, zeros muted. The counters are
 // cumulative since the last clear, so a steady non-zero value is historical; the page polls so the
@@ -52,35 +56,37 @@ function Counter({ value, title }: { value: number; title?: string }) {
     >
       {value}
     </span>
-  )
+  );
 }
 
 function Bool({ value, good }: { value: boolean; good: boolean }) {
   if (value === good) {
-    return <span className="text-status-good">yes</span>
+    return <span className="text-status-good">yes</span>;
   }
-  return <span className="text-status-bad font-medium">no</span>
+  return <span className="text-status-bad font-medium">no</span>;
 }
 
 function Field({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
     <div>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
-      <p className={`font-mono text-sm mt-0.5 ${value > 0 ? 'text-status-bad font-bold' : 'text-grey-800'}`}>
+      <p
+        className={`font-mono text-sm mt-0.5 ${value > 0 ? 'text-status-bad font-bold' : 'text-grey-800'}`}
+      >
         {value}
       </p>
       <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>
     </div>
-  )
+  );
 }
 
 function PortTable({ ports }: { ports: PortDiagnostics[] }) {
   // Keep the real ESC port number (index) even after filtering unused ports out.
-  const rows = ports.map((p, index) => ({ p, index })).filter(({ p }) => portInUse(p))
+  const rows = ports.map((p, index) => ({ p, index })).filter(({ p }) => portInUse(p));
   if (rows.length === 0) {
-    return <p className="text-xs text-grey-500">No active ports.</p>
+    return <p className="text-xs text-grey-500">No active ports.</p>;
   }
-  const th = 'px-4 py-2 font-display uppercase tracking-wide font-medium'
+  const th = 'px-4 py-2 font-display uppercase tracking-wide font-medium';
   return (
     <div className="border border-grey-200 overflow-x-auto">
       <table className="w-full min-w-[620px] text-xs border-collapse">
@@ -88,22 +94,40 @@ function PortTable({ ports }: { ports: PortDiagnostics[] }) {
           <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
             <th className={th}>Port</th>
             <th className={th}>Link</th>
-            <th className={`${th} cursor-help`} title="Loop closed — no downstream slave, or port disabled">
+            <th
+              className={`${th} cursor-help`}
+              title="Loop closed — no downstream slave, or port disabled"
+            >
               Loop
             </th>
-            <th className={`${th} cursor-help`} title="Stable communication established on this port">
+            <th
+              className={`${th} cursor-help`}
+              title="Stable communication established on this port"
+            >
               Comm
             </th>
-            <th className={`${th} cursor-help`} title="Invalid-frame counter (0x0300+): frames with a bad FCS/structure">
+            <th
+              className={`${th} cursor-help`}
+              title="Invalid-frame counter (0x0300+): frames with a bad FCS/structure"
+            >
               Invalid
             </th>
-            <th className={`${th} cursor-help`} title="Physical-layer RX error counter (0x0301+): RX_ER asserted by the PHY">
+            <th
+              className={`${th} cursor-help`}
+              title="Physical-layer RX error counter (0x0301+): RX_ER asserted by the PHY"
+            >
               RX err
             </th>
-            <th className={`${th} cursor-help`} title="Forwarded RX error counter (0x0308+): errors first flagged upstream — points at the segment where corruption began">
+            <th
+              className={`${th} cursor-help`}
+              title="Forwarded RX error counter (0x0308+): errors first flagged upstream — points at the segment where corruption began"
+            >
               Fwd err
             </th>
-            <th className={`${th} cursor-help`} title="Lost-link counter (0x0310+): link-down events on this port">
+            <th
+              className={`${th} cursor-help`}
+              title="Lost-link counter (0x0310+): link-down events on this port"
+            >
               Lost link
             </th>
           </tr>
@@ -115,7 +139,9 @@ function PortTable({ ports }: { ports: PortDiagnostics[] }) {
               <td className="px-4 py-2">
                 <Bool value={p.linkUp} good={true} />
               </td>
-              <td className="px-4 py-2 font-mono text-grey-600">{p.loopClosed ? 'closed' : 'open'}</td>
+              <td className="px-4 py-2 font-mono text-grey-600">
+                {p.loopClosed ? 'closed' : 'open'}
+              </td>
               <td className="px-4 py-2">
                 <Bool value={p.communication} good={true} />
               </td>
@@ -136,18 +162,28 @@ function PortTable({ ports }: { ports: PortDiagnostics[] }) {
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 // A read-only labelled cell for the watchdog status/config breakdown.
-function Stat({ label, value, hint, cls }: { label: string; value: string; hint?: string; cls?: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+  cls,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  cls?: string;
+}) {
   return (
     <div>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className={`font-mono text-sm mt-0.5 ${cls ?? 'text-grey-800'}`}>{value}</p>
       {hint && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
-  )
+  );
 }
 
 // The PD watchdog is the dead-man's switch behind the "PD watchdog" expiration counter above it:
@@ -157,45 +193,53 @@ function Stat({ label, value, hint, cls }: { label: string; value: string; hint?
 // user change it. Per-device (config lives in the slave's ESC), so its own query/mutation rather
 // than the page's bulk diagnostics fetch; polls on the same 2 s cadence so the run state stays
 // live. A 0 ms timeout disables the watchdog.
-function WatchdogControl({ slavePosition, expirations }: { slavePosition: number; expirations: number }) {
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
-  const setTiming = useWireTiming()
+function WatchdogControl({
+  slavePosition,
+  expirations,
+}: {
+  slavePosition: number;
+  expirations: number;
+}) {
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
+  const setTiming = useWireTiming();
   // null = follow the fetched value; a string = the user is editing.
-  const [draft, setDraft] = useState<string | null>(null)
+  const [draft, setDraft] = useState<string | null>(null);
 
   const query = useQuery({
     queryKey: ['watchdog', slavePosition],
-    queryFn: () => api.getProcessDataWatchdog(slavePosition).then(r => r.data),
+    queryFn: () => api.getProcessDataWatchdog(slavePosition).then((r) => r.data),
     refetchInterval: 2000,
-  })
+  });
 
   const mutation = useMutation({
     mutationFn: (timeoutMs: number) =>
-      setTiming.measure(() => api.setProcessDataWatchdog(slavePosition, { timeoutMs })).then(r => r.data),
-    onSuccess: data => {
-      queryClient.setQueryData(['watchdog', slavePosition], data)
-      setDraft(null)
+      setTiming
+        .measure(() => api.setProcessDataWatchdog(slavePosition, { timeoutMs }))
+        .then((r) => r.data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['watchdog', slavePosition], data);
+      setDraft(null);
     },
-  })
+  });
 
-  const wd = query.data
-  const shown = draft ?? (wd ? formatMs(wd.timeoutMs) : '')
-  const value = Number(shown)
-  const canSet = shown !== '' && Number.isFinite(value) && value >= 0 && !mutation.isPending
+  const wd = query.data;
+  const shown = draft ?? (wd ? formatMs(wd.timeoutMs) : '');
+  const value = Number(shown);
+  const canSet = shown !== '' && Number.isFinite(value) && value >= 0 && !mutation.isPending;
 
   // Live run state: disabled (ticks 0), running (counting), or expired (timed out / not yet fed).
-  const state = !wd ? '' : !wd.enabled ? 'Disabled' : wd.running ? 'Running' : 'Expired'
+  const state = !wd ? '' : !wd.enabled ? 'Disabled' : wd.running ? 'Running' : 'Expired';
   const stateCls = !wd
     ? ''
     : !wd.enabled
       ? 'text-grey-500'
       : wd.running
         ? 'text-status-good'
-        : 'text-status-bad font-bold'
+        : 'text-status-bad font-bold';
   // The divider sets the tick length: 40 ns × (divider + 2). Shown so the timeout derivation
   // (ticks × this base) is transparent.
-  const tickBaseUs = wd ? Number(((40 * (wd.divider + 2)) / 1000).toFixed(3)) : 0
+  const tickBaseUs = wd ? Number(((40 * (wd.divider + 2)) / 1000).toFixed(3)) : 0;
 
   return (
     <div className="space-y-2">
@@ -241,14 +285,22 @@ function WatchdogControl({ slavePosition, expirations }: { slavePosition: number
                 min={0}
                 step="any"
                 value={shown}
-                onChange={e => setDraft(e.target.value)}
+                onChange={(e) => setDraft(e.target.value)}
                 className="border border-grey-300 px-3 py-1.5 text-sm w-32 bg-white font-mono"
               />
             </div>
-            <button onClick={() => mutation.mutate(value)} disabled={!canSet} className={btnOutline}>
+            <button
+              onClick={() => mutation.mutate(value)}
+              disabled={!canSet}
+              className={btnOutline}
+            >
               {mutation.isPending ? 'Setting…' : 'Set'}
             </button>
-            <WireTiming label="Watchdog" timing={setTiming.timing} className="text-xs text-grey-500 font-mono whitespace-nowrap pb-2" />
+            <WireTiming
+              label="Watchdog"
+              timing={setTiming.timing}
+              className="text-xs text-grey-500 font-mono whitespace-nowrap pb-2"
+            />
           </div>
 
           {mutation.isError && (
@@ -263,11 +315,11 @@ function WatchdogControl({ slavePosition, expirations }: { slavePosition: number
         </>
       )}
     </div>
-  )
+  );
 }
 
 function DeviceCard({ device }: { device: DeviceDiagnostics }) {
-  const errors = deviceErrors(device)
+  const errors = deviceErrors(device);
   return (
     <section className="border border-grey-200">
       <header className="border-b border-grey-200 bg-grey-50 px-4 py-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -277,7 +329,9 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
         </span>
         <span className="ml-auto text-[11px] font-display uppercase tracking-wide">
           {errors > 0 ? (
-            <span className="text-status-bad">{errors} error{errors === 1 ? '' : 's'}</span>
+            <span className="text-status-bad">
+              {errors} error{errors === 1 ? '' : 's'}
+            </span>
           ) : (
             <span className="text-status-good">healthy</span>
           )}
@@ -315,7 +369,7 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
         </div>
       </div>
     </section>
-  )
+  );
 }
 
 // A capture is about the PC, not about a device: it records every EtherCAT frame on the bus
@@ -324,10 +378,10 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
 // program once, on request, and the file lands in the user cache under captures/, where the
 // Storage page lists it and this card links it. A pcap from tcpdump on another PC gets the same
 // summary once it is uploaded there.
-const CAPTURES_FOLDER = 'captures'
+const CAPTURES_FOLDER = 'captures';
 
 function KindRow({ label, k }: { label: string; k: CaptureSummary['control'] }) {
-  const band = (n: number) => (n > 0 ? 'text-status-bad font-bold' : 'text-grey-400')
+  const band = (n: number) => (n > 0 ? 'text-status-bad font-bold' : 'text-grey-400');
   return (
     <tr className="border-t border-grey-100">
       <td className="px-3 py-1 text-grey-700">{label}</td>
@@ -337,21 +391,26 @@ function KindRow({ label, k }: { label: string; k: CaptureSummary['control'] }) 
       <td className={`px-3 py-1 font-mono ${band(k.over2Ms)}`}>{k.over2Ms}</td>
       <td className={`px-3 py-1 font-mono ${band(k.over20Ms)}`}>{k.over20Ms}</td>
       <td className={`px-3 py-1 font-mono ${band(k.over100Ms)}`}>{k.over100Ms}</td>
-      <td className={`px-3 py-1 font-mono ${k.latestUs > 100000 ? 'text-status-bad font-bold' : k.latestUs > 20000 ? 'text-status-warn' : ''}`}>
+      <td
+        className={`px-3 py-1 font-mono ${k.latestUs > 100000 ? 'text-status-bad font-bold' : k.latestUs > 20000 ? 'text-status-warn' : ''}`}
+      >
         {(k.latestUs / 1000).toFixed(1)} ms
       </td>
     </tr>
-  )
+  );
 }
 
 function SummaryTable({ summary }: { summary: CaptureSummary }) {
-  const seconds = ((summary.lastUs - summary.firstUs) / 1e6).toFixed(1)
+  const seconds = ((summary.lastUs - summary.firstUs) / 1e6).toFixed(1);
   return (
     <div className="space-y-2">
       <p className="text-xs text-grey-600">
         {summary.frames} frames over {seconds} s
         {summary.notEtherCat > 0 && <>, {summary.notEtherCat} not EtherCAT</>}
-        {summary.unmatchedReturns > 0 && <>, {summary.unmatchedReturns} returns with no send to match</>}.
+        {summary.unmatchedReturns > 0 && (
+          <>, {summary.unmatchedReturns} returns with no send to match</>
+        )}
+        .
       </p>
       <table className="w-full text-xs">
         <thead>
@@ -372,104 +431,104 @@ function SummaryTable({ summary }: { summary: CaptureSummary }) {
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 // A server that cannot stop a capture early answers 501 to a start: Windows, where a program
 // without a console gets no signal. The page then records for a fixed time instead.
 const isNotImplemented = (err: unknown) =>
-  !!err && typeof err === 'object' && (err as { status?: number }).status === 501
+  !!err && typeof err === 'object' && (err as { status?: number }).status === 501;
 
 // The longest a capture of a fixed length may run, the limit of POST /api/captures.
-const TIMED_CAPTURE_MAX_SECONDS = 300
+const TIMED_CAPTURE_MAX_SECONDS = 300;
 
 function CaptureSection() {
-  const { api } = useConnection()
-  const [seconds, setSeconds] = useState('600')
-  const [result, setResult] = useState<{ path: string; summary: CaptureSummary } | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { api } = useConnection();
+  const [seconds, setSeconds] = useState('600');
+  const [result, setResult] = useState<{ path: string; summary: CaptureSummary } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   // The capture that runs until Stop, and when it started, for the readout beside the button.
-  const [started, setStarted] = useState<{ path: string; since: number } | null>(null)
-  const [now, setNow] = useState(() => Date.now())
+  const [started, setStarted] = useState<{ path: string; since: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!started) {
-      return
+      return;
     }
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [started])
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [started]);
 
   const run = useMutation({
-    mutationFn: (n: number) => api.runCapture({ seconds: n }).then(r => r.data),
+    mutationFn: (n: number) => api.runCapture({ seconds: n }).then((r) => r.data),
     onMutate: () => {
-      setError(null)
+      setError(null);
     },
-    onSuccess: data => setResult({ path: data.path, summary: data.summary }),
-    onError: err => setError(apiError(err)),
-  })
+    onSuccess: (data) => setResult({ path: data.path, summary: data.summary }),
+    onError: (err) => setError(apiError(err)),
+  });
 
   const start = useMutation({
-    mutationFn: (n: number) => api.startCapture({ seconds: n }).then(r => r.data),
+    mutationFn: (n: number) => api.startCapture({ seconds: n }).then((r) => r.data),
     onMutate: () => {
-      setError(null)
+      setError(null);
     },
-    onSuccess: data => {
-      setStarted({ path: data.path, since: Date.now() })
-      setNow(Date.now())
+    onSuccess: (data) => {
+      setStarted({ path: data.path, since: Date.now() });
+      setNow(Date.now());
     },
     onError: (err, n) => {
       if (isNotImplemented(err)) {
-        run.mutate(Math.min(n, TIMED_CAPTURE_MAX_SECONDS))
+        run.mutate(Math.min(n, TIMED_CAPTURE_MAX_SECONDS));
       } else {
-        setError(apiError(err))
+        setError(apiError(err));
       }
     },
-  })
+  });
 
   const stop = useMutation({
-    mutationFn: () => api.stopCapture().then(r => r.data),
+    mutationFn: () => api.stopCapture().then((r) => r.data),
     onMutate: () => {
-      setError(null)
+      setError(null);
     },
-    onSuccess: data => {
-      setStarted(null)
-      setResult({ path: data.path, summary: data.summary })
+    onSuccess: (data) => {
+      setStarted(null);
+      setResult({ path: data.path, summary: data.summary });
     },
-    onError: err => {
+    onError: (err) => {
       // Nothing to stop any more, or the capture failed: either way no capture runs.
-      setStarted(null)
-      setError(apiError(err))
+      setStarted(null);
+      setError(apiError(err));
     },
-  })
+  });
 
   // A pcap from another PC: into captures/ through the user cache, then the same summary.
   const upload = useMutation({
     mutationFn: async (file: File) => {
-      const path = `${CAPTURES_FOLDER}/${file.name}`
+      const path = `${CAPTURES_FOLDER}/${file.name}`;
       const res = await fetch(userCacheUrl(api.baseUrl, path), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: file,
-      })
+      });
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        throw new Error(body?.error ?? `HTTP ${res.status}`)
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
       }
-      const summary = await api.getCaptureSummary(file.name).then(r => r.data)
-      return { path: summary.path, summary: summary.summary }
+      const summary = await api.getCaptureSummary(file.name).then((r) => r.data);
+      return { path: summary.path, summary: summary.summary };
     },
     onMutate: () => {
-      setError(null)
+      setError(null);
     },
-    onSuccess: data => setResult(data),
-    onError: err => setError(err instanceof Error ? err.message : apiError(err)),
-  })
+    onSuccess: (data) => setResult(data),
+    onError: (err) => setError(err instanceof Error ? err.message : apiError(err)),
+  });
 
-  const n = Number(seconds)
-  const busy = run.isPending || start.isPending || stop.isPending || upload.isPending
-  const canStart = Number.isFinite(n) && n >= 1 && n <= 3600 && !busy && !started
-  const elapsed = started ? Math.max(0, Math.floor((now - started.since) / 1000)) : 0
+  const n = Number(seconds);
+  const busy = run.isPending || start.isPending || stop.isPending || upload.isPending;
+  const canStart = Number.isFinite(n) && n >= 1 && n <= 3600 && !busy && !started;
+  const elapsed = started ? Math.max(0, Math.floor((now - started.since) / 1000)) : 0;
 
   return (
     <section className="border border-grey-200 bg-white">
@@ -493,11 +552,11 @@ function CaptureSection() {
           which is every mailbox and register request. The bands are the three waits the driver
           uses, and they are cumulative. The time is taken at the boundary to the NIC driver, so it
           covers the NIC, the wire and the device, and not the PC&apos;s own queues between that
-          boundary and Motion Master. Late frames here put the delay on the wire or in the device.
-          A clean capture beside &ldquo;got no frame back&rdquo; warnings in the server log puts it
+          boundary and Motion Master. Late frames here put the delay on the wire or in the device. A
+          clean capture beside &ldquo;got no frame back&rdquo; warnings in the server log puts it
           inside the PC. A server on Windows cannot stop a capture early, so there the capture
-          records for a fixed time: the seconds you choose, at most {TIMED_CAPTURE_MAX_SECONDS}. A pcap from
-          tcpdump on another PC gets the same summary: pick the file.
+          records for a fixed time: the seconds you choose, at most {TIMED_CAPTURE_MAX_SECONDS}. A
+          pcap from tcpdump on another PC gets the same summary: pick the file.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-xs text-grey-600">
@@ -507,7 +566,7 @@ function CaptureSection() {
               min={1}
               max={3600}
               value={seconds}
-              onChange={e => setSeconds(e.target.value)}
+              onChange={(e) => setSeconds(e.target.value)}
               disabled={!!started}
               className="ml-2 w-20 h-[38px] border border-grey-300 px-2 font-mono text-sm"
             />
@@ -535,7 +594,7 @@ function CaptureSection() {
             </button>
           )}
           <FilePickerButton
-            onFile={file => upload.mutate(file)}
+            onFile={(file) => upload.mutate(file)}
             accept=".pcap,application/vnd.tcpdump.pcap,application/octet-stream"
             disabled={busy || !!started}
             className="h-[38px]"
@@ -572,23 +631,23 @@ function CaptureSection() {
         )}
       </div>
     </section>
-  )
+  );
 }
 
 export default function FieldbusDiagnosticsPage() {
-  const { api } = useConnection()
-  const { timing, measure } = useWireTiming()
+  const { api } = useConnection();
+  const { timing, measure } = useWireTiming();
 
-  const supportsEsc = useSupportsEsc()
+  const supportsEsc = useSupportsEsc();
 
   const query = useQuery({
     queryKey: ['deviceDiagnostics'],
     enabled: supportsEsc,
     queryFn: () => measure(() => api.getDeviceDiagnostics()),
     refetchInterval: 2000,
-  })
+  });
 
-  const devices = query.data?.data ?? []
+  const devices = query.data?.data ?? [];
 
   if (!supportsEsc) {
     return (
@@ -602,7 +661,7 @@ export default function FieldbusDiagnosticsPage() {
           <NoEscNotice feature="ESC diagnostics" />
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -652,10 +711,10 @@ export default function FieldbusDiagnosticsPage() {
           </p>
         )}
 
-        {devices.map(device => (
+        {devices.map((device) => (
           <DeviceCard key={device.slavePosition} device={device} />
         ))}
       </div>
     </div>
-  )
+  );
 }

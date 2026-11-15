@@ -1,10 +1,14 @@
-import type { ReactNode } from 'react'
-import { type SlaveInformationInterface, type SiiPdo, formatHex } from '@synapticon/motion-master-client'
-import MailboxCapabilities from './MailboxCapabilities'
+import type { ReactNode } from 'react';
+import {
+  type SlaveInformationInterface,
+  type SiiPdo,
+  formatHex,
+} from '@synapticon/motion-master-client';
+import MailboxCapabilities from './MailboxCapabilities';
 
-type Sii = SlaveInformationInterface
-type SyncManager = NonNullable<Sii['category']['syncManagers']>[number]
-type DistributedClock = NonNullable<Sii['category']['distributedClocks']>[number]
+type Sii = SlaveInformationInterface;
+type SyncManager = NonNullable<Sii['category']['syncManagers']>[number];
+type DistributedClock = NonNullable<Sii['category']['distributedClocks']>[number];
 
 // SII Sync-Manager type (category 41): mirrors the ESC SM role.
 const SM_TYPE: Record<number, string> = {
@@ -13,7 +17,7 @@ const SM_TYPE: Record<number, string> = {
   2: 'Mailbox In',
   3: 'Outputs (RxPDO)',
   4: 'Inputs (TxPDO)',
-}
+};
 
 // Mailbox protocol bits (SII standard mailbox protocol word): bit, abbreviation, full name.
 const MBX_PROTOCOLS: [number, string, string][] = [
@@ -23,9 +27,9 @@ const MBX_PROTOCOLS: [number, string, string][] = [
   [0x08, 'FoE', 'File over EtherCAT'],
   [0x10, 'SoE', 'Servo Drive Profile over EtherCAT'],
   [0x20, 'VoE', 'Vendor-specific over EtherCAT'],
-]
+];
 
-const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
+const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit);
 
 // FMMU usage byte (SII category 40, ETG.2010 Table 9): one Unsigned8 per FMMU.
 const FMMU_USAGE: Record<number, string> = {
@@ -36,9 +40,9 @@ const FMMU_USAGE: Record<number, string> = {
   0x04: 'dynamic Outputs',
   0x05: 'dynamic Inputs',
   0xff: 'unused',
-}
+};
 
-const fmmuUsage = (v: number) => `(${FMMU_USAGE[v] ?? 'reserved'})`
+const fmmuUsage = (v: number) => `(${FMMU_USAGE[v] ?? 'reserved'})`;
 
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
@@ -47,7 +51,7 @@ function Field({ label, value, hint }: { label: string; value: ReactNode; hint?:
       <p className="font-mono text-sm text-grey-800 mt-0.5">{value}</p>
       {hint && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
-  )
+  );
 }
 
 function Th({ children, hint }: { children: ReactNode; hint?: string }) {
@@ -58,7 +62,7 @@ function Th({ children, hint }: { children: ReactNode; hint?: string }) {
     >
       {children}
     </th>
-  )
+  );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -67,26 +71,26 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <p className="eyebrow">{title}</p>
       {children}
     </section>
-  )
+  );
 }
 
-const tableWrap = 'border border-grey-200 overflow-x-auto'
-const tableCls = 'w-full text-xs border-collapse'
-const theadCls = 'border-b border-grey-200 bg-grey-50 text-left text-grey-600'
+const tableWrap = 'border border-grey-200 overflow-x-auto';
+const tableCls = 'w-full text-xs border-collapse';
+const theadCls = 'border-b border-grey-200 bg-grey-50 text-left text-grey-600';
 
 // SII string indices are 1-based references into the STRINGS table (index 0 means "no string").
 function StringRef({ idx, strings }: { idx: number; strings: string[] }) {
   const idxTitle =
     idx === 0
       ? 'No string — this field references index 0 of the EEPROM STRINGS table, which means “unset”.'
-      : `1-based index into the EEPROM STRINGS table — this field stores the index ${idx}, not the text itself; entry ${idx} of that table holds the string shown.`
-  const name = idx >= 1 && idx <= strings.length ? strings[idx - 1] : null
+      : `1-based index into the EEPROM STRINGS table — this field stores the index ${idx}, not the text itself; entry ${idx} of that table holds the string shown.`;
+  const name = idx >= 1 && idx <= strings.length ? strings[idx - 1] : null;
   if (!name) {
     return (
       <span className="text-grey-400 cursor-help" title={idxTitle}>
         — ({idx})
       </span>
-    )
+    );
   }
   return (
     <span>
@@ -95,12 +99,12 @@ function StringRef({ idx, strings }: { idx: number; strings: string[] }) {
         ({idx})
       </span>
     </span>
-  )
+  );
 }
 
 function PdoTable({ pdos, strings }: { pdos: SiiPdo[]; strings: string[] }) {
   if (pdos.length === 0) {
-    return <p className="text-xs text-grey-500">None defined in the EEPROM.</p>
+    return <p className="text-xs text-grey-500">None defined in the EEPROM.</p>;
   }
   return (
     <div className="space-y-4">
@@ -149,21 +153,21 @@ function PdoTable({ pdos, strings }: { pdos: SiiPdo[]; strings: string[] }) {
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 // Renders a parsed SII image: the identity/mailbox header followed by the decoded categories
 // (strings, general, default Sync Managers / FMMUs / PDOs, distributed clocks). Shared by the
 // device SII page (read from hardware) and the Tools SII page (parsed from an uploaded file).
 export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
-  const { info, category } = sii
-  const strings = category.strings ?? []
-  const general = category.general
-  const syncManagers = category.syncManagers ?? []
-  const fmmus = category.fmmus ?? []
-  const rxPdos = category.rxPdos ?? []
-  const txPdos = category.txPdos ?? []
-  const distributedClocks = category.distributedClocks ?? []
+  const { info, category } = sii;
+  const strings = category.strings ?? [];
+  const general = category.general;
+  const syncManagers = category.syncManagers ?? [];
+  const fmmus = category.fmmus ?? [];
+  const rxPdos = category.rxPdos ?? [];
+  const txPdos = category.txPdos ?? [];
+  const distributedClocks = category.distributedClocks ?? [];
 
   return (
     <div className="space-y-8">
@@ -179,10 +183,26 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
           </span>
         </header>
         <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Field label="Vendor ID" value={formatHex(info.vendorId ?? 0, 8)} hint="Manufacturer ID from the EEPROM" />
-          <Field label="Product code" value={formatHex(info.productCode ?? 0, 8)} hint="Product code from the EEPROM" />
-          <Field label="Revision" value={formatHex(info.revisionNumber ?? 0, 8)} hint="Revision number from the EEPROM" />
-          <Field label="Serial" value={String(info.serialNumber ?? 0)} hint="Serial number from the EEPROM" />
+          <Field
+            label="Vendor ID"
+            value={formatHex(info.vendorId ?? 0, 8)}
+            hint="Manufacturer ID from the EEPROM"
+          />
+          <Field
+            label="Product code"
+            value={formatHex(info.productCode ?? 0, 8)}
+            hint="Product code from the EEPROM"
+          />
+          <Field
+            label="Revision"
+            value={formatHex(info.revisionNumber ?? 0, 8)}
+            hint="Revision number from the EEPROM"
+          />
+          <Field
+            label="Serial"
+            value={String(info.serialNumber ?? 0)}
+            hint="Serial number from the EEPROM"
+          />
           <Field
             label="Station alias"
             value={formatHex(info.configuredStationAlias ?? 0)}
@@ -196,18 +216,16 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
           <Field
             label="Protocols"
             value={
-              decodeProtocols(info.mailboxProtocol ?? 0).length ? (
-                decodeProtocols(info.mailboxProtocol ?? 0).map(([bit, abbr, full], i) => (
-                  <span key={bit}>
-                    {i > 0 && <span className="text-grey-400"> · </span>}
-                    <span title={full} className="cursor-help">
-                      {abbr}
+              decodeProtocols(info.mailboxProtocol ?? 0).length
+                ? decodeProtocols(info.mailboxProtocol ?? 0).map(([bit, abbr, full], i) => (
+                    <span key={bit}>
+                      {i > 0 && <span className="text-grey-400"> · </span>}
+                      <span title={full} className="cursor-help">
+                        {abbr}
+                      </span>
                     </span>
-                  </span>
-                ))
-              ) : (
-                '—'
-              )
+                  ))
+                : '—'
             }
             hint="Mailbox protocols declared in the EEPROM"
           />
@@ -250,16 +268,56 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
         <Section title="General">
           <div className="border border-grey-200 p-4 space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <Field label="Group" value={<StringRef idx={general.groupIdx ?? 0} strings={strings} />} hint="STRINGS-table group name" />
-              <Field label="Name" value={<StringRef idx={general.nameIdx ?? 0} strings={strings} />} hint="STRINGS-table device name" />
-              <Field label="Order" value={<StringRef idx={general.orderIdx ?? 0} strings={strings} />} hint="STRINGS-table order number" />
-              <Field label="Image" value={<StringRef idx={general.imgIdx ?? 0} strings={strings} />} hint="STRINGS-table image name" />
-              <Field label="CoE details" value={formatHex(general.coeDetails ?? 0, 2)} hint="Raw CoE capability byte (decoded below)" />
-              <Field label="FoE details" value={formatHex(general.foeDetails ?? 0, 2)} hint="Raw FoE capability byte (decoded below)" />
-              <Field label="EoE details" value={formatHex(general.eoeDetails ?? 0, 2)} hint="Raw EoE capability byte (decoded below)" />
-              <Field label="Flags" value={formatHex(general.flags ?? 0, 2)} hint="General device flags" />
-              <Field label="DS402 channels" value={String(general.ds402Channels ?? 0)} hint="Number of DS402 channels" />
-              <Field label="E-Bus current" value={`${general.currentOnEBus ?? 0} mA`} hint="Current consumption on the E-Bus" />
+              <Field
+                label="Group"
+                value={<StringRef idx={general.groupIdx ?? 0} strings={strings} />}
+                hint="STRINGS-table group name"
+              />
+              <Field
+                label="Name"
+                value={<StringRef idx={general.nameIdx ?? 0} strings={strings} />}
+                hint="STRINGS-table device name"
+              />
+              <Field
+                label="Order"
+                value={<StringRef idx={general.orderIdx ?? 0} strings={strings} />}
+                hint="STRINGS-table order number"
+              />
+              <Field
+                label="Image"
+                value={<StringRef idx={general.imgIdx ?? 0} strings={strings} />}
+                hint="STRINGS-table image name"
+              />
+              <Field
+                label="CoE details"
+                value={formatHex(general.coeDetails ?? 0, 2)}
+                hint="Raw CoE capability byte (decoded below)"
+              />
+              <Field
+                label="FoE details"
+                value={formatHex(general.foeDetails ?? 0, 2)}
+                hint="Raw FoE capability byte (decoded below)"
+              />
+              <Field
+                label="EoE details"
+                value={formatHex(general.eoeDetails ?? 0, 2)}
+                hint="Raw EoE capability byte (decoded below)"
+              />
+              <Field
+                label="Flags"
+                value={formatHex(general.flags ?? 0, 2)}
+                hint="General device flags"
+              />
+              <Field
+                label="DS402 channels"
+                value={String(general.ds402Channels ?? 0)}
+                hint="Number of DS402 channels"
+              />
+              <Field
+                label="E-Bus current"
+                value={`${general.currentOnEBus ?? 0} mA`}
+                hint="Current consumption on the E-Bus"
+              />
             </div>
             <div className="space-y-1.5">
               <p
@@ -300,9 +358,13 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
                     <td className="px-4 py-2 text-grey-700">
                       {SM_TYPE[sm.syncManagerType ?? 0] ?? `Type ${sm.syncManagerType}`}
                     </td>
-                    <td className="px-4 py-2 font-mono">{formatHex(sm.physicalStartAddress ?? 0)}</td>
+                    <td className="px-4 py-2 font-mono">
+                      {formatHex(sm.physicalStartAddress ?? 0)}
+                    </td>
                     <td className="px-4 py-2 font-mono">{sm.length ?? 0} B</td>
-                    <td className="px-4 py-2 font-mono text-grey-500">{formatHex(sm.controlRegister ?? 0, 2)}</td>
+                    <td className="px-4 py-2 font-mono text-grey-500">
+                      {formatHex(sm.controlRegister ?? 0, 2)}
+                    </td>
                     <td className="px-4 py-2">
                       {sm.enableSyncManager ? (
                         <span className="text-status-good">yes</span>
@@ -368,7 +430,9 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
                     <td className="px-4 py-2 font-mono">{dc.cycleTime0 ?? 0} ns</td>
                     <td className="px-4 py-2 font-mono">{dc.shiftTime0 ?? 0} ns</td>
                     <td className="px-4 py-2 font-mono">{dc.shiftTime1 ?? 0} ns</td>
-                    <td className="px-4 py-2 font-mono text-grey-500">{formatHex(dc.assignActivate ?? 0, 4)}</td>
+                    <td className="px-4 py-2 font-mono text-grey-500">
+                      {formatHex(dc.assignActivate ?? 0, 4)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -377,5 +441,5 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
         </Section>
       )}
     </div>
-  )
+  );
 }

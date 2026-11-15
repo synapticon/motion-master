@@ -1,125 +1,124 @@
-import { useMemo, useState } from 'react'
-import Checkbox from '../components/Checkbox'
-import PageHeader from '../components/PageHeader'
-import { isPollRequestUrl, useRequests, type RequestEntry } from '../contexts/RequestsContext'
-import { btnOutline } from '../utils/styles'
+import { useMemo, useState } from 'react';
+import Checkbox from '../components/Checkbox';
+import PageHeader from '../components/PageHeader';
+import { isPollRequestUrl, useRequests, type RequestEntry } from '../contexts/RequestsContext';
+import { btnOutline } from '../utils/styles';
 
 function StatusBadge({ status, error }: { status?: number; error?: string }) {
-  let color = 'bg-grey-100 text-grey-500'
-  let label: string = '…'
+  let color = 'bg-grey-100 text-grey-500';
+  let label: string = '…';
   if (error) {
-    color = 'bg-status-bad/15 text-status-bad'
-    label = 'ERR'
+    color = 'bg-status-bad/15 text-status-bad';
+    label = 'ERR';
   } else if (status != null) {
-    label = String(status)
+    label = String(status);
     if (status >= 200 && status < 300) {
-      color = 'bg-status-good/15 text-status-good'
+      color = 'bg-status-good/15 text-status-good';
     } else if (status >= 400) {
-      color = 'bg-status-bad/15 text-status-bad'
+      color = 'bg-status-bad/15 text-status-bad';
     } else {
-      color = 'bg-status-warn/15 text-status-warn'
+      color = 'bg-status-warn/15 text-status-warn';
     }
   }
   return (
     <span className={`inline-block min-w-12 text-center px-2 py-0.5 text-xs font-mono ${color}`}>
       {label}
     </span>
-  )
+  );
 }
 
 function formatTime(ts?: number): string {
   if (!ts) {
-    return '—'
+    return '—';
   }
-  const d = new Date(ts)
+  const d = new Date(ts);
   return (
     d.toLocaleTimeString('en-GB', { hour12: false }) +
     '.' +
     String(d.getMilliseconds()).padStart(3, '0')
-  )
+  );
 }
 
 function pathOf(rawUrl: string): string {
   try {
-    const u = new URL(rawUrl, window.location.origin)
-    return u.pathname + u.search
+    const u = new URL(rawUrl, window.location.origin);
+    return u.pathname + u.search;
   } catch {
-    return rawUrl
+    return rawUrl;
   }
 }
 
 // Wrap a value in single quotes, escaping embedded single quotes the POSIX way ('\'').
 function shSingleQuote(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`
+  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 // Headers that fetch/the browser sets itself — pointless (and sometimes invalid) to replay via curl.
-const SKIP_CURL_HEADERS = new Set(['host', 'content-length', 'connection'])
+const SKIP_CURL_HEADERS = new Set(['host', 'content-length', 'connection']);
 
 function buildCurl(entry: RequestEntry): string {
   // -k: the local server may use a self-signed cert on dev machines.
-  const parts = [`curl -k -X ${entry.method} ${shSingleQuote(entry.url)}`]
+  const parts = [`curl -k -X ${entry.method} ${shSingleQuote(entry.url)}`];
   for (const [k, v] of Object.entries(entry.requestHeaders ?? {})) {
     if (!SKIP_CURL_HEADERS.has(k)) {
-      parts.push(`-H ${shSingleQuote(`${k}: ${v}`)}`)
+      parts.push(`-H ${shSingleQuote(`${k}: ${v}`)}`);
     }
   }
   if (entry.requestBody) {
-    parts.push(`--data ${shSingleQuote(entry.requestBody)}`)
+    parts.push(`--data ${shSingleQuote(entry.requestBody)}`);
   }
-  return parts.join(' \\\n  ')
+  return parts.join(' \\\n  ');
 }
 
 function CopyCurlButton({ entry }: { entry: RequestEntry }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
 
   const handleCopy = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(buildCurl(entry))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      await navigator.clipboard.writeText(buildCurl(entry));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     } catch {
-      setCopied(false)
+      setCopied(false);
     }
-  }
+  };
 
-  const base =
-    'shrink-0 border px-3 py-1.5 text-xs cursor-pointer transition-colors rounded-sm'
+  const base = 'shrink-0 border px-3 py-1.5 text-xs cursor-pointer transition-colors rounded-sm';
   const state = copied
     ? 'border-status-good text-status-good'
-    : 'border-grey-300 text-grey-600 hover:border-ocean hover:text-ocean'
+    : 'border-grey-300 text-grey-600 hover:border-ocean hover:text-ocean';
 
   return (
     <button onClick={handleCopy} className={`${base} ${state}`}>
       {copied ? '✓ Copied' : 'Copy as cURL'}
     </button>
-  )
+  );
 }
 
 interface FormattedBody {
-  text: string
-  language: 'json' | 'text'
+  text: string;
+  language: 'json' | 'text';
 }
 
 function formatBody(body: string | undefined, contentType: string | undefined): FormattedBody {
   if (!body) {
-    return { text: '', language: 'text' }
+    return { text: '', language: 'text' };
   }
   if (contentType && contentType.includes('json')) {
     try {
-      return { text: JSON.stringify(JSON.parse(body), null, 2), language: 'json' }
+      return { text: JSON.stringify(JSON.parse(body), null, 2), language: 'json' };
     } catch {
-      return { text: body, language: 'text' }
+      return { text: body, language: 'text' };
     }
   }
-  return { text: body, language: 'text' }
+  return { text: body, language: 'text' };
 }
 
 function DetailView({ entry }: { entry: RequestEntry }) {
   const formatted = useMemo(
     () => formatBody(entry.responseBody, entry.contentType),
     [entry.responseBody, entry.contentType],
-  )
+  );
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
@@ -170,21 +169,21 @@ function DetailView({ entry }: { entry: RequestEntry }) {
         </pre>
       </div>
     </div>
-  )
+  );
 }
 
 export default function ServerRequestsPage() {
-  const { entries, clear } = useRequests()
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [showPollRequests, setShowPollRequests] = useState(false)
+  const { entries, clear } = useRequests();
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [showPollRequests, setShowPollRequests] = useState(false);
   const visibleEntries = useMemo(
-    () => (showPollRequests ? entries : entries.filter(e => !isPollRequestUrl(e.url))),
+    () => (showPollRequests ? entries : entries.filter((e) => !isPollRequestUrl(e.url))),
     [entries, showPollRequests],
-  )
+  );
   const selected = useMemo(
-    () => entries.find(e => e.id === selectedId) ?? null,
+    () => entries.find((e) => e.id === selectedId) ?? null,
     [entries, selectedId],
-  )
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -200,17 +199,10 @@ export default function ServerRequestsPage() {
               {entries.length} request{entries.length === 1 ? '' : 's'} (max 1000)
             </p>
             <label className="flex items-center gap-1.5 text-xs text-grey-700 cursor-pointer">
-              <Checkbox
-                checked={showPollRequests}
-                onChange={setShowPollRequests}
-              />
+              <Checkbox checked={showPollRequests} onChange={setShowPollRequests} />
               Show poll requests
             </label>
-            <button
-              onClick={clear}
-              disabled={entries.length === 0}
-              className={btnOutline}
-            >
+            <button onClick={clear} disabled={entries.length === 0} className={btnOutline}>
               Clear
             </button>
           </div>
@@ -219,7 +211,7 @@ export default function ServerRequestsPage() {
               <p className="p-4 text-xs text-grey-500">No requests yet.</p>
             ) : (
               <ul>
-                {visibleEntries.map(e => (
+                {visibleEntries.map((e) => (
                   <li
                     key={e.id}
                     onClick={() => setSelectedId(e.id)}
@@ -252,5 +244,5 @@ export default function ServerRequestsPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

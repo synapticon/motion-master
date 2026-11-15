@@ -4,82 +4,96 @@
 // — the HTTP API and the monitoring stream are the source of truth. Isomorphic: pass `WebSocket`
 // (and `customFetch`) to run under Node; both default to the platform globals in the browser.
 
-import { Api } from './generated/Api'
-import type { ApiConfig } from './generated/http-client'
-import { API_BASE_URL, WS_URL } from './constants'
-import { fetchProcessDataDump, type MmpdFile } from './mmpd'
-import type { ObjectAddress } from './objects'
-import { WebSocketConnection, type WebSocketConstructor } from './web-socket-connection'
+import { Api } from './generated/Api';
+import type { ApiConfig } from './generated/http-client';
+import { API_BASE_URL, WS_URL } from './constants';
+import { fetchProcessDataDump, type MmpdFile } from './mmpd';
+import type { ObjectAddress } from './objects';
+import { WebSocketConnection, type WebSocketConstructor } from './web-socket-connection';
 
 export interface MotionMasterClientOptions {
-  /// Origin (or `host:port`) of the HTTP API. Default: the bundled localhost dev origin.
-  baseUrl?: string
-  /// Full URL of the WebSocket connection. Default: the bundled localhost dev origin.
-  wsUrl?: string
-  /// WebSocket implementation for `client.ws`. Defaults to the global `WebSocket` (browsers,
-  /// Node >= 22); inject the `ws` package's constructor on older Node.
-  WebSocket?: WebSocketConstructor
-  /// Second argument for the WebSocket constructor — e.g. `{ rejectUnauthorized: false }` for the
-  /// Node `ws` client against a self-signed dev cert. Ignored by the browser global.
-  webSocketOptions?: unknown
-  /// Custom `fetch` forwarded to the HTTP client (e.g. request logging in tests).
-  customFetch?: ApiConfig['customFetch']
+  /** Origin (or `host:port`) of the HTTP API. Default: the bundled localhost dev origin. */
+  baseUrl?: string;
+  /** Full URL of the WebSocket connection. Default: the bundled localhost dev origin. */
+  wsUrl?: string;
+  /**
+   * WebSocket implementation for `client.ws`. Defaults to the global `WebSocket` (browsers,
+   * Node >= 22); inject the `ws` package's constructor on older Node.
+   */
+  WebSocket?: WebSocketConstructor;
+  /**
+   * Second argument for the WebSocket constructor — e.g. `{ rejectUnauthorized: false }` for the
+   * Node `ws` client against a self-signed dev cert. Ignored by the browser global.
+   */
+  webSocketOptions?: unknown;
+  /** Custom `fetch` forwarded to the HTTP client (e.g. request logging in tests). */
+  customFetch?: ApiConfig['customFetch'];
 }
 
 export class MotionMasterClient {
-  /// The generated HTTP API client. Flat method surface: `client.api.getVersion()`,
-  /// `client.api.scan()`, `client.api.sdoUpload(...)`, ...
-  readonly api: Api
+  /**
+   * The generated HTTP API client. Flat method surface: `client.api.getVersion()`,
+   * `client.api.scan()`, `client.api.sdoUpload(...)`, ...
+   */
+  readonly api: Api;
 
-  /// The WebSocket connection: `client.ws.subscribe(topic, cb)`,
-  /// `client.ws.onNotification(cb)`, `client.ws.onProgress(cb)`. Connects lazily.
-  readonly ws: WebSocketConnection
+  /**
+   * The WebSocket connection: `client.ws.subscribe(topic, cb)`,
+   * `client.ws.onNotification(cb)`, `client.ws.onProgress(cb)`. Connects lazily.
+   */
+  readonly ws: WebSocketConnection;
 
-  private readonly httpBaseUrl: string
-  private readonly customFetch?: ApiConfig['customFetch']
+  private readonly httpBaseUrl: string;
+  private readonly customFetch?: ApiConfig['customFetch'];
 
   constructor(options: MotionMasterClientOptions = {}) {
-    this.httpBaseUrl = options.baseUrl ?? API_BASE_URL
-    this.customFetch = options.customFetch
+    this.httpBaseUrl = options.baseUrl ?? API_BASE_URL;
+    this.customFetch = options.customFetch;
     // The generated HttpClient copies its config onto itself with Object.assign, so a
     // `customFetch: undefined` replaces its default fetch and every request fails with
     // "this.customFetch is not a function". Pass the key only when there is a value.
     this.api = new Api({
       baseUrl: this.httpBaseUrl,
       ...(options.customFetch ? { customFetch: options.customFetch } : {}),
-    })
+    });
     this.ws = new WebSocketConnection({
       url: options.wsUrl ?? WS_URL,
       WebSocket: options.WebSocket,
       protocolsOrOptions: options.webSocketOptions,
-    })
+    });
   }
 
-  /// Reads one object of a device and returns its value, decoded by the server. The address gives
-  /// the type of the value: `readValue(1, Cia402.STATUSWORD)` is a `Promise<number>`.
+  /**
+   * Reads one object of a device and returns its value, decoded by the server. The address gives
+   * the type of the value: `readValue(1, Cia402.STATUSWORD)` is a `Promise<number>`.
+   */
   async readValue<T>(slavePosition: number, address: ObjectAddress<T>): Promise<T> {
-    const response = await this.api.readParameter(slavePosition, address.index, address.subindex)
-    return response.data.value as T
+    const response = await this.api.readParameter(slavePosition, address.index, address.subindex);
+    return response.data.value as T;
   }
 
-  /// Reads the recorder clock of the server (`GET /api/process-data/mark`), in epoch microseconds.
-  /// Pass it as `from` or `to` of `fetchProcessDataDump` to dump one part of a run.
+  /**
+   * Reads the recorder clock of the server (`GET /api/process-data/mark`), in epoch microseconds.
+   * Pass it as `from` or `to` of `fetchProcessDataDump` to dump one part of a run.
+   */
   async readProcessDataMark(): Promise<number> {
-    const response = await this.api.getProcessDataMark()
-    return response.data.timestampUs
+    const response = await this.api.getProcessDataMark();
+    return response.data.timestampUs;
   }
 
-  /// Fetches and parses the live recorder dump (`GET /api/process-data/dump`) as an `MmpdFile`.
-  /// `from` and `to` limit it to a span, from `readProcessDataMark`. Without them it is the whole
-  /// recorder.
+  /**
+   * Fetches and parses the live recorder dump (`GET /api/process-data/dump`) as an `MmpdFile`.
+   * `from` and `to` limit it to a span, from `readProcessDataMark`. Without them it is the whole
+   * recorder.
+   */
   fetchProcessDataDump(
     options: { signal?: AbortSignal; from?: number; to?: number } = {},
   ): Promise<MmpdFile> {
-    return fetchProcessDataDump(this.httpBaseUrl, { fetch: this.customFetch, ...options })
+    return fetchProcessDataDump(this.httpBaseUrl, { fetch: this.customFetch, ...options });
   }
 
-  /// Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown.
+  /** Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown. */
   close(): void {
-    this.ws.close()
+    this.ws.close();
   }
 }

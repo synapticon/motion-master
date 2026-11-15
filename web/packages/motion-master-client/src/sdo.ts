@@ -1,14 +1,24 @@
 // Encoding and decoding helpers for CoE SDO values: turning the raw little-endian
 // byte arrays exchanged over the wire into human-readable values and back.
-import { parseHexBytes } from './hex'
+import { parseHexBytes } from './hex';
 
 // CoE data types the SDO download card can encode a value into. `raw` is an
 // escape hatch for entering bytes directly.
 export const SDO_TYPES = [
-  'uint8', 'int8', 'uint16', 'int16', 'uint32', 'int32',
-  'uint64', 'int64', 'float32', 'float64', 'string', 'raw',
-] as const
-export type SdoType = (typeof SDO_TYPES)[number]
+  'uint8',
+  'int8',
+  'uint16',
+  'int16',
+  'uint32',
+  'int32',
+  'uint64',
+  'int64',
+  'float32',
+  'float64',
+  'string',
+  'raw',
+] as const;
+export type SdoType = (typeof SDO_TYPES)[number];
 
 // Placeholder text shown in the value input for each type.
 export const SDO_TYPE_HINT: Record<SdoType, string> = {
@@ -24,70 +34,117 @@ export const SDO_TYPE_HINT: Record<SdoType, string> = {
   float64: 'e.g. 3.141592653589793',
   string: 'e.g. SOMANET',
   raw: 'hex bytes, e.g. 01 02 0A FF',
-}
+};
 
 const INT_ENC: Partial<Record<SdoType, { size: number; signed: boolean }>> = {
-  uint8: { size: 1, signed: false }, int8: { size: 1, signed: true },
-  uint16: { size: 2, signed: false }, int16: { size: 2, signed: true },
-  uint32: { size: 4, signed: false }, int32: { size: 4, signed: true },
-  uint64: { size: 8, signed: false }, int64: { size: 8, signed: true },
-}
+  uint8: { size: 1, signed: false },
+  int8: { size: 1, signed: true },
+  uint16: { size: 2, signed: false },
+  int16: { size: 2, signed: true },
+  uint32: { size: 4, signed: false },
+  int32: { size: 4, signed: true },
+  uint64: { size: 8, signed: false },
+  int64: { size: 8, signed: true },
+};
 
 // Accepts decimal (with optional leading '-') or 0x-prefixed hex; returns null on anything else.
 // Signed hex is signed-magnitude ("-0x1"), not two's-complement — so a value round-trips through
 // the range check in encodeSdoValue regardless of the base it was entered in.
 export function parseIntegerFlexible(s: string): bigint | null {
-  if (/^-?[0-9]+$/.test(s)) return BigInt(s)
-  if (/^0[xX][0-9a-fA-F]+$/.test(s)) return BigInt(s)
-  if (/^-0[xX][0-9a-fA-F]+$/.test(s)) return -BigInt(s.slice(1))
-  return null
+  if (/^-?[0-9]+$/.test(s)) {
+    return BigInt(s);
+  }
+  if (/^0[xX][0-9a-fA-F]+$/.test(s)) {
+    return BigInt(s);
+  }
+  if (/^-0[xX][0-9a-fA-F]+$/.test(s)) {
+    return -BigInt(s.slice(1));
+  }
+  return null;
 }
 
 // True for the fixed-width integer types — the ones a value can meaningfully be shown and edited
 // in hexadecimal (floats and strings have no base; `raw` is already entered as hex bytes).
 export function isIntegerSdoType(type: SdoType): boolean {
-  return type in INT_ENC
+  return type in INT_ENC;
 }
 
 // Encodes a human-entered value into the little-endian byte sequence for an SDO download.
-export function encodeSdoValue(type: SdoType, raw: string): { bytes: number[] } | { error: string } {
-  const s = raw.trim()
+export function encodeSdoValue(
+  type: SdoType,
+  raw: string,
+): { bytes: number[] } | { error: string } {
+  const s = raw.trim();
 
-  const meta = INT_ENC[type]
+  const meta = INT_ENC[type];
   if (meta) {
-    const n = parseIntegerFlexible(s)
-    if (n === null) return { error: 'Not a valid integer' }
-    const bits = BigInt(meta.size * 8)
-    const min = meta.signed ? -(1n << (bits - 1n)) : 0n
-    const max = meta.signed ? (1n << (bits - 1n)) - 1n : (1n << bits) - 1n
-    if (n < min || n > max) return { error: `Out of range for ${type} [${min}, ${max}]` }
-    const view = new DataView(new ArrayBuffer(meta.size))
-    if (meta.size === 1) meta.signed ? view.setInt8(0, Number(n)) : view.setUint8(0, Number(n))
-    else if (meta.size === 2) meta.signed ? view.setInt16(0, Number(n), true) : view.setUint16(0, Number(n), true)
-    else if (meta.size === 4) meta.signed ? view.setInt32(0, Number(n), true) : view.setUint32(0, Number(n), true)
-    else meta.signed ? view.setBigInt64(0, n, true) : view.setBigUint64(0, n, true)
-    return { bytes: [...new Uint8Array(view.buffer)] }
+    const n = parseIntegerFlexible(s);
+    if (n === null) {
+      return { error: 'Not a valid integer' };
+    }
+    const bits = BigInt(meta.size * 8);
+    const min = meta.signed ? -(1n << (bits - 1n)) : 0n;
+    const max = meta.signed ? (1n << (bits - 1n)) - 1n : (1n << bits) - 1n;
+    if (n < min || n > max) {
+      return { error: `Out of range for ${type} [${min}, ${max}]` };
+    }
+    const view = new DataView(new ArrayBuffer(meta.size));
+    if (meta.size === 1) {
+      if (meta.signed) {
+        view.setInt8(0, Number(n));
+      } else {
+        view.setUint8(0, Number(n));
+      }
+    } else if (meta.size === 2) {
+      if (meta.signed) {
+        view.setInt16(0, Number(n), true);
+      } else {
+        view.setUint16(0, Number(n), true);
+      }
+    } else if (meta.size === 4) {
+      if (meta.signed) {
+        view.setInt32(0, Number(n), true);
+      } else {
+        view.setUint32(0, Number(n), true);
+      }
+    } else {
+      if (meta.signed) {
+        view.setBigInt64(0, n, true);
+      } else {
+        view.setBigUint64(0, n, true);
+      }
+    }
+    return { bytes: [...new Uint8Array(view.buffer)] };
   }
 
   if (type === 'float32' || type === 'float64') {
-    if (s === '') return { error: 'Value is empty' }
-    const f = Number(s)
-    if (Number.isNaN(f)) return { error: 'Not a valid number' }
-    const size = type === 'float32' ? 4 : 8
-    const view = new DataView(new ArrayBuffer(size))
-    if (type === 'float32') view.setFloat32(0, f, true)
-    else view.setFloat64(0, f, true)
-    return { bytes: [...new Uint8Array(view.buffer)] }
+    if (s === '') {
+      return { error: 'Value is empty' };
+    }
+    const f = Number(s);
+    if (Number.isNaN(f)) {
+      return { error: 'Not a valid number' };
+    }
+    const size = type === 'float32' ? 4 : 8;
+    const view = new DataView(new ArrayBuffer(size));
+    if (type === 'float32') {
+      view.setFloat32(0, f, true);
+    } else {
+      view.setFloat64(0, f, true);
+    }
+    return { bytes: [...new Uint8Array(view.buffer)] };
   }
 
   if (type === 'string') {
-    return { bytes: [...new TextEncoder().encode(raw)] }
+    return { bytes: [...new TextEncoder().encode(raw)] };
   }
 
   // raw: whitespace- or comma-separated hex bytes
-  const bytes = parseHexBytes(s)
-  if (bytes === null) return { error: 'Not a valid even-length hex byte string' }
-  return { bytes }
+  const bytes = parseHexBytes(s);
+  if (bytes === null) {
+    return { error: 'Not a valid even-length hex byte string' };
+  }
+  return { bytes };
 }
 
 // Maps a CoE object's data-type name (as reported by SDO Info) to the SdoType the
@@ -98,113 +155,140 @@ export function sdoTypeForDataTypeName(dataTypeName: string): SdoType {
     case 'BOOLEAN':
     case 'UNSIGNED8':
     case 'BYTE':
-      return 'uint8'
+      return 'uint8';
     case 'INTEGER8':
-      return 'int8'
+      return 'int8';
     case 'UNSIGNED16':
     case 'WORD':
-      return 'uint16'
+      return 'uint16';
     case 'INTEGER16':
-      return 'int16'
+      return 'int16';
     case 'UNSIGNED32':
     case 'DWORD':
-      return 'uint32'
+      return 'uint32';
     case 'INTEGER32':
-      return 'int32'
+      return 'int32';
     case 'UNSIGNED64':
-      return 'uint64'
+      return 'uint64';
     case 'INTEGER64':
-      return 'int64'
+      return 'int64';
     case 'REAL32':
-      return 'float32'
+      return 'float32';
     case 'REAL64':
-      return 'float64'
+      return 'float64';
     case 'VISIBLE_STRING':
     case 'UNICODE_STRING':
-      return 'string'
+      return 'string';
     default:
-      return 'raw'
+      return 'raw';
   }
 }
 
-export interface SdoInterpretation { label: string; value: string }
+export interface SdoInterpretation {
+  label: string;
+  value: string;
+}
 
 // Best-effort interpretation of raw SDO bytes as every fixed-width type that fits,
 // plus a printable-string reading. Used to show what an uploaded value could mean.
 export function interpretSdoBytes(bytes: number[]): SdoInterpretation[] {
-  const view = new DataView(new Uint8Array(bytes).buffer)
-  const out: SdoInterpretation[] = []
+  const view = new DataView(new Uint8Array(bytes).buffer);
+  const out: SdoInterpretation[] = [];
 
   if (bytes.length === 1) {
-    out.push({ label: 'int8',  value: String(view.getInt8(0)) })
-    out.push({ label: 'uint8', value: String(view.getUint8(0)) })
+    out.push({ label: 'int8', value: String(view.getInt8(0)) });
+    out.push({ label: 'uint8', value: String(view.getUint8(0)) });
   } else if (bytes.length === 2) {
-    out.push({ label: 'int16 LE',  value: String(view.getInt16(0, true)) })
-    out.push({ label: 'uint16 LE', value: String(view.getUint16(0, true)) })
+    out.push({ label: 'int16 LE', value: String(view.getInt16(0, true)) });
+    out.push({ label: 'uint16 LE', value: String(view.getUint16(0, true)) });
   } else if (bytes.length === 4) {
-    out.push({ label: 'int32 LE',   value: String(view.getInt32(0, true)) })
-    out.push({ label: 'uint32 LE',  value: String(view.getUint32(0, true)) })
-    out.push({ label: 'float32 LE', value: String(view.getFloat32(0, true)) })
+    out.push({ label: 'int32 LE', value: String(view.getInt32(0, true)) });
+    out.push({ label: 'uint32 LE', value: String(view.getUint32(0, true)) });
+    out.push({ label: 'float32 LE', value: String(view.getFloat32(0, true)) });
   } else if (bytes.length === 8) {
-    out.push({ label: 'int64 LE',   value: view.getBigInt64(0, true).toString() })
-    out.push({ label: 'uint64 LE',  value: view.getBigUint64(0, true).toString() })
-    out.push({ label: 'float64 LE', value: String(view.getFloat64(0, true)) })
+    out.push({ label: 'int64 LE', value: view.getBigInt64(0, true).toString() });
+    out.push({ label: 'uint64 LE', value: view.getBigUint64(0, true).toString() });
+    out.push({ label: 'float64 LE', value: String(view.getFloat64(0, true)) });
   }
 
-  if (bytes.length > 0 && bytes.every(b => (b >= 0x20 && b <= 0x7e) || b === 0)) {
+  if (bytes.length > 0 && bytes.every((b) => (b >= 0x20 && b <= 0x7e) || b === 0)) {
     // VISIBLE_STRING is space-padded to a fixed width and may carry a terminating
     // NUL — neither is significant, so strip trailing 0x20/0x00 before display.
-    let len = bytes.length
-    while (len > 0 && (bytes[len - 1] === 0x00 || bytes[len - 1] === 0x20)) len--
-    const str = new TextDecoder().decode(new Uint8Array(bytes.slice(0, len).filter(b => b !== 0)))
-    out.push({ label: 'string', value: `"${str}"` })
+    let len = bytes.length;
+    while (len > 0 && (bytes[len - 1] === 0x00 || bytes[len - 1] === 0x20)) {
+      len--;
+    }
+    const str = new TextDecoder().decode(
+      new Uint8Array(bytes.slice(0, len).filter((b) => b !== 0)),
+    );
+    out.push({ label: 'string', value: `"${str}"` });
   }
 
-  return out
+  return out;
 }
 
 // Decodes raw SDO bytes into a typed value, given the object's CoE data-type name.
 // Falls back to the raw byte array for unknown types or short reads.
 export function decodeSdoBytes(dataTypeName: string, bytes: number[]): number | string | number[] {
-  const view = new DataView(new Uint8Array(bytes).buffer)
+  const view = new DataView(new Uint8Array(bytes).buffer);
   switch (dataTypeName) {
     case 'BOOLEAN':
     case 'UNSIGNED8':
     case 'BYTE':
-      if (bytes.length >= 1) return view.getUint8(0)
-      break
+      if (bytes.length >= 1) {
+        return view.getUint8(0);
+      }
+      break;
     case 'INTEGER8':
-      if (bytes.length >= 1) return view.getInt8(0)
-      break
+      if (bytes.length >= 1) {
+        return view.getInt8(0);
+      }
+      break;
     case 'INTEGER16':
-      if (bytes.length >= 2) return view.getInt16(0, true)
-      break
+      if (bytes.length >= 2) {
+        return view.getInt16(0, true);
+      }
+      break;
     case 'INTEGER32':
-      if (bytes.length >= 4) return view.getInt32(0, true)
-      break
+      if (bytes.length >= 4) {
+        return view.getInt32(0, true);
+      }
+      break;
     case 'UNSIGNED16':
     case 'WORD':
-      if (bytes.length >= 2) return view.getUint16(0, true)
-      break
+      if (bytes.length >= 2) {
+        return view.getUint16(0, true);
+      }
+      break;
     case 'UNSIGNED32':
     case 'DWORD':
-      if (bytes.length >= 4) return view.getUint32(0, true)
-      break
+      if (bytes.length >= 4) {
+        return view.getUint32(0, true);
+      }
+      break;
     case 'REAL32':
-      if (bytes.length >= 4) return view.getFloat32(0, true)
-      break
+      if (bytes.length >= 4) {
+        return view.getFloat32(0, true);
+      }
+      break;
     case 'REAL64':
-      if (bytes.length >= 8) return view.getFloat64(0, true)
-      break
+      if (bytes.length >= 8) {
+        return view.getFloat64(0, true);
+      }
+      break;
     case 'INTEGER64':
-      if (bytes.length >= 8) return Number(view.getBigInt64(0, true))
-      break
+      if (bytes.length >= 8) {
+        return Number(view.getBigInt64(0, true));
+      }
+      break;
     case 'UNSIGNED64':
-      if (bytes.length >= 8) return Number(view.getBigUint64(0, true))
-      break
+      if (bytes.length >= 8) {
+        return Number(view.getBigUint64(0, true));
+      }
+      break;
     case 'VISIBLE_STRING':
     case 'UNICODE_STRING':
-      return new TextDecoder().decode(new Uint8Array(bytes.filter(b => b !== 0)))
+      return new TextDecoder().decode(new Uint8Array(bytes.filter((b) => b !== 0)));
   }
-  return bytes
+  return bytes;
 }

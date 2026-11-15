@@ -1,19 +1,19 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   apiErrorMessage,
   type IntegroVariant,
   type IntegroVariantOption,
-} from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
-import FilePickerButton from '../components/FilePickerButton'
-import IntegroVariantView, { multipleSelections } from '../components/IntegroVariantView'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
+} from '@synapticon/motion-master-client';
+import Callout from '../components/Callout';
+import FilePickerButton from '../components/FilePickerButton';
+import IntegroVariantView, { multipleSelections } from '../components/IntegroVariantView';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
 
-const cardCls = 'border border-grey-200 bg-white p-5 space-y-4'
+const cardCls = 'border border-grey-200 bg-white p-5 space-y-4';
 const thCls =
-  'text-left font-display uppercase text-[10px] tracking-wide text-grey-500 px-3 py-2 border-b border-grey-200 align-bottom'
-const tdCls = 'px-3 py-2 border-b border-grey-100 align-top text-sm'
+  'text-left font-display uppercase text-[10px] tracking-wide text-grey-500 px-3 py-2 border-b border-grey-200 align-bottom';
+const tdCls = 'px-3 py-2 border-b border-grey-100 align-top text-sm';
 
 /**
  * The catalogue as one table, grouped by category, with the loaded file's choices marked.
@@ -30,25 +30,25 @@ function CatalogueTable({
   selected,
   alternativeIds,
 }: {
-  options: IntegroVariantOption[]
-  selected: Set<number>
-  alternativeIds: Set<number>
+  options: IntegroVariantOption[];
+  selected: Set<number>;
+  alternativeIds: Set<number>;
 }) {
   // Category order follows the catalogue's own code order — the first code in a category places it —
   // so the table reads in the order the option ids were assigned rather than alphabetically.
   const groups = useMemo(() => {
-    const byCategory = new Map<string, IntegroVariantOption[]>()
+    const byCategory = new Map<string, IntegroVariantOption[]>();
     for (const option of options) {
-      const category = option.category ?? 'Not in the catalogue'
-      const group = byCategory.get(category)
+      const category = option.category ?? 'Not in the catalogue';
+      const group = byCategory.get(category);
       if (group) {
-        group.push(option)
+        group.push(option);
       } else {
-        byCategory.set(category, [option])
+        byCategory.set(category, [option]);
       }
     }
-    return [...byCategory.entries()]
-  }, [options])
+    return [...byCategory.entries()];
+  }, [options]);
 
   return (
     <div className="overflow-x-auto">
@@ -74,9 +74,9 @@ function CatalogueTable({
                   {category}
                 </th>
               </tr>
-              {group.map(option => {
-                const isSelected = selected.has(option.id)
-                const hasSelectedAlternative = alternativeIds.has(option.id)
+              {group.map((option) => {
+                const isSelected = selected.has(option.id);
+                const hasSelectedAlternative = alternativeIds.has(option.id);
                 return (
                   <tr
                     key={option.id}
@@ -88,7 +88,9 @@ function CatalogueTable({
                     <td className={`${tdCls} whitespace-nowrap`}>
                       {isSelected && (
                         <span
-                          className={hasSelectedAlternative ? 'text-status-info' : 'text-status-good'}
+                          className={
+                            hasSelectedAlternative ? 'text-status-info' : 'text-status-good'
+                          }
                         >
                           {hasSelectedAlternative ? 'one of several' : 'yes'}
                         </span>
@@ -110,14 +112,14 @@ function CatalogueTable({
                       {option.mpnSegmentCodes?.join(', ')}
                     </td>
                   </tr>
-                )
+                );
               })}
             </Fragment>
           ))}
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 /**
@@ -129,93 +131,93 @@ function CatalogueTable({
  * keep in step with a drive.
  */
 export default function ToolsIntegroVariantPage() {
-  const { api } = useConnection()
-  const [filename, setFilename] = useState<string | null>(null)
-  const [byteCount, setByteCount] = useState<number | null>(null)
-  const [variant, setVariant] = useState<IntegroVariant | null>(null)
-  const [parsing, setParsing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [catalogue, setCatalogue] = useState<IntegroVariantOption[]>([])
-  const [onlySelected, setOnlySelected] = useState(false)
+  const { api } = useConnection();
+  const [filename, setFilename] = useState<string | null>(null);
+  const [byteCount, setByteCount] = useState<number | null>(null);
+  const [variant, setVariant] = useState<IntegroVariant | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [catalogue, setCatalogue] = useState<IntegroVariantOption[]>([]);
+  const [onlySelected, setOnlySelected] = useState(false);
 
   // The catalogue is static server-side data, so it is fetched once and kept — it is the same table
   // whether or not a file is loaded, and it is what makes the page useful with no file at all.
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     api
       .listIntegroVariantOptions()
-      .then(res => {
+      .then((res) => {
         if (!cancelled) {
-          setCatalogue(res.data)
+          setCatalogue(res.data);
         }
       })
       .catch(() => {
         // A missing catalogue costs the reference table and nothing else; the file decode below is
         // the page's real job and works without it.
-      })
+      });
     return () => {
-      cancelled = true
-    }
-  }, [api])
+      cancelled = true;
+    };
+  }, [api]);
 
   async function loadFile(file: File) {
-    setParsing(true)
-    setError(null)
-    setVariant(null)
+    setParsing(true);
+    setError(null);
+    setVariant(null);
     try {
-      const raw = new Uint8Array(await file.arrayBuffer())
-      setFilename(file.name)
-      setByteCount(raw.length)
+      const raw = new Uint8Array(await file.arrayBuffer());
+      setFilename(file.name);
+      setByteCount(raw.length);
       // Posted as raw bytes rather than through the generated client, which JSON-encodes its body.
       const res = await fetch(`${api.baseUrl}/api/integro-variant/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: raw,
-      })
+      });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(body?.error ?? `HTTP ${res.status}`)
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
       }
-      setVariant((await res.json()) as IntegroVariant)
+      setVariant((await res.json()) as IntegroVariant);
     } catch (err) {
-      setError(apiErrorMessage(err, 'Failed to parse the variant file.'))
+      setError(apiErrorMessage(err, 'Failed to parse the variant file.'));
     } finally {
-      setParsing(false)
+      setParsing(false);
     }
   }
 
   const selectedIds = useMemo(
-    () => new Set((variant?.options ?? []).map(option => option.id)),
+    () => new Set((variant?.options ?? []).map((option) => option.id)),
     [variant],
-  )
+  );
 
   // Which selected options have a selected alternative, so the catalogue table can mark them the
   // way the decoded view above does. The pairing itself belongs to that view.
   const alternativeIds = useMemo(() => {
-    const ids = new Set<number>()
+    const ids = new Set<number>();
     if (variant) {
       for (const selection of multipleSelections(variant)) {
         for (const option of selection.options) {
-          ids.add(option.id)
+          ids.add(option.id);
         }
       }
     }
-    return ids
-  }, [variant])
+    return ids;
+  }, [variant]);
 
   // Codes the file carries that the catalogue does not name. Shown as their own rows so a file from
   // a future firmware still lists everything it selects rather than silently dropping it.
   const unknownOptions = useMemo(
-    () => (variant?.options ?? []).filter(option => option.category === undefined),
+    () => (variant?.options ?? []).filter((option) => option.category === undefined),
     [variant],
-  )
+  );
 
   const tableOptions = useMemo(() => {
     const rows = onlySelected
-      ? catalogue.filter(option => selectedIds.has(option.id))
-      : [...catalogue]
-    return [...rows, ...unknownOptions]
-  }, [catalogue, onlySelected, selectedIds, unknownOptions])
+      ? catalogue.filter((option) => selectedIds.has(option.id))
+      : [...catalogue];
+    return [...rows, ...unknownOptions];
+  }, [catalogue, onlySelected, selectedIds, unknownOptions]);
 
   return (
     <div>
@@ -239,7 +241,7 @@ export default function ToolsIntegroVariantPage() {
 
           <div className="flex items-center gap-3">
             {/* No `accept`: the file is named `.variant`, an extension no dialog filter matches. */}
-            <FilePickerButton accept="" onFile={file => void loadFile(file)} disabled={parsing}>
+            <FilePickerButton accept="" onFile={(file) => void loadFile(file)} disabled={parsing}>
               {variant ? 'Load another file' : 'Load variant file'}
             </FilePickerButton>
             {filename && (
@@ -269,9 +271,10 @@ export default function ToolsIntegroVariantPage() {
                   {variant ? 'Options, with this file marked' : 'All Integro variant options'}
                 </h3>
                 <p className="text-xs text-grey-500 mt-1">
-                  Every option an Integro can be licensed with, grouped by what it selects. The codes
-                  ascend with real gaps, and some are no longer implemented by current firmware —
-                  they stay in the catalogue because files written years ago still carry them.
+                  Every option an Integro can be licensed with, grouped by what it selects. The
+                  codes ascend with real gaps, and some are no longer implemented by current
+                  firmware — they stay in the catalogue because files written years ago still carry
+                  them.
                 </p>
               </div>
               {variant && (
@@ -279,7 +282,7 @@ export default function ToolsIntegroVariantPage() {
                   <input
                     type="checkbox"
                     checked={onlySelected}
-                    onChange={e => setOnlySelected(e.target.checked)}
+                    onChange={(e) => setOnlySelected(e.target.checked)}
                   />
                   Only selected
                 </label>
@@ -294,5 +297,5 @@ export default function ToolsIntegroVariantPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

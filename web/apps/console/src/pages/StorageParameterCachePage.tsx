@@ -1,14 +1,14 @@
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ParameterCacheEntry } from '@synapticon/motion-master-client'
-import PageHeader from '../components/PageHeader'
-import ParameterCacheExplainer from '../components/ParameterCacheExplainer'
-import { useConnection } from '../contexts/ConnectionContext'
-import { downloadBytes } from '../utils/download'
-import { formatBytes } from '../utils/format'
-import { btnOutline } from '../utils/styles'
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ParameterCacheEntry } from '@synapticon/motion-master-client';
+import PageHeader from '../components/PageHeader';
+import ParameterCacheExplainer from '../components/ParameterCacheExplainer';
+import { useConnection } from '../contexts/ConnectionContext';
+import { downloadBytes } from '../utils/download';
+import { formatBytes } from '../utils/format';
+import { btnOutline } from '../utils/styles';
 
-const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`
+const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`;
 
 // One entry per table column. `help` is the header's tooltip: what the value is and where Motion
 // Master got it.
@@ -40,37 +40,37 @@ const COLUMNS: { label: string; help?: string }[] = [
     help: 'The size of the cache file on disk.',
   },
   { label: '' },
-]
+];
 
 export default function StorageParameterCachePage() {
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Caches live on disk, independent of the bus — no scan/connect gate. The query simply fails if
   // Motion Master is unreachable, surfaced as the error state below.
   const cachesQuery = useQuery({
     queryKey: ['parameter-cache'],
     queryFn: () => api.listParameterCacheEntries(),
-  })
-  const caches = cachesQuery.data?.data ?? []
+  });
+  const caches = cachesQuery.data?.data ?? [];
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteParameterCache(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['parameter-cache'] }),
-  })
+  });
 
   async function handleDownload(entry: ParameterCacheEntry) {
-    setDownloadingId(entry.id)
+    setDownloadingId(entry.id);
     try {
-      const res = await fetch(`${api.baseUrl}/api/parameter-cache/${entry.id}`)
+      const res = await fetch(`${api.baseUrl}/api/parameter-cache/${entry.id}`);
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
+        throw new Error(`HTTP ${res.status}`);
       }
-      const bytes = new Uint8Array(await res.arrayBuffer())
-      downloadBytes(bytes, `parameters-${entry.id}.json`)
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      downloadBytes(bytes, `parameters-${entry.id}.json`);
     } finally {
-      setDownloadingId(null)
+      setDownloadingId(null);
     }
   }
 
@@ -79,22 +79,22 @@ export default function StorageParameterCachePage() {
       `Delete the cached object dictionary for ${hex(entry.vendorId)} / ${hex(entry.productCode)} / ` +
         `${entry.firmwareVersion}?\n\nThis only removes Motion Master's saved copy — the device ` +
         `is untouched. The next scan of this hardware will re-enumerate it over SDO.`,
-    )
+    );
     if (confirmed) {
-      deleteMutation.mutate(entry.id)
+      deleteMutation.mutate(entry.id);
     }
   }
 
   function handleClearAll() {
     if (caches.length === 0) {
-      return
+      return;
     }
     const confirmed = window.confirm(
       `Delete all ${caches.length} cached object ${caches.length === 1 ? 'dictionary' : 'dictionaries'}?\n\n` +
         `Devices are untouched; the next scan re-enumerates them over SDO.`,
-    )
+    );
     if (confirmed) {
-      caches.forEach(entry => deleteMutation.mutate(entry.id))
+      caches.forEach((entry) => deleteMutation.mutate(entry.id));
     }
   }
 
@@ -160,7 +160,7 @@ export default function StorageParameterCachePage() {
                 </tr>
               </thead>
               <tbody>
-                {caches.map(entry => (
+                {caches.map((entry) => (
                   <tr key={entry.id} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{hex(entry.vendorId)}</td>
                     <td className="px-4 py-2 font-mono">{hex(entry.productCode)}</td>
@@ -193,5 +193,5 @@ export default function StorageParameterCachePage() {
         )}
       </div>
     </div>
-  )
+  );
 }

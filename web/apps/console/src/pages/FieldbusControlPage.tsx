@@ -1,10 +1,10 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import PageHeader from '../components/PageHeader'
-import ControlExplainer from '../components/ControlExplainer'
-import SlavePositionBadge from '../components/SlavePositionBadge'
-import { useConnection, type SpoeMode } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import PageHeader from '../components/PageHeader';
+import ControlExplainer from '../components/ControlExplainer';
+import SlavePositionBadge from '../components/SlavePositionBadge';
+import { useConnection, type SpoeMode } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
 
 // AL state transition targets, in the order the buttons are rendered. BOOT leads
 // (it is the odd one out — file-transfer only) and is styled distinctly; the rest
@@ -12,11 +12,11 @@ import { btnOutline } from '../utils/styles'
 // what communication each state enables, since that is what users actually reason
 // about when choosing a target.
 type TransitionTarget = {
-  value: 1 | 2 | 3 | 4 | 8
-  label: string
-  cls: string
-  hint: string
-}
+  value: 1 | 2 | 3 | 4 | 8;
+  label: string;
+  cls: string;
+  hint: string;
+};
 // The targets of a restart, the end state first. A restart always starts at INIT.
 const RESTART_TARGETS: { value: 1 | 2 | 3 | 4 | 8; label: string }[] = [
   { value: 8, label: 'OP' },
@@ -24,7 +24,7 @@ const RESTART_TARGETS: { value: 1 | 2 | 3 | 4 | 8; label: string }[] = [
   { value: 2, label: 'PREOP' },
   { value: 3, label: 'BOOT' },
   { value: 1, label: 'INIT' },
-]
+];
 
 const TRANSITION_TARGETS: TransitionTarget[] = [
   {
@@ -57,35 +57,35 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
     cls: 'bg-green-600 text-white hover:brightness-110',
     hint: 'Everything active: inputs, outputs, and mailbox. The drive enters it only once valid outputs are already being sent.',
   },
-]
+];
 
 // Human-readable elapsed time for transition feedback: sub-second as whole ms,
 // otherwise seconds with one decimal (transitions can run up to the server timeout).
 function formatDuration(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
 function apiError(err: unknown): string {
   if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error
+    const inner = (err as { error: unknown }).error;
     if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error)
+      return String((inner as { error: unknown }).error);
     }
   }
-  return 'Unknown error'
+  return 'Unknown error';
 }
 
 function apiStatus(err: unknown): number | undefined {
   if (err && typeof err === 'object' && 'status' in err) {
-    return (err as { status?: number }).status
+    return (err as { status?: number }).status;
   }
-  return undefined
+  return undefined;
 }
 
-const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 const btnCls =
-  'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full transition-colors'
+  'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full transition-colors';
 
 // The two roles a SPoE connection can take. The wording follows the mode-selection design.
 const SPOE_MODES: { value: SpoeMode; title: string; description: string }[] = [
@@ -93,7 +93,7 @@ const SPOE_MODES: { value: SpoeMode; title: string; description: string }[] = [
     value: 'monitor',
     title: 'Monitoring mode',
     description:
-      'The drive takes its commands and setpoints from a PLC or another master. Motion Master observes the process data and the control behaviour, and tunes parameters. It cannot change the drive\'s state.',
+      "The drive takes its commands and setpoints from a PLC or another master. Motion Master observes the process data and the control behaviour, and tunes parameters. It cannot change the drive's state.",
   },
   {
     value: 'control',
@@ -101,41 +101,68 @@ const SPOE_MODES: { value: SpoeMode; title: string; description: string }[] = [
     description:
       'Motion Master takes full control of the drive, to commission, maintain and configure it, send test signals and watch the response. No PLC or master controls it. If no SPoE message arrives within the watchdog time, 75 ms by default, the drive faults.',
   },
-]
+];
 
 export default function FieldbusControlPage() {
-  const queryClient = useQueryClient()
-  const { api, driver, setDriver, adapter, setAdapter, ipAddresses, setIpAddresses, spoeMode, setSpoeMode, spoePort, setSpoePort, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
-  const AL_STATE_LABEL: Record<number, string> = { 1: 'INIT', 2: 'PREOP', 3: 'BOOT', 4: 'SAFEOP', 8: 'OP' }
+  const queryClient = useQueryClient();
+  const {
+    api,
+    driver,
+    setDriver,
+    adapter,
+    setAdapter,
+    ipAddresses,
+    setIpAddresses,
+    spoeMode,
+    setSpoeMode,
+    spoePort,
+    setSpoePort,
+    hasScanned,
+    setHasScanned,
+    setIsInitialized,
+    alreadyInitialized,
+    setAlreadyInitialized,
+  } = useConnection();
+  const AL_STATE_LABEL: Record<number, string> = {
+    1: 'INIT',
+    2: 'PREOP',
+    3: 'BOOT',
+    4: 'SAFEOP',
+    8: 'OP',
+  };
 
   const alStatusCodesQuery = useQuery({
     queryKey: ['alStatusCodes'],
     queryFn: () => api.getAlStatusCodes(),
     staleTime: Infinity,
-  })
+  });
   const alStatusCodeMap = Object.fromEntries(
-    (alStatusCodesQuery.data?.data ?? []).map(c => [c.code, c])
-  )
+    (alStatusCodesQuery.data?.data ?? []).map((c) => [c.code, c]),
+  );
 
-  type DeviceState = { alState: number; error: boolean; alStatusCode: number }
-  const [deviceStates, setDeviceStates] = useState<Record<number, DeviceState>>({})
-  const [readingStates, setReadingStates] = useState(false)
+  type DeviceState = { alState: number; error: boolean; alStatusCode: number };
+  const [deviceStates, setDeviceStates] = useState<Record<number, DeviceState>>({});
+  const [readingStates, setReadingStates] = useState(false);
 
   async function readStatesFor(positions: number[]) {
     if (positions.length === 0) {
-      setDeviceStates({})
-      return
+      setDeviceStates({});
+      return;
     }
-    setReadingStates(true)
+    setReadingStates(true);
     try {
-      const res = await api.getDeviceStates({ positions: positions.join(',') })
-      const next: Record<number, DeviceState> = {}
+      const res = await api.getDeviceStates({ positions: positions.join(',') });
+      const next: Record<number, DeviceState> = {};
       for (const entry of res.data) {
-        next[entry.slavePosition] = { alState: entry.alState, error: entry.error, alStatusCode: entry.alStatusCode }
+        next[entry.slavePosition] = {
+          alState: entry.alState,
+          error: entry.error,
+          alStatusCode: entry.alStatusCode,
+        };
       }
-      setDeviceStates(next)
+      setDeviceStates(next);
     } finally {
-      setReadingStates(false)
+      setReadingStates(false);
     }
   }
 
@@ -144,157 +171,182 @@ export default function FieldbusControlPage() {
   // keep their state (e.g. PREOP / OP). States are read off the freshly
   // re-fetched list so a refresh right after a scan reflects the new devices.
   async function refreshDevices() {
-    const res = await devicesQuery.refetch()
-    await readStatesFor(res.data?.data.map(d => d.slavePosition) ?? [])
+    const res = await devicesQuery.refetch();
+    await readStatesFor(res.data?.data.map((d) => d.slavePosition) ?? []);
     // Keep the sidebar's shared AL-state query in sync with fieldbus actions
     // (scan / transition / manual refresh); the sidebar derives the mailbox icon from it.
-    void queryClient.invalidateQueries({ queryKey: ['deviceStates'] })
+    void queryClient.invalidateQueries({ queryKey: ['deviceStates'] });
   }
 
   // One address per line or separated by commas, in position order.
-  const spoeAddresses = ipAddresses.split(/[\s,]+/).map(a => a.trim()).filter(a => a.length > 0)
-  const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : adapter.trim().length > 0
+  const spoeAddresses = ipAddresses
+    .split(/[\s,]+/)
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+  const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : adapter.trim().length > 0;
 
   const initMutation = useMutation({
     mutationFn: () =>
       driver === 'spoe'
-        ? api.init({ driver, ipAddresses: spoeAddresses, spoe: { mode: spoeMode, port: Number(spoePort) || 8080 } })
+        ? api.init({
+            driver,
+            ipAddresses: spoeAddresses,
+            spoe: { mode: spoeMode, port: Number(spoePort) || 8080 },
+          })
         : api.init({ driver, adapter }),
     onSuccess: () => {
-      setAlreadyInitialized(false)
-      setIsInitialized(true)
+      setAlreadyInitialized(false);
+      setIsInitialized(true);
     },
     onError: (err) => {
       // 409 = already initialized on the server; surface it as info, not an error.
       if (apiStatus(err) === 409) {
-        setAlreadyInitialized(true)
-        setIsInitialized(true)
+        setAlreadyInitialized(true);
+        setIsInitialized(true);
       }
     },
-  })
+  });
 
   const resetMutation = useMutation({
     mutationFn: () => api.reset(),
     onSuccess: () => {
-      setHasScanned(false)
-      setIsInitialized(false)
-      setAlreadyInitialized(false)
-      setDeviceStates({})
-      queryClient.removeQueries({ queryKey: ['devices'] })
+      setHasScanned(false);
+      setIsInitialized(false);
+      setAlreadyInitialized(false);
+      setDeviceStates({});
+      queryClient.removeQueries({ queryKey: ['devices'] });
     },
-  })
+  });
 
   const scanMutation = useMutation({
     mutationFn: () => api.scan(),
     onSuccess: () => {
-      setHasScanned(true)
+      setHasScanned(true);
       // Pull the freshly discovered devices and their actual (post-scan: INIT)
       // states so the table reflects reality without a manual Refresh.
-      return refreshDevices()
+      return refreshDevices();
     },
-  })
+  });
 
   const devicesQuery = useQuery({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
     enabled: hasScanned,
-  })
+  });
 
   const adaptersQuery = useQuery({
     queryKey: ['adapters'],
     queryFn: () => api.getAdapters(),
     enabled: false,
-  })
+  });
 
   const transitionMutation = useMutation({
     // Time just the transition request — the server blocks until devices settle (or time out),
     // so this is the real wall-clock the state change took. Measured here, not around onSuccess,
     // so the follow-up refresh below is excluded.
     mutationFn: async (state: 1 | 2 | 3 | 4 | 8) => {
-      const start = performance.now()
-      const res = await api.transitionToState({ state })
-      return { res, elapsedMs: performance.now() - start }
+      const start = performance.now();
+      const res = await api.transitionToState({ state });
+      return { res, elapsedMs: performance.now() - start };
     },
     // The transition blocks server-side until devices arrive (or time out), so
     // re-read states afterwards to show where each device actually landed.
     onSuccess: () => refreshDevices(),
-  })
+  });
 
   // Per-device transition: same endpoint, but scoped to a single slave via `positions`.
   // The server walks to the target one legal AL transition at a time, so the dropdown offers
   // every state and we surface where the slave ended up.
   // Last result is kept per slave position for the inline row feedback.
   type DeviceTransitionResult = {
-    target: 1 | 2 | 3 | 4 | 8
-    alState: number
-    error: boolean
-    alStatusCode: number
-    elapsedMs: number
-    requestError?: string
-  }
-  const [deviceTransitionResult, setDeviceTransitionResult] = useState<Record<number, DeviceTransitionResult>>({})
+    target: 1 | 2 | 3 | 4 | 8;
+    alState: number;
+    error: boolean;
+    alStatusCode: number;
+    elapsedMs: number;
+    requestError?: string;
+  };
+  const [deviceTransitionResult, setDeviceTransitionResult] = useState<
+    Record<number, DeviceTransitionResult>
+  >({});
 
   const deviceTransitionMutation = useMutation({
     mutationFn: async ({ position, state }: { position: number; state: 1 | 2 | 3 | 4 | 8 }) => {
-      const start = performance.now()
-      const res = await api.transitionToState({ state, positions: [position] })
-      return { position, target: state, res, elapsedMs: performance.now() - start }
+      const start = performance.now();
+      const res = await api.transitionToState({ state, positions: [position] });
+      return { position, target: state, res, elapsedMs: performance.now() - start };
     },
     // Clear the previous result for this row as soon as a new transition starts.
     onMutate: ({ position }) => {
-      setDeviceTransitionResult(prev => {
-        const next = { ...prev }
-        delete next[position]
-        return next
-      })
+      setDeviceTransitionResult((prev) => {
+        const next = { ...prev };
+        delete next[position];
+        return next;
+      });
     },
     onSuccess: ({ position, target, res, elapsedMs }) => {
       // Scoped to one slave, so the response carries exactly that device.
-      const entry = res.data.devices.find(d => d.slavePosition === position) ?? res.data.devices[0]
+      const entry =
+        res.data.devices.find((d) => d.slavePosition === position) ?? res.data.devices[0];
       if (entry) {
-        setDeviceTransitionResult(prev => ({
+        setDeviceTransitionResult((prev) => ({
           ...prev,
-          [position]: { target, alState: entry.alState, error: entry.error, alStatusCode: entry.alStatusCode, elapsedMs },
-        }))
+          [position]: {
+            target,
+            alState: entry.alState,
+            error: entry.error,
+            alStatusCode: entry.alStatusCode,
+            elapsedMs,
+          },
+        }));
       }
-      return refreshDevices()
+      return refreshDevices();
     },
     onError: (err, { position, state }) => {
-      setDeviceTransitionResult(prev => ({
+      setDeviceTransitionResult((prev) => ({
         ...prev,
-        [position]: { target: state, alState: 0, error: true, alStatusCode: 0, elapsedMs: 0, requestError: apiError(err) },
-      }))
+        [position]: {
+          target: state,
+          alState: 0,
+          error: true,
+          alStatusCode: 0,
+          elapsedMs: 0,
+          requestError: apiError(err),
+        },
+      }));
     },
-  })
+  });
 
   // Restart: INIT, then one AL state at a time up to the chosen target. The server walks the
   // steps and stops at the first one a device does not reach, so the result names that step.
-  const [restartTarget, setRestartTarget] = useState<1 | 2 | 3 | 4 | 8>(8)
+  const [restartTarget, setRestartTarget] = useState<1 | 2 | 3 | 4 | 8>(8);
   const restartMutation = useMutation({
     mutationFn: async (target: 1 | 2 | 3 | 4 | 8) => {
-      const start = performance.now()
-      const res = await api.restartDevices({ target })
-      return { target, res, elapsedMs: performance.now() - start }
+      const start = performance.now();
+      const res = await api.restartDevices({ target });
+      return { target, res, elapsedMs: performance.now() - start };
     },
     onSuccess: () => refreshDevices(),
-  })
+  });
   // The bus-wide, the per-device and the restart transitions all command the same bus, so one in
   // flight blocks the other two.
   const anyTransitionPending =
-    transitionMutation.isPending || deviceTransitionMutation.isPending || restartMutation.isPending
+    transitionMutation.isPending || deviceTransitionMutation.isPending || restartMutation.isPending;
 
   // When the device list first appears without us having read states yet — a page
   // refresh that restored the session, or navigating back to the Control page — read
   // the actual AL states once so the table isn't blank until a manual refresh.
   // Scan/transition set states themselves, so this only fills the initial gap.
-  const autoReadStates = useRef(false)
+  const autoReadStates = useRef(false);
   useEffect(() => {
-    if (autoReadStates.current) return
-    if (devicesQuery.isSuccess && devicesQuery.data.data.length > 0) {
-      autoReadStates.current = true
-      void readStatesFor(devicesQuery.data.data.map(d => d.slavePosition))
+    if (autoReadStates.current) {
+      return;
     }
-  }, [devicesQuery.isSuccess, devicesQuery.data]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (devicesQuery.isSuccess && devicesQuery.data.data.length > 0) {
+      autoReadStates.current = true;
+      void readStatesFor(devicesQuery.data.data.map((d) => d.slavePosition));
+    }
+  }, [devicesQuery.isSuccess, devicesQuery.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
@@ -309,20 +361,19 @@ export default function FieldbusControlPage() {
         {/* Row 1 — Init + Reset */}
         <section>
           <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
-
             {/* Init */}
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
               <h3 className="text-sm font-display uppercase">Init</h3>
               <p className="text-xs text-grey-600">
-                Initialize the fieldbus driver with the selected protocol: SOEM on a network adapter, or SPoE to drives at
-                IP addresses. Must be called before scanning.
+                Initialize the fieldbus driver with the selected protocol: SOEM on a network
+                adapter, or SPoE to drives at IP addresses. Must be called before scanning.
               </p>
               <div className="space-y-3">
                 <div>
                   <label className={labelCls}>Driver</label>
                   <select
                     value={driver}
-                    onChange={e => setDriver(e.target.value as 'soem' | 'spoe')}
+                    onChange={(e) => setDriver(e.target.value as 'soem' | 'spoe')}
                     className={inputCls}
                   >
                     <option value="soem">SOEM (Simple Open EtherCAT Master)</option>
@@ -334,7 +385,7 @@ export default function FieldbusControlPage() {
                     <div>
                       <label className={labelCls}>Role of Motion Master</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {SPOE_MODES.map(m => (
+                        {SPOE_MODES.map((m) => (
                           <button
                             key={m.value}
                             type="button"
@@ -342,11 +393,17 @@ export default function FieldbusControlPage() {
                             aria-checked={spoeMode === m.value}
                             onClick={() => setSpoeMode(m.value)}
                             className={`text-left border p-3 transition-colors cursor-pointer ${
-                              spoeMode === m.value ? 'border-syn-red bg-syn-red/5' : 'border-grey-300 hover:border-grey-400'
+                              spoeMode === m.value
+                                ? 'border-syn-red bg-syn-red/5'
+                                : 'border-grey-300 hover:border-grey-400'
                             }`}
                           >
-                            <span className="block text-xs font-display font-medium uppercase tracking-wide">{m.title}</span>
-                            <span className="block text-xs text-grey-700 mt-1 normal-case tracking-normal">{m.description}</span>
+                            <span className="block text-xs font-display font-medium uppercase tracking-wide">
+                              {m.title}
+                            </span>
+                            <span className="block text-xs text-grey-700 mt-1 normal-case tracking-normal">
+                              {m.description}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -355,15 +412,16 @@ export default function FieldbusControlPage() {
                       <label className={labelCls}>IP Addresses</label>
                       <textarea
                         value={ipAddresses}
-                        onChange={e => setIpAddresses(e.target.value)}
+                        onChange={(e) => setIpAddresses(e.target.value)}
                         placeholder={'192.168.0.10\n192.168.0.11'}
                         rows={3}
                         className={`${inputCls} font-mono`}
                       />
                       <p className="text-xs text-grey-600 mt-1">
-                        One drive per line. The order is the position order, and a drive that does not answer keeps its
-                        position. Each drive serves one client: while another commissioning tool or another Motion Master
-                        holds a drive, this one gets no answer from it.
+                        One drive per line. The order is the position order, and a drive that does
+                        not answer keeps its position. Each drive serves one client: while another
+                        commissioning tool or another Motion Master holds a drive, this one gets no
+                        answer from it.
                       </p>
                     </div>
                     <div>
@@ -372,51 +430,51 @@ export default function FieldbusControlPage() {
                         type="text"
                         inputMode="numeric"
                         value={spoePort}
-                        onChange={e => setSpoePort(e.target.value)}
+                        onChange={(e) => setSpoePort(e.target.value)}
                         className={inputCls}
                       />
                     </div>
                   </>
                 )}
                 {driver === 'soem' && (
-                <div>
-                  <label className={labelCls}>Adapter</label>
-                  <input
-                    type="text"
-                    value={adapter}
-                    onChange={e => setAdapter(e.target.value)}
-                    placeholder="network adapter name or MAC address"
-                    className={inputCls}
-                  />
-                  <button
-                    onClick={() => adaptersQuery.refetch()}
-                    disabled={adaptersQuery.isFetching}
-                    className={`${btnOutline} w-full mt-2`}
-                  >
-                    {adaptersQuery.isFetching ? 'Reading…' : 'Read Adapters'}
-                  </button>
-                  {adaptersQuery.isSuccess && adaptersQuery.data.data.length === 0 && (
-                    <p className="text-xs text-grey-600 mt-2">No adapters found.</p>
-                  )}
-                  {adaptersQuery.isSuccess && adaptersQuery.data.data.length > 0 && (
-                    <ul className="border border-grey-200 divide-y divide-grey-100 mt-2">
-                      {adaptersQuery.data.data.map(a => (
-                        <li key={a.macLinux}>
-                          <button
-                            onClick={() => setAdapter(a.name)}
-                            className="w-full text-left px-3 py-2 text-xs hover:bg-grey-50 transition-colors"
-                          >
-                            <span>{a.description || a.name}</span>
-                            <span className="text-grey-500 ml-2 font-mono">{a.macLinux}</span>
-                            {a.description && (
-                              <span className="block text-grey-500 font-mono">{a.name}</span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                  <div>
+                    <label className={labelCls}>Adapter</label>
+                    <input
+                      type="text"
+                      value={adapter}
+                      onChange={(e) => setAdapter(e.target.value)}
+                      placeholder="network adapter name or MAC address"
+                      className={inputCls}
+                    />
+                    <button
+                      onClick={() => adaptersQuery.refetch()}
+                      disabled={adaptersQuery.isFetching}
+                      className={`${btnOutline} w-full mt-2`}
+                    >
+                      {adaptersQuery.isFetching ? 'Reading…' : 'Read Adapters'}
+                    </button>
+                    {adaptersQuery.isSuccess && adaptersQuery.data.data.length === 0 && (
+                      <p className="text-xs text-grey-600 mt-2">No adapters found.</p>
+                    )}
+                    {adaptersQuery.isSuccess && adaptersQuery.data.data.length > 0 && (
+                      <ul className="border border-grey-200 divide-y divide-grey-100 mt-2">
+                        {adaptersQuery.data.data.map((a) => (
+                          <li key={a.macLinux}>
+                            <button
+                              onClick={() => setAdapter(a.name)}
+                              className="w-full text-left px-3 py-2 text-xs hover:bg-grey-50 transition-colors"
+                            >
+                              <span>{a.description || a.name}</span>
+                              <span className="text-grey-500 ml-2 font-mono">{a.macLinux}</span>
+                              {a.description && (
+                                <span className="block text-grey-500 font-mono">{a.name}</span>
+                              )}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
               </div>
               <button
@@ -428,12 +486,12 @@ export default function FieldbusControlPage() {
               </button>
               {!canInit && (
                 <p className="text-grey-500 text-xs">
-                  {driver === 'spoe' ? 'Enter at least one IP address to initialize.' : 'Select a network adapter to initialize.'}
+                  {driver === 'spoe'
+                    ? 'Enter at least one IP address to initialize.'
+                    : 'Select a network adapter to initialize.'}
                 </p>
               )}
-              {initMutation.isSuccess && (
-                <p className="text-status-good text-xs">Initialized</p>
-              )}
+              {initMutation.isSuccess && <p className="text-status-good text-xs">Initialized</p>}
               {initMutation.isError && apiStatus(initMutation.error) !== 409 && (
                 <p className="text-status-bad text-xs">{apiError(initMutation.error)}</p>
               )}
@@ -453,7 +511,8 @@ export default function FieldbusControlPage() {
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-1">
               <h3 className="text-sm font-display uppercase">Reset</h3>
               <p className="text-xs text-grey-600">
-                Reset the fieldbus driver and clear the device list. Init must be performed again afterwards.
+                Reset the fieldbus driver and clear the device list. Init must be performed again
+                afterwards.
               </p>
               <button
                 onClick={() => resetMutation.mutate()}
@@ -462,28 +521,24 @@ export default function FieldbusControlPage() {
               >
                 {resetMutation.isPending ? 'Resetting…' : 'Reset'}
               </button>
-              {resetMutation.isSuccess && (
-                <p className="text-status-good text-xs">Reset</p>
-              )}
+              {resetMutation.isSuccess && <p className="text-status-good text-xs">Reset</p>}
               {resetMutation.isError && (
                 <p className="text-status-bad text-xs">{apiError(resetMutation.error)}</p>
               )}
             </div>
-
           </div>
         </section>
 
         {/* Row 2 — Scan + Transition to State */}
         <section>
           <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
-
             {/* Scan + Devices */}
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
               <h3 className="text-sm font-display uppercase">Scan</h3>
               <p className="text-xs text-grey-600">
-                Discover EtherCAT slaves on the bus. Requires a successful init first.
-                Re-discovers the bus and resets all slaves to INIT — use Refresh below to
-                update the list and states without disturbing slave state.
+                Discover EtherCAT slaves on the bus. Requires a successful init first. Re-discovers
+                the bus and resets all slaves to INIT — use Refresh below to update the list and
+                states without disturbing slave state.
               </p>
               <button
                 onClick={() => scanMutation.mutate()}
@@ -510,12 +565,16 @@ export default function FieldbusControlPage() {
                       <select
                         value={restartTarget}
                         disabled={anyTransitionPending}
-                        onChange={e => setRestartTarget(Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8)}
+                        onChange={(e) =>
+                          setRestartTarget(Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8)
+                        }
                         title="The AL state the restart ends in."
                         className="border border-grey-300 px-2 h-[30px] text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                       >
-                        {RESTART_TARGETS.map(t => (
-                          <option key={t.value} value={t.value}>{t.label} ({t.value})</option>
+                        {RESTART_TARGETS.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label} ({t.value})
+                          </option>
                         ))}
                       </select>
                       <button
@@ -536,41 +595,49 @@ export default function FieldbusControlPage() {
                       </button>
                     </div>
                   </div>
-                  {restartMutation.isSuccess && (() => {
-                    const { target, res, elapsedMs } = restartMutation.data
-                    const body = res.data
-                    const elapsed = ` in ${formatDuration(elapsedMs)}`
-                    if (body.ok) {
+                  {restartMutation.isSuccess &&
+                    (() => {
+                      const { target, res, elapsedMs } = restartMutation.data;
+                      const body = res.data;
+                      const elapsed = ` in ${formatDuration(elapsedMs)}`;
+                      if (body.ok) {
+                        return (
+                          <p className="text-status-good text-xs">
+                            Restarted to {AL_STATE_LABEL[target]} ({target}){elapsed}
+                          </p>
+                        );
+                      }
+                      const failed = body.devices.filter((d) => !d.reached);
+                      const detail = failed
+                        .map((d) => {
+                          const stateLabel =
+                            AL_STATE_LABEL[d.alState] ??
+                            `0x${d.alState.toString(16).toUpperCase()}`;
+                          const codeEntry = d.error
+                            ? (alStatusCodeMap[d.alStatusCode] ?? null)
+                            : null;
+                          const code = codeEntry
+                            ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
+                            : '';
+                          return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`;
+                        })
+                        .join('; ');
                       return (
-                        <p className="text-status-good text-xs">
-                          Restarted to {AL_STATE_LABEL[target]} ({target}){elapsed}
+                        <p className="text-status-bad text-xs">
+                          Restart to {AL_STATE_LABEL[target]} ({target}) stopped at{' '}
+                          {AL_STATE_LABEL[body.step]} ({body.step}){elapsed}. {detail}
                         </p>
-                      )
-                    }
-                    const failed = body.devices.filter(d => !d.reached)
-                    const detail = failed.map(d => {
-                      const stateLabel = AL_STATE_LABEL[d.alState] ?? `0x${d.alState.toString(16).toUpperCase()}`
-                      const codeEntry = d.error ? (alStatusCodeMap[d.alStatusCode] ?? null) : null
-                      const code = codeEntry
-                        ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
-                        : ''
-                      return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`
-                    }).join('; ')
-                    return (
-                      <p className="text-status-bad text-xs">
-                        Restart to {AL_STATE_LABEL[target]} ({target}) stopped at{' '}
-                        {AL_STATE_LABEL[body.step]} ({body.step}){elapsed}. {detail}
-                      </p>
-                    )
-                  })()}
+                      );
+                    })()}
                   {restartMutation.isError && (
                     <p className="text-status-bad text-xs">{apiError(restartMutation.error)}</p>
                   )}
                   <p className="text-xs text-grey-600">
-                    Use the <span className="font-medium">Action</span> dropdown to command an individual
-                    slave to an AL state. The bus-wide buttons under “Transition to State” move every slave at once.
-                    <span className="font-medium"> Restart</span> commands every slave to INIT and then up one
-                    state at a time to the chosen target, OP by default.
+                    Use the <span className="font-medium">Action</span> dropdown to command an
+                    individual slave to an AL state. The bus-wide buttons under “Transition to
+                    State” move every slave at once.
+                    <span className="font-medium"> Restart</span> commands every slave to INIT and
+                    then up one state at a time to the chosen target, OP by default.
                   </p>
                   <div className="border border-grey-200 overflow-x-auto">
                     {devicesQuery.isFetching && !devicesQuery.data && (
@@ -583,87 +650,130 @@ export default function FieldbusControlPage() {
                       <table className="w-full text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-grey-200 bg-grey-50">
-                            {['Position', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State', 'Action'].map(h => (
-                              <th key={h} className={`${h === 'Action' ? 'text-right' : 'text-left'} px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium`}>
+                            {[
+                              'Position',
+                              'Name',
+                              'Vendor ID',
+                              'Product Code',
+                              'Revision',
+                              'Serial',
+                              'AL State',
+                              'Action',
+                            ].map((h) => (
+                              <th
+                                key={h}
+                                className={`${h === 'Action' ? 'text-right' : 'text-left'} px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium`}
+                              >
                                 {h}
                               </th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {devicesQuery.data.data.map(d => {
-                            const pos = d.slavePosition
-                            const rowPending = deviceTransitionMutation.isPending
-                              && deviceTransitionMutation.variables?.position === pos
+                          {devicesQuery.data.data.map((d) => {
+                            const pos = d.slavePosition;
+                            const rowPending =
+                              deviceTransitionMutation.isPending &&
+                              deviceTransitionMutation.variables?.position === pos;
                             // Block all per-device dropdowns while any transition (bus-wide or
                             // per-device) is in flight — they all command the same bus.
-                            const busy = anyTransitionPending
-                            const result = deviceTransitionResult[pos]
+                            const busy = anyTransitionPending;
+                            const result = deviceTransitionResult[pos];
                             return (
                               <Fragment key={pos}>
                                 {/* When a transition result is shown, the row separator moves to the
                                     detail row below so the device row + its result read as one unit. */}
-                                <tr className={result ? '' : 'border-b border-grey-100 last:border-0'}>
+                                <tr
+                                  className={result ? '' : 'border-b border-grey-100 last:border-0'}
+                                >
                                   <td className="px-4 py-2">
                                     <SlavePositionBadge position={d.slavePosition} />
                                   </td>
                                   <td className="px-4 py-2">{d.name}</td>
-                                  <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
+                                  <td className="px-4 py-2 font-mono">
+                                    0x{d.vendorId.toString(16).toUpperCase()}
+                                  </td>
                                   <td className="px-4 py-2 font-mono">
                                     <span className="cursor-help" title={d.productName}>
                                       0x{d.productCode.toString(16).toUpperCase()}
                                     </span>
                                   </td>
-                                  <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
+                                  <td className="px-4 py-2 font-mono">
+                                    0x{d.revisionNumber.toString(16).toUpperCase()}
+                                  </td>
                                   <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                                   <td className="px-4 py-2">
-                                    {deviceStates[d.slavePosition] !== undefined && deviceStates[d.slavePosition].alState !== 0
+                                    {deviceStates[d.slavePosition] !== undefined &&
+                                    deviceStates[d.slavePosition].alState !== 0
                                       ? (() => {
-                                        const ds = deviceStates[d.slavePosition]
-                                        const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
-                                        const errorEntry = ds.error ? (alStatusCodeMap[ds.alStatusCode] ?? null) : null
-                                        return (
-                                          <span className={ds.error ? 'text-status-bad' : ''}>
-                                            {stateLabel} ({ds.alState})
-                                            {errorEntry && (
-                                              <span className="cursor-help" title={errorEntry.description}>
-                                                {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
-                                                {errorEntry.terminal && (
-                                                  <span
-                                                    className="ml-1 cursor-help text-grey-600"
-                                                    title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
-                                                  >
-                                                    (terminal)
-                                                  </span>
-                                                )}
-                                              </span>
-                                            )}
-                                            {ds.error && !errorEntry && (
-                                              <span>{' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}</span>
-                                            )}
-                                          </span>
-                                        )
-                                      })()
+                                          const ds = deviceStates[d.slavePosition];
+                                          const stateLabel =
+                                            AL_STATE_LABEL[ds.alState] ??
+                                            `0x${ds.alState.toString(16).toUpperCase()}`;
+                                          const errorEntry = ds.error
+                                            ? (alStatusCodeMap[ds.alStatusCode] ?? null)
+                                            : null;
+                                          return (
+                                            <span className={ds.error ? 'text-status-bad' : ''}>
+                                              {stateLabel} ({ds.alState})
+                                              {errorEntry && (
+                                                <span
+                                                  className="cursor-help"
+                                                  title={errorEntry.description}
+                                                >
+                                                  {' — '}0x
+                                                  {ds.alStatusCode
+                                                    .toString(16)
+                                                    .toUpperCase()
+                                                    .padStart(4, '0')}{' '}
+                                                  {errorEntry.name}
+                                                  {errorEntry.terminal && (
+                                                    <span
+                                                      className="ml-1 cursor-help text-grey-600"
+                                                      title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
+                                                    >
+                                                      (terminal)
+                                                    </span>
+                                                  )}
+                                                </span>
+                                              )}
+                                              {ds.error && !errorEntry && (
+                                                <span>
+                                                  {' — '}0x
+                                                  {ds.alStatusCode
+                                                    .toString(16)
+                                                    .toUpperCase()
+                                                    .padStart(4, '0')}
+                                                </span>
+                                              )}
+                                            </span>
+                                          );
+                                        })()
                                       : '—'}
                                   </td>
                                   <td className="px-4 py-2 text-right">
                                     <select
                                       value=""
                                       disabled={busy}
-                                      onChange={e => {
-                                        const state = Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8
+                                      onChange={(e) => {
+                                        const state = Number(e.currentTarget.value) as
+                                          1 | 2 | 3 | 4 | 8;
                                         // Reset to the placeholder so re-selecting the same target re-fires.
-                                        e.currentTarget.value = ''
+                                        e.currentTarget.value = '';
                                         if (state) {
-                                          deviceTransitionMutation.mutate({ position: pos, state })
+                                          deviceTransitionMutation.mutate({ position: pos, state });
                                         }
                                       }}
                                       title="Bring just this slave to an AL state, one legal step at a time."
                                       className="border border-grey-300 px-2 py-1 text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                                     >
-                                      <option value="">{rowPending ? 'Transitioning…' : 'Change AL state…'}</option>
-                                      {TRANSITION_TARGETS.map(t => (
-                                        <option key={t.value} value={t.value}>{t.label} ({t.value})</option>
+                                      <option value="">
+                                        {rowPending ? 'Transitioning…' : 'Change AL state…'}
+                                      </option>
+                                      {TRANSITION_TARGETS.map((t) => (
+                                        <option key={t.value} value={t.value}>
+                                          {t.label} ({t.value})
+                                        </option>
                                       ))}
                                     </select>
                                   </td>
@@ -677,41 +787,55 @@ export default function FieldbusControlPage() {
                                       <span className="text-grey-500">Slave {pos}: </span>
                                       {(() => {
                                         if (result.requestError) {
-                                          return <span className="text-status-bad">{result.requestError}</span>
+                                          return (
+                                            <span className="text-status-bad">
+                                              {result.requestError}
+                                            </span>
+                                          );
                                         }
-                                        const reached = !result.error && result.alState === result.target
+                                        const reached =
+                                          !result.error && result.alState === result.target;
                                         if (reached) {
                                           return (
                                             <span className="text-status-good">
-                                              → {AL_STATE_LABEL[result.target]} ({result.target}) in {formatDuration(result.elapsedMs)}
+                                              → {AL_STATE_LABEL[result.target]} ({result.target}) in{' '}
+                                              {formatDuration(result.elapsedMs)}
                                             </span>
-                                          )
+                                          );
                                         }
-                                        const stateLabel = AL_STATE_LABEL[result.alState] ?? `0x${result.alState.toString(16).toUpperCase()}`
-                                        const codeEntry = result.error ? (alStatusCodeMap[result.alStatusCode] ?? null) : null
+                                        const stateLabel =
+                                          AL_STATE_LABEL[result.alState] ??
+                                          `0x${result.alState.toString(16).toUpperCase()}`;
+                                        const codeEntry = result.error
+                                          ? (alStatusCodeMap[result.alStatusCode] ?? null)
+                                          : null;
                                         const code = result.error
                                           ? ` — 0x${result.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}${codeEntry ? ` ${codeEntry.name}` : ''}`
-                                          : ''
+                                          : '';
                                         // Stuck in INIT with no error reported: usually a drive carried over from
                                         // another master that needs a power-cycle (same case the bus-wide panel explains).
-                                        const silentInit = result.target !== 1 && result.alState === 1
-                                          && !result.error && result.alStatusCode === 0
+                                        const silentInit =
+                                          result.target !== 1 &&
+                                          result.alState === 1 &&
+                                          !result.error &&
+                                          result.alStatusCode === 0;
                                         return (
                                           <span className="text-status-bad">
                                             stuck in {stateLabel} ({result.alState}){code}
                                             {silentInit && (
                                               <span className="block text-grey-600">
-                                                No error reported — if moved from another master, power-cycle and rescan.
+                                                No error reported — if moved from another master,
+                                                power-cycle and rescan.
                                               </span>
                                             )}
                                           </span>
-                                        )
+                                        );
                                       })()}
                                     </td>
                                   </tr>
                                 )}
                               </Fragment>
-                            )
+                            );
                           })}
                         </tbody>
                       </table>
@@ -729,14 +853,15 @@ export default function FieldbusControlPage() {
                 first.
               </p>
               <p className="text-xs text-grey-600">
-                The server takes each slave there one legal step at a time. Going up is step by
-                step — INIT → PREOP → SAFEOP → OP — a drop of several states is one step (e.g.
-                OP → INIT), and BOOT is entered and left only through INIT. The walk stops at the
-                first step a slave does not reach, and its AL status code says why.
+                The server takes each slave there one legal step at a time. Going up is step by step
+                — INIT → PREOP → SAFEOP → OP — a drop of several states is one step (e.g. OP →
+                INIT), and BOOT is entered and left only through INIT. The walk stops at the first
+                step a slave does not reach, and its AL status code says why.
               </p>
               <div className="space-y-4">
                 {TRANSITION_TARGETS.map(({ value, label, cls, hint }) => {
-                  const isThisPending = transitionMutation.isPending && transitionMutation.variables === value
+                  const isThisPending =
+                    transitionMutation.isPending && transitionMutation.variables === value;
                   return (
                     <div key={value} className="space-y-1.5">
                       <button
@@ -748,65 +873,70 @@ export default function FieldbusControlPage() {
                       </button>
                       <p className="text-xs text-grey-600">{hint}</p>
                     </div>
-                  )
+                  );
                 })}
               </div>
-              {transitionMutation.isSuccess && transitionMutation.variables !== undefined && transitionMutation.data && (() => {
-                // The request returns HTTP 200 whenever the bus was commanded — it does NOT mean
-                // the devices arrived. The server reports per-device truth in `ok` / `devices[].reached`
-                // (a device commanded to PREOP can stay in INIT with AL status code "No error"), so
-                // branch on that here rather than treating any 200 as a successful transition.
-                const target = transitionMutation.variables
-                const body = transitionMutation.data.res.data
-                const elapsed = ` in ${formatDuration(transitionMutation.data.elapsedMs)}`
-                if (body.ok) {
-                  return (
-                    <p className="text-status-good text-xs">
-                      Transitioned to {AL_STATE_LABEL[target]} ({target}){elapsed}
-                    </p>
-                  )
-                }
-                const failed = body.devices.filter(d => !d.reached)
-                const detail = failed.map(d => {
-                  const stateLabel = AL_STATE_LABEL[d.alState] ?? `0x${d.alState.toString(16).toUpperCase()}`
-                  const codeEntry = d.error ? (alStatusCodeMap[d.alStatusCode] ?? null) : null
-                  const code = codeEntry
-                    ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
-                    : ''
-                  return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`
-                }).join('; ')
-                // A device that stays in Init (1) after being asked to leave it, with the error bit
-                // clear and AL status code 0x0000 ("No error"), is not reporting a fault — its
-                // firmware silently isn't servicing the transition. The usual cause is a drive that
-                // was last run by a different EtherCAT master and moved over without a power-cycle;
-                // the firmware latches state that only cutting power clears. Surface that, since the
-                // silent no-error failure is otherwise baffling.
-                const silentlyStuckInInit = target !== 1 && failed.some(
-                  d => d.alState === 1 && !d.error && d.alStatusCode === 0)
-                return (
-                  <>
-                    <p className="text-status-bad text-xs">
-                      Failed to reach {AL_STATE_LABEL[target]} ({target}){elapsed}. {detail}
-                    </p>
-                    {silentlyStuckInInit && (
-                      <p className="text-grey-600 text-xs">
-                        The drive reports no error — it is silently ignoring the request. If you just
-                        moved this drive from another EtherCAT master, power-cycle it once after
-                        connecting, then scan again.
+              {transitionMutation.isSuccess &&
+                transitionMutation.variables !== undefined &&
+                transitionMutation.data &&
+                (() => {
+                  // The request returns HTTP 200 whenever the bus was commanded — it does NOT mean
+                  // the devices arrived. The server reports per-device truth in `ok` / `devices[].reached`
+                  // (a device commanded to PREOP can stay in INIT with AL status code "No error"), so
+                  // branch on that here rather than treating any 200 as a successful transition.
+                  const target = transitionMutation.variables;
+                  const body = transitionMutation.data.res.data;
+                  const elapsed = ` in ${formatDuration(transitionMutation.data.elapsedMs)}`;
+                  if (body.ok) {
+                    return (
+                      <p className="text-status-good text-xs">
+                        Transitioned to {AL_STATE_LABEL[target]} ({target}){elapsed}
                       </p>
-                    )}
-                  </>
-                )
-              })()}
+                    );
+                  }
+                  const failed = body.devices.filter((d) => !d.reached);
+                  const detail = failed
+                    .map((d) => {
+                      const stateLabel =
+                        AL_STATE_LABEL[d.alState] ?? `0x${d.alState.toString(16).toUpperCase()}`;
+                      const codeEntry = d.error ? (alStatusCodeMap[d.alStatusCode] ?? null) : null;
+                      const code = codeEntry
+                        ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
+                        : '';
+                      return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`;
+                    })
+                    .join('; ');
+                  // A device that stays in Init (1) after being asked to leave it, with the error bit
+                  // clear and AL status code 0x0000 ("No error"), is not reporting a fault — its
+                  // firmware silently isn't servicing the transition. The usual cause is a drive that
+                  // was last run by a different EtherCAT master and moved over without a power-cycle;
+                  // the firmware latches state that only cutting power clears. Surface that, since the
+                  // silent no-error failure is otherwise baffling.
+                  const silentlyStuckInInit =
+                    target !== 1 &&
+                    failed.some((d) => d.alState === 1 && !d.error && d.alStatusCode === 0);
+                  return (
+                    <>
+                      <p className="text-status-bad text-xs">
+                        Failed to reach {AL_STATE_LABEL[target]} ({target}){elapsed}. {detail}
+                      </p>
+                      {silentlyStuckInInit && (
+                        <p className="text-grey-600 text-xs">
+                          The drive reports no error — it is silently ignoring the request. If you
+                          just moved this drive from another EtherCAT master, power-cycle it once
+                          after connecting, then scan again.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               {transitionMutation.isError && (
                 <p className="text-status-bad text-xs">{apiError(transitionMutation.error)}</p>
               )}
             </div>
-
           </div>
         </section>
-
       </div>
     </div>
-  )
+  );
 }

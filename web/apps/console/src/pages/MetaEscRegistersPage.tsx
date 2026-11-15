@@ -1,17 +1,17 @@
-import { useQuery } from '@tanstack/react-query'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { useQuery } from '@tanstack/react-query';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
 
 export default function MetaEscRegistersPage() {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   const registersQuery = useQuery({
     queryKey: ['registers'],
     queryFn: () => api.getRegisters(),
-  })
+  });
 
-  const registers = registersQuery.data?.data ?? []
+  const registers = registersQuery.data?.data ?? [];
 
   return (
     <div>
@@ -45,18 +45,23 @@ export default function MetaEscRegistersPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['Address', 'Hex', 'Length', 'Name', 'Description'].map(h => (
-                    <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                  {['Address', 'Hex', 'Length', 'Name', 'Description'].map((h) => (
+                    <th
+                      key={h}
+                      className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
+                    >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {registers.map(r => (
+                {registers.map((r) => (
                   <tr key={r.address} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{r.address}</td>
-                    <td className="px-4 py-2 font-mono">0x{r.address.toString(16).toUpperCase().padStart(4, '0')}</td>
+                    <td className="px-4 py-2 font-mono">
+                      0x{r.address.toString(16).toUpperCase().padStart(4, '0')}
+                    </td>
                     <td className="px-4 py-2 font-mono">{r.length}</td>
                     <td className="px-4 py-2 font-mono">{r.name}</td>
                     <td className="px-4 py-2 text-grey-600">{r.description}</td>
@@ -71,5 +76,5 @@ export default function MetaEscRegistersPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

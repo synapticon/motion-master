@@ -1,7 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { useQuery } from '@tanstack/react-query';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
 
 // One column set for all five tables. Widths are explicit so the tables line up with each other
 // rather than each sizing itself to its own longest field name; Description takes what is left.
@@ -16,24 +16,24 @@ const COLUMNS = [
 ];
 
 function hex(value: number) {
-  return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`
+  return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
 }
 
 // One address, or the range the datasheet prints as a single row.
 function addressLabel(address: number, lastAddress: number) {
-  return address === lastAddress ? hex(address) : `${hex(address)}–${hex(lastAddress)}`
+  return address === lastAddress ? hex(address) : `${hex(address)}–${hex(lastAddress)}`;
 }
 
 export default function MetaIcHausRegistersPage() {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   const spacesQuery = useQuery({
     queryKey: ['icHausRegisters'],
     queryFn: () => api.getIcHausRegisters(),
     staleTime: Infinity,
-  })
+  });
 
-  const spaces = spacesQuery.data?.data ?? []
+  const spaces = spacesQuery.data?.data ?? [];
 
   return (
     <div>
@@ -43,17 +43,17 @@ export default function MetaIcHausRegistersPage() {
         description={
           <>
             The register maps of the two iC-Haus chips inside a Circulo's internal encoder — the
-            reference for the{' '}
-            <span className="font-mono">encoder-register-communication</span> procedure. The{' '}
-            <strong>iC-MU</strong> is the position encoder proper, a magnetic off-axis absolute chip
-            speaking BiSS-C to the drive; the <strong>iC-PVL</strong> is a battery-buffered Hall
-            multiturn counter behind it, reached over I²C through the iC-MU rather than directly. An
-            address alone names nothing, so the maps are grouped by <strong>space</strong>: the same
-            iC-PVL address <span className="font-mono">0x00</span> is a configuration register in one
-            and the status register in another. Each field carries the datasheet's own one-line
-            description; <strong>bits</strong> is the field's own slice as the register map prints
-            it, not its position in the byte. Transcribed from iC-MU Series Rev B1 and iC-PVL Rev F2;
-            the prose behind each one-liner stays in those datasheets.
+            reference for the <span className="font-mono">encoder-register-communication</span>{' '}
+            procedure. The <strong>iC-MU</strong> is the position encoder proper, a magnetic
+            off-axis absolute chip speaking BiSS-C to the drive; the <strong>iC-PVL</strong> is a
+            battery-buffered Hall multiturn counter behind it, reached over I²C through the iC-MU
+            rather than directly. An address alone names nothing, so the maps are grouped by{' '}
+            <strong>space</strong>: the same iC-PVL address <span className="font-mono">0x00</span>{' '}
+            is a configuration register in one and the status register in another. Each field
+            carries the datasheet's own one-line description; <strong>bits</strong> is the field's
+            own slice as the register map prints it, not its position in the byte. Transcribed from
+            iC-MU Series Rev B1 and iC-PVL Rev F2; the prose behind each one-liner stays in those
+            datasheets.
           </>
         }
       />
@@ -146,5 +146,5 @@ export default function MetaIcHausRegistersPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

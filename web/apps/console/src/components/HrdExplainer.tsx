@@ -1,4 +1,4 @@
-import Explainer from './Explainer'
+import Explainer from './Explainer';
 
 // The "What is HRD?" teaching panel for the device HRD page. Its job is to answer the two questions
 // this page cannot answer by itself: where a recording comes from (the procedure, not this page),
@@ -54,5 +54,5 @@ export default function HrdExplainer() {
         decoded into an invented final sample.
       </p>
     </Explainer>
-  )
+  );
 }

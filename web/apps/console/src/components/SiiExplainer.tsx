@@ -1,4 +1,4 @@
-import Explainer from './Explainer'
+import Explainer from './Explainer';
 
 // The "What is SII?" teaching panel, shared by the device SII page and the Tools SII page so the
 // explanation stays in one place.
@@ -15,18 +15,18 @@ export default function SiiExplainer() {
       </p>
       <p>
         It holds the slave's <strong>identity and self-description</strong>: vendor ID, product
-        code, revision and serial number, the configured mailbox sizes and offsets, the default
-        Sync Manager and FMMU configuration, the device / group / order name strings, and the
-        default PDO mappings. At power-on the ESC automatically loads the first part of it to
-        configure itself, before the master ever communicates with the device.
+        code, revision and serial number, the configured mailbox sizes and offsets, the default Sync
+        Manager and FMMU configuration, the device / group / order name strings, and the default PDO
+        mappings. At power-on the ESC automatically loads the first part of it to configure itself,
+        before the master ever communicates with the device.
       </p>
       <p>
         <strong>Is it the same as registers?</strong> No — the SII is a separate EEPROM chip, not
         ESC registers. But you reach it <em>through</em> registers: the ESC exposes an
-        EEPROM-control window (configuration <code>0x0500</code>, control/status <code>0x0502</code>,
-        address <code>0x0504</code>, data <code>0x0508</code>). So “SII” is the <em>logical
-        layout</em> of the data, and the “EEPROM registers” are the <em>transport</em>. The SII is
-        addressed in 16-bit words, not bytes.
+        EEPROM-control window (configuration <code>0x0500</code>, control/status <code>0x0502</code>
+        , address <code>0x0504</code>, data <code>0x0508</code>). So “SII” is the{' '}
+        <em>logical layout</em> of the data, and the “EEPROM registers” are the <em>transport</em>.
+        The SII is addressed in 16-bit words, not bytes.
       </p>
       <p>
         <strong>How is it read?</strong> The master performs a small handshake on those control
@@ -43,5 +43,5 @@ export default function SiiExplainer() {
         is the structure decoded and displayed below.
       </p>
     </Explainer>
-  )
+  );
 }

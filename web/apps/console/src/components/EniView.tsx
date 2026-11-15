@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import type { ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 import {
   formatHex,
   type EniCoeCmd,
@@ -8,7 +8,7 @@ import {
   type EniParseResult,
   type EniPdo,
   type EniSlave,
-} from '@synapticon/motion-master-client'
+} from '@synapticon/motion-master-client';
 
 // Renders a parsed ENI. The document is a script of EtherCAT datagrams, so the centre of this view
 // is the init-command table: what each one does, which register it touches, and what its payload
@@ -24,7 +24,7 @@ function Th({ children, hint }: { children: ReactNode; hint: string }) {
     >
       {children}
     </th>
-  )
+  );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -33,7 +33,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <dt className="eyebrow text-grey-500">{label}</dt>
       <dd className="font-mono text-xs text-grey-800 mt-0.5">{children}</dd>
     </div>
-  )
+  );
 }
 
 function Section({
@@ -42,17 +42,17 @@ function Section({
   defaultOpen = false,
   children,
 }: {
-  title: string
-  subtitle?: ReactNode
-  defaultOpen?: boolean
-  children: ReactNode
+  title: string;
+  subtitle?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="border border-grey-200">
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-grey-50 transition-colors cursor-pointer"
       >
@@ -67,21 +67,23 @@ function Section({
       </button>
       {open && <div className="border-t border-grey-200 px-4 py-4 space-y-4">{children}</div>}
     </section>
-  )
+  );
 }
 
-/// Says in one line what a datagram does, using whatever the server managed to decode. A command
-/// nobody could annotate falls back to its own comment, which is what the writing tool chose to say.
+/**
+ * Says in one line what a datagram does, using whatever the server managed to decode. A command
+ * nobody could annotate falls back to its own comment, which is what the writing tool chose to say.
+ */
 function meaning(cmd: EniInitCmd): ReactNode {
-  const register = cmd.register
+  const register = cmd.register;
   if (!register) {
-    return <span className="text-grey-400">{cmd.comment ?? '—'}</span>
+    return <span className="text-grey-400">{cmd.comment ?? '—'}</span>;
   }
   if (register.requestsState) {
-    return <span className="text-grey-800">request {register.requestsState}</span>
+    return <span className="text-grey-800">request {register.requestsState}</span>;
   }
   if (register.waitsForState) {
-    return <span className="text-grey-800">wait for {register.waitsForState}</span>
+    return <span className="text-grey-800">wait for {register.waitsForState}</span>;
   }
   if (register.decoded) {
     return (
@@ -89,85 +91,90 @@ function meaning(cmd: EniInitCmd): ReactNode {
         {Object.entries(register.decoded)
           .map(([key, value]) => {
             if (typeof value === 'boolean') {
-              return value ? key : `not ${key}`
+              return value ? key : `not ${key}`;
             }
             if (typeof value === 'number' && (key.includes('tart') || key.includes('ddr'))) {
-              return `${key} ${formatHex(value)}`
+              return `${key} ${formatHex(value)}`;
             }
-            return `${key} ${value}`
+            return `${key} ${value}`;
           })
           .join(', ')}
       </span>
-    )
+    );
   }
-  return <span className="text-grey-400">{cmd.comment ?? '—'}</span>
+  return <span className="text-grey-400">{cmd.comment ?? '—'}</span>;
 }
 
-/// Splits a process-image variable name into the scope its writer prefixed and the signal itself.
-///
-/// The ENI gives a variable one name and no structure, and every tool builds it the same way: the
-/// device label, a dot, then the signal — `Device 1.Controlword`, `Term 4 (EL5001).Kanal 1.Value`.
-/// Splitting at the first dot separates the two, and a name with no dot is all signal.
+/**
+ * Splits a process-image variable name into the scope its writer prefixed and the signal itself.
+ *
+ * The ENI gives a variable one name and no structure, and every tool builds it the same way: the
+ * device label, a dot, then the signal — `Device 1.Controlword`, `Term 4 (EL5001).Kanal 1.Value`.
+ * Splitting at the first dot separates the two, and a name with no dot is all signal.
+ */
 function splitVariableName(name: string): { scope: string | null; signal: string } {
-  const dot = name.indexOf('.')
+  const dot = name.indexOf('.');
   if (dot < 0) {
-    return { scope: null, signal: name }
+    return { scope: null, signal: name };
   }
-  return { scope: name.slice(0, dot), signal: name.slice(dot + 1) }
+  return { scope: name.slice(0, dot), signal: name.slice(dot + 1) };
 }
 
-/// Locates the object a process-image value belongs to.
-///
-/// The image itself has no object address — the ENI gives a variable a name, a size and an offset,
-/// and nothing more. The PDO declarations have the address, so walking a device's PDOs in order and
-/// accumulating bit lengths from the start of its window says which object sits at a given offset.
-/// A document that declares no PDOs, as a device with fixed PDOs may well produce, yields nothing,
-/// and the column says so rather than guessing.
+/**
+ * Locates the object a process-image value belongs to.
+ *
+ * The image itself has no object address — the ENI gives a variable a name, a size and an offset,
+ * and nothing more. The PDO declarations have the address, so walking a device's PDOs in order and
+ * accumulating bit lengths from the start of its window says which object sits at a given offset.
+ * A document that declares no PDOs, as a device with fixed PDOs may well produce, yields nothing,
+ * and the column says so rather than guessing.
+ */
 function objectAt(
   slaves: EniSlave[],
   half: 'outputs' | 'inputs',
   bitOffs: number,
 ): { index: number; subindex: number } | null {
   for (const slave of slaves) {
-    const window = half === 'outputs' ? slave.processData?.send : slave.processData?.recv
+    const window = half === 'outputs' ? slave.processData?.send : slave.processData?.recv;
     const pdos: EniPdo[] | undefined =
-      half === 'outputs' ? slave.processData?.rxPdos : slave.processData?.txPdos
+      half === 'outputs' ? slave.processData?.rxPdos : slave.processData?.txPdos;
     if (!window || !pdos) {
-      continue
+      continue;
     }
-    let at = window.bitStart
+    let at = window.bitStart;
     for (const pdo of pdos) {
       for (const entry of pdo.entries) {
         if (at === bitOffs && entry.index !== 0) {
-          return { index: entry.index, subindex: entry.subindex }
+          return { index: entry.index, subindex: entry.subindex };
         }
-        at += entry.bitLen
+        at += entry.bitLen;
       }
     }
   }
-  return null
+  return null;
 }
 
-/// Finds which device owns a bit offset in one half of the process image.
-///
-/// The name's prefix says which device a tool *called* it; this says which device's window the
-/// value actually lands in, which is the document's own answer and does not depend on a naming
-/// convention. Outputs are matched against each device's `send` window and inputs against `recv`,
-/// both named from the master's side.
+/**
+ * Finds which device owns a bit offset in one half of the process image.
+ *
+ * The name's prefix says which device a tool *called* it; this says which device's window the
+ * value actually lands in, which is the document's own answer and does not depend on a naming
+ * convention. Outputs are matched against each device's `send` window and inputs against `recv`,
+ * both named from the master's side.
+ */
 function deviceAt(slaves: EniSlave[], half: 'outputs' | 'inputs', bitOffs: number): number | null {
   for (let i = 0; i < slaves.length; i += 1) {
-    const window =
-      half === 'outputs' ? slaves[i].processData?.send : slaves[i].processData?.recv
+    const window = half === 'outputs' ? slaves[i].processData?.send : slaves[i].processData?.recv;
     if (window && bitOffs >= window.bitStart && bitOffs < window.bitStart + window.bitLength) {
-      return i + 1
+      return i + 1;
     }
   }
-  return null
+  return null;
 }
 
 function InitCmdTable({ cmds }: { cmds: EniInitCmd[] }) {
   if (cmds.length === 0) {
-    return <p className="text-xs text-grey-500">No init commands.</p>
+    return <p className="text-xs text-grey-500">No init commands.</p>;
   }
   return (
     <div className="border border-grey-200 overflow-x-auto">
@@ -213,14 +220,18 @@ function InitCmdTable({ cmds }: { cmds: EniInitCmd[] }) {
               </td>
               <td className="px-3 py-2">{meaning(cmd)}</td>
               <td className="px-3 py-2 font-mono text-grey-500 break-all">
-                {cmd.data ? cmd.data.hex : cmd.dataLength !== undefined ? `${cmd.dataLength} B` : '—'}
+                {cmd.data
+                  ? cmd.data.hex
+                  : cmd.dataLength !== undefined
+                    ? `${cmd.dataLength} B`
+                    : '—'}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 function CoeCmdTable({ cmds }: { cmds: EniCoeCmd[] }) {
@@ -255,11 +266,11 @@ function CoeCmdTable({ cmds }: { cmds: EniCoeCmd[] }) {
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 function SlaveCard({ slave, position }: { slave: EniSlave; position: number }) {
-  const previous = slave.previousPorts?.find(p => p.selected)
+  const previous = slave.previousPorts?.find((p) => p.selected);
   return (
     <Section
       title={`Device ${position}`}
@@ -311,7 +322,7 @@ function SlaveCard({ slave, position }: { slave: EniSlave; position: number }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {slave.processData.syncManagers.map(sm => (
+                  {slave.processData.syncManagers.map((sm) => (
                     <tr key={sm.index} className="border-b border-grey-100 last:border-0">
                       <td className="px-3 py-2 font-mono">SM{sm.index}</td>
                       <td className="px-3 py-2 text-grey-700">{sm.type}</td>
@@ -342,7 +353,7 @@ function SlaveCard({ slave, position }: { slave: EniSlave; position: number }) {
               ['Inputs', slave.processData?.txPdos ?? []],
             ] as const
           ).map(([label, pdos]) =>
-            pdos.map(pdo => (
+            pdos.map((pdo) => (
               <div key={`${label}-${pdo.index}`} className="space-y-1">
                 <p className="text-xs text-grey-600 font-mono">
                   {label} · {formatHex(pdo.index)} · {pdo.name}
@@ -432,11 +443,11 @@ function SlaveCard({ slave, position }: { slave: EniSlave; position: number }) {
         <InitCmdTable cmds={slave.initCmds} />
       </div>
     </Section>
-  )
+  );
 }
 
 export default function EniView({ parsed }: { parsed: EniParseResult }) {
-  const { network, warnings, summary } = parsed
+  const { network, warnings, summary } = parsed;
   return (
     <div className="space-y-4">
       {warnings.length > 0 && (
@@ -512,10 +523,10 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
 
       {network.processImage && (
         <Section title="Process image">
-          {(['outputs', 'inputs'] as const).map(half => {
-            const area = network.processImage?.[half]
+          {(['outputs', 'inputs'] as const).map((half) => {
+            const area = network.processImage?.[half];
             if (!area) {
-              return null
+              return null;
             }
             return (
               <div key={half} className="space-y-2">
@@ -546,13 +557,17 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                       </thead>
                       <tbody>
                         {area.variables.map((variable, j) => {
-                          const { scope, signal } = splitVariableName(variable.name)
-                          const device = deviceAt(network.slaves, half, variable.bitOffs)
-                          const object = objectAt(network.slaves, half, variable.bitOffs)
+                          const { scope, signal } = splitVariableName(variable.name);
+                          const device = deviceAt(network.slaves, half, variable.bitOffs);
+                          const object = objectAt(network.slaves, half, variable.bitOffs);
                           return (
                             <tr key={j} className="border-b border-grey-100 last:border-0">
                               <td className="px-3 py-2 font-mono">
-                                {device !== null ? `#${device}` : <span className="text-grey-400">—</span>}
+                                {device !== null ? (
+                                  `#${device}`
+                                ) : (
+                                  <span className="text-grey-400">—</span>
+                                )}
                               </td>
                               <td className="px-3 py-2 text-grey-600">
                                 {scope ?? <span className="text-grey-400">—</span>}
@@ -573,17 +588,17 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                                 {variable.bitOffs}
                               </td>
                             </tr>
-                          )
+                          );
                         })}
                       </tbody>
                     </table>
                   </div>
                 )}
               </div>
-            )
+            );
           })}
         </Section>
       )}
     </div>
-  )
+  );
 }

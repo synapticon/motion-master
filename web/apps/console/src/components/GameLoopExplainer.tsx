@@ -1,4 +1,4 @@
-import Explainer from './Explainer'
+import Explainer from './Explainer';
 
 // The teaching panel for the Server → Game Loop page. It explains what the cyclic RT loop is, then
 // documents every card on the page — what it means and exactly how it is derived from the two things
@@ -11,10 +11,10 @@ export default function GameLoopExplainer() {
         The <strong>game loop</strong> is the single real-time thread that drives the bus: once per
         cycle it exchanges EtherCAT process data (and, later, steps trajectories) on a fixed{' '}
         <strong>period</strong>. On a real-time host it holds that period almost exactly; on stock
-        Windows / macOS the OS timer can be too coarse to sustain a 1&nbsp;ms cycle, and the loop then{' '}
-        <strong>skips</strong> grid points to stay phase-locked rather than drift or fire a burst of
-        stale frames. This page is a live health readout of that loop — it runs unconditionally, so
-        the numbers are meaningful even before a bus is scanned.
+        Windows / macOS the OS timer can be too coarse to sustain a 1&nbsp;ms cycle, and the loop
+        then <strong>skips</strong> grid points to stay phase-locked rather than drift or fire a
+        burst of stale frames. This page is a live health readout of that loop — it runs
+        unconditionally, so the numbers are meaningful even before a bus is scanned.
       </p>
 
       <p>
@@ -41,11 +41,13 @@ export default function GameLoopExplainer() {
           <dt className="font-medium text-grey-900">Live rate</dt>
           <dd>
             The <strong>instantaneous</strong> rate over just the last poll:{' '}
-            <code>(executedCycles_now − executedCycles_prev) ÷ (timestamp_now − timestamp_prev)</code>
-            . This is the canary — a transient stall that the lifetime average would smooth away shows
-            up here within one second. It reads <code>—</code> on the first poll (there is no previous
-            sample yet to diff against) and resets after a connection error. The small jitter around
-            target is just the ~1&nbsp;s poll interval not being exactly one second.
+            <code>
+              (executedCycles_now − executedCycles_prev) ÷ (timestamp_now − timestamp_prev)
+            </code>
+            . This is the canary — a transient stall that the lifetime average would smooth away
+            shows up here within one second. It reads <code>—</code> on the first poll (there is no
+            previous sample yet to diff against) and resets after a connection error. The small
+            jitter around target is just the ~1&nbsp;s poll interval not being exactly one second.
           </dd>
         </div>
 
@@ -56,7 +58,8 @@ export default function GameLoopExplainer() {
             stall. Skipping is deliberate: one fresh frame on-grid beats a back-to-back burst of
             stale setpoints the drives can&apos;t use. An occasional skip is harmless; a value that{' '}
             <em>climbs steadily</em> (shown as <code>+N/s</code>) means the configured period is too
-            aggressive for this machine — raise it (e.g. to 2&nbsp;ms) so the loop can meet its grid.
+            aggressive for this machine — raise it (e.g. to 2&nbsp;ms) so the loop can meet its
+            grid.
           </dd>
         </div>
 
@@ -73,11 +76,11 @@ export default function GameLoopExplainer() {
           <dt className="font-medium text-grey-900">Task time</dt>
           <dd>
             How long the <strong>work inside a cycle</strong> takes — the process-data exchange and
-            any tasks, excluding the wait for the next deadline. Measured with two steady-clock reads
-            around the task loop. It shows the most recent cycle&apos;s time, with the worst-case
-            (<strong>max</strong>) and running <strong>average</strong> since start. This is the
-            budget being consumed out of each period; if it approaches the period, there is no slack
-            left to absorb jitter.
+            any tasks, excluding the wait for the next deadline. Measured with two steady-clock
+            reads around the task loop. It shows the most recent cycle&apos;s time, with the
+            worst-case (<strong>max</strong>) and running <strong>average</strong> since start. This
+            is the budget being consumed out of each period; if it approaches the period, there is
+            no slack left to absorb jitter.
           </dd>
         </div>
 
@@ -95,5 +98,5 @@ export default function GameLoopExplainer() {
         </div>
       </dl>
     </Explainer>
-  )
+  );
 }

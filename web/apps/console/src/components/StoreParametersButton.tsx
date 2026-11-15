@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiErrorMessage } from '@synapticon/motion-master-client'
-import { useConnection } from '../contexts/ConnectionContext'
-import { barBtnOutline } from './deviceBarStyles'
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiErrorMessage } from '@synapticon/motion-master-client';
+import { useConnection } from '../contexts/ConnectionContext';
+import { barBtnOutline } from './deviceBarStyles';
 
-const PROCEDURE = 'store-parameters'
+const PROCEDURE = 'store-parameters';
 
 /**
  * Stores the parameters of a device to its flash, with the store-parameters procedure.
@@ -18,44 +18,44 @@ export default function StoreParametersButton({
   slavePosition,
   mailboxActive,
 }: {
-  slavePosition: number
-  mailboxActive: boolean
+  slavePosition: number;
+  mailboxActive: boolean;
 }) {
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
-  const key = ['procedure', slavePosition, PROCEDURE]
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
+  const key = ['procedure', slavePosition, PROCEDURE];
   const snapshotQuery = useQuery({
     queryKey: key,
-    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then(r => r.data),
-    refetchInterval: query => (query.state.data?.status === 'running' ? 500 : false),
+    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then((r) => r.data),
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 500 : false),
     enabled: mailboxActive,
     retry: false,
-  })
+  });
   const store = useMutation({
     mutationFn: () => api.startProcedure(slavePosition, PROCEDURE, {}),
     onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
-  })
+  });
 
   // "Stored" shows for a few seconds after a store this page started, then the label returns.
-  const [justStored, setJustStored] = useState(false)
-  const finishedAt = snapshotQuery.data?.finishedAt
-  const succeeded = snapshotQuery.data?.status === 'succeeded'
+  const [justStored, setJustStored] = useState(false);
+  const finishedAt = snapshotQuery.data?.finishedAt;
+  const succeeded = snapshotQuery.data?.status === 'succeeded';
   useEffect(() => {
     if (!finishedAt || !succeeded || !store.isSuccess) {
-      return
+      return;
     }
-    setJustStored(true)
-    const timer = setTimeout(() => setJustStored(false), 3000)
-    return () => clearTimeout(timer)
-  }, [finishedAt, succeeded, store.isSuccess])
+    setJustStored(true);
+    const timer = setTimeout(() => setJustStored(false), 3000);
+    return () => clearTimeout(timer);
+  }, [finishedAt, succeeded, store.isSuccess]);
 
-  const running = store.isPending || snapshotQuery.data?.status === 'running'
-  const failed = snapshotQuery.data?.status === 'failed'
+  const running = store.isPending || snapshotQuery.data?.status === 'running';
+  const failed = snapshotQuery.data?.status === 'failed';
   const error = store.isError
     ? apiErrorMessage(store.error)
     : failed
       ? (snapshotQuery.data?.error ?? 'the store failed')
-      : undefined
+      : undefined;
 
   return (
     <span className="flex items-center gap-2">
@@ -78,5 +78,5 @@ export default function StoreParametersButton({
         </span>
       )}
     </span>
-  )
+  );
 }

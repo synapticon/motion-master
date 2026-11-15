@@ -1,33 +1,33 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Navigate, NavLink, useParams } from 'react-router'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react';
+import { Navigate, NavLink, useParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   apiErrorMessage,
   type ProcedureListing,
   type ProcedureSnapshot,
   type ProgressStep,
-} from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
-import DevicePageHeader from '../components/DevicePageHeader'
-import ProceduresExplainer from '../components/ProceduresExplainer'
-import KueblerRegisterPicker from '../components/KueblerRegisterPicker'
+} from '@synapticon/motion-master-client';
+import Callout from '../components/Callout';
+import DevicePageHeader from '../components/DevicePageHeader';
+import ProceduresExplainer from '../components/ProceduresExplainer';
+import KueblerRegisterPicker from '../components/KueblerRegisterPicker';
 import ProcedureParameters, {
   initialParameterValues,
   parseParameterValues,
   type ParameterValues,
-} from '../components/ProcedureParameters'
-import { useConnection } from '../contexts/ConnectionContext'
+} from '../components/ProcedureParameters';
+import { useConnection } from '../contexts/ConnectionContext';
 
 // One shared control height for every interactive control, matching the other device pages: this
 // theme's spacing scale is geometric (h-9 = 6rem = 96px!), so the height has to be explicit px.
 const btnCls =
   'inline-flex items-center justify-center bg-syn-red text-white px-4 h-[38px] text-xs ' +
-  'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+  'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 const btnGhostCls =
   'inline-flex items-center justify-center border border-grey-300 text-grey-700 px-4 h-[38px] ' +
   'text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ' +
-  'transition-colors'
-const statLabelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display'
+  'transition-colors';
+const statLabelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display';
 
 // Overall run status → badge colour. Mirrors the AL-state and CiA402 badges elsewhere: green for a
 // clean finish, red for a failure, amber for a user cancel (not an error, but not success either),
@@ -38,7 +38,7 @@ const STATUS_BADGE: Record<ProcedureSnapshot['status'], string> = {
   succeeded: 'bg-green-600 text-white',
   failed: 'bg-syn-red text-white',
   cancelled: 'bg-status-warn text-grey-900',
-}
+};
 
 // Per-step status → dot colour, for the compact step list.
 const STEP_DOT: Record<ProgressStep['status'], string> = {
@@ -46,13 +46,13 @@ const STEP_DOT: Record<ProgressStep['status'], string> = {
   running: 'bg-ocean',
   succeeded: 'bg-green-600',
   failed: 'bg-syn-red',
-}
+};
 
 // Surfaces the node layer's error string from a failed request. The unwrapping itself lives in the
 // client library, which owns the generated client and therefore its error shape — the pages that
 // still hand-roll it predate that helper.
 function apiError(err: unknown): string {
-  return apiErrorMessage(err)
+  return apiErrorMessage(err);
 }
 
 // Wall-clock time of a run boundary, to the millisecond — 11:01:28.762. The precision is the point:
@@ -61,37 +61,41 @@ function apiError(err: unknown): string {
 // fractionalSecondDigits counts as a component option, and passing it alone suppresses the default
 // hour/minute/second and formats the fraction on its own.
 function formatTime(epochMs?: number): string {
-  if (epochMs === undefined) return '—'
+  if (epochMs === undefined) {
+    return '—';
+  }
   return new Date(epochMs).toLocaleTimeString([], {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     fractionalSecondDigits: 3,
-  })
+  });
 }
 
 // How long a finished run took, or how long the current one has been going.
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms} ms`
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
+  if (ms < 1000) {
+    return `${ms} ms`;
+  }
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
 }
 
 export default function DeviceProceduresPage() {
-  const { deviceId, procedureName } = useParams()
-  const slavePosition = Number(deviceId)
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
+  const { deviceId, procedureName } = useParams();
+  const slavePosition = Number(deviceId);
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
 
-  const listKey = ['procedures', slavePosition]
+  const listKey = ['procedures', slavePosition];
   const listQuery = useQuery({
     queryKey: listKey,
-    queryFn: () => api.listProcedures(slavePosition).then(r => r.data),
+    queryFn: () => api.listProcedures(slavePosition).then((r) => r.data),
     // One request carries every procedure's descriptor AND its snapshot, so the whole page — list,
     // detail and live progress — is driven by this single query. Poll only while something is
     // actually running; a page of finished results needs no traffic at all.
-    refetchInterval: query =>
-      (query.state.data ?? []).some(l => l.snapshot.status === 'running') ? 300 : false,
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((l) => l.snapshot.status === 'running') ? 300 : false,
     // Keep polling when the window is not focused, which React Query does not do by default.
     // Without this the page silently stops updating the moment the user looks somewhere else — and
     // for these procedures that is the normal case, not an edge case: a firmware installation runs
@@ -103,10 +107,10 @@ export default function DeviceProceduresPage() {
     // pages nobody is looking at; here the staleness is actively misleading about a live operation.
     refetchIntervalInBackground: true,
     retry: false,
-  })
+  });
 
-  const listings = listQuery.data ?? []
-  const selected = listings.find(l => l.descriptor.name === procedureName)
+  const listings = listQuery.data ?? [];
+  const selected = listings.find((l) => l.descriptor.name === procedureName);
 
   const startMutation = useMutation({
     mutationFn: ({ name, body }: { name: string; body?: Record<string, unknown> }) =>
@@ -114,12 +118,12 @@ export default function DeviceProceduresPage() {
     // The 202 body is the initial snapshot, but the list is what this page renders — refetch so the
     // run appears with its bumped runCount, and the poll above takes over from there.
     onSettled: () => queryClient.invalidateQueries({ queryKey: listKey }),
-  })
+  });
 
   const cancelMutation = useMutation({
     mutationFn: (name: string) => api.cancelProcedure(slavePosition, name),
     onSettled: () => queryClient.invalidateQueries({ queryKey: listKey }),
-  })
+  });
 
   return (
     <div>
@@ -138,8 +142,8 @@ export default function DeviceProceduresPage() {
           <p className="text-sm text-grey-500">Reading procedures…</p>
         ) : listings.length === 0 ? (
           <Callout variant="info">
-            This device has no procedures. The list is served per device — a procedure is offered only
-            where it applies, so a slave from another vendor reports none.
+            This device has no procedures. The list is served per device — a procedure is offered
+            only where it applies, so a slave from another vendor reports none.
           </Callout>
         ) : (
           // Master-detail: pick a procedure on the left, work it on the right. The selection lives in
@@ -149,7 +153,7 @@ export default function DeviceProceduresPage() {
             <nav className="border border-grey-200">
               <p className="px-4 py-3 border-b border-grey-200 eyebrow">Procedure</p>
               <ul>
-                {listings.map(listing => (
+                {listings.map((listing) => (
                   <li key={listing.descriptor.name}>
                     <ProcedureNavItem
                       slavePosition={slavePosition}
@@ -180,10 +184,14 @@ export default function DeviceProceduresPage() {
                 listing={selected}
                 // The busy claim is per device, not per procedure, so a run on any of them refuses a
                 // start here (HTTP 409). Say so on the button rather than letting the user find out.
-                busyWith={listings.find(
-                  l => l.snapshot.status === 'running' && l.descriptor.name !== selected.descriptor.name,
-                )?.descriptor.title}
-                onStart={body => startMutation.mutate({ name: selected.descriptor.name, body })}
+                busyWith={
+                  listings.find(
+                    (l) =>
+                      l.snapshot.status === 'running' &&
+                      l.descriptor.name !== selected.descriptor.name,
+                  )?.descriptor.title
+                }
+                onStart={(body) => startMutation.mutate({ name: selected.descriptor.name, body })}
                 onCancel={() => cancelMutation.mutate(selected.descriptor.name)}
                 starting={startMutation.isPending}
                 cancelling={cancelMutation.isPending}
@@ -200,7 +208,7 @@ export default function DeviceProceduresPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 // One entry in the procedure list: its title, and a dot carrying the status of its last run so the
@@ -210,11 +218,11 @@ function ProcedureNavItem({
   listing,
   selected,
 }: {
-  slavePosition: number
-  listing: ProcedureListing
-  selected: boolean
+  slavePosition: number;
+  listing: ProcedureListing;
+  selected: boolean;
 }) {
-  const { status } = listing.snapshot
+  const { status } = listing.snapshot;
   return (
     <NavLink
       to={`/devices/${slavePosition}/procedures/${listing.descriptor.name}`}
@@ -233,7 +241,7 @@ function ProcedureNavItem({
         }`}
       />
     </NavLink>
-  )
+  );
 }
 
 // The list dot reuses the per-step palette, so the five overall statuses map onto its four colours:
@@ -242,14 +250,14 @@ function ProcedureNavItem({
 function statusDot(status: ProcedureSnapshot['status']): ProgressStep['status'] {
   switch (status) {
     case 'running':
-      return 'running'
+      return 'running';
     case 'succeeded':
-      return 'succeeded'
+      return 'succeeded';
     case 'failed':
     case 'cancelled':
-      return 'failed'
+      return 'failed';
     default:
-      return 'idle'
+      return 'idle';
   }
 }
 
@@ -263,48 +271,54 @@ function ProcedureDetail({
   cancelling,
   requestError,
 }: {
-  slavePosition: number
-  listing: ProcedureListing
+  slavePosition: number;
+  listing: ProcedureListing;
   /** Title of another procedure running on this device, which blocks a start here. */
-  busyWith?: string
-  onStart: (body?: Record<string, unknown>) => void
-  onCancel: () => void
-  starting: boolean
-  cancelling: boolean
-  requestError: string | null
+  busyWith?: string;
+  onStart: (body?: Record<string, unknown>) => void;
+  onCancel: () => void;
+  starting: boolean;
+  cancelling: boolean;
+  requestError: string | null;
 }) {
-  const { descriptor, snapshot } = listing
-  const running = snapshot.status === 'running'
+  const { descriptor, snapshot } = listing;
+  const running = snapshot.status === 'running';
 
   // Elapsed time for a run in flight, ticking beside the button that started it. A finished run's
   // duration comes from its own timestamps and needs no timer.
-  const [now, setNow] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!running) return
-    const timer = setInterval(() => setNow(Date.now()), 100)
-    return () => clearInterval(timer)
-  }, [running])
+    if (!running) {
+      return;
+    }
+    const timer = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(timer);
+  }, [running]);
 
   const duration = useMemo(() => {
-    if (snapshot.startedAt === undefined) return null
-    const end = snapshot.finishedAt ?? (running ? now : undefined)
-    if (end === undefined) return null
-    return formatDuration(Math.max(0, end - snapshot.startedAt))
-  }, [snapshot.startedAt, snapshot.finishedAt, running, now])
+    if (snapshot.startedAt === undefined) {
+      return null;
+    }
+    const end = snapshot.finishedAt ?? (running ? now : undefined);
+    if (end === undefined) {
+      return null;
+    }
+    return formatDuration(Math.max(0, end - snapshot.startedAt));
+  }, [snapshot.startedAt, snapshot.finishedAt, running, now]);
 
   // The procedure's parameters, seeded from the defaults its descriptor declares. Held here (keyed
   // on the procedure by the parent's `key`) so switching procedures does not carry one procedure's
   // input into another.
   const [values, setValues] = useState<ParameterValues>(() =>
     initialParameterValues(descriptor.parameters),
-  )
-  const { body, errors } = parseParameterValues(descriptor.parameters, values)
+  );
+  const { body, errors } = parseParameterValues(descriptor.parameters, values);
 
-  const canRun = running || starting || busyWith !== undefined ? false : body !== null
+  const canRun = running || starting || busyWith !== undefined ? false : body !== null;
 
   function start() {
     if (body !== null) {
-      onStart(body)
+      onStart(body);
     }
   }
 
@@ -318,7 +332,7 @@ function ProcedureDetail({
   const packageFilename =
     descriptor.name === 'firmware-installation' && typeof values.packageFilename === 'string'
       ? values.packageFilename.trim()
-      : ''
+      : '';
 
   return (
     <div className="space-y-6">
@@ -347,7 +361,7 @@ function ProcedureDetail({
         {descriptor.caveats.length > 0 && (
           <Callout variant="warning">
             <ul className="list-disc pl-4">
-              {descriptor.caveats.map(caveat => (
+              {descriptor.caveats.map((caveat) => (
                 <li key={caveat}>{caveat}</li>
               ))}
             </ul>
@@ -366,7 +380,7 @@ function ProcedureDetail({
           <KueblerRegisterPicker
             disabled={running}
             onPick={(address, lengthBytes) =>
-              setValues(previous => ({
+              setValues((previous) => ({
                 ...previous,
                 address: String(address),
                 length: String(lengthBytes),
@@ -380,7 +394,7 @@ function ProcedureDetail({
           values={values}
           errors={errors}
           disabled={running}
-          onChange={(name, value) => setValues(previous => ({ ...previous, [name]: value }))}
+          onChange={(name, value) => setValues((previous) => ({ ...previous, [name]: value }))}
           // The one procedure-specific line on this page, and the honest cost of keeping a file
           // parameter to bytes alone: the name of the file the user chose would otherwise be
           // discarded, and for firmware installation that name is what the package is cached as and
@@ -395,9 +409,9 @@ function ProcedureDetail({
           // against whatever it then says, because that is what the server will be sent.
           onFilePicked={(parameter, file) => {
             if (parameter.name !== 'packageContent') {
-              return
+              return;
             }
-            setValues(previous => ({ ...previous, packageFilename: file.name }))
+            setValues((previous) => ({ ...previous, packageFilename: file.name }));
           }}
         />
 
@@ -427,8 +441,8 @@ function ProcedureDetail({
 
         {busyWith && (
           <p className="text-xs text-grey-500">
-            This device is busy running <strong>{busyWith}</strong>. One procedure runs per device at
-            a time.
+            This device is busy running <strong>{busyWith}</strong>. One procedure runs per device
+            at a time.
           </p>
         )}
 
@@ -486,7 +500,7 @@ function ProcedureDetail({
               </tr>
             </thead>
             <tbody>
-              {snapshot.steps.map(step => (
+              {snapshot.steps.map((step) => (
                 <tr key={step.id} className="border-b border-grey-100 last:border-0 align-top">
                   <td className="pl-3 py-2">
                     <span
@@ -523,24 +537,30 @@ function ProcedureDetail({
         <p className="text-xs text-grey-600 max-w-3xl">
           The three requests behind this panel, and the response body exactly as the snapshot above
           was decoded from. The whole client contract: <code>POST</code> to start, then read{' '}
-          <code>GET</code> repeatedly for as long as it answers <code>running</code>, and stop once it
-          does not. There is nothing to poll before a run or after one — this page follows the same
-          rule, reading a few times a second while a run is in flight and not at all otherwise.
+          <code>GET</code> repeatedly for as long as it answers <code>running</code>, and stop once
+          it does not. There is nothing to poll before a run or after one — this page follows the
+          same rule, reading a few times a second while a run is in flight and not at all otherwise.
         </p>
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs font-mono text-grey-700">
           <dt className="text-grey-500">POST</dt>
-          <dd>/api/devices/{slavePosition}/procedures/{descriptor.name}</dd>
+          <dd>
+            /api/devices/{slavePosition}/procedures/{descriptor.name}
+          </dd>
           <dt className="text-grey-500">GET</dt>
-          <dd>/api/devices/{slavePosition}/procedures/{descriptor.name}</dd>
+          <dd>
+            /api/devices/{slavePosition}/procedures/{descriptor.name}
+          </dd>
           <dt className="text-grey-500">DELETE</dt>
-          <dd>/api/devices/{slavePosition}/procedures/{descriptor.name}</dd>
+          <dd>
+            /api/devices/{slavePosition}/procedures/{descriptor.name}
+          </dd>
         </dl>
         <pre className="border border-grey-200 bg-grey-50 p-3 text-xs font-mono overflow-x-auto">
           {JSON.stringify(snapshot, null, 2)}
         </pre>
       </section>
     </div>
-  )
+  );
 }
 
 /**
@@ -558,39 +578,39 @@ function FirmwareCompatibilityNotice({
   slavePosition,
   filename,
 }: {
-  slavePosition: number
-  filename: string
+  slavePosition: number;
+  filename: string;
 }) {
-  const { api } = useConnection()
+  const { api } = useConnection();
   const query = useQuery({
     queryKey: ['firmware-compatibility', slavePosition, filename],
     queryFn: async () => {
-      const res = await api.checkDeviceFirmwareCompatibility(slavePosition, { filename })
-      return res.data
+      const res = await api.checkDeviceFirmwareCompatibility(slavePosition, { filename });
+      return res.data;
     },
     // The answer depends on the device's own files and the filename, neither of which changes while
     // this panel is open, so there is nothing to refetch.
     staleTime: Infinity,
     retry: false,
-  })
+  });
 
   if (query.isPending) {
-    return <p className="text-xs text-grey-500">Checking the package against this device…</p>
+    return <p className="text-xs text-grey-500">Checking the package against this device…</p>;
   }
 
   if (query.isError) {
     return (
       <Callout variant="info">
         <p>
-          Could not check whether this package fits: {apiError(query.error)}. The installation is not
-          affected — nothing about it depends on this check.
+          Could not check whether this package fits: {apiError(query.error)}. The installation is
+          not affected — nothing about it depends on this check.
         </p>
       </Callout>
-    )
+    );
   }
 
-  const verdict = query.data
-  const { deviceDescriptors, packageName } = verdict
+  const verdict = query.data;
+  const { deviceDescriptors, packageName } = verdict;
 
   return (
     <Callout variant={verdict.compatible ? 'success' : 'warning'}>
@@ -622,10 +642,10 @@ function FirmwareCompatibilityNotice({
       </dl>
       {!verdict.compatible && (
         <p className="mt-1.5">
-          Installing it anyway is allowed and nothing here prevents it — the procedure writes what it
-          is given. Check the descriptors above first.
+          Installing it anyway is allowed and nothing here prevents it — the procedure writes what
+          it is given. Check the descriptors above first.
         </p>
       )}
     </Callout>
-  )
+  );
 }

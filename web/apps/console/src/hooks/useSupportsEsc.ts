@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { useConnection } from '../contexts/ConnectionContext'
+import { useQuery } from '@tanstack/react-query';
+import { useConnection } from '../contexts/ConnectionContext';
 
 /**
  * Whether the devices have an EtherCAT Slave Controller: SII, ESC registers, distributed clocks
@@ -10,15 +10,15 @@ import { useConnection } from '../contexts/ConnectionContext'
  * until the device list is known, so a page does not flash a notice while it loads.
  */
 export function useSupportsEsc(slavePosition?: number): boolean {
-  const { api, hasScanned } = useConnection()
+  const { api, hasScanned } = useConnection();
   const devicesQuery = useQuery({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
     enabled: hasScanned,
-  })
-  const devices = devicesQuery.data?.data ?? []
+  });
+  const devices = devicesQuery.data?.data ?? [];
   if (slavePosition !== undefined) {
-    return devices.find(d => d.slavePosition === slavePosition)?.supportsEsc !== false
+    return devices.find((d) => d.slavePosition === slavePosition)?.supportsEsc !== false;
   }
-  return !devices.some(d => d.supportsEsc === false)
+  return !devices.some((d) => d.supportsEsc === false);
 }

@@ -1,13 +1,13 @@
-import { useState } from 'react'
-import PageHeader from '../components/PageHeader'
-import LearnSections from '../components/LearnSections'
-import type { LearnSectionEntry } from '../components/LearnSections'
-import Callout from '../components/Callout'
-import MotorCrossSection from '../components/MotorCrossSection'
-import CoilPairField from '../components/CoilPairField'
-import StatorFieldFigure from '../components/StatorFieldFigure'
-import TorqueSpeedFigure from '../components/TorqueSpeedFigure'
-import Term from '../components/Term'
+import { useState } from 'react';
+import PageHeader from '../components/PageHeader';
+import LearnSections from '../components/LearnSections';
+import type { LearnSectionEntry } from '../components/LearnSections';
+import Callout from '../components/Callout';
+import MotorCrossSection from '../components/MotorCrossSection';
+import CoilPairField from '../components/CoilPairField';
+import StatorFieldFigure from '../components/StatorFieldFigure';
+import TorqueSpeedFigure from '../components/TorqueSpeedFigure';
+import Term from '../components/Term';
 
 // Learn → Servo Motors.
 //
@@ -18,7 +18,7 @@ import Term from '../components/Term'
 // Section ids are linked to from other pages, so treat them as stable.
 
 export default function LearnServoMotorsPage() {
-  const [polePairs, setPolePairs] = useState(1)
+  const [polePairs, setPolePairs] = useState(1);
 
   const sections: LearnSectionEntry[] = [
     {
@@ -28,9 +28,9 @@ export default function LearnServoMotorsPage() {
       content: (
         <>
           <p>
-            A plain DC or AC motor turns while it is powered. Nothing in it knows where the shaft is,
-            so on its own it cannot be told to stop in a particular place. That is fine for a fan or
-            a pump, where all you want is rotation. It rules out anything that has to arrive
+            A plain DC or AC motor turns while it is powered. Nothing in it knows where the shaft
+            is, so on its own it cannot be told to stop in a particular place. That is fine for a
+            fan or a pump, where all you want is rotation. It rules out anything that has to arrive
             somewhere: a robot joint, a machine axis, a gripper.
           </p>
           <p>
@@ -42,8 +42,8 @@ export default function LearnServoMotorsPage() {
             what <strong>servo</strong> means.
           </p>
           <p>
-            What you command can be a position, a velocity or a torque. All three arrive at the
-            same instruction in the end: how much current to push through the motor.
+            What you command can be a position, a velocity or a torque. All three arrive at the same
+            instruction in the end: how much current to push through the motor.
           </p>
           <p>
             The drive does that conversion itself, in firmware. A position or velocity command
@@ -107,9 +107,9 @@ export default function LearnServoMotorsPage() {
       content: (
         <>
           <p>
-            Start with a brushed motor, which does the switching mechanically. Its magnets are
-            fixed to the housing and the windings spin. Two brushes press on
-            a <Term id="commutator">commutator</Term>, a ring of segments on the shaft, and as the
+            Start with a brushed motor, which does the switching mechanically. Its magnets are fixed
+            to the housing and the windings spin. Two brushes press on a{' '}
+            <Term id="commutator">commutator</Term>, a ring of segments on the shaft, and as the
             shaft turns the segments pass under the brushes and switch current from one winding to
             the next, so the rotor&apos;s field never lines up with the magnets. Fields that line up
             make no torque, so keeping them apart is the whole job. Nothing has to measure anything,
@@ -263,9 +263,15 @@ export default function LearnServoMotorsPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">Object</th>
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">What</th>
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">Unit</th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    Object
+                  </th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    What
+                  </th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    Unit
+                  </th>
                 </tr>
               </thead>
               <tbody className="text-grey-700">
@@ -356,8 +362,8 @@ export default function LearnServoMotorsPage() {
             <span className="font-mono">0x2010:05</span> sets how much current is spent on the
             weakening, as a percentage of the rated current. The dictionary warns that more than 25
             percent can destabilise the torque controller, and how much is too much depends on the
-            motor. There are also starting and
-            ending speed sub-entries at <span className="font-mono">0x2010:06</span> and{' '}
+            motor. There are also starting and ending speed sub-entries at{' '}
+            <span className="font-mono">0x2010:06</span> and{' '}
             <span className="font-mono">0x2010:07</span>, both marked deprecated, so do not build
             anything on them.
           </p>
@@ -368,9 +374,15 @@ export default function LearnServoMotorsPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">Object</th>
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">What</th>
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">Unit</th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    Object
+                  </th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    What
+                  </th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    Unit
+                  </th>
                 </tr>
               </thead>
               <tbody className="text-grey-700">
@@ -444,7 +456,7 @@ export default function LearnServoMotorsPage() {
         </>
       ),
     },
-  ]
+  ];
 
   return (
     <div>
@@ -460,5 +472,5 @@ export default function LearnServoMotorsPage() {
       </div>
       <LearnSections sections={sections} />
     </div>
-  )
+  );
 }

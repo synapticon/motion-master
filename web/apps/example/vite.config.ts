@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import { VitePWA } from 'vite-plugin-pwa'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 // Minimal starter config for an app served under /apps/<name>. The base is injected
 // at build time (VITE_BASE=/apps/example in deploy-pages.yml) and drives both the
@@ -40,4 +40,4 @@ export default defineConfig({
   // Normalize to a trailing slash: Vite requires it, and `import.meta.env.BASE_URL`
   // is inlined verbatim, so `${BASE_URL}foo.png` breaks if VITE_BASE lacks the slash.
   base: (process.env.VITE_BASE ?? '/').replace(/\/?$/, '/'),
-})
+});

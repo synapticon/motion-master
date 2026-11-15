@@ -1,18 +1,18 @@
-import { useQuery } from '@tanstack/react-query'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { useQuery } from '@tanstack/react-query';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
 
 export default function MetaObjectDataTypesPage() {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   const query = useQuery({
     queryKey: ['dataTypes'],
     queryFn: () => api.getObjectDataTypes(),
     staleTime: Infinity,
-  })
+  });
 
-  const types = query.data?.data ?? []
+  const types = query.data?.data ?? [];
 
   return (
     <div>
@@ -23,9 +23,9 @@ export default function MetaObjectDataTypesPage() {
           <>
             CANopen-over-EtherCAT (CoE) object dictionary data type codes. Base numbering follows{' '}
             SOEM / <span className="font-mono">CiA 301</span> (what the wire reports), extended with
-            the record and array types from{' '}
-            <span className="font-mono">ETG.1020 §26</span> (Base Data Types). The code is the 16-bit
-            DataType field returned when reading an object's metadata from the dictionary.
+            the record and array types from <span className="font-mono">ETG.1020 §26</span> (Base
+            Data Types). The code is the 16-bit DataType field returned when reading an object's
+            metadata from the dictionary.
           </>
         }
       />
@@ -47,18 +47,23 @@ export default function MetaObjectDataTypesPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['Code', 'Hex', 'Name', 'Bit Size'].map(h => (
-                    <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                  {['Code', 'Hex', 'Name', 'Bit Size'].map((h) => (
+                    <th
+                      key={h}
+                      className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
+                    >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {types.map(t => (
+                {types.map((t) => (
                   <tr key={t.code} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{t.code}</td>
-                    <td className="px-4 py-2 font-mono">0x{t.code.toString(16).toUpperCase().padStart(4, '0')}</td>
+                    <td className="px-4 py-2 font-mono">
+                      0x{t.code.toString(16).toUpperCase().padStart(4, '0')}
+                    </td>
                     <td className="px-4 py-2 font-mono">{t.name}</td>
                     <td className="px-4 py-2 font-mono">{t.bitSize === 0 ? '—' : t.bitSize}</td>
                   </tr>
@@ -67,10 +72,8 @@ export default function MetaObjectDataTypesPage() {
             </table>
           </div>
         )}
-        {query.isFetching && !query.data && (
-          <p className="text-xs text-grey-600">Loading…</p>
-        )}
+        {query.isFetching && !query.data && <p className="text-xs text-grey-600">Loading…</p>}
       </div>
     </div>
-  )
+  );
 }

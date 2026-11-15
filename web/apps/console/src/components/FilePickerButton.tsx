@@ -1,21 +1,21 @@
-import { useRef } from 'react'
-import type { ReactNode } from 'react'
-import { Upload } from 'lucide-react'
-import { btnOutline } from '../utils/styles'
+import { useRef } from 'react';
+import type { ReactNode } from 'react';
+import { Upload } from 'lucide-react';
+import { btnOutline } from '../utils/styles';
 
 interface FilePickerButtonProps {
   /** Called with the chosen file. The picker resets after each pick so the same file re-fires. */
-  onFile: (file: File) => void
-  children: ReactNode
-  accept?: string
-  disabled?: boolean
-  title?: string
+  onFile: (file: File) => void;
+  children: ReactNode;
+  accept?: string;
+  disabled?: boolean;
+  title?: string;
   /**
    * Extra classes for the button. Chiefly for height: btnOutline sizes itself by padding, which
    * leaves it shorter than the h-[38px] text inputs, so a picker standing next to one passes
    * `h-[38px]` to line the two up.
    */
-  className?: string
+  className?: string;
 }
 
 // A button that opens the OS file-selection dialog and hands back the chosen File. Hides the
@@ -29,13 +29,13 @@ export default function FilePickerButton({
   title,
   className = '',
 }: FilePickerButtonProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null);
 
   function onChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = '' // allow re-selecting the same file
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
     if (file) {
-      onFile(file)
+      onFile(file);
     }
   }
 
@@ -53,5 +53,5 @@ export default function FilePickerButton({
         {children}
       </button>
     </>
-  )
+  );
 }

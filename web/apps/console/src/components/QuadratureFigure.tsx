@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { RotateCcw } from 'lucide-react'
+import { useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 
 // What an incremental encoder actually sends down the wire, for the Learn pages.
 //
@@ -10,87 +10,157 @@ import { RotateCcw } from 'lucide-react'
 // screen. A real encoder puts thousands of cycles in the same space, which changes the numbers and
 // nothing else.
 
-const CYCLES = 4
-const INDEX_AT = 0.62
-const W = 520
-const LEFT = 54
-const PLOT = W - LEFT - 12
-const ROW_H = 34
-const HIGH = 8
-const LOW = 26
+const CYCLES = 4;
+const INDEX_AT = 0.62;
+const W = 520;
+const LEFT = 54;
+const PLOT = W - LEFT - 12;
+const ROW_H = 34;
+const HIGH = 8;
+const LOW = 26;
 
-function Channel({ y, label, phaseShift, position, reversed }: {
-  y: number
-  label: string
-  phaseShift: number
-  position: number
-  reversed: boolean
+function Channel({
+  y,
+  label,
+  phaseShift,
+  position,
+  reversed,
+}: {
+  y: number;
+  label: string;
+  phaseShift: number;
+  position: number;
+  reversed: boolean;
 }) {
   // One square wave across the whole turn. Reversing direction swaps which channel leads, which is
   // the only thing that tells a counter which way the shaft is going.
-  const shift = reversed ? -phaseShift : phaseShift
-  const steps: string[] = []
-  const samples = 400
+  const shift = reversed ? -phaseShift : phaseShift;
+  const steps: string[] = [];
+  const samples = 400;
   for (let i = 0; i <= samples; i++) {
-    const turn = i / samples
-    const phase = (turn * CYCLES + shift + 1) % 1
-    const high = phase < 0.5
-    const x = LEFT + turn * PLOT
-    const yy = y + (high ? HIGH : LOW)
-    steps.push(`${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${yy}`)
+    const turn = i / samples;
+    const phase = (turn * CYCLES + shift + 1) % 1;
+    const high = phase < 0.5;
+    const x = LEFT + turn * PLOT;
+    const yy = y + (high ? HIGH : LOW);
+    steps.push(`${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${yy}`);
   }
   return (
     <g>
-      <text x={LEFT - 10} y={y + 20} textAnchor="end" className="fill-grey-700 text-[12px] font-mono">
+      <text
+        x={LEFT - 10}
+        y={y + 20}
+        textAnchor="end"
+        className="fill-grey-700 text-[12px] font-mono"
+      >
         {label}
       </text>
-      <line x1={LEFT} y1={y + LOW} x2={LEFT + PLOT} y2={y + LOW} className="stroke-grey-200" strokeWidth={1} />
-      <path d={steps.join(' ')} className="stroke-ocean fill-none" strokeWidth={2} shapeRendering="crispEdges" />
+      <line
+        x1={LEFT}
+        y1={y + LOW}
+        x2={LEFT + PLOT}
+        y2={y + LOW}
+        className="stroke-grey-200"
+        strokeWidth={1}
+      />
+      <path
+        d={steps.join(' ')}
+        className="stroke-ocean fill-none"
+        strokeWidth={2}
+        shapeRendering="crispEdges"
+      />
       <circle
         cx={LEFT + position * PLOT}
-        cy={y + (((position * CYCLES + (reversed ? -phaseShift : phaseShift) + 1) % 1) < 0.5 ? HIGH : LOW)}
+        cy={
+          y +
+          ((position * CYCLES + (reversed ? -phaseShift : phaseShift) + 1) % 1 < 0.5 ? HIGH : LOW)
+        }
         r={3.5}
         className="fill-syn-red"
       />
     </g>
-  )
+  );
 }
 
 export default function QuadratureFigure() {
-  const [position, setPosition] = useState(0.18)
-  const [reversed, setReversed] = useState(false)
+  const [position, setPosition] = useState(0.18);
+  const [reversed, setReversed] = useState(false);
 
-  const edges = Math.floor(position * CYCLES * 4)
-  const indexPassed = position > INDEX_AT
+  const edges = Math.floor(position * CYCLES * 4);
+  const indexPassed = position > INDEX_AT;
 
   return (
     <div className="border border-grey-200 max-w-2xl">
       <div className="p-4">
-        <svg viewBox={`0 0 ${W} 150`} className="w-full" role="img"
-          aria-label="Two quadrature channels a quarter cycle apart, plus an index pulse once per turn">
+        <svg
+          viewBox={`0 0 ${W} 150`}
+          className="w-full"
+          role="img"
+          aria-label="Two quadrature channels a quarter cycle apart, plus an index pulse once per turn"
+        >
           <Channel y={4} label="A" phaseShift={0} position={position} reversed={reversed} />
-          <Channel y={4 + ROW_H} label="B" phaseShift={-0.25} position={position} reversed={reversed} />
+          <Channel
+            y={4 + ROW_H}
+            label="B"
+            phaseShift={-0.25}
+            position={position}
+            reversed={reversed}
+          />
 
           {/* Index: one pulse per turn, at the same shaft angle every time. */}
           <g>
-            <text x={LEFT - 10} y={4 + 2 * ROW_H + 20} textAnchor="end" className="fill-grey-700 text-[12px] font-mono">
+            <text
+              x={LEFT - 10}
+              y={4 + 2 * ROW_H + 20}
+              textAnchor="end"
+              className="fill-grey-700 text-[12px] font-mono"
+            >
               Z
             </text>
-            <line x1={LEFT} y1={4 + 2 * ROW_H + LOW} x2={LEFT + PLOT} y2={4 + 2 * ROW_H + LOW}
-              className="stroke-grey-200" strokeWidth={1} />
+            <line
+              x1={LEFT}
+              y1={4 + 2 * ROW_H + LOW}
+              x2={LEFT + PLOT}
+              y2={4 + 2 * ROW_H + LOW}
+              className="stroke-grey-200"
+              strokeWidth={1}
+            />
             <path
               d={`M ${LEFT} ${4 + 2 * ROW_H + LOW} L ${LEFT + INDEX_AT * PLOT} ${4 + 2 * ROW_H + LOW} L ${LEFT + INDEX_AT * PLOT} ${4 + 2 * ROW_H + HIGH} L ${LEFT + INDEX_AT * PLOT + 8} ${4 + 2 * ROW_H + HIGH} L ${LEFT + INDEX_AT * PLOT + 8} ${4 + 2 * ROW_H + LOW} L ${LEFT + PLOT} ${4 + 2 * ROW_H + LOW}`}
-              className="stroke-syn-red fill-none" strokeWidth={2} shapeRendering="crispEdges" />
+              className="stroke-syn-red fill-none"
+              strokeWidth={2}
+              shapeRendering="crispEdges"
+            />
           </g>
 
           {/* Position cursor across all three rows. */}
-          <line x1={LEFT + position * PLOT} y1={0} x2={LEFT + position * PLOT} y2={4 + 3 * ROW_H}
-            className="stroke-grey-400" strokeWidth={1} strokeDasharray="3 3" />
+          <line
+            x1={LEFT + position * PLOT}
+            y1={0}
+            x2={LEFT + position * PLOT}
+            y2={4 + 3 * ROW_H}
+            className="stroke-grey-400"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
 
-          <line x1={LEFT} y1={4 + 3 * ROW_H + 4} x2={LEFT + PLOT} y2={4 + 3 * ROW_H + 4}
-            className="stroke-grey-300" strokeWidth={1} />
-          <text x={LEFT} y={4 + 3 * ROW_H + 20} className="fill-grey-500 text-[10px]">one turn of the shaft</text>
-          <text x={LEFT + PLOT} y={4 + 3 * ROW_H + 20} textAnchor="end" className="fill-grey-500 text-[10px]">
+          <line
+            x1={LEFT}
+            y1={4 + 3 * ROW_H + 4}
+            x2={LEFT + PLOT}
+            y2={4 + 3 * ROW_H + 4}
+            className="stroke-grey-300"
+            strokeWidth={1}
+          />
+          <text x={LEFT} y={4 + 3 * ROW_H + 20} className="fill-grey-500 text-[10px]">
+            one turn of the shaft
+          </text>
+          <text
+            x={LEFT + PLOT}
+            y={4 + 3 * ROW_H + 20}
+            textAnchor="end"
+            className="fill-grey-500 text-[10px]"
+          >
             back to the start
           </text>
         </svg>
@@ -106,14 +176,14 @@ export default function QuadratureFigure() {
               min={0}
               max={1000}
               value={Math.round(position * 1000)}
-              onChange={e => setPosition(Number(e.target.value) / 1000)}
+              onChange={(e) => setPosition(Number(e.target.value) / 1000)}
               className="w-full h-1 appearance-none bg-grey-200 accent-syn-red cursor-pointer"
             />
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setReversed(r => !r)}
+              onClick={() => setReversed((r) => !r)}
               className="h-[38px] inline-flex items-center gap-1.5 px-3 text-xs border border-syn-red text-syn-red hover:bg-syn-red hover:text-white transition-colors cursor-pointer"
             >
               <RotateCcw className="h-3.5 w-3.5" aria-hidden />
@@ -131,10 +201,12 @@ export default function QuadratureFigure() {
 
       <div className="border-t border-grey-200 p-4 text-[11px] text-grey-500 leading-4 space-y-1.5">
         <p>
-          <span className="text-grey-900">A and B are the same square wave a quarter cycle apart.</span>{' '}
+          <span className="text-grey-900">
+            A and B are the same square wave a quarter cycle apart.
+          </span>{' '}
           Neither one alone says anything about direction. Together they do: turn one way and A
-          changes first, turn the other and B does. That is the whole of it, and it is why a drive has
-          a polarity setting — swap the two wires and every count goes the wrong way.
+          changes first, turn the other and B does. That is the whole of it, and it is why a drive
+          has a polarity setting — swap the two wires and every count goes the wrong way.
         </p>
         <p>
           A counter that watches every edge on both channels gets four counts per cycle, which is
@@ -152,5 +224,5 @@ export default function QuadratureFigure() {
         </p>
       </div>
     </div>
-  )
+  );
 }

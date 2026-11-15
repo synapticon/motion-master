@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState } from 'react';
 
 // The torque-speed envelope, for the Learn pages.
 //
@@ -16,50 +16,93 @@ import { useState } from 'react'
 // the magnets instead of making torque, which is why the tail is lower rather than longer at the
 // same height.
 
-const W = 520
-const H = 190
-const L = 46
-const B = 42
+const W = 520;
+const H = 190;
+const L = 46;
+const B = 42;
 
-const x = (speed: number) => L + speed * (W - L - 16)
-const y = (torque: number) => H - B - torque * (H - B - 16)
+const x = (speed: number) => L + speed * (W - L - 16);
+const y = (torque: number) => H - B - torque * (H - B - 16);
 
 export default function TorqueSpeedFigure() {
-  const [supply, setSupply] = useState(48)
-  const [weakening, setWeakening] = useState(false)
+  const [supply, setSupply] = useState(48);
+  const [weakening, setWeakening] = useState(false);
 
   // Base speed scales with the supply. 48 V nominal is drawn around half the axis so both the
   // low end and the headroom above it have room.
-  const base = (supply / 100) * 0.9
+  const base = (supply / 100) * 0.9;
 
-  const points: string[] = []
+  const points: string[] = [];
   for (let i = 0; i <= 200; i++) {
-    const s = i / 200
-    let t: number
+    const s = i / 200;
+    let t: number;
     if (s <= base) {
-      t = 1
+      t = 1;
     } else if (weakening) {
-      t = base / s
+      t = base / s;
     } else {
       // Without field weakening there is simply no voltage left, and it goes quickly.
-      t = Math.max(0, 1 - (s - base) / (base * 0.18))
+      t = Math.max(0, 1 - (s - base) / (base * 0.18));
     }
-    points.push(`${i === 0 ? 'M' : 'L'} ${x(s).toFixed(1)} ${y(Math.min(t, 1)).toFixed(1)}`)
+    points.push(`${i === 0 ? 'M' : 'L'} ${x(s).toFixed(1)} ${y(Math.min(t, 1)).toFixed(1)}`);
   }
 
   return (
     <div className="border border-grey-200 max-w-2xl">
       <div className="p-4 space-y-4">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img"
-          aria-label="Torque falling away above base speed, with base speed set by the supply voltage">
-          <line x1={L} y1={y(0)} x2={W - 16} y2={y(0)} className="stroke-grey-300" strokeWidth={1} />
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full"
+          role="img"
+          aria-label="Torque falling away above base speed, with base speed set by the supply voltage"
+        >
+          <line
+            x1={L}
+            y1={y(0)}
+            x2={W - 16}
+            y2={y(0)}
+            className="stroke-grey-300"
+            strokeWidth={1}
+          />
           <line x1={L} y1={y(0)} x2={L} y2={12} className="stroke-grey-300" strokeWidth={1} />
-          <line x1={L} y1={y(1)} x2={W - 16} y2={y(1)} className="stroke-grey-200" strokeWidth={1} strokeDasharray="3 3" />
-          <text x={L - 8} y={y(1) + 3} textAnchor="end" className="fill-grey-500 text-[9px] font-mono">peak</text>
-          <text x={L - 8} y={y(0) + 3} textAnchor="end" className="fill-grey-500 text-[9px] font-mono">0</text>
+          <line
+            x1={L}
+            y1={y(1)}
+            x2={W - 16}
+            y2={y(1)}
+            className="stroke-grey-200"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+          <text
+            x={L - 8}
+            y={y(1) + 3}
+            textAnchor="end"
+            className="fill-grey-500 text-[9px] font-mono"
+          >
+            peak
+          </text>
+          <text
+            x={L - 8}
+            y={y(0) + 3}
+            textAnchor="end"
+            className="fill-grey-500 text-[9px] font-mono"
+          >
+            0
+          </text>
 
-          <line x1={x(base)} y1={y(0)} x2={x(base)} y2={y(1)} className="stroke-grey-300" strokeWidth={1} strokeDasharray="3 3" />
-          <text x={x(base)} y={H - 20} textAnchor="middle" className="fill-grey-500 text-[9px]">base speed</text>
+          <line
+            x1={x(base)}
+            y1={y(0)}
+            x2={x(base)}
+            y2={y(1)}
+            className="stroke-grey-300"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+          <text x={x(base)} y={H - 20} textAnchor="middle" className="fill-grey-500 text-[9px]">
+            base speed
+          </text>
 
           <path d={points.join(' ')} className="stroke-syn-red fill-none" strokeWidth={2.5} />
 
@@ -73,7 +116,12 @@ export default function TorqueSpeedFigure() {
           >
             torque
           </text>
-          <text x={L + (W - L - 16) / 2} y={H - 3} textAnchor="middle" className="fill-grey-600 text-[11px]">
+          <text
+            x={L + (W - L - 16) / 2}
+            y={H - 3}
+            textAnchor="middle"
+            className="fill-grey-600 text-[11px]"
+          >
             speed →
           </text>
         </svg>
@@ -83,7 +131,8 @@ export default function TorqueSpeedFigure() {
             <label className="flex items-baseline justify-between text-xs text-grey-700 mb-1.5">
               <span>Supply voltage</span>
               <span className="font-mono text-grey-900">
-                {supply} V{supply <= 18 ? ' · near the minimum' : supply >= 50 ? ' · above nominal' : ''}
+                {supply} V
+                {supply <= 18 ? ' · near the minimum' : supply >= 50 ? ' · above nominal' : ''}
               </span>
             </label>
             <input
@@ -91,13 +140,13 @@ export default function TorqueSpeedFigure() {
               min={14}
               max={58}
               value={supply}
-              onChange={e => setSupply(Number(e.target.value))}
+              onChange={(e) => setSupply(Number(e.target.value))}
               className="w-full h-1 appearance-none bg-grey-200 accent-syn-red cursor-pointer"
             />
           </div>
           <button
             type="button"
-            onClick={() => setWeakening(w => !w)}
+            onClick={() => setWeakening((w) => !w)}
             aria-pressed={weakening}
             className={`h-[38px] inline-flex items-center justify-center px-3 text-xs border transition-colors cursor-pointer ${
               weakening
@@ -112,10 +161,12 @@ export default function TorqueSpeedFigure() {
 
       <div className="border-t border-grey-200 p-4 text-[11px] text-grey-500 leading-4 space-y-1.5">
         <p>
-          <span className="text-grey-900">Below base speed the current limit decides the torque</span>,
-          so the line is flat and the motor gives everything it has. Base speed is the point where the
-          back-EMF has used up the supply. Raise the supply and it moves out in proportion, which is
-          the whole of what the slider does.
+          <span className="text-grey-900">
+            Below base speed the current limit decides the torque
+          </span>
+          , so the line is flat and the motor gives everything it has. Base speed is the point where
+          the back-EMF has used up the supply. Raise the supply and it moves out in proportion,
+          which is the whole of what the slider does.
         </p>
         <p>
           Past that point there is no voltage left over to push current through the winding, and the
@@ -134,5 +185,5 @@ export default function TorqueSpeedFigure() {
         </p>
       </div>
     </div>
-  )
+  );
 }

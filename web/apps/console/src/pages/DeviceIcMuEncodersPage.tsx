@@ -1,96 +1,96 @@
-import { useEffect, useState } from 'react'
-import { useParams } from 'react-router'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   apiErrorMessage,
   type EncoderConfiguration,
   type IcMuEncoderStatus,
   type ProcedureSnapshot,
   type ProgressStep,
-} from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
-import Checkbox from '../components/Checkbox'
-import DevicePageHeader from '../components/DevicePageHeader'
-import IcMuCalibrationSection from '../components/IcMuCalibrationSection'
-import IcMuEepromSection from '../components/IcMuEepromSection'
-import { useConnection } from '../contexts/ConnectionContext'
-import { isIcMuEncoder } from '../utils/icMuEncoder'
-import { btnOutline, btnPrimary } from '../utils/styles'
+} from '@synapticon/motion-master-client';
+import Callout from '../components/Callout';
+import Checkbox from '../components/Checkbox';
+import DevicePageHeader from '../components/DevicePageHeader';
+import IcMuCalibrationSection from '../components/IcMuCalibrationSection';
+import IcMuEepromSection from '../components/IcMuEepromSection';
+import { useConnection } from '../contexts/ConnectionContext';
+import { isIcMuEncoder } from '../utils/icMuEncoder';
+import { btnOutline, btnPrimary } from '../utils/styles';
 
-const STATUS_PROCEDURE = 'ic-mu-encoder-status'
-const CONFIGURATION_PROCEDURE = 'ic-mu-encoder-configuration'
+const STATUS_PROCEDURE = 'ic-mu-encoder-status';
+const CONFIGURATION_PROCEDURE = 'ic-mu-encoder-configuration';
 
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 const STEP_DOT: Record<ProgressStep['status'], string> = {
   idle: 'bg-grey-300',
   running: 'bg-ocean',
   succeeded: 'bg-green-600',
   failed: 'bg-syn-red',
-}
+};
 
 const STATE_BADGE: Record<NonNullable<IcMuEncoderStatus['state']>, string> = {
   configured: 'bg-green-600 text-white',
   invalid: 'bg-status-warn text-grey-900',
   'not-configured': 'bg-grey-700 text-white',
-}
+};
 
 function hex(n: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(2, '0')}`
+  return `0x${n.toString(16).toUpperCase().padStart(2, '0')}`;
 }
 
 function stepValue(snapshot: ProcedureSnapshot | undefined, id: string): unknown {
-  return snapshot?.steps.find(step => step.id === id)?.value
+  return snapshot?.steps.find((step) => step.id === id)?.value;
 }
 
 export default function DeviceIcMuEncodersPage() {
-  const { deviceId } = useParams()
-  const slavePosition = Number(deviceId)
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
+  const { deviceId } = useParams();
+  const slavePosition = Number(deviceId);
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
 
   const encodersQuery = useQuery({
     queryKey: ['encoders', slavePosition],
-    queryFn: () => api.getEncoders(slavePosition).then(r => r.data),
+    queryFn: () => api.getEncoders(slavePosition).then((r) => r.data),
     retry: false,
-  })
+  });
 
   // The last snapshot of each procedure. Reading one runs nothing on the drive, so opening the page
   // never takes the busy token from another procedure.
   const snapshotQuery = (name: string) => ({
     queryKey: ['procedure', slavePosition, name],
-    queryFn: () => api.getProcedure(slavePosition, name).then(r => r.data),
+    queryFn: () => api.getProcedure(slavePosition, name).then((r) => r.data),
     refetchInterval: (query: { state: { data?: ProcedureSnapshot } }) =>
       query.state.data?.status === 'running' ? 300 : false,
     refetchIntervalInBackground: true,
     retry: false,
-  })
+  });
   // The calibration exists only on a server built with MU_3SL, so the page asks for it.
   const proceduresQuery = useQuery({
     queryKey: ['procedures', slavePosition],
-    queryFn: () => api.listProcedures(slavePosition).then(r => r.data),
+    queryFn: () => api.listProcedures(slavePosition).then((r) => r.data),
     retry: false,
-  })
+  });
   const calibrationAvailable = (proceduresQuery.data ?? []).some(
-    listing => listing.descriptor.name === 'ic-mu-calibration',
-  )
-  const statusQuery = useQuery(snapshotQuery(STATUS_PROCEDURE))
-  const configurationQuery = useQuery(snapshotQuery(CONFIGURATION_PROCEDURE))
+    (listing) => listing.descriptor.name === 'ic-mu-calibration',
+  );
+  const statusQuery = useQuery(snapshotQuery(STATUS_PROCEDURE));
+  const configurationQuery = useQuery(snapshotQuery(CONFIGURATION_PROCEDURE));
 
   const start = useMutation({
     mutationFn: ({ name, body }: { name: string; body: Record<string, unknown> }) =>
       api.startProcedure(slavePosition, name, body),
     onSettled: (_data, _error, { name }) =>
       queryClient.invalidateQueries({ queryKey: ['procedure', slavePosition, name] }),
-  })
+  });
 
   const running =
-    statusQuery.data?.status === 'running' || configurationQuery.data?.status === 'running'
-  const statuses = (stepValue(statusQuery.data, 'read-registers') ?? []) as IcMuEncoderStatus[]
-  const encoders = (encodersQuery.data?.encoders ?? []).filter(isIcMuEncoder)
-  const configured = stepValue(configurationQuery.data, 'verify') as IcMuEncoderStatus | undefined
-  const twoColumns = encoders.length > 1
+    statusQuery.data?.status === 'running' || configurationQuery.data?.status === 'running';
+  const statuses = (stepValue(statusQuery.data, 'read-registers') ?? []) as IcMuEncoderStatus[];
+  const encoders = (encodersQuery.data?.encoders ?? []).filter(isIcMuEncoder);
+  const configured = stepValue(configurationQuery.data, 'verify') as IcMuEncoderStatus | undefined;
+  const twoColumns = encoders.length > 1;
 
   return (
     <div>
@@ -134,7 +134,7 @@ export default function DeviceIcMuEncodersPage() {
         {start.isError && <Callout variant="error">{apiErrorMessage(start.error)}</Callout>}
         {statusQuery.data?.status === 'failed' && (
           <Callout variant="error">
-            {statusQuery.data.steps.find(step => step.status === 'failed')?.error ??
+            {statusQuery.data.steps.find((step) => step.status === 'failed')?.error ??
               'The status read failed.'}
           </Callout>
         )}
@@ -148,34 +148,34 @@ export default function DeviceIcMuEncodersPage() {
         )}
 
         <div className={`grid gap-6 items-start ${twoColumns ? '2xl:grid-cols-2' : ''}`}>
-        {encoders.map(encoder => (
-          <EncoderCard
-            key={encoder.encoderOrdinal}
-            encoder={encoder}
-            status={
-              configured?.encoderOrdinal === encoder.encoderOrdinal &&
-              (configurationQuery.data?.finishedAt ?? 0) > (statusQuery.data?.finishedAt ?? 0)
-                ? configured
-                : statuses.find(s => s.encoderOrdinal === encoder.encoderOrdinal)
-            }
-            busy={running || start.isPending}
-            slavePosition={slavePosition}
-            calibrationAvailable={calibrationAvailable}
-            roles={(['position', 'velocity', 'commutation'] as const).filter(
-              role => encodersQuery.data?.[role] === encoder.encoderOrdinal,
-            )}
-            onConfigure={(batteryMode, writeRestoreFile) =>
-              start.mutate({
-                name: CONFIGURATION_PROCEDURE,
-                body: {
-                  encoderOrdinal: encoder.encoderOrdinal,
-                  writeRestoreFile,
-                  ...(batteryMode ? { batteryMode } : {}),
-                },
-              })
-            }
-          />
-        ))}
+          {encoders.map((encoder) => (
+            <EncoderCard
+              key={encoder.encoderOrdinal}
+              encoder={encoder}
+              status={
+                configured?.encoderOrdinal === encoder.encoderOrdinal &&
+                (configurationQuery.data?.finishedAt ?? 0) > (statusQuery.data?.finishedAt ?? 0)
+                  ? configured
+                  : statuses.find((s) => s.encoderOrdinal === encoder.encoderOrdinal)
+              }
+              busy={running || start.isPending}
+              slavePosition={slavePosition}
+              calibrationAvailable={calibrationAvailable}
+              roles={(['position', 'velocity', 'commutation'] as const).filter(
+                (role) => encodersQuery.data?.[role] === encoder.encoderOrdinal,
+              )}
+              onConfigure={(batteryMode, writeRestoreFile) =>
+                start.mutate({
+                  name: CONFIGURATION_PROCEDURE,
+                  body: {
+                    encoderOrdinal: encoder.encoderOrdinal,
+                    writeRestoreFile,
+                    ...(batteryMode ? { batteryMode } : {}),
+                  },
+                })
+              }
+            />
+          ))}
         </div>
 
         {configurationQuery.data && configurationQuery.data.status !== 'idle' && (
@@ -183,7 +183,7 @@ export default function DeviceIcMuEncodersPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function EncoderCard({
@@ -195,40 +195,40 @@ function EncoderCard({
   roles,
   onConfigure,
 }: {
-  encoder: EncoderConfiguration
-  status: IcMuEncoderStatus | undefined
-  busy: boolean
-  slavePosition: number
-  calibrationAvailable: boolean
+  encoder: EncoderConfiguration;
+  status: IcMuEncoderStatus | undefined;
+  busy: boolean;
+  slavePosition: number;
+  calibrationAvailable: boolean;
   /** The controllers that use this encoder, as GET /encoders names them. */
-  roles: readonly ('position' | 'velocity' | 'commutation')[]
-  onConfigure: (batteryMode: string | null, writeRestoreFile: boolean) => void
+  roles: readonly ('position' | 'velocity' | 'commutation')[];
+  onConfigure: (batteryMode: string | null, writeRestoreFile: boolean) => void;
 }) {
-  const [batteryMode, setBatteryMode] = useState('default')
-  const multiturn = status?.path === 'multiturn'
+  const [batteryMode, setBatteryMode] = useState('default');
+  const multiturn = status?.path === 'multiturn';
   // The drive keeps a restore file only for sensor ports 1 and 2.
-  const restoreFilePort = encoder.sensorPort === 1 || encoder.sensorPort === 2
-  const [writeRestoreFile, setWriteRestoreFile] = useState(true)
+  const restoreFilePort = encoder.sensorPort === 1 || encoder.sensorPort === 2;
+  const [writeRestoreFile, setWriteRestoreFile] = useState(true);
 
   return (
     <section className="border border-grey-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-grey-200">
         <div className="flex flex-wrap items-center gap-3">
-        <h3 className="font-display uppercase tracking-wide text-sm">
-          Encoder {encoder.encoderOrdinal} · sensor port {encoder.sensorPort}
-          {encoder.sensorPort >= 3 ? ' · external' : ''}
-        </h3>
-        <span className="flex flex-wrap gap-1.5 text-xs text-grey-700">
-          {roles.length === 0 ? (
-            <span className="text-grey-500">no controller uses it</span>
-          ) : (
-            roles.map(role => (
-              <span key={role} className="border border-grey-300 px-1.5 py-0.5">
-                {role}
-              </span>
-            ))
-          )}
-        </span>
+          <h3 className="font-display uppercase tracking-wide text-sm">
+            Encoder {encoder.encoderOrdinal} · sensor port {encoder.sensorPort}
+            {encoder.sensorPort >= 3 ? ' · external' : ''}
+          </h3>
+          <span className="flex flex-wrap gap-1.5 text-xs text-grey-700">
+            {roles.length === 0 ? (
+              <span className="text-grey-500">no controller uses it</span>
+            ) : (
+              roles.map((role) => (
+                <span key={role} className="border border-grey-300 px-1.5 py-0.5">
+                  {role}
+                </span>
+              ))
+            )}
+          </span>
         </div>
         {status?.state ? (
           <span className={`px-2 py-0.5 text-xs ${STATE_BADGE[status.state]}`}>{status.state}</span>
@@ -253,9 +253,7 @@ function EncoderCard({
           value={status?.expectedOutputRegister != null ? hex(status.expectedOutputRegister) : '—'}
         />
       </dl>
-      {status?.reason && (
-        <p className="px-5 pb-3 text-xs text-status-bad">{status.reason}</p>
-      )}
+      {status?.reason && <p className="px-5 pb-3 text-xs text-status-bad">{status.reason}</p>}
       <EncoderStatusBits
         slavePosition={slavePosition}
         encoderOrdinal={encoder.encoderOrdinal}
@@ -272,10 +270,10 @@ function EncoderCard({
               id={`battery-${encoder.encoderOrdinal}`}
               className={inputCls}
               value={batteryMode}
-              onChange={event => setBatteryMode(event.target.value)}
+              onChange={(event) => setBatteryMode(event.target.value)}
             >
               <option value="default">Default, from the shaft the encoder measures</option>
-              {status.batteryModes.map(mode => (
+              {status.batteryModes.map((mode) => (
                 <option key={mode.name} value={mode.name}>
                   {mode.maxCurrentMicroamps} µA, up to {mode.maxAccelerationKrpmPerSecond} krpm/s
                 </option>
@@ -305,9 +303,9 @@ function EncoderCard({
         <p className="text-xs text-grey-600 max-w-xl">
           Writes the EEPROM of the encoder. The calibration registers keep their values. The drive
           must not be in Operation Enabled, and the encoder reports no position while it is
-          configured. Read the status first. The restore file is what the drive writes back into
-          the encoder when the iC-MU reports a corrupted EEPROM. Leave it off to keep the file that
-          is there now.
+          configured. Read the status first. The restore file is what the drive writes back into the
+          encoder when the iC-MU reports a corrupted EEPROM. Leave it off to keep the file that is
+          there now.
         </p>
       </div>
       {calibrationAvailable && (
@@ -315,11 +313,11 @@ function EncoderCard({
       )}
       <IcMuEepromSection slavePosition={slavePosition} encoder={encoder} busy={busy} />
     </section>
-  )
+  );
 }
 
 function statusHex(value: number): string {
-  return `0x${value.toString(16).toUpperCase().padStart(6, '0')}`
+  return `0x${value.toString(16).toUpperCase().padStart(6, '0')}`;
 }
 
 // The encoder status word in an input. Read fills it from the drive; a person can also type a value,
@@ -329,39 +327,39 @@ function EncoderStatusBits({
   encoderOrdinal,
   latched,
 }: {
-  slavePosition: number
-  encoderOrdinal: number
+  slavePosition: number;
+  encoderOrdinal: number;
   /** What the last status run read, if it ran. */
-  latched: number | undefined
+  latched: number | undefined;
 }) {
-  const { api } = useConnection()
-  const index = encoderOrdinal === 1 ? 0x2111 : 0x2113
-  const object = `0x${index.toString(16)}:04`
-  const [text, setText] = useState('')
-  const [typed, setTyped] = useState(false)
+  const { api } = useConnection();
+  const index = encoderOrdinal === 1 ? 0x2111 : 0x2113;
+  const object = `0x${index.toString(16)}:04`;
+  const [text, setText] = useState('');
+  const [typed, setTyped] = useState(false);
 
   useEffect(() => {
     if (latched !== undefined) {
-      setText(statusHex(latched))
-      setTyped(false)
+      setText(statusHex(latched));
+      setTyped(false);
     }
-  }, [latched])
+  }, [latched]);
 
   const read = useMutation({
-    mutationFn: () => api.readParameter(slavePosition, index, 4).then(r => r.data),
-    onSuccess: parameter => {
-      setText(statusHex(Number(parameter.value)))
-      setTyped(false)
+    mutationFn: () => api.readParameter(slavePosition, index, 4).then((r) => r.data),
+    onSuccess: (parameter) => {
+      setText(statusHex(Number(parameter.value)));
+      setTyped(false);
     },
-  })
+  });
 
-  const value = text.trim()
+  const value = text.trim();
   const decoded = useQuery({
     queryKey: ['ic-mu-encoder-status', value],
-    queryFn: () => api.getIcMuEncoderStatus({ encoderStatus: value }).then(r => r.data),
+    queryFn: () => api.getIcMuEncoderStatus({ encoderStatus: value }).then((r) => r.data),
     enabled: value !== '',
     retry: false,
-  })
+  });
 
   return (
     <div className="px-5 py-4 border-t border-grey-100 text-sm">
@@ -375,9 +373,9 @@ function EncoderStatusBits({
             className={`${inputCls} font-mono w-40`}
             placeholder="0x000000"
             value={text}
-            onChange={event => {
-              setText(event.target.value)
-              setTyped(true)
+            onChange={(event) => {
+              setText(event.target.value);
+              setTyped(true);
             }}
           />
         </div>
@@ -410,12 +408,14 @@ function EncoderStatusBits({
           <p className="text-grey-600">No error latched.</p>
         ) : (
           <ul className="space-y-2">
-            {decoded.data.encoderStatusBits.map(bit => (
+            {decoded.data.encoderStatusBits.map((bit) => (
               <li key={bit.bit} className="border-l-2 border-status-bad pl-3">
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   <span className="font-mono font-semibold">{bit.name ?? `bit ${bit.bit}`}</span>
                   <span className="text-xs text-grey-600">
-                    {bit.chip ? `${bit.chip} ${bit.register} bit ${bit.registerBit}` : `bit ${bit.bit}`}
+                    {bit.chip
+                      ? `${bit.chip} ${bit.register} bit ${bit.registerBit}`
+                      : `bit ${bit.bit}`}
                   </span>
                   {bit.title && <span className="text-grey-800">{bit.title}</span>}
                 </div>
@@ -439,7 +439,7 @@ function EncoderStatusBits({
           </ul>
         ))}
     </div>
-  )
+  );
 }
 
 function Field({ label, value }: { label: string; value: string | number }) {
@@ -448,22 +448,23 @@ function Field({ label, value }: { label: string; value: string | number }) {
       <dt className={labelCls}>{label}</dt>
       <dd className="font-mono">{value}</dd>
     </div>
-  )
+  );
 }
 
 function ConfigurationRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
-  const validate = stepValue(snapshot, 'validate') as { encoderOrdinal?: number } | undefined
+  const validate = stepValue(snapshot, 'validate') as { encoderOrdinal?: number } | undefined;
   return (
     <section className="border border-grey-200 bg-white">
       <div className="px-5 py-3 border-b border-grey-200 flex items-center justify-between">
         <h3 className="font-display uppercase tracking-wide text-sm">
-          Last configuration{validate?.encoderOrdinal ? ` · encoder ${validate.encoderOrdinal}` : ''}
+          Last configuration
+          {validate?.encoderOrdinal ? ` · encoder ${validate.encoderOrdinal}` : ''}
         </h3>
         <span className="text-xs text-grey-600">{snapshot.status}</span>
       </div>
       <table className="w-full text-xs">
         <tbody>
-          {snapshot.steps.map(step => (
+          {snapshot.steps.map((step) => (
             <tr key={step.id} className="border-b border-grey-100 last:border-0 align-top">
               <td className="pl-5 py-2 w-6">
                 <span
@@ -482,5 +483,5 @@ function ConfigurationRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
         </tbody>
       </table>
     </section>
-  )
+  );
 }

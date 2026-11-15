@@ -1,9 +1,9 @@
-import type { ReactNode } from 'react'
+import type { ReactNode } from 'react';
 
 interface PageHeaderProps {
-  eyebrow: string
-  title: string
-  description?: ReactNode
+  eyebrow: string;
+  title: string;
+  description?: ReactNode;
 }
 
 /** Standard page heading: a red eyebrow label, a large display title, and an optional blurb. */
@@ -14,5 +14,5 @@ export function PageHeader({ eyebrow, title, description }: PageHeaderProps) {
       <h1 className="font-display text-4xl font-light">{title}</h1>
       {description && <p className="text-sm text-grey-600 mt-2">{description}</p>}
     </div>
-  )
+  );
 }

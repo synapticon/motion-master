@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { defineConfig, type Plugin } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import { VitePWA } from 'vite-plugin-pwa'
-import { parse as parseYaml } from 'yaml'
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, type Plugin } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { VitePWA } from 'vite-plugin-pwa';
+import { parse as parseYaml } from 'yaml';
 
 // Bundle apps/motion_master/swagger.yml (the binary's shipped spec, outside this
 // app's tree) as a virtual module so the API docs page can render it without a
@@ -13,44 +13,50 @@ import { parse as parseYaml } from 'yaml'
 // (info.version, kept in sync by tools/bump-version.sh) without re-parsing at
 // runtime: `default` = raw YAML, `json` = pretty JSON, `version` = info.version.
 function swaggerSpec(): Plugin {
-  const virtualId = 'virtual:swagger-spec'
-  const resolvedId = '\0' + virtualId
+  const virtualId = 'virtual:swagger-spec';
+  const resolvedId = '\0' + virtualId;
   const specPath = fileURLToPath(
     new URL('../../../apps/motion_master/swagger.yml', import.meta.url),
-  )
+  );
   return {
     name: 'swagger-spec',
     resolveId(id) {
-      if (id === virtualId) return resolvedId
+      if (id === virtualId) {
+        return resolvedId;
+      }
     },
     load(id) {
       if (id === resolvedId) {
-        const yaml = readFileSync(specPath, 'utf-8')
-        const doc = parseYaml(yaml)
-        const json = JSON.stringify(doc, null, 2)
-        const version = doc?.info?.version ?? '0.0.0'
+        const yaml = readFileSync(specPath, 'utf-8');
+        const doc = parseYaml(yaml);
+        const json = JSON.stringify(doc, null, 2);
+        const version = doc?.info?.version ?? '0.0.0';
         return [
           `export default ${JSON.stringify(yaml)}`,
           `export const json = ${JSON.stringify(json)}`,
           `export const version = ${JSON.stringify(version)}`,
-        ].join('\n')
+        ].join('\n');
       }
     },
     configureServer(server) {
-      server.watcher.add(specPath)
+      server.watcher.add(specPath);
     },
     // swagger.yml lives outside this app's tree, so it is not in the module graph; a plain edit
     // would leave the cached virtual module (and the rendered API docs) stale until a dev-server
     // restart. On a change to the spec, invalidate the virtual module and trigger a full reload so
     // the docs pick up new endpoints live.
     handleHotUpdate(ctx) {
-      if (ctx.file !== specPath) return
-      const mod = ctx.server.moduleGraph.getModuleById(resolvedId)
-      if (mod) ctx.server.moduleGraph.invalidateModule(mod)
-      ctx.server.ws.send({ type: 'full-reload' })
-      return []
+      if (ctx.file !== specPath) {
+        return;
+      }
+      const mod = ctx.server.moduleGraph.getModuleById(resolvedId);
+      if (mod) {
+        ctx.server.moduleGraph.invalidateModule(mod);
+      }
+      ctx.server.ws.send({ type: 'full-reload' });
+      return [];
     },
-  }
+  };
 }
 
 export default defineConfig({
@@ -75,7 +81,12 @@ export default defineConfig({
           { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          {
+            src: 'maskable-icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
         ],
       },
       workbox: {
@@ -104,4 +115,4 @@ export default defineConfig({
   // Normalize to a trailing slash: Vite requires it, and `import.meta.env.BASE_URL`
   // is inlined verbatim, so `${BASE_URL}foo.png` breaks if VITE_BASE lacks the slash.
   base: (process.env.VITE_BASE ?? '/').replace(/\/?$/, '/'),
-})
+});

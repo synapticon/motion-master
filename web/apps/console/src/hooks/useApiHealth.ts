@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { onlineManager } from '@tanstack/react-query'
-import type { Api } from '@synapticon/motion-master-client'
+import { useEffect, useState } from 'react';
+import { onlineManager } from '@tanstack/react-query';
+import type { Api } from '@synapticon/motion-master-client';
 
 /**
  * Polls `GET /api/version` to determine whether the Motion Master API is live.
@@ -37,39 +37,39 @@ import type { Api } from '@synapticon/motion-master-client'
  *   costs nothing to re-enter and should be instant.
  */
 export function useApiHealth(api: Api, intervalMs = 2000): boolean {
-  const [online, setOnline] = useState(false)
+  const [online, setOnline] = useState(false);
 
   useEffect(() => {
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let failures = 0
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
 
     async function check() {
       try {
-        await api.getVersion({ signal: AbortSignal.timeout(intervalMs * 4) })
+        await api.getVersion({ signal: AbortSignal.timeout(intervalMs * 4) });
         if (!cancelled) {
-          failures = 0
-          setOnline(true)
-          onlineManager.setOnline(true)
+          failures = 0;
+          setOnline(true);
+          onlineManager.setOnline(true);
         }
       } catch {
         if (!cancelled && ++failures >= 2) {
-          setOnline(false)
-          onlineManager.setOnline(false)
+          setOnline(false);
+          onlineManager.setOnline(false);
         }
       } finally {
         if (!cancelled) {
-          timer = setTimeout(check, intervalMs)
+          timer = setTimeout(check, intervalMs);
         }
       }
     }
 
-    check()
+    void check();
     return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [api, intervalMs])
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [api, intervalMs]);
 
-  return online
+  return online;
 }

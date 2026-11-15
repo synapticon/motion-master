@@ -1,5 +1,5 @@
 interface SlavePositionBadgeProps {
-  position: number
+  position: number;
 }
 
 /**
@@ -20,5 +20,5 @@ export default function SlavePositionBadge({ position }: SlavePositionBadgeProps
     >
       {String(position).padStart(2, '0')}
     </span>
-  )
+  );
 }

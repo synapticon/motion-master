@@ -9,11 +9,11 @@ export const AlState = {
   BOOT: 3,
   SAFEOP: 4,
   OP: 8,
-} as const
+} as const;
 
-export type AlState = (typeof AlState)[keyof typeof AlState]
+export type AlState = (typeof AlState)[keyof typeof AlState];
 
 /** The name of an AL state value, such as `PREOP` for 2. */
 export function alStateName(value: number): keyof typeof AlState | undefined {
-  return (Object.keys(AlState) as (keyof typeof AlState)[]).find((name) => AlState[name] === value)
+  return (Object.keys(AlState) as (keyof typeof AlState)[]).find((name) => AlState[name] === value);
 }

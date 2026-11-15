@@ -3,11 +3,11 @@
 // `cia402::decodeState` on the server, and the two clients and the server are tested against one
 // table, `libs/node/tests/data/cia402_statusword_states.json`.
 
-import type { Cia402Status } from './generated/data-contracts'
-import { Cia402 as Cia402Objects } from './objects'
+import type { Cia402Status } from './generated/data-contracts';
+import { Cia402 as Cia402Objects } from './objects';
 
 /** A CiA402 state, by the name the API uses. */
-export type Cia402State = Cia402Status['state']
+export type Cia402State = Cia402Status['state'];
 
 /**
  * Returns the CiA402 state that a statusword (0x6041) reports. A pattern that matches no state is
@@ -15,27 +15,27 @@ export type Cia402State = Cia402Status['state']
  */
 function state(statusword: number): Cia402State {
   if ((statusword & 0x4f) === 0x40) {
-    return 'SwitchOnDisabled'
+    return 'SwitchOnDisabled';
   }
   if ((statusword & 0x6f) === 0x21) {
-    return 'ReadyToSwitchOn'
+    return 'ReadyToSwitchOn';
   }
   if ((statusword & 0x6f) === 0x23) {
-    return 'SwitchedOn'
+    return 'SwitchedOn';
   }
   if ((statusword & 0x6f) === 0x27) {
-    return 'OperationEnabled'
+    return 'OperationEnabled';
   }
   if ((statusword & 0x6f) === 0x07) {
-    return 'QuickStopActive'
+    return 'QuickStopActive';
   }
   if ((statusword & 0x4f) === 0x0f) {
-    return 'FaultReactionActive'
+    return 'FaultReactionActive';
   }
   if ((statusword & 0x4f) === 0x08) {
-    return 'Fault'
+    return 'Fault';
   }
-  return 'NotReadyToSwitchOn'
+  return 'NotReadyToSwitchOn';
 }
 
 /**
@@ -62,16 +62,16 @@ export const OperationMode = {
   OPEN_LOOP_FIELD: -3,
   DIAGNOSTICS: -2,
   COGGING_COMPENSATION_RECORDING: -1,
-} as const
+} as const;
 
-export type OperationMode = (typeof OperationMode)[keyof typeof OperationMode]
+export type OperationMode = (typeof OperationMode)[keyof typeof OperationMode];
 
 /** The name of an operation mode value, such as `CYCLIC_SYNC_VELOCITY` for 9. */
 export function operationModeName(value: number): keyof typeof OperationMode | undefined {
   return (Object.keys(OperationMode) as (keyof typeof OperationMode)[]).find(
     (name) => OperationMode[name] === value,
-  )
+  );
 }
 
 /** The CiA402 objects (0x6xxx) as addresses, such as `Cia402.STATUSWORD`, and `Cia402.state()`. */
-export const Cia402 = { ...Cia402Objects, state } as const
+export const Cia402 = { ...Cia402Objects, state } as const;

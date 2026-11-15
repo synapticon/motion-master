@@ -1,39 +1,39 @@
-import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react';
 
 export interface RequestEntry {
-  id: number
-  method: string
-  url: string
-  requestBody?: string
-  requestHeaders?: Record<string, string>
-  requestedAt: number
-  completedAt?: number
-  durationMs?: number
-  status?: number
-  statusText?: string
-  contentType?: string
-  responseBody?: string
-  error?: string
+  id: number;
+  method: string;
+  url: string;
+  requestBody?: string;
+  requestHeaders?: Record<string, string>;
+  requestedAt: number;
+  completedAt?: number;
+  durationMs?: number;
+  status?: number;
+  statusText?: string;
+  contentType?: string;
+  responseBody?: string;
+  error?: string;
 }
 
-const MAX_ENTRIES = 1000
+const MAX_ENTRIES = 1000;
 
 class RequestsStore {
-  private entries: RequestEntry[] = []
-  private listeners = new Set<() => void>()
-  private nextId = 1
+  private entries: RequestEntry[] = [];
+  private listeners = new Set<() => void>();
+  private nextId = 1;
 
   subscribe = (cb: () => void): (() => void) => {
-    this.listeners.add(cb)
+    this.listeners.add(cb);
     return () => {
-      this.listeners.delete(cb)
-    }
-  }
+      this.listeners.delete(cb);
+    };
+  };
 
-  getSnapshot = (): RequestEntry[] => this.entries
+  getSnapshot = (): RequestEntry[] => this.entries;
 
   private emit(): void {
-    this.listeners.forEach(l => l())
+    this.listeners.forEach((l) => l());
   }
 
   start(
@@ -49,138 +49,134 @@ class RequestsStore {
       requestBody,
       requestHeaders,
       requestedAt: Date.now(),
-    }
-    this.entries = [entry, ...this.entries].slice(0, MAX_ENTRIES)
-    this.emit()
-    return entry.id
+    };
+    this.entries = [entry, ...this.entries].slice(0, MAX_ENTRIES);
+    this.emit();
+    return entry.id;
   }
 
   complete(id: number, patch: Partial<RequestEntry>): void {
-    this.entries = this.entries.map(e => (e.id === id ? { ...e, ...patch } : e))
-    this.emit()
+    this.entries = this.entries.map((e) => (e.id === id ? { ...e, ...patch } : e));
+    this.emit();
   }
 
   clear(): void {
-    this.entries = []
-    this.emit()
+    this.entries = [];
+    this.emit();
   }
 }
 
-const store = new RequestsStore()
-const RequestsContext = createContext(store)
+const store = new RequestsStore();
+const RequestsContext = createContext(store);
 
 function shouldCapture(url: string): boolean {
   try {
-    return new URL(url, window.location.origin).pathname.startsWith('/api')
+    return new URL(url, window.location.origin).pathname.startsWith('/api');
   } catch {
-    return false
+    return false;
   }
 }
 
 // Background polls that fire on a fixed cadence and would otherwise drown the log: the API
 // health check (`/api/version`, every 5 s) and the sidebar device AL-state poll
 // (`/api/devices/state`, every 3 s). Hidden by default so the log shows user-driven traffic.
-const POLL_REQUEST_PATHS = new Set(['/api/version', '/api/devices/state'])
+const POLL_REQUEST_PATHS = new Set(['/api/version', '/api/devices/state']);
 
 export function isPollRequestUrl(url: string): boolean {
   try {
-    return POLL_REQUEST_PATHS.has(new URL(url, window.location.origin).pathname)
+    return POLL_REQUEST_PATHS.has(new URL(url, window.location.origin).pathname);
   } catch {
-    return false
+    return false;
   }
 }
 
 function bodyToString(body: BodyInit | null | undefined): string | undefined {
   if (body == null) {
-    return undefined
+    return undefined;
   }
   if (typeof body === 'string') {
-    return body
+    return body;
   }
   if (body instanceof URLSearchParams) {
-    return body.toString()
+    return body.toString();
   }
   if (body instanceof FormData) {
-    const parts: string[] = []
+    const parts: string[] = [];
     body.forEach((v, k) => {
-      parts.push(`${k}=${typeof v === 'string' ? v : `[Blob ${v.size} bytes]`}`)
-    })
-    return parts.join('&')
+      parts.push(`${k}=${typeof v === 'string' ? v : `[Blob ${v.size} bytes]`}`);
+    });
+    return parts.join('&');
   }
   if (body instanceof Blob) {
-    return `[Blob ${body.size} bytes]`
+    return `[Blob ${body.size} bytes]`;
   }
   if (body instanceof ArrayBuffer) {
-    return `[ArrayBuffer ${body.byteLength} bytes]`
+    return `[ArrayBuffer ${body.byteLength} bytes]`;
   }
-  return undefined
+  return undefined;
 }
 
 function collectHeaders(input: RequestInfo | URL, init?: RequestInit): Record<string, string> {
-  const out: Record<string, string> = {}
+  const out: Record<string, string> = {};
   const add = (h?: HeadersInit): void => {
     if (!h) {
-      return
+      return;
     }
     if (h instanceof Headers) {
       h.forEach((v, k) => {
-        out[k.toLowerCase()] = v
-      })
+        out[k.toLowerCase()] = v;
+      });
     } else if (Array.isArray(h)) {
       for (const [k, v] of h) {
-        out[k.toLowerCase()] = v
+        out[k.toLowerCase()] = v;
       }
     } else {
       for (const [k, v] of Object.entries(h)) {
-        out[k.toLowerCase()] = v
+        out[k.toLowerCase()] = v;
       }
     }
-  }
+  };
   if (input instanceof Request) {
-    add(input.headers)
+    add(input.headers);
   }
-  add(init?.headers)
-  return out
+  add(init?.headers);
+  return out;
 }
 
 export function RequestsProvider({ children }: { children: React.ReactNode }) {
-  const installedRef = useRef(false)
+  const installedRef = useRef(false);
 
   useEffect(() => {
     if (installedRef.current) {
-      return
+      return;
     }
-    installedRef.current = true
-    const original = window.fetch
+    installedRef.current = true;
+    const original = window.fetch;
 
     const wrapped: typeof fetch = async (input, init) => {
       const url =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       if (!shouldCapture(url)) {
-        return original(input, init)
+        return original(input, init);
       }
 
       const method = (
         init?.method ?? (input instanceof Request ? input.method : 'GET')
-      ).toUpperCase()
-      const requestBody = bodyToString(init?.body)
-      const requestHeaders = collectHeaders(input, init)
-      const start = performance.now()
-      const id = store.start(method, url, requestBody, requestHeaders)
+      ).toUpperCase();
+      const requestBody = bodyToString(init?.body);
+      const requestHeaders = collectHeaders(input, init);
+      const start = performance.now();
+      const id = store.start(method, url, requestBody, requestHeaders);
 
       try {
-        const response = await original(input, init)
-        const cloned = response.clone()
-        const contentType = cloned.headers.get('content-type') ?? undefined
-        let responseBody: string | undefined
+        const response = await original(input, init);
+        const cloned = response.clone();
+        const contentType = cloned.headers.get('content-type') ?? undefined;
+        let responseBody: string | undefined;
         try {
-          responseBody = await cloned.text()
+          responseBody = await cloned.text();
         } catch {
-          responseBody = undefined
+          responseBody = undefined;
         }
         store.complete(id, {
           completedAt: Date.now(),
@@ -189,30 +185,30 @@ export function RequestsProvider({ children }: { children: React.ReactNode }) {
           statusText: response.statusText,
           contentType,
           responseBody,
-        })
-        return response
+        });
+        return response;
       } catch (err) {
         store.complete(id, {
           completedAt: Date.now(),
           durationMs: performance.now() - start,
           error: err instanceof Error ? err.message : String(err),
-        })
-        throw err
+        });
+        throw err;
       }
-    }
+    };
 
-    window.fetch = wrapped
+    window.fetch = wrapped;
     return () => {
-      window.fetch = original
-      installedRef.current = false
-    }
-  }, [])
+      window.fetch = original;
+      installedRef.current = false;
+    };
+  }, []);
 
-  return <RequestsContext.Provider value={store}>{children}</RequestsContext.Provider>
+  return <RequestsContext.Provider value={store}>{children}</RequestsContext.Provider>;
 }
 
 export function useRequests(): { entries: RequestEntry[]; clear: () => void } {
-  const s = useContext(RequestsContext)
-  const entries = useSyncExternalStore(s.subscribe, s.getSnapshot)
-  return { entries, clear: () => s.clear() }
+  const s = useContext(RequestsContext);
+  const entries = useSyncExternalStore(s.subscribe, s.getSnapshot);
+  return { entries, clear: () => s.clear() };
 }

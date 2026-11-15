@@ -8,15 +8,15 @@ export default function PolePairSelector({
   onChange,
   hint,
 }: {
-  value: number
-  onChange: (polePairs: number) => void
-  hint?: string
+  value: number;
+  onChange: (polePairs: number) => void;
+  hint?: string;
 }) {
   return (
     <div>
       <span className="block text-xs text-grey-700 mb-1.5">Pole pairs</span>
       <div className="flex gap-1">
-        {[1, 2, 3, 4].map(p => (
+        {[1, 2, 3, 4].map((p) => (
           <button
             key={p}
             type="button"
@@ -34,5 +34,5 @@ export default function PolePairSelector({
       </div>
       {hint && <p className="text-[11px] text-grey-500 leading-4 mt-1">{hint}</p>}
     </div>
-  )
+  );
 }

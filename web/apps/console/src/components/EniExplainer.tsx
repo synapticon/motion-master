@@ -1,4 +1,4 @@
-import Explainer from './Explainer'
+import Explainer from './Explainer';
 
 // The "What is an ENI file?" teaching panel for the Tools ENI page. Its own component, matching how
 // EsiExplainer and SiiExplainer are kept, so the explanation has one home if a second ENI view is
@@ -34,8 +34,8 @@ export default function EniExplainer() {
       <p>
         <strong>The bus has to be mapped.</strong> FMMUs and logical addresses come into being at
         the <strong>SAFEOP</strong> transition. Before that there is no mapping to describe, so a
-        bus in PREOP is refused rather than guessed at. Use{' '}
-        <strong>Fieldbus → Control</strong> to reach SAFEOP or OP first.
+        bus in PREOP is refused rather than guessed at. Use <strong>Fieldbus → Control</strong> to
+        reach SAFEOP or OP first.
       </p>
       <p>
         <strong>Exporting drives the bus.</strong> Each device's SII is read for its port layout and
@@ -57,5 +57,5 @@ export default function EniExplainer() {
         each warning is written to the server log.
       </p>
     </Explainer>
-  )
+  );
 }

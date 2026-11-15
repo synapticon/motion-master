@@ -1,43 +1,43 @@
-import { useEffect, useRef } from 'react'
-import { ApiReferenceReact } from '@scalar/api-reference-react'
-import '@scalar/api-reference-react/style.css'
-import spec, { json as specJson, version } from 'virtual:swagger-spec'
-import { downloadBytes } from '../utils/download'
+import { useEffect, useRef } from 'react';
+import { ApiReferenceReact } from '@scalar/api-reference-react';
+import '@scalar/api-reference-react/style.css';
+import spec, { json as specJson, version } from 'virtual:swagger-spec';
+import { downloadBytes } from '../utils/download';
 
-const fileBase = `motion-master-api-v${version}`
-const encoder = new TextEncoder()
+const fileBase = `motion-master-api-v${version}`;
+const encoder = new TextEncoder();
 
 function downloadSpec(text: string, ext: 'yml' | 'json') {
-  downloadBytes(encoder.encode(text), `${fileBase}.${ext}`)
+  downloadBytes(encoder.encode(text), `${fileBase}.${ext}`);
 }
 
 // Build the download bar as plain DOM so it can be inserted into Scalar's own
 // introduction section (which we don't own as React). Styled via .mm-spec-download
 // in the custom CSS below.
 function buildDownloadBar(): HTMLElement {
-  const bar = document.createElement('div')
-  bar.className = 'mm-spec-download'
+  const bar = document.createElement('div');
+  bar.className = 'mm-spec-download';
 
-  const label = document.createElement('span')
-  label.className = 'mm-spec-download__label'
-  label.textContent = 'OpenAPI Specification'
+  const label = document.createElement('span');
+  label.className = 'mm-spec-download__label';
+  label.textContent = 'OpenAPI Specification';
 
-  const ymlBtn = document.createElement('button')
-  ymlBtn.type = 'button'
-  ymlBtn.textContent = 'Download YAML'
-  ymlBtn.addEventListener('click', () => downloadSpec(spec, 'yml'))
+  const ymlBtn = document.createElement('button');
+  ymlBtn.type = 'button';
+  ymlBtn.textContent = 'Download YAML';
+  ymlBtn.addEventListener('click', () => downloadSpec(spec, 'yml'));
 
-  const jsonBtn = document.createElement('button')
-  jsonBtn.type = 'button'
-  jsonBtn.textContent = 'Download JSON'
-  jsonBtn.addEventListener('click', () => downloadSpec(specJson, 'json'))
+  const jsonBtn = document.createElement('button');
+  jsonBtn.type = 'button';
+  jsonBtn.textContent = 'Download JSON';
+  jsonBtn.addEventListener('click', () => downloadSpec(specJson, 'json'));
 
-  const file = document.createElement('span')
-  file.className = 'mm-spec-download__file'
-  file.textContent = `${fileBase}.yml / .json`
+  const file = document.createElement('span');
+  file.className = 'mm-spec-download__file';
+  file.textContent = `${fileBase}.yml / .json`;
 
-  bar.append(label, ymlBtn, jsonBtn, file)
-  return bar
+  bar.append(label, ymlBtn, jsonBtn, file);
+  return bar;
 }
 
 // Synapticon-matched theme for the Scalar docs. `theme: 'none'` switches off
@@ -149,35 +149,39 @@ const SCALAR_CSS = `
   font-size: 12px;
   color: #848484;
 }
-`
+`;
 
 export default function ReferenceApiDocsPage() {
-  const rootRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Scalar owns the introduction DOM, so we inject our download bar there once
   // it renders, placing it directly below the API title. A MutationObserver
   // covers Scalar's async render; the existence guard makes it idempotent.
   useEffect(() => {
-    const root = rootRef.current
-    if (!root) return undefined
-
-    const tryInject = () => {
-      const section = root.querySelector('.introduction-section')
-      if (!section || section.querySelector('.mm-spec-download')) return
-      const bar = buildDownloadBar()
-      const title = section.querySelector('h1')
-      if (title) {
-        title.insertAdjacentElement('afterend', bar)
-      } else {
-        section.prepend(bar)
-      }
+    const root = rootRef.current;
+    if (!root) {
+      return undefined;
     }
 
-    tryInject()
-    const observer = new MutationObserver(tryInject)
-    observer.observe(root, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [])
+    const tryInject = () => {
+      const section = root.querySelector('.introduction-section');
+      if (!section || section.querySelector('.mm-spec-download')) {
+        return;
+      }
+      const bar = buildDownloadBar();
+      const title = section.querySelector('h1');
+      if (title) {
+        title.insertAdjacentElement('afterend', bar);
+      } else {
+        section.prepend(bar);
+      }
+    };
+
+    tryInject();
+    const observer = new MutationObserver(tryInject);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <div ref={rootRef} className="h-full overflow-auto">
@@ -203,5 +207,5 @@ export default function ReferenceApiDocsPage() {
         }}
       />
     </div>
-  )
+  );
 }

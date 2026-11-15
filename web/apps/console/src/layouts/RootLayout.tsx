@@ -1,12 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
-import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
-import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
-import SlavePositionBadge from '../components/SlavePositionBadge'
-import { useConnection } from '../contexts/ConnectionContext'
-import { isIcMuEncoder } from '../utils/icMuEncoder'
-import { formatHex } from '@synapticon/motion-master-client'
+import { useEffect, useState, type ReactNode } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
+import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react';
+import PwaUpdatePrompt from '../components/PwaUpdatePrompt';
+import SlavePositionBadge from '../components/SlavePositionBadge';
+import { useConnection } from '../contexts/ConnectionContext';
+import { isIcMuEncoder } from '../utils/icMuEncoder';
+import { formatHex } from '@synapticon/motion-master-client';
 
 const deviceLinks = [
   { to: 'foe', label: 'FoE' },
@@ -16,7 +16,7 @@ const deviceLinks = [
   { to: 'procedures', label: 'Procedures' },
   { to: 'registers', label: 'Registers' },
   { to: 'sii', label: 'SII' },
-]
+];
 
 const AL_STATE_LABEL: Record<number, string> = {
   0: 'UNKNOWN', // The device does not answer: lost or powered off. The server reports state 0.
@@ -25,7 +25,7 @@ const AL_STATE_LABEL: Record<number, string> = {
   3: 'BOOT',
   4: 'SAFEOP',
   8: 'OP',
-}
+};
 
 // Per-state badge colors (bg + text), matching the Transition-to-State buttons on
 // the Control page so a state reads the same here as where it's commanded. BOOT is
@@ -37,12 +37,12 @@ const AL_STATE_BADGE: Record<number, string> = {
   3: 'bg-status-warn text-grey-900',
   4: 'bg-status-info text-white',
   8: 'bg-green-600 text-white',
-}
+};
 
 interface DeviceState {
-  alState: number
-  error: boolean
-  reachability: 'answering' | 'addressLost' | 'notAnswering'
+  alState: number;
+  error: boolean;
+  reachability: 'answering' | 'addressLost' | 'notAnswering';
 }
 
 // A device that does not answer at its station address has no known AL state, so the badge says
@@ -50,55 +50,60 @@ interface DeviceState {
 const REACHABILITY_LABEL: Record<string, string> = {
   addressLost: 'Address lost',
   notAnswering: 'Not answering',
-}
+};
 
 const REACHABILITY_TITLE: Record<string, string> = {
   addressLost:
     'Address lost — nothing answers at the station address the master gave this device, but a device answers at its wire position. A reset, such as a power cycle, clears the address. Run a scan to command it again. If the chain changed, the device at this position can be a different one.',
   notAnswering:
     'Not answering — nothing answers at the station address the master gave this device or at its wire position. Check the cabling and the power. If devices were removed from the chain, run a scan.',
-}
+};
 
 function isUnreachable(state?: DeviceState): boolean {
-  return state !== undefined && state.reachability !== 'answering'
+  return state !== undefined && state.reachability !== 'answering';
 }
 
 function alStateLabel(state?: DeviceState): string | null {
   if (!state) {
-    return null
+    return null;
   }
   if (isUnreachable(state)) {
-    return REACHABILITY_LABEL[state.reachability]
+    return REACHABILITY_LABEL[state.reachability];
   }
-  return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`
+  return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`;
 }
 
 // Mailbox (CoE/SDO) communication is live in PREOP, SAFEOP and OP — independent of the
 // AL error flag (a device in SAFEOP+error still answers). INIT has no mailbox and BOOT's
 // is FoE-only, so both count as inactive. Mirrors Device::mailboxActive() on the backend, so
 // it can be derived from the batched device-state poll instead of a per-device request.
-const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8])
+const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8]);
 
 function mailboxActiveFor(state?: DeviceState): boolean | null {
-  if (!state) return null
-  return MAILBOX_ACTIVE_STATES.has(state.alState)
+  if (!state) {
+    return null;
+  }
+  return MAILBOX_ACTIVE_STATES.has(state.alState);
 }
 
 interface ScanStatus {
-  required: boolean
-  devicesOnWire: number | null
-  devicesScanned: number
-  unreachable: number[]
+  required: boolean;
+  devicesOnWire: number | null;
+  devicesScanned: number;
+  unreachable: number[];
 }
 
 // The server decides whether the bus still matches the last scan. This only shows the facts it
 // decided from, and sends the user to the Control page, where the scan is.
 function ScanNotice({ status }: { status: ScanStatus }) {
-  const countChanged = status.devicesOnWire !== null && status.devicesOnWire !== status.devicesScanned
+  const countChanged =
+    status.devicesOnWire !== null && status.devicesOnWire !== status.devicesScanned;
   const details = [
-    ...(countChanged ? [`${status.devicesOnWire} on the wire, ${status.devicesScanned} scanned`] : []),
+    ...(countChanged
+      ? [`${status.devicesOnWire} on the wire, ${status.devicesScanned} scanned`]
+      : []),
     ...(status.unreachable.length > 0 ? [`Not answering: ${status.unreachable.join(', ')}`] : []),
-  ]
+  ];
   return (
     <NavLink
       to="/fieldbus/control"
@@ -106,13 +111,13 @@ function ScanNotice({ status }: { status: ScanStatus }) {
       className="block mx-5 mb-2 px-2 py-1.5 rounded-sm bg-status-bad text-white hover:opacity-90 transition-opacity"
     >
       <span className="block text-[10px] font-display tracking-wide">Scan needed</span>
-      {details.map(d => (
+      {details.map((d) => (
         <span key={d} className="block text-[11px] text-white/80">
           {d}
         </span>
       ))}
     </NavLink>
-  )
+  );
 }
 
 function NavItem({
@@ -121,26 +126,27 @@ function NavItem({
   end,
   trailing,
 }: {
-  to: string
-  label: string
-  end?: boolean
-  trailing?: ReactNode
+  to: string;
+  label: string;
+  end?: boolean;
+  trailing?: ReactNode;
 }) {
   return (
     <NavLink
       to={to}
       end={end}
       className={({ isActive }) =>
-        `flex items-center justify-between gap-2 px-5 py-2 text-xs font-display uppercase tracking-wide border-l-2 transition-colors ${isActive
-          ? 'border-syn-red text-white bg-white/10'
-          : 'border-transparent text-white/60 hover:text-white hover:border-white/30'
+        `flex items-center justify-between gap-2 px-5 py-2 text-xs font-display uppercase tracking-wide border-l-2 transition-colors ${
+          isActive
+            ? 'border-syn-red text-white bg-white/10'
+            : 'border-transparent text-white/60 hover:text-white hover:border-white/30'
         }`
       }
     >
       <span>{label}</span>
       {trailing}
     </NavLink>
-  )
+  );
 }
 
 // A uniform collapsible sidebar group: an eyebrow heading with a chevron that toggles its
@@ -159,32 +165,33 @@ function SidebarGroup({
   trailing,
   children,
 }: {
-  label: string
-  labelTitle?: string
-  defaultOpen?: boolean
-  path?: string
-  collapsible?: boolean
-  trailing?: ReactNode
-  children: ReactNode
+  label: string;
+  labelTitle?: string;
+  defaultOpen?: boolean;
+  path?: string;
+  collapsible?: boolean;
+  trailing?: ReactNode;
+  children: ReactNode;
 }) {
-  const { pathname } = useLocation()
-  const onPath = path !== undefined && (pathname === path || pathname.startsWith(`${path}/`))
-  const [open, setOpen] = useState(defaultOpen || onPath)
+  const { pathname } = useLocation();
+  const onPath = path !== undefined && (pathname === path || pathname.startsWith(`${path}/`));
+  const [open, setOpen] = useState(defaultOpen || onPath);
   useEffect(() => {
     if (onPath) {
-      setOpen(true)
+      setOpen(true);
     }
-  }, [onPath])
-  const expanded = collapsible ? open : true
+  }, [onPath]);
+  const expanded = collapsible ? open : true;
   const labelSpan = (
     <span
       title={labelTitle}
-      className={`eyebrow leading-none text-white/40 truncate ${collapsible ? 'group-hover:text-white/70 transition-colors' : ''
-        }`}
+      className={`eyebrow leading-none text-white/40 truncate ${
+        collapsible ? 'group-hover:text-white/70 transition-colors' : ''
+      }`}
     >
       {label}
     </span>
-  )
+  );
   return (
     <div className="mt-6">
       {/* border-l-2 (transparent) matches NavItem's active-indicator border so the group
@@ -193,14 +200,15 @@ function SidebarGroup({
         {collapsible ? (
           <button
             type="button"
-            onClick={() => setOpen(o => !o)}
+            onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             className="group flex flex-1 min-w-0 items-center justify-between cursor-pointer"
           >
             {labelSpan}
             <ChevronDown
-              className={`h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
-                }`}
+              className={`h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${
+                open ? 'rotate-180' : ''
+              }`}
             />
           </button>
         ) : (
@@ -210,7 +218,7 @@ function SidebarGroup({
       </div>
       {expanded && <div>{children}</div>}
     </div>
-  )
+  );
 }
 
 function DeviceSection({
@@ -225,44 +233,44 @@ function DeviceSection({
   isSomanet,
   state,
 }: {
-  deviceId: string
-  name?: string
-  productName?: string
-  vendorId?: number
-  productCode?: number
-  revisionNumber?: number
-  serialNumber?: number
-  isCia402?: boolean
-  isSomanet?: boolean
-  state?: DeviceState
+  deviceId: string;
+  name?: string;
+  productName?: string;
+  vendorId?: number;
+  productCode?: number;
+  revisionNumber?: number;
+  serialNumber?: number;
+  isCia402?: boolean;
+  isSomanet?: boolean;
+  state?: DeviceState;
 }) {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   // The iC-MU page is listed only for a drive with an encoder it can configure. The encoder objects
   // exist once the dictionary is read, from PREOP up, and the link stays hidden until they answer.
-  const hasDictionary = state !== undefined && state.alState >= 2
+  const hasDictionary = state !== undefined && state.alState >= 2;
   const encodersQuery = useQuery({
     queryKey: ['encoders', Number(deviceId)],
-    queryFn: () => api.getEncoders(Number(deviceId)).then(r => r.data),
+    queryFn: () => api.getEncoders(Number(deviceId)).then((r) => r.data),
     enabled: Boolean(isSomanet) && hasDictionary,
     staleTime: Infinity,
     retry: false,
-  })
-  const hasIcMuEncoder = (encodersQuery.data?.encoders ?? []).some(isIcMuEncoder)
+  });
+  const hasIcMuEncoder = (encodersQuery.data?.encoders ?? []).some(isIcMuEncoder);
 
   // Links start expanded for every device. After that it's purely manual — the header
   // toggles it and that choice sticks; navigation alone never re-folds it.
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(true);
 
   // Mailbox availability is a pure function of the AL state, so we derive it from the
   // batched device-state poll rather than issuing a per-device request (which would be one
   // request per device every few seconds — N requests for N devices). `null` while no state
   // has arrived yet.
-  const mailboxActive: boolean | null = mailboxActiveFor(state)
+  const mailboxActive: boolean | null = mailboxActiveFor(state);
   // BOOT replaces the standard CoE/SDO mailbox with a FoE-only one (firmware transfer is the
   // only thing the device can do there), so we swap the mail glyph for a "FoE" tag and a tooltip
   // that says so, rather than showing the mailbox as plainly inactive.
-  const isBoot = state?.alState === 3
+  const isBoot = state?.alState === 3;
   const statusLabel =
     mailboxActive === null
       ? 'Checking…'
@@ -270,7 +278,7 @@ function DeviceSection({
         ? 'FoE only'
         : mailboxActive
           ? 'Mailbox active'
-          : 'Mailbox inactive'
+          : 'Mailbox inactive';
   const statusTitle =
     mailboxActive === null
       ? 'Checking… — reading the device’s AL state on the bus'
@@ -278,7 +286,7 @@ function DeviceSection({
         ? 'FoE only — the device is in BOOT, so its mailbox carries only File-over-EtherCAT (firmware transfer); CoE/SDO is unavailable until it leaves BOOT'
         : mailboxActive
           ? 'Mailbox active — the device is in PREOP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
-          : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT, or is not responding (powered off, unplugged, or left the bus)'
+          : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT, or is not responding (powered off, unplugged, or left the bus)';
 
   // Object-dictionary read state. The backend enumerates a device's OD when it reaches
   // PREOP; we share the Parameters page's query cache (identical key) so this neither
@@ -294,24 +302,24 @@ function DeviceSection({
     // result would stick forever. Poll while empty so the green dictionary icon (and the shared
     // Parameters page cache) pick up the auto-read; stop polling the moment it is populated.
     refetchInterval: (query) => ((query.state.data?.data?.length ?? 0) > 0 ? false : 2000),
-  })
+  });
   const parameterCount: number | null = parametersQuery.isPending
     ? null
-    : parametersQuery.data?.data?.length ?? 0
+    : (parametersQuery.data?.data?.length ?? 0);
   const dictionaryLabel =
     parameterCount === null
       ? 'Reading object dictionary'
       : parameterCount > 0
         ? 'Object dictionary read'
-        : 'Object dictionary not read'
+        : 'Object dictionary not read';
   const dictionaryTitle =
     parameterCount === null
       ? 'Object dictionary — reading the device’s parameters…'
       : parameterCount > 0
         ? `Object dictionary — ${parameterCount} parameters read (the device’s CoE object dictionary has been enumerated; it is read automatically once the device reaches PREOP)`
-        : 'Object dictionary — not read yet: no parameters enumerated. The device reads its OD on reaching PREOP; open the Parameters page to read it on demand.'
+        : 'Object dictionary — not read yet: no parameters enumerated. The device reads its OD on reaching PREOP; open the Parameters page to read it on demand.';
 
-  const stateLabel = alStateLabel(state)
+  const stateLabel = alStateLabel(state);
 
   // Full device identity, shown as a multi-line tooltip on the name — the immutable
   // EEPROM identity that the status line deliberately keeps off the chrome.
@@ -323,12 +331,12 @@ function DeviceSection({
     ...(productName && productName !== name ? ['Product name', productName] : []),
     ...(revisionNumber !== undefined ? ['Revision', formatHex(revisionNumber, 8)] : []),
     ...(serialNumber !== undefined ? ['Serial', String(serialNumber)] : []),
-  ].join('\n')
+  ].join('\n');
 
   // Motion is CiA402-only AND requires OP: you can only drive the state machine and setpoints while
   // the device is in the operational EtherCAT state (process data actually exchanging) — in any
   // other AL state a motion command has no effect. All device links are sorted by name.
-  const isOp = state?.alState === 8
+  const isOp = state?.alState === 8;
   const links = [
     ...(isCia402 && isOp ? [{ to: 'motion', label: 'Motion' }] : []),
     ...(hasIcMuEncoder ? [{ to: 'ic-mu-encoders', label: 'iC-MU Encoders' }] : []),
@@ -336,7 +344,7 @@ function DeviceSection({
     ...(isSomanet ? [{ to: 'firmware', label: 'Firmware' }] : []),
     ...(isSomanet ? [{ to: 'configuration', label: 'Configuration' }] : []),
     ...deviceLinks,
-  ].sort((a, b) => a.label.localeCompare(b.label))
+  ].sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <div className="mt-2">
@@ -344,7 +352,7 @@ function DeviceSection({
           status line carries the state color, so the card needs no left accent bar. */}
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className="group w-full text-left px-5 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] border-y border-white/10 transition-colors cursor-pointer"
       >
@@ -360,8 +368,9 @@ function DeviceSection({
             </span>
           </div>
           <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
-              }`}
+            className={`h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${
+              open ? 'rotate-180' : ''
+            }`}
           />
         </div>
 
@@ -373,16 +382,17 @@ function DeviceSection({
         <div className="mt-1.5 flex items-center gap-1 text-[10px] font-display tracking-wide">
           {stateLabel && (
             <span
-              className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm cursor-help ${state?.error || isUnreachable(state)
-                ? 'bg-status-bad text-white'
-                : AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60'
-                }`}
+              className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm cursor-help ${
+                state?.error || isUnreachable(state)
+                  ? 'bg-status-bad text-white'
+                  : (AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60')
+              }`}
               title={
                 state && isUnreachable(state)
                   ? REACHABILITY_TITLE[state.reachability]
                   : state?.error
-                  ? 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130). The error indicator (bit 4) is set; the reason is in the AL Status Code register (0x0134).'
-                  : 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130).'
+                    ? 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130). The error indicator (bit 4) is set; the reason is in the AL Status Code register (0x0134).'
+                    : 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130).'
               }
             >
               {stateLabel}
@@ -393,14 +403,15 @@ function DeviceSection({
           <span
             title={statusTitle}
             aria-label={statusLabel}
-            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${mailboxActive === null
-              ? 'bg-white/15 animate-pulse'
-              : isBoot
-                ? 'bg-status-warn text-grey-900'
-                : mailboxActive
-                  ? 'bg-ocean'
-                  : 'bg-white/15'
-              }`}
+            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${
+              mailboxActive === null
+                ? 'bg-white/15 animate-pulse'
+                : isBoot
+                  ? 'bg-status-warn text-grey-900'
+                  : mailboxActive
+                    ? 'bg-ocean'
+                    : 'bg-white/15'
+            }`}
           >
             {isBoot ? (
               <span className="font-display font-semibold leading-none">FoE</span>
@@ -411,12 +422,13 @@ function DeviceSection({
           <span
             title={dictionaryTitle}
             aria-label={dictionaryLabel}
-            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${parameterCount === null
-              ? 'bg-white/15 animate-pulse'
-              : parameterCount > 0
-                ? 'bg-ocean'
-                : 'bg-white/15'
-              }`}
+            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${
+              parameterCount === null
+                ? 'bg-white/15 animate-pulse'
+                : parameterCount > 0
+                  ? 'bg-ocean'
+                  : 'bg-white/15'
+            }`}
           >
             <BookOpenText className="h-3 w-3 text-white" />
           </span>
@@ -430,11 +442,11 @@ function DeviceSection({
         </div>
       )}
     </div>
-  )
+  );
 }
 
 export default function RootLayout() {
-  const { api, host, httpPort, online, hasScanned, isInitialized } = useConnection()
+  const { api, host, httpPort, online, hasScanned, isInitialized } = useConnection();
 
   // `hasScanned` is sticky (cleared only on reset), so it stays true after the server
   // drops. Gate on `online` too, or these keep firing against a dead API — the states
@@ -443,9 +455,9 @@ export default function RootLayout() {
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
     enabled: online && hasScanned,
-  })
+  });
 
-  const devices = devicesQuery.data?.data ?? []
+  const devices = devicesQuery.data?.data ?? [];
 
   const statesQuery = useQuery({
     queryKey: ['deviceStates'],
@@ -454,7 +466,7 @@ export default function RootLayout() {
     // AL state changes out-of-band (other clients, the drive's own faults, manual
     // transitions), so poll a few-second cadence to keep the sidebar badges live.
     refetchInterval: 3000,
-  })
+  });
 
   // Polled beside the states, because a device added to the chain shows only in the count of
   // devices on the wire, which no per-device state carries.
@@ -463,30 +475,30 @@ export default function RootLayout() {
     queryFn: () => api.getScanStatus(),
     enabled: online && hasScanned,
     refetchInterval: 3000,
-  })
-  const scanStatus = scanStatusQuery.data?.data
+  });
+  const scanStatus = scanStatusQuery.data?.data;
 
   const stateByPosition = new Map<number, DeviceState>(
-    (statesQuery.data?.data ?? []).map(s => [s.slavePosition, s]),
-  )
+    (statesQuery.data?.data ?? []).map((s) => [s.slavePosition, s]),
+  );
 
   // `spinning` keeps the icon turning for at least one full rotation even when a
   // localhost refetch resolves in milliseconds — otherwise the spin is imperceptible.
-  const [spinning, setSpinning] = useState(false)
-  const refreshing = spinning || devicesQuery.isFetching || statesQuery.isFetching
+  const [spinning, setSpinning] = useState(false);
+  const refreshing = spinning || devicesQuery.isFetching || statesQuery.isFetching;
 
   async function refreshAll() {
-    setSpinning(true)
-    const start = performance.now()
+    setSpinning(true);
+    const start = performance.now();
     try {
-      const res = await devicesQuery.refetch()
+      const res = await devicesQuery.refetch();
       if ((res.data?.data.length ?? 0) > 0) {
-        await statesQuery.refetch()
+        await statesQuery.refetch();
       }
-      await scanStatusQuery.refetch()
+      await scanStatusQuery.refetch();
     } finally {
-      const remaining = Math.max(0, 900 - (performance.now() - start))
-      setTimeout(() => setSpinning(false), remaining)
+      const remaining = Math.max(0, 900 - (performance.now() - start));
+      setTimeout(() => setSpinning(false), remaining);
     }
   }
 
@@ -507,17 +519,20 @@ export default function RootLayout() {
             // tile; a box-shadow traces the padding-box rectangle (which sits outside the
             // art) and leaves dark notches at the corners. Online: a teal (ocean #00849b)
             // core + softer halo. Offline: no glow at all — the absence is the status cue.
-            className={`h-14 w-14 rounded-lg transition-[filter] duration-500 ease-out ${online
-              ? '[filter:drop-shadow(0_0_20px_rgb(0_132_155_/_1))_drop-shadow(0_0_50px_rgb(0_132_155_/_0.95))_drop-shadow(0_0_96px_rgb(0_132_155_/_0.7))]'
-              : ''
-              }`}
+            className={`h-14 w-14 rounded-lg transition-[filter] duration-500 ease-out ${
+              online
+                ? '[filter:drop-shadow(0_0_20px_rgb(0_132_155_/_1))_drop-shadow(0_0_50px_rgb(0_132_155_/_0.95))_drop-shadow(0_0_96px_rgb(0_132_155_/_0.7))]'
+                : ''
+            }`}
           />
           {/* Match the landing page's <h1> wordmark styling (Montserrat medium, uppercase,
               0.025em tracking, grey-50) — only the size differs, scaled down for the sidebar. */}
           <span className="mt-3 font-display text-sm font-medium uppercase tracking-wide text-grey-50">
             Motion Master
           </span>
-          <p className="mt-0.5 text-xs font-display tracking-wide text-white/30">v6.0.0-alpha.126</p>
+          <p className="mt-0.5 text-xs font-display tracking-wide text-white/30">
+            v6.0.0-alpha.126
+          </p>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
@@ -533,10 +548,11 @@ export default function RootLayout() {
                     : `API offline — no response from https://${host}:${httpPort}. Make sure Motion Master is installed and running on your system.`
                 }
                 aria-label={online ? 'API online' : 'API offline'}
-                className={`inline-block h-2.5 w-2.5 shrink-0 cursor-help rounded-full ring-2 ring-white ${online
-                  ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
-                  : 'bg-status-bad shadow-[0_0_6px_2px_var(--color-status-bad)] animate-pulse'
-                  }`}
+                className={`inline-block h-2.5 w-2.5 shrink-0 cursor-help rounded-full ring-2 ring-white ${
+                  online
+                    ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
+                    : 'bg-status-bad shadow-[0_0_6px_2px_var(--color-status-bad)] animate-pulse'
+                }`}
               />
             }
           />
@@ -667,30 +683,31 @@ export default function RootLayout() {
                   }
                 >
                   <span
-                    className={`text-xs font-display tracking-wide ${!isInitialized ? 'text-white/40' : 'text-status-warn'
-                      }`}
+                    className={`text-xs font-display tracking-wide ${
+                      !isInitialized ? 'text-white/40' : 'text-status-warn'
+                    }`}
                   >
                     {!isInitialized ? 'Not initialized' : 'Initialized · not scanned'}
                   </span>
                 </div>
               ) : (
                 <>
-                {scanStatus?.required && <ScanNotice status={scanStatus} />}
-                {devices.map(d => (
-                  <DeviceSection
-                    key={d.slavePosition}
-                    deviceId={String(d.slavePosition)}
-                    name={d.name}
-                    productName={d.productName}
-                    vendorId={d.vendorId}
-                    productCode={d.productCode}
-                    revisionNumber={d.revisionNumber}
-                    serialNumber={d.serialNumber}
-                    isCia402={d.isCia402}
-                    isSomanet={d.isSomanet}
-                    state={stateByPosition.get(d.slavePosition)}
-                  />
-                ))}
+                  {scanStatus?.required && <ScanNotice status={scanStatus} />}
+                  {devices.map((d) => (
+                    <DeviceSection
+                      key={d.slavePosition}
+                      deviceId={String(d.slavePosition)}
+                      name={d.name}
+                      productName={d.productName}
+                      vendorId={d.vendorId}
+                      productCode={d.productCode}
+                      revisionNumber={d.revisionNumber}
+                      serialNumber={d.serialNumber}
+                      isCia402={d.isCia402}
+                      isSomanet={d.isSomanet}
+                      state={stateByPosition.get(d.slavePosition)}
+                    />
+                  ))}
                 </>
               )}
             </SidebarGroup>
@@ -709,5 +726,5 @@ export default function RootLayout() {
 
       <PwaUpdatePrompt />
     </div>
-  )
+  );
 }

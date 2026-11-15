@@ -1,11 +1,11 @@
-import { Link } from 'react-router'
-import PageHeader from '../components/PageHeader'
-import LearnSections from '../components/LearnSections'
-import Callout from '../components/Callout'
-import type { LearnSectionEntry } from '../components/LearnSections'
-import MotorSideView from '../components/MotorSideView'
-import QuadratureFigure from '../components/QuadratureFigure'
-import CommutationCompareFigure from '../components/CommutationCompareFigure'
+import { Link } from 'react-router';
+import PageHeader from '../components/PageHeader';
+import LearnSections from '../components/LearnSections';
+import Callout from '../components/Callout';
+import type { LearnSectionEntry } from '../components/LearnSections';
+import MotorSideView from '../components/MotorSideView';
+import QuadratureFigure from '../components/QuadratureFigure';
+import CommutationCompareFigure from '../components/CommutationCompareFigure';
 
 // Learn → Encoders.
 //
@@ -46,18 +46,17 @@ export default function LearnEncodersPage() {
             signal says <em>where the shaft is</em> or only <em>how far it has moved</em>.
           </p>
           <p>
-            That second question is worth stating carefully, because the words for it get used as
-            if they named kinds of hardware. <strong>Absolute</strong> and{' '}
-            <strong>incremental</strong> describe the signal, not the device. Plenty of encoders
-            provide both at once, and an incremental one with an index mark becomes absolute as soon
-            as the shaft has passed that mark. Hall sensors are absolute too — they just answer very
-            coarsely.
+            That second question is worth stating carefully, because the words for it get used as if
+            they named kinds of hardware. <strong>Absolute</strong> and <strong>incremental</strong>{' '}
+            describe the signal, not the device. Plenty of encoders provide both at once, and an
+            incremental one with an index mark becomes absolute as soon as the shaft has passed that
+            mark. Hall sensors are absolute too — they just answer very coarsely.
           </p>
           <div className="border border-grey-200 overflow-x-auto max-w-3xl">
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['', 'Hall sensors', 'Encoder, incremental', 'Encoder, absolute'].map(h => (
+                  {['', 'Hall sensors', 'Encoder, incremental', 'Encoder, absolute'].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
@@ -89,7 +88,9 @@ export default function LearnEncodersPage() {
                 <tr>
                   <td className="px-4 py-2 text-grey-900">Good enough for</td>
                   <td className="px-4 py-2">Block commutation, six steps per cycle</td>
-                  <td className="px-4 py-2">Smooth control, once the angle has been re-established</td>
+                  <td className="px-4 py-2">
+                    Smooth control, once the angle has been re-established
+                  </td>
                   <td className="px-4 py-2">Smooth control, immediately</td>
                 </tr>
               </tbody>
@@ -104,14 +105,15 @@ export default function LearnEncodersPage() {
           </p>
           <QuadratureFigure />
           <p>
-            A backup battery is the usual way of keeping it alive. It keeps the counter running while the drive is
-            off, so the position survives a power cycle even though the signal is still incremental.
-            Worth knowing that this is a maintenance item rather than a property of the encoder: let
-            the battery go flat, or unplug the encoder, and the position is gone with it.
+            A backup battery is the usual way of keeping it alive. It keeps the counter running
+            while the drive is off, so the position survives a power cycle even though the signal is
+            still incremental. Worth knowing that this is a maintenance item rather than a property
+            of the encoder: let the battery go flat, or unplug the encoder, and the position is gone
+            with it.
           </p>
           <p>
-            Absolute encoders come as <strong>singleturn</strong>, which reports the angle within one
-            turn of the shaft, and <strong>multiturn</strong>, which also counts whole turns.
+            Absolute encoders come as <strong>singleturn</strong>, which reports the angle within
+            one turn of the shaft, and <strong>multiturn</strong>, which also counts whole turns.
             Commutation never needs the multiturn part, because the magnet pattern repeats every
             turn anyway.
           </p>
@@ -186,10 +188,9 @@ export default function LearnEncodersPage() {
               electrical angle
             </Link>
             , so what matters is counts per electrical cycle, which is{' '}
-            <span className="font-mono">resolution / pole pairs</span>. More pole pairs
-            means fewer counts per cycle out of the same encoder. At 65536 counts and 4 pole pairs
-            that is 16384 per cycle, or 0.022 electrical degrees a count — far finer than
-            commutation needs.
+            <span className="font-mono">resolution / pole pairs</span>. More pole pairs means fewer
+            counts per cycle out of the same encoder. At 65536 counts and 4 pole pairs that is 16384
+            per cycle, or 0.022 electrical degrees a count — far finer than commutation needs.
           </p>
           <p>
             Resolution does start to matter at the other end of the range. Halls give six states per
@@ -220,9 +221,9 @@ export default function LearnEncodersPage() {
             A SOMANET drive reads at most two encoders, and each one gets a record of its own:{' '}
             <span className="font-mono">0x2110</span> for the first and{' '}
             <span className="font-mono">0x2112</span> for the second. They hold the same subitems as
-            each other. Beside each sits a read-only twin — <span className="font-mono">0x2111</span>{' '}
-            and <span className="font-mono">0x2113</span> — carrying raw position, adjusted position,
-            velocity and a status word.
+            each other. Beside each sits a read-only twin —{' '}
+            <span className="font-mono">0x2111</span> and <span className="font-mono">0x2113</span>{' '}
+            — carrying raw position, adjusted position, velocity and a status word.
           </p>
           <p>
             <strong>One record has to describe every kind of encoder the drive supports</strong>, so
@@ -235,30 +236,112 @@ export default function LearnEncodersPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">Sub</th>
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">What</th>
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">Note</th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    Sub
+                  </th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
+                    What
+                  </th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
+                    Note
+                  </th>
                 </tr>
               </thead>
               <tbody className="text-grey-700">
-                <tr className="border-b border-grey-100 bg-grey-50/60"><td colSpan={3} className="px-4 py-1.5 text-grey-900">Whatever the encoder is</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:01</td><td className="px-4 py-2">Sensor port</td><td className="px-4 py-2">where the drive reads it from</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:02</td><td className="px-4 py-2">Type</td><td className="px-4 py-2">which of the fields below matter</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:03</td><td className="px-4 py-2">Resolution</td><td className="px-4 py-2">Inc/Revolution</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:05</td><td className="px-4 py-2">Polarity</td><td className="px-4 py-2">which way it counts</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:06</td><td className="px-4 py-2">Singleturn offset</td><td className="px-4 py-2">Inc</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:04</td><td className="px-4 py-2">Zero velocity threshold</td><td className="px-4 py-2">µs</td></tr>
-                <tr className="border-b border-grey-100 bg-grey-50/60"><td colSpan={3} className="px-4 py-1.5 text-grey-900">Serial protocols only</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:08</td><td className="px-4 py-2">Clock frequency</td><td className="px-4 py-2">kHz</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:09</td><td className="px-4 py-2">Frame size</td><td className="px-4 py-2"></td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:0A – :0D</td><td className="px-4 py-2">Multiturn and singleturn bits, and where each starts</td><td className="px-4 py-2"></td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:0E, :10, :13</td><td className="px-4 py-2">Timeout, maximum tbusy, first clock delay</td><td className="px-4 py-2">µs</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:0F, :12</td><td className="px-4 py-2">CRC polynomial, parity type</td><td className="px-4 py-2"></td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:11, :14, :15</td><td className="px-4 py-2">Status bits active value, data ordering, endianness</td><td className="px-4 py-2"></td></tr>
-                <tr className="border-b border-grey-100 bg-grey-50/60"><td colSpan={3} className="px-4 py-1.5 text-grey-900">One type each</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:16</td><td className="px-4 py-2">Index availability</td><td className="px-4 py-2">incremental</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:17</td><td className="px-4 py-2">Hall sensor port</td><td className="px-4 py-2">halls</td></tr>
-                <tr className="border-b border-grey-100 last:border-0"><td className="px-4 py-2 font-mono whitespace-nowrap">:18 – :1A</td><td className="px-4 py-2">Sinewave cycles per revolution, resolution, output voltage</td><td className="px-4 py-2">sine-wave</td></tr>
+                <tr className="border-b border-grey-100 bg-grey-50/60">
+                  <td colSpan={3} className="px-4 py-1.5 text-grey-900">
+                    Whatever the encoder is
+                  </td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:01</td>
+                  <td className="px-4 py-2">Sensor port</td>
+                  <td className="px-4 py-2">where the drive reads it from</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:02</td>
+                  <td className="px-4 py-2">Type</td>
+                  <td className="px-4 py-2">which of the fields below matter</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:03</td>
+                  <td className="px-4 py-2">Resolution</td>
+                  <td className="px-4 py-2">Inc/Revolution</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:05</td>
+                  <td className="px-4 py-2">Polarity</td>
+                  <td className="px-4 py-2">which way it counts</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:06</td>
+                  <td className="px-4 py-2">Singleturn offset</td>
+                  <td className="px-4 py-2">Inc</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:04</td>
+                  <td className="px-4 py-2">Zero velocity threshold</td>
+                  <td className="px-4 py-2">µs</td>
+                </tr>
+                <tr className="border-b border-grey-100 bg-grey-50/60">
+                  <td colSpan={3} className="px-4 py-1.5 text-grey-900">
+                    Serial protocols only
+                  </td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:08</td>
+                  <td className="px-4 py-2">Clock frequency</td>
+                  <td className="px-4 py-2">kHz</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:09</td>
+                  <td className="px-4 py-2">Frame size</td>
+                  <td className="px-4 py-2"></td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:0A – :0D</td>
+                  <td className="px-4 py-2">
+                    Multiturn and singleturn bits, and where each starts
+                  </td>
+                  <td className="px-4 py-2"></td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:0E, :10, :13</td>
+                  <td className="px-4 py-2">Timeout, maximum tbusy, first clock delay</td>
+                  <td className="px-4 py-2">µs</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:0F, :12</td>
+                  <td className="px-4 py-2">CRC polynomial, parity type</td>
+                  <td className="px-4 py-2"></td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:11, :14, :15</td>
+                  <td className="px-4 py-2">Status bits active value, data ordering, endianness</td>
+                  <td className="px-4 py-2"></td>
+                </tr>
+                <tr className="border-b border-grey-100 bg-grey-50/60">
+                  <td colSpan={3} className="px-4 py-1.5 text-grey-900">
+                    One type each
+                  </td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:16</td>
+                  <td className="px-4 py-2">Index availability</td>
+                  <td className="px-4 py-2">incremental</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:17</td>
+                  <td className="px-4 py-2">Hall sensor port</td>
+                  <td className="px-4 py-2">halls</td>
+                </tr>
+                <tr className="border-b border-grey-100 last:border-0">
+                  <td className="px-4 py-2 font-mono whitespace-nowrap">:18 – :1A</td>
+                  <td className="px-4 py-2">
+                    Sinewave cycles per revolution, resolution, output voltage
+                  </td>
+                  <td className="px-4 py-2">sine-wave</td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -269,21 +352,27 @@ export default function LearnEncodersPage() {
           </p>
           <p>
             <strong>Configuring an encoder does not put it to work.</strong> That is a separate
-            decision, taken once per controller, and it is where the two-devices idea from further up
-            this page becomes a setting you can see:
+            decision, taken once per controller, and it is where the two-devices idea from further
+            up this page becomes a setting you can see:
           </p>
           <div className="border border-grey-200 overflow-x-auto max-w-3xl">
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">Object</th>
-                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">Encoder source for</th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                    Object
+                  </th>
+                  <th className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
+                    Encoder source for
+                  </th>
                 </tr>
               </thead>
               <tbody className="text-grey-700">
                 <tr className="border-b border-grey-100">
                   <td className="px-4 py-2 font-mono">0x2010:0C</td>
-                  <td className="px-4 py-2">The torque controller — this is the commutation encoder</td>
+                  <td className="px-4 py-2">
+                    The torque controller — this is the commutation encoder
+                  </td>
                 </tr>
                 <tr className="border-b border-grey-100">
                   <td className="px-4 py-2 font-mono">0x2011:05</td>
@@ -339,7 +428,7 @@ export default function LearnEncodersPage() {
         </>
       ),
     },
-  ]
+  ];
 
   return (
     <div>
@@ -355,5 +444,5 @@ export default function LearnEncodersPage() {
       </div>
       <LearnSections sections={sections} />
     </div>
-  )
+  );
 }

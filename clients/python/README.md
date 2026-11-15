@@ -21,8 +21,9 @@ The recording below shows a first run from a clone. The steps are in [Setup](#se
 
 ## Install with pip
 
-Python 3.11 or newer is necessary, because the client reads the config with the standard library
-module `tomllib`.
+Python 3.12 or newer is necessary. Debian 12 and the Raspberry Pi OS based on it have Python 3.11
+as their system Python. There, install a newer Python beside it, for example with
+`uv python install 3.12`.
 
 ```bash
 pip install motion-master-client
@@ -56,8 +57,8 @@ run(main)
 
 ## Setup
 
-Python 3.11 or newer is necessary, because the client reads the config with the standard library
-module `tomllib`.
+Python 3.12 or newer is necessary. [Install with pip](#install-with-pip) says what to do on Debian
+12.
 
 ```bash
 git clone https://github.com/synapticon/motion-master.git

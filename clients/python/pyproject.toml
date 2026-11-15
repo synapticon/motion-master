@@ -10,7 +10,7 @@ description = "Python client for the Motion Master HTTP API and WebSocket"
 readme = "README.md"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 # Keep this list the same as requirements.txt, which a clone of the repository installs.
 dependencies = ["requests>=2.31", "pyyaml>=6", "websockets>=13"]
 classifiers = [

@@ -67,6 +67,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- The Python client needs Python 3.12 or newer. It needed 3.11. Debian 12 and the Raspberry Pi OS
+  based on it have 3.11 as their system Python, so there a newer Python goes beside it, for example
+  with `uv python install 3.12`. The server packages for arm64 already need Debian 13. CI tests the
+  client on 3.12 and on the newest Python.
 - The TypeScript client's `readProcessDataMark()` is `processDataMark()`, and `fetchProcessDataDump()`
   is `processDataDump({ fromUs, toUs })`, the names of the Python client. The dump returns the bytes
   of the `.mmpd` file, which `parseMmpd()` decodes, or `null` when the server has no cycle to dump. It

@@ -1,70 +1,70 @@
-import { useState } from 'react'
-import { fetchEni, parseEni, type EniParseResult } from '@synapticon/motion-master-client'
-import EniExplainer from '../components/EniExplainer'
-import EniView from '../components/EniView'
-import FilePickerButton from '../components/FilePickerButton'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { downloadText } from '../utils/download'
-import { btnPrimary, btnOutline } from '../utils/styles'
-import NoEscNotice from '../components/NoEscNotice'
-import { useSupportsEsc } from '../hooks/useSupportsEsc'
+import { useState } from 'react';
+import { fetchEni, parseEni, type EniParseResult } from '@synapticon/motion-master-client';
+import EniExplainer from '../components/EniExplainer';
+import EniView from '../components/EniView';
+import FilePickerButton from '../components/FilePickerButton';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { downloadText } from '../utils/download';
+import { btnPrimary, btnOutline } from '../utils/styles';
+import NoEscNotice from '../components/NoEscNotice';
+import { useSupportsEsc } from '../hooks/useSupportsEsc';
 
 /// Where the document on screen came from. It matters to the reader: an exported document describes
 /// the bus in front of them, a loaded one describes somebody else's.
-type Source = { kind: 'export'; warnings: number } | { kind: 'file'; filename: string }
+type Source = { kind: 'export'; warnings: number } | { kind: 'file'; filename: string };
 
 export default function ToolsEniPage() {
-  const { api } = useConnection()
-  const [xml, setXml] = useState<string | null>(null)
-  const [parsed, setParsed] = useState<EniParseResult | null>(null)
-  const [source, setSource] = useState<Source | null>(null)
-  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [showSource, setShowSource] = useState(false)
-  const supportsEsc = useSupportsEsc()
+  const { api } = useConnection();
+  const [xml, setXml] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<EniParseResult | null>(null);
+  const [source, setSource] = useState<Source | null>(null);
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showSource, setShowSource] = useState(false);
+  const supportsEsc = useSupportsEsc();
 
   /// Parses a document and shows it. The same view serves both sources, because what a reader wants
   /// to know about a document does not depend on who wrote it.
   async function show(document: string, from: Source) {
-    setParsed(await parseEni(api.baseUrl, document))
-    setXml(document)
-    setSource(from)
+    setParsed(await parseEni(api.baseUrl, document));
+    setXml(document);
+    setSource(from);
   }
 
   function reset() {
-    setError(null)
-    setParsed(null)
-    setXml(null)
-    setSource(null)
-    setElapsedMs(null)
+    setError(null);
+    setParsed(null);
+    setXml(null);
+    setSource(null);
+    setElapsedMs(null);
   }
 
   async function handleExport() {
-    setBusy(true)
-    reset()
-    const start = performance.now()
+    setBusy(true);
+    reset();
+    const start = performance.now();
     try {
-      const result = await fetchEni(api.baseUrl)
-      await show(result.xml, { kind: 'export', warnings: result.warnings })
-      setElapsedMs(performance.now() - start)
+      const result = await fetchEni(api.baseUrl);
+      await show(result.xml, { kind: 'export', warnings: result.warnings });
+      setElapsedMs(performance.now() - start);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to export the ENI.')
+      setError(err instanceof Error ? err.message : 'Failed to export the ENI.');
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   async function handleFile(file: File) {
-    setBusy(true)
-    reset()
+    setBusy(true);
+    reset();
     try {
-      await show(await file.text(), { kind: 'file', filename: file.name })
+      await show(await file.text(), { kind: 'file', filename: file.name });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read the ENI file.')
+      setError(err instanceof Error ? err.message : 'Failed to read the ENI file.');
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
@@ -90,7 +90,12 @@ export default function ToolsEniPage() {
           </p>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
-              <button type="button" onClick={handleExport} disabled={busy || !supportsEsc} className={btnPrimary}>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={busy || !supportsEsc}
+                className={btnPrimary}
+              >
                 {busy ? 'Working…' : 'Export ENI'}
               </button>
               <FilePickerButton onFile={handleFile} disabled={busy} accept=".xml,application/xml">
@@ -129,7 +134,7 @@ export default function ToolsEniPage() {
           <section className="border border-grey-200">
             <button
               type="button"
-              onClick={() => setShowSource(s => !s)}
+              onClick={() => setShowSource((s) => !s)}
               aria-expanded={showSource}
               className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-grey-50 transition-colors cursor-pointer"
             >
@@ -152,5 +157,5 @@ export default function ToolsEniPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

@@ -1,30 +1,30 @@
-import { useEffect, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import Callout from '../components/Callout'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { downloadText } from '../utils/download'
-import { btnOutline } from '../utils/styles'
+import { useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import Callout from '../components/Callout';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { downloadText } from '../utils/download';
+import { btnOutline } from '../utils/styles';
 
 export default function ServerLogPage() {
-  const { host, httpPort } = useConnection()
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const { host, httpPort } = useConnection();
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   const logQuery = useQuery({
     queryKey: ['log', host, httpPort],
     queryFn: async () => {
-      const res = await fetch(`https://${host}:${httpPort}/api/log`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      return res.text()
+      const res = await fetch(`https://${host}:${httpPort}/api/log`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.text();
     },
     refetchInterval: false,
-  })
+  });
 
-  const text = logQuery.data ?? ''
+  const text = logQuery.data ?? '';
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView()
-  }, [text])
+    bottomRef.current?.scrollIntoView();
+  }, [text]);
 
   return (
     <div className="flex flex-col h-full">
@@ -77,5 +77,5 @@ export default function ServerLogPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

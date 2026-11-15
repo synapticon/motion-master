@@ -1,4 +1,4 @@
-import Explainer from './Explainer'
+import Explainer from './Explainer';
 
 // The "What is the parameter cache?" teaching panel for the Data → Parameter Caches page.
 export default function ParameterCacheExplainer() {
@@ -8,10 +8,10 @@ export default function ParameterCacheExplainer() {
         Reading a drive's full <strong>object dictionary</strong> over the CoE SDO-Information
         service is hundreds of mailbox round-trips and takes seconds. The result — the parameter{' '}
         <strong>definitions</strong> (index, name, data type, access, units, and default / min / max
-        bounds) — is identical for every device of the same <strong>vendor, product, and
-        firmware version</strong>, so Motion Master writes it to a small JSON file on disk and reuses it the
-        next time it scans the same hardware. That's why re-scanning a familiar bus no longer
-        re-enumerates devices it has already seen.
+        bounds) — is identical for every device of the same{' '}
+        <strong>vendor, product, and firmware version</strong>, so Motion Master writes it to a
+        small JSON file on disk and reuses it the next time it scans the same hardware. That's why
+        re-scanning a familiar bus no longer re-enumerates devices it has already seen.
       </p>
       <p>
         Only the <strong>definitions</strong> are cached — never live parameter <em>values</em>. On
@@ -32,9 +32,9 @@ export default function ParameterCacheExplainer() {
         This page is the manual escape hatch: <strong>download</strong> a file to inspect or share
         it offline, or <strong>delete</strong> one to force a fresh enumeration on the next scan
         (handy after a development build that changed the dictionary and kept its version string).
-        Deleting a cache never affects the device
-        — only Motion Master's saved copy of its dictionary.
+        Deleting a cache never affects the device — only Motion Master's saved copy of its
+        dictionary.
       </p>
     </Explainer>
-  )
+  );
 }

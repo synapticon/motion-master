@@ -4,6 +4,6 @@
 // app with `import '@synapticon/ui/theme.css'`. The components below are the starter set; apps are
 // free to use them, wrap them, or bail out and build their own.
 
-export { Callout, type CalloutVariant } from './components/Callout'
-export { PageHeader } from './components/PageHeader'
-export { Button, btnOutline } from './components/Button'
+export { Callout, type CalloutVariant } from './components/Callout';
+export { PageHeader } from './components/PageHeader';
+export { Button, btnOutline } from './components/Button';

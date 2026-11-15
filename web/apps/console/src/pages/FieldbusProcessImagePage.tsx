@@ -1,12 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
-import { type ProcessImageObject, formatHex } from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
-import PageHeader from '../components/PageHeader'
-import ProcessImageExplainer from '../components/ProcessImageExplainer'
-import SlavePositionBadge from '../components/SlavePositionBadge'
-import { useConnection } from '../contexts/ConnectionContext'
-import { formatEpochUs } from '../utils/format'
-import { btnOutline } from '../utils/styles'
+import { useQuery } from '@tanstack/react-query';
+import { type ProcessImageObject, formatHex } from '@synapticon/motion-master-client';
+import Callout from '../components/Callout';
+import PageHeader from '../components/PageHeader';
+import ProcessImageExplainer from '../components/ProcessImageExplainer';
+import SlavePositionBadge from '../components/SlavePositionBadge';
+import { useConnection } from '../contexts/ConnectionContext';
+import { formatEpochUs } from '../utils/format';
+import { btnOutline } from '../utils/styles';
 
 function Stat({
   label,
@@ -14,10 +14,10 @@ function Stat({
   tone,
   hint,
 }: {
-  label: string
-  value: string
-  tone?: string
-  hint: string
+  label: string;
+  value: string;
+  tone?: string;
+  hint: string;
 }) {
   return (
     <div className="border border-grey-200 px-4 py-3">
@@ -25,7 +25,7 @@ function Stat({
       <p className={`font-mono text-lg mt-0.5 ${tone ?? 'text-grey-800'}`}>{value}</p>
       <p className="text-[11px] leading-snug text-grey-500 mt-1.5">{hint}</p>
     </div>
-  )
+  );
 }
 
 const COLUMNS = [
@@ -60,19 +60,19 @@ const COLUMNS = [
     hint: 'Bit offset within that byte (bitOffset % 8), for sub-byte packed objects.',
   },
   { label: 'Bits', width: 'w-16', hint: 'Width of the mapped object in bits.' },
-]
+];
 
 function MappingTable({
   title,
   entries,
   deviceName,
 }: {
-  title: string
-  entries: ProcessImageObject[]
-  deviceName: (pos: number) => string
+  title: string;
+  entries: ProcessImageObject[];
+  deviceName: (pos: number) => string;
 }) {
-  const totalBits = entries.reduce((sum, e) => sum + e.bitLength, 0)
-  const totalBytes = Math.ceil(totalBits / 8)
+  const totalBits = entries.reduce((sum, e) => sum + e.bitLength, 0);
+  const totalBytes = Math.ceil(totalBits / 8);
   return (
     <section>
       <div className="flex items-baseline justify-between mb-3 gap-4">
@@ -88,13 +88,13 @@ function MappingTable({
         <div className="border border-grey-200 overflow-x-auto">
           <table className="w-full min-w-[640px] text-xs border-collapse table-fixed">
             <colgroup>
-              {COLUMNS.map(c => (
+              {COLUMNS.map((c) => (
                 <col key={c.label} className={c.width} />
               ))}
             </colgroup>
             <thead>
               <tr className="border-b border-grey-200 bg-grey-50">
-                {COLUMNS.map(c => (
+                {COLUMNS.map((c) => (
                   <th
                     key={c.label}
                     title={c.hint}
@@ -106,7 +106,7 @@ function MappingTable({
               </tr>
             </thead>
             <tbody>
-              {entries.map(e => (
+              {entries.map((e) => (
                 <tr
                   key={`${e.slavePosition}-${e.index}-${e.subindex}-${e.bitOffset}`}
                   className="border-b border-grey-100 last:border-0"
@@ -114,7 +114,10 @@ function MappingTable({
                   <td className="px-4 py-2">
                     <SlavePositionBadge position={e.slavePosition} />
                   </td>
-                  <td className="px-4 py-2 text-grey-600 truncate" title={deviceName(e.slavePosition)}>
+                  <td
+                    className="px-4 py-2 text-grey-600 truncate"
+                    title={deviceName(e.slavePosition)}
+                  >
                     {deviceName(e.slavePosition)}
                   </td>
                   <td className="px-4 py-2 font-mono whitespace-nowrap">
@@ -133,28 +136,30 @@ function MappingTable({
         </div>
       )}
     </section>
-  )
+  );
 }
 
 export default function FieldbusProcessImagePage() {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   const query = useQuery({
     queryKey: ['processImage'],
     queryFn: () => api.getProcessImage(),
     refetchInterval: 2000,
-  })
+  });
 
   // Label each slave position with its device name, when the device list is available.
   const devicesQuery = useQuery({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
     staleTime: Infinity,
-  })
-  const deviceNames = new Map((devicesQuery.data?.data ?? []).map(d => [d.slavePosition, d.name]))
-  const deviceName = (pos: number) => deviceNames.get(pos) ?? ''
+  });
+  const deviceNames = new Map(
+    (devicesQuery.data?.data ?? []).map((d) => [d.slavePosition, d.name]),
+  );
+  const deviceName = (pos: number) => deviceNames.get(pos) ?? '';
 
-  const img = query.data?.data
+  const img = query.data?.data;
 
   return (
     <div>
@@ -191,8 +196,7 @@ export default function FieldbusProcessImagePage() {
 
         {img && !img.configured && img.generations === 0 && (
           <p className="text-xs text-grey-600">
-            No process image has been published. Bring a device to SAFEOP or OP to map process
-            data.
+            No process image has been published. Bring a device to SAFEOP or OP to map process data.
           </p>
         )}
 
@@ -245,10 +249,10 @@ export default function FieldbusProcessImagePage() {
               <Callout variant="warning">
                 <p>
                   <strong>{img.droppedInputFrames.toLocaleString()}</strong> input{' '}
-                  {img.droppedInputFrames === 1 ? 'frame was' : 'frames were'} dropped since the process
-                  data was configured. A SPoE drive returns its input frames in batches, and Motion Master
-                  takes one per cycle. When the cycle falls more than 30 frames behind, the oldest are
-                  dropped, so monitoring has gaps.
+                  {img.droppedInputFrames === 1 ? 'frame was' : 'frames were'} dropped since the
+                  process data was configured. A SPoE drive returns its input frames in batches, and
+                  Motion Master takes one per cycle. When the cycle falls more than 30 frames
+                  behind, the oldest are dropped, so monitoring has gaps.
                 </p>
               </Callout>
             )}
@@ -280,5 +284,5 @@ export default function FieldbusProcessImagePage() {
         )}
       </div>
     </div>
-  )
+  );
 }

@@ -8,52 +8,52 @@
 // tap and on keyboard focus as well. It closes on Escape, on blur, and on a pointer press
 // anywhere else.
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import { glossary, type GlossaryId } from './glossary'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { glossary, type GlossaryId } from './glossary';
 
 /** Matches `w-80` below. Used to decide which way the popover opens, before it is rendered. */
-const popoverWidth = 320
+const popoverWidth = 320;
 
 export default function Term({ id, children }: { id: GlossaryId; children?: ReactNode }) {
-  const entry = glossary[id]
-  const [open, setOpen] = useState(false)
-  const [alignRight, setAlignRight] = useState(false)
-  const wrapper = useRef<HTMLSpanElement>(null)
-  const popoverId = useId()
+  const entry = glossary[id];
+  const [open, setOpen] = useState(false);
+  const [alignRight, setAlignRight] = useState(false);
+  const wrapper = useRef<HTMLSpanElement>(null);
+  const popoverId = useId();
 
   useEffect(() => {
     if (!open) {
-      return
+      return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setOpen(false)
+        setOpen(false);
       }
-    }
+    };
     const onPointerDown = (event: PointerEvent) => {
       if (!wrapper.current?.contains(event.target as Node)) {
-        setOpen(false)
+        setOpen(false);
       }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    document.addEventListener('pointerdown', onPointerDown)
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
     return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      document.removeEventListener('pointerdown', onPointerDown)
-    }
-  }, [open])
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [open]);
 
   // A term near the right edge would open a fixed-width popover off the screen. Decide from the
   // term's own position rather than the popover's, so the answer does not depend on the alignment
   // it is about to set.
   useLayoutEffect(() => {
     if (!open || !wrapper.current) {
-      return
+      return;
     }
-    const rect = wrapper.current.getBoundingClientRect()
-    setAlignRight(rect.left + popoverWidth > window.innerWidth - 8)
-  }, [open])
+    const rect = wrapper.current.getBoundingClientRect();
+    setAlignRight(rect.left + popoverWidth > window.innerWidth - 8);
+  }, [open]);
 
   return (
     <span ref={wrapper} className="relative">
@@ -64,14 +64,14 @@ export default function Term({ id, children }: { id: GlossaryId; children?: Reac
         onClick={() => setOpen(true)}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        onPointerEnter={event => {
+        onPointerEnter={(event) => {
           if (event.pointerType === 'mouse') {
-            setOpen(true)
+            setOpen(true);
           }
         }}
-        onPointerLeave={event => {
+        onPointerLeave={(event) => {
           if (event.pointerType === 'mouse') {
-            setOpen(false)
+            setOpen(false);
           }
         }}
         className="border-b border-dotted border-grey-500 text-grey-900 hover:border-syn-red hover:text-syn-red transition-colors cursor-help"
@@ -93,5 +93,5 @@ export default function Term({ id, children }: { id: GlossaryId; children?: Reac
         </span>
       )}
     </span>
-  )
+  );
 }

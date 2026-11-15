@@ -1,6 +1,6 @@
-import { useId, useState } from 'react'
-import Checkbox from './Checkbox'
-import PolePairSelector from './PolePairSelector'
+import { useId, useState } from 'react';
+import Checkbox from './Checkbox';
+import PolePairSelector from './PolePairSelector';
 
 // A labelled cross-section of a three-phase servo motor, for the Learn pages.
 //
@@ -72,138 +72,138 @@ import PolePairSelector from './PolePairSelector'
 // The rotor follows the field with no lead angle, which is the unloaded case. Producing torque
 // needs the field held ahead of the magnets, and that belongs to the Commutation Offset page.
 
-const CX = 150
-const CY = 150
+const CX = 150;
+const CY = 150;
 
-const rad = (deg: number) => (deg * Math.PI) / 180
+const rad = (deg: number) => (deg * Math.PI) / 180;
 const polar = (r: number, deg: number) => ({
   x: CX + r * Math.cos(rad(deg)),
   y: CY - r * Math.sin(rad(deg)),
-})
+});
 
 function sector(rInner: number, rOuter: number, fromDeg: number, spanDeg: number) {
-  const large = spanDeg > 180 ? 1 : 0
-  const a = polar(rOuter, fromDeg)
-  const b = polar(rOuter, fromDeg + spanDeg)
-  const c = polar(rInner, fromDeg + spanDeg)
-  const d = polar(rInner, fromDeg)
+  const large = spanDeg > 180 ? 1 : 0;
+  const a = polar(rOuter, fromDeg);
+  const b = polar(rOuter, fromDeg + spanDeg);
+  const c = polar(rInner, fromDeg + spanDeg);
+  const d = polar(rInner, fromDeg);
   return [
     `M ${a.x.toFixed(2)} ${a.y.toFixed(2)}`,
     `A ${rOuter} ${rOuter} 0 ${large} 0 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`,
     `L ${c.x.toFixed(2)} ${c.y.toFixed(2)}`,
     `A ${rInner} ${rInner} 0 ${large} 1 ${d.x.toFixed(2)} ${d.y.toFixed(2)}`,
     'Z',
-  ].join(' ')
+  ].join(' ');
 }
 
 // One pole pair's worth of slots, in the order they sit round the circle. The whole pattern repeats
 // once per pole pair.
-const SLOT_PATTERN = ['U×', 'W•', 'V×', 'U•', 'W×', 'V•']
+const SLOT_PATTERN = ['U×', 'W•', 'V×', 'U•', 'W×', 'V•'];
 
 // Where each phase's axis sits in electrical degrees. The current in a phase is the cosine of the
 // angle between the field the drive wants and that axis.
-const PHASE_AXIS: Record<string, number> = { U: 0, V: 120, W: 240 }
+const PHASE_AXIS: Record<string, number> = { U: 0, V: 120, W: 240 };
 
 // The peak phase current the plot is drawn for. A round number, because the shape is the point and
 // no real motor is implied by it.
-const PEAK_AMPS = 10
+const PEAK_AMPS = 10;
 
 // The current plot. One cosine per phase, a third of a cycle apart, with the slider's angle marked.
-const PLOT_W = 520
-const PLOT_H = 104
-const PLOT_LEFT = 30
-const PLOT_RIGHT = 12
-const PLOT_MID = 52
-const PLOT_AMP = 34
+const PLOT_W = 520;
+const PLOT_H = 104;
+const PLOT_LEFT = 30;
+const PLOT_RIGHT = 12;
+const PLOT_MID = 52;
+const PLOT_AMP = 34;
 
-const plotX = (deg: number) => PLOT_LEFT + (deg / 360) * (PLOT_W - PLOT_LEFT - PLOT_RIGHT)
-const plotY = (share: number) => PLOT_MID - share * PLOT_AMP
+const plotX = (deg: number) => PLOT_LEFT + (deg / 360) * (PLOT_W - PLOT_LEFT - PLOT_RIGHT);
+const plotY = (share: number) => PLOT_MID - share * PLOT_AMP;
 
 function phaseCurve(axisDeg: number) {
-  const points = []
+  const points = [];
   for (let deg = 0; deg <= 360; deg += 4) {
-    points.push(`${plotX(deg).toFixed(1)},${plotY(Math.cos(rad(deg - axisDeg))).toFixed(1)}`)
+    points.push(`${plotX(deg).toFixed(1)},${plotY(Math.cos(rad(deg - axisDeg))).toFixed(1)}`);
   }
-  return `M ${points.join(' L ')}`
+  return `M ${points.join(' L ')}`;
 }
 
 // The signed current in one slot, from −1 to 1, where positive flows into the page. A phase's
 // return slot carries the same current the other way, so the mark decides the sign.
 function slotCurrent(slot: string, electricalDeg: number) {
-  const phase = PHASE_AXIS[slot[0]]
-  const current = Math.cos(rad(electricalDeg - phase))
-  return slot[1] === '×' ? current : -current
+  const phase = PHASE_AXIS[slot[0]];
+  const current = Math.cos(rad(electricalDeg - phase));
+  return slot[1] === '×' ? current : -current;
 }
 
 // The field lines: where they cross the bore, and the radii of the outer ring they close along.
-const BORE = 86
-const RING_INNER = 125
-const RING_OUTER = 131
+const BORE = 86;
+const RING_INNER = 125;
+const RING_OUTER = 131;
 
 interface FieldLine {
   /** The part inside the bore, from the stator N it leaves to the stator S it enters. */
-  bore: string
+  bore: string;
   /** The part in the stator, from that S back round to that N. */
-  stator: string
+  stator: string;
   /** An arrowhead at the middle of the bore part, pointing the way the field runs. */
-  arrow: string
+  arrow: string;
 }
 
 function fieldLines(polePairs: number, electricalDeg: number): FieldLine[] {
-  const firstPole = (90 + electricalDeg) / polePairs
+  const firstPole = (90 + electricalDeg) / polePairs;
   // Fewer lines per pole as the poles multiply, or four pole pairs turn into a thicket.
-  const levels = polePairs <= 2 ? [0.2, 0.5, 0.8] : [0.3, 0.7]
-  const steps = 40
-  const lines: FieldLine[] = []
+  const levels = polePairs <= 2 ? [0.2, 0.5, 0.8] : [0.3, 0.7];
+  const steps = 40;
+  const lines: FieldLine[] = [];
   // Each region k lies between stator pole k and pole k + 1, and holds the lines joining them.
   for (let k = 0; k < polePairs * 2; k++) {
     for (const level of levels) {
-      const from = k * Math.PI + Math.asin(level)
-      const to = (k + 1) * Math.PI - Math.asin(level)
-      const angles: number[] = []
+      const from = k * Math.PI + Math.asin(level);
+      const to = (k + 1) * Math.PI - Math.asin(level);
+      const angles: number[] = [];
       const points = Array.from({ length: steps + 1 }, (_, i) => {
-        const u = from + ((to - from) * i) / steps
-        const radius = BORE * Math.pow(level / Math.abs(Math.sin(u)), 1 / polePairs)
-        const angle = firstPole + (u * 180) / Math.PI / polePairs
-        angles.push(angle)
-        return polar(radius, angle)
-      })
+        const u = from + ((to - from) * i) / steps;
+        const radius = BORE * Math.pow(level / Math.abs(Math.sin(u)), 1 / polePairs);
+        const angle = firstPole + (u * 180) / Math.PI / polePairs;
+        angles.push(angle);
+        return polar(radius, angle);
+      });
       // Pole k is a south when k is even. Inside the bore the field runs from the N to the S, so
       // an even region is walked backwards.
       if (k % 2 === 0) {
-        points.reverse()
-        angles.reverse()
+        points.reverse();
+        angles.reverse();
       }
-      const fromN = angles[0]
-      const intoS = angles[steps]
+      const fromN = angles[0];
+      const intoS = angles[steps];
       // The deepest lines take the widest way round, so they close on the outermost radius and no
       // two lines cross.
-      const ring = RING_OUTER - level * (RING_OUTER - RING_INNER)
-      const sweep = fromN > intoS ? 0 : 1
-      const ringS = polar(ring, intoS)
-      const ringN = polar(ring, fromN)
-      const bore = `M ${points.map(q => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' L ')}`
+      const ring = RING_OUTER - level * (RING_OUTER - RING_INNER);
+      const sweep = fromN > intoS ? 0 : 1;
+      const ringS = polar(ring, intoS);
+      const ringN = polar(ring, fromN);
+      const bore = `M ${points.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' L ')}`;
       const stator = [
         `M ${points[steps].x.toFixed(1)},${points[steps].y.toFixed(1)}`,
         `L ${ringS.x.toFixed(1)},${ringS.y.toFixed(1)}`,
         `A ${ring} ${ring} 0 0 ${sweep} ${ringN.x.toFixed(1)},${ringN.y.toFixed(1)}`,
         `L ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`,
-      ].join(' ')
-      const mid = points[steps / 2]
-      const ahead = points[steps / 2 + 1]
-      const heading = Math.atan2(ahead.y - mid.y, ahead.x - mid.x)
-      const tip = { x: mid.x + 4 * Math.cos(heading), y: mid.y + 4 * Math.sin(heading) }
+      ].join(' ');
+      const mid = points[steps / 2];
+      const ahead = points[steps / 2 + 1];
+      const heading = Math.atan2(ahead.y - mid.y, ahead.x - mid.x);
+      const tip = { x: mid.x + 4 * Math.cos(heading), y: mid.y + 4 * Math.sin(heading) };
       const wing = (side: number) => ({
         x: mid.x - 3 * Math.cos(heading) + side * 3 * Math.sin(heading),
         y: mid.y - 3 * Math.sin(heading) - side * 3 * Math.cos(heading),
-      })
-      const left = wing(1)
-      const right = wing(-1)
-      const arrow = `${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${left.x.toFixed(1)},${left.y.toFixed(1)} ${right.x.toFixed(1)},${right.y.toFixed(1)}`
-      lines.push({ bore, stator, arrow })
+      });
+      const left = wing(1);
+      const right = wing(-1);
+      const arrow = `${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${left.x.toFixed(1)},${left.y.toFixed(1)} ${right.x.toFixed(1)},${right.y.toFixed(1)}`;
+      lines.push({ bore, stator, arrow });
     }
   }
-  return lines
+  return lines;
 }
 
 // A caption with a leader line back to the part it names.
@@ -214,13 +214,13 @@ function Label({
   atRadius,
   y,
 }: {
-  text: string
-  detail: string
-  atDeg: number
-  atRadius: number
-  y: number
+  text: string;
+  detail: string;
+  atDeg: number;
+  atRadius: number;
+  y: number;
 }) {
-  const anchor = polar(atRadius, atDeg)
+  const anchor = polar(atRadius, atDeg);
   return (
     <g>
       <circle cx={anchor.x} cy={anchor.y} r={2.5} className="fill-grey-700" />
@@ -236,31 +236,31 @@ function Label({
         {detail}
       </text>
     </g>
-  )
+  );
 }
 
 export default function MotorCrossSection({
   polePairs,
   onPolePairsChange,
 }: {
-  polePairs: number
-  onPolePairsChange: (polePairs: number) => void
+  polePairs: number;
+  onPolePairsChange: (polePairs: number) => void;
 }) {
-  const [electricalDeg, setElectricalDeg] = useState(0)
-  const sliderId = useId()
-  const [showField, setShowField] = useState(true)
+  const [electricalDeg, setElectricalDeg] = useState(0);
+  const sliderId = useId();
+  const [showField, setShowField] = useState(true);
 
-  const slots = polePairs * 6
-  const slotPitch = 360 / slots
-  const poles = polePairs * 2
-  const poleSpan = 180 / polePairs
+  const slots = polePairs * 6;
+  const slotPitch = 360 / slots;
+  const poles = polePairs * 2;
+  const poleSpan = 180 / polePairs;
   // The rotor keeps step with the field, and the field goes round once per pole pair per turn. So
   // the shaft turns by a fraction of what the drive commands, which is the whole point of the two
   // angles.
-  const shaftDeg = electricalDeg / polePairs
-  const lines = showField ? fieldLines(polePairs, electricalDeg) : []
+  const shaftDeg = electricalDeg / polePairs;
+  const lines = showField ? fieldLines(polePairs, electricalDeg) : [];
   // The letters have to survive twenty-four slots without turning into a smear.
-  const phaseFont = Math.max(6, 13 - polePairs * 1.5)
+  const phaseFont = Math.max(6, 13 - polePairs * 1.5);
 
   return (
     <div className="border border-grey-200 max-w-2xl">
@@ -281,10 +281,10 @@ export default function MotorCrossSection({
 
         {/* Winding bundles. Six per pole pair, so the U-V-W pattern comes round once per pair. */}
         {Array.from({ length: slots }, (_, i) => {
-          const slot = SLOT_PATTERN[i % SLOT_PATTERN.length]
-          const current = slotCurrent(slot, electricalDeg)
-          const centre = i * slotPitch
-          const span = slotPitch * 0.78
+          const slot = SLOT_PATTERN[i % SLOT_PATTERN.length];
+          const current = slotCurrent(slot, electricalDeg);
+          const centre = i * slotPitch;
+          const span = slotPitch * 0.78;
           return (
             <g key={i}>
               <path
@@ -318,7 +318,7 @@ export default function MotorCrossSection({
                 {current >= 0 ? '×' : '•'}
               </text>
             </g>
-          )
+          );
         })}
 
         {/* Air gap — the stator does not touch the rotor. */}
@@ -366,15 +366,20 @@ export default function MotorCrossSection({
         {/* The field lines' bore part, over the rotor. */}
         {lines.map((line, i) => (
           <g key={i}>
-            <path d={line.bore} className="stroke-grey-900 fill-none" strokeWidth={1} strokeOpacity={0.4} />
+            <path
+              d={line.bore}
+              className="stroke-grey-900 fill-none"
+              strokeWidth={1}
+              strokeOpacity={0.4}
+            />
             <polygon points={line.arrow} className="fill-grey-900" fillOpacity={0.5} />
           </g>
         ))}
 
         {/* The stator's poles. */}
         {Array.from({ length: poles }, (_, j) => {
-          const at = (90 + electricalDeg) / polePairs + j * poleSpan
-          const outward = j % 2 === 0
+          const at = (90 + electricalDeg) / polePairs + j * poleSpan;
+          const outward = j % 2 === 0;
           return (
             <g key={j}>
               <text
@@ -387,7 +392,7 @@ export default function MotorCrossSection({
                 {outward ? 'S' : 'N'}
               </text>
             </g>
-          )
+          );
         })}
 
         <Label
@@ -438,7 +443,7 @@ export default function MotorCrossSection({
             max={359}
             step={1}
             value={electricalDeg}
-            onChange={event => setElectricalDeg(Number(event.target.value))}
+            onChange={(event) => setElectricalDeg(Number(event.target.value))}
             className="w-full h-1 appearance-none bg-grey-200 accent-syn-red cursor-pointer"
           />
         </div>
@@ -458,7 +463,7 @@ export default function MotorCrossSection({
               className="stroke-grey-300"
               strokeWidth={1}
             />
-            {[1, -1].map(share => (
+            {[1, -1].map((share) => (
               <text
                 key={share}
                 x={PLOT_LEFT - 6}
@@ -502,8 +507,8 @@ export default function MotorCrossSection({
               strokeWidth={1}
               strokeDasharray="3 3"
             />
-            {Object.values(PHASE_AXIS).map(axis => {
-              const share = Math.cos(rad(electricalDeg - axis))
+            {Object.values(PHASE_AXIS).map((axis) => {
+              const share = Math.cos(rad(electricalDeg - axis));
               return (
                 <circle
                   key={axis}
@@ -513,13 +518,13 @@ export default function MotorCrossSection({
                   className="fill-status-warn stroke-grey-700"
                   strokeWidth={1}
                 />
-              )
+              );
             })}
           </svg>
 
           <div className="flex gap-4 mt-1">
             {Object.entries(PHASE_AXIS).map(([letter, axis]) => {
-              const amps = Math.cos(rad(electricalDeg - axis)) * PEAK_AMPS
+              const amps = Math.cos(rad(electricalDeg - axis)) * PEAK_AMPS;
               return (
                 <span
                   key={letter}
@@ -535,7 +540,7 @@ export default function MotorCrossSection({
                     {amps.toFixed(1)} A
                   </span>
                 </span>
-              )
+              );
             })}
           </div>
         </div>
@@ -545,8 +550,8 @@ export default function MotorCrossSection({
             <span className="text-grey-900">Drag the slider and the shaft turns.</span> The{' '}
             <span className="inline-block h-2 w-2 align-middle bg-status-warn" /> wash on a slot is
             the size of the current in it, deeper for a larger current. The mark under the letter is
-            the direction. All three phases carry current at once, because the drive sets all
-            three together. The magnets follow the field round.
+            the direction. All three phases carry current at once, because the drive sets all three
+            together. The magnets follow the field round.
           </p>
           <p>
             <span className="text-grey-900">You are looking at the motor end-on.</span> The wires
@@ -573,9 +578,9 @@ export default function MotorCrossSection({
           </p>
           <p>
             <span className="text-grey-900">The grey lines are the field.</span> Each one is a
-            closed loop. It comes out of the stator at an N, crosses the gap and the rotor, goes back
-            into the stator at an S, and returns through the outer ring. The arrows show which way it
-            runs. The letters outside the housing are the stator&apos;s poles:{' '}
+            closed loop. It comes out of the stator at an N, crosses the gap and the rotor, goes
+            back into the stator at an S, and returns through the outer ring. The arrows show which
+            way it runs. The letters outside the housing are the stator&apos;s poles:{' '}
             <span className="font-mono text-syn-red">N</span> where the field comes out of the
             stator, <span className="font-mono text-ocean">S</span> where it goes back in. They go
             round with the slider while the windings stay put, and each rotor magnet sits under the
@@ -586,8 +591,8 @@ export default function MotorCrossSection({
             The plot is those three currents against electrical angle, each a third of a cycle from
             the next. That is what <span className="text-grey-900">three-phase</span> means. The
             dashed line is where the slider sits, and the dots on it are the three currents at that
-            instant, the same currents the slots show. Drawn for a 10 A peak, which is a
-            round number rather than any particular motor.
+            instant, the same currents the slots show. Drawn for a 10 A peak, which is a round
+            number rather than any particular motor.
           </p>
           <p>
             <span className="text-grey-900">A pole pair is one north magnet and one south.</span>{' '}
@@ -607,5 +612,5 @@ export default function MotorCrossSection({
         </div>
       </div>
     </div>
-  )
+  );
 }

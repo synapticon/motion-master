@@ -9,8 +9,8 @@
 
 export interface GlossaryEntry {
   /** The term as it is written in the popover heading. */
-  term: string
-  definition: string
+  term: string;
+  definition: string;
 }
 
 export const glossary = {
@@ -26,8 +26,7 @@ export const glossary = {
   },
   rotor: {
     term: 'Rotor',
-    definition:
-      'The turning part of the motor: the shaft and the permanent magnets fixed to it.',
+    definition: 'The turning part of the motor: the shaft and the permanent magnets fixed to it.',
   },
   stator: {
     term: 'Stator',
@@ -98,6 +97,6 @@ export const glossary = {
     definition:
       'Spending part of the current on a field that opposes the rotor magnets, which lowers the back-EMF and leaves room for more velocity. The current doing it makes no torque.',
   },
-} as const satisfies Record<string, GlossaryEntry>
+} as const satisfies Record<string, GlossaryEntry>;
 
-export type GlossaryId = keyof typeof glossary
+export type GlossaryId = keyof typeof glossary;

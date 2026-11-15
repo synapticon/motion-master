@@ -1,5 +1,5 @@
-import { Link } from 'react-router'
-import Explainer from './Explainer'
+import { Link } from 'react-router';
+import Explainer from './Explainer';
 
 // The teaching panel for the Storage → User Cache page. It explains that the store lives on the
 // server rather than in this browser, what the two folders Motion Master writes itself contain and
@@ -17,12 +17,15 @@ export default function UserCacheExplainer() {
       </p>
 
       <p>
-        <strong>Uploading a file does not, by itself, make Motion Master do anything with it.</strong>{' '}
+        <strong>
+          Uploading a file does not, by itself, make Motion Master do anything with it.
+        </strong>{' '}
         Nothing is validated, converted or acted on at upload time — you choose the paths, and a
         file simply sits where you put it. That is a separate question from whether some{' '}
         <em>feature</em> reads a particular file: several own a folder here and parse their own,
         listed below, and more will over time. The rule of thumb is that a feature knows where to
-        look for its own files; dropping something into this store does not volunteer it to anything.
+        look for its own files; dropping something into this store does not volunteer it to
+        anything.
       </p>
 
       <p>
@@ -65,13 +68,13 @@ export default function UserCacheExplainer() {
       </p>
 
       <p>
-        Paths are confined to the cache directory: anything absolute, containing{' '}
-        <code>..</code>, or naming a device is refused, so no request can read or write elsewhere on
-        the server. Downloads are always saved, never opened in the browser. A file could contain a
-        script, and a script opened from Motion Master&apos;s own address would be able to command
-        the drives as if you had clicked the buttons yourself — so the browser is told to save it
-        and never run it.
+        Paths are confined to the cache directory: anything absolute, containing <code>..</code>, or
+        naming a device is refused, so no request can read or write elsewhere on the server.
+        Downloads are always saved, never opened in the browser. A file could contain a script, and
+        a script opened from Motion Master&apos;s own address would be able to command the drives as
+        if you had clicked the buttons yourself — so the browser is told to save it and never run
+        it.
       </p>
     </Explainer>
-  )
+  );
 }

@@ -12,19 +12,19 @@
 // with the server log, whose prefix is also local — placing a fault against the log is the whole
 // reason these timestamps are served.
 export function formatEpochUs(epochUs: number): string {
-  const date = new Date(epochUs / 1000)
-  const time = date.toLocaleTimeString(undefined, { hour12: false })
-  return `${time}.${String(date.getMilliseconds()).padStart(3, '0')}`
+  const date = new Date(epochUs / 1000);
+  const time = date.toLocaleTimeString(undefined, { hour12: false });
+  return `${time}.${String(date.getMilliseconds()).padStart(3, '0')}`;
 }
 
 export function formatBytes(bytes: number): string {
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let value = bytes
-  let unit = 0
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes;
+  let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
+    value /= 1024;
+    unit++;
   }
   // Whole bytes need no decimal; every larger unit keeps one so a small difference stays visible.
-  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }

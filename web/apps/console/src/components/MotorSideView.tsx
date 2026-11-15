@@ -1,4 +1,4 @@
-import { Link } from 'react-router'
+import { Link } from 'react-router';
 // A side view of the same motor, for the Learn pages.
 //
 // It exists because the cross-section cannot answer "where is the encoder". A cross-section is a
@@ -21,11 +21,11 @@ function Label({
   to,
   anchor = 'middle',
 }: {
-  text: string
-  detail?: string
-  from: { x: number; y: number }
-  to: { x: number; y: number }
-  anchor?: 'start' | 'middle' | 'end'
+  text: string;
+  detail?: string;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  anchor?: 'start' | 'middle' | 'end';
 }) {
   return (
     <g>
@@ -38,16 +38,26 @@ function Label({
         className="stroke-grey-400"
         strokeWidth={1}
       />
-      <text x={to.x} y={to.y + (to.y < from.y ? -14 : 14)} textAnchor={anchor} className="fill-grey-900 text-[11px]">
+      <text
+        x={to.x}
+        y={to.y + (to.y < from.y ? -14 : 14)}
+        textAnchor={anchor}
+        className="fill-grey-900 text-[11px]"
+      >
         {text}
       </text>
       {detail && (
-        <text x={to.x} y={to.y + (to.y < from.y ? -3 : 25)} textAnchor={anchor} className="fill-grey-500 text-[10px]">
+        <text
+          x={to.x}
+          y={to.y + (to.y < from.y ? -3 : 25)}
+          textAnchor={anchor}
+          className="fill-grey-500 text-[10px]"
+        >
           {detail}
         </text>
       )}
     </g>
-  )
+  );
 }
 
 export default function MotorSideView() {
@@ -63,20 +73,70 @@ export default function MotorSideView() {
         <rect x={40} y={118} width={400} height={16} className="fill-grey-800" />
 
         {/* Front end: whatever the motor drives. */}
-        <rect x={44} y={92} width={26} height={68} className="fill-grey-400 stroke-grey-700" strokeWidth={1} />
+        <rect
+          x={44}
+          y={92}
+          width={26}
+          height={68}
+          className="fill-grey-400 stroke-grey-700"
+          strokeWidth={1}
+        />
 
         {/* Motor body. */}
-        <rect x={150} y={62} width={190} height={128} className="fill-grey-50 stroke-grey-700" strokeWidth={1} />
-        <rect x={158} y={70} width={174} height={22} className="fill-grey-300 stroke-grey-700" strokeWidth={1} />
-        <rect x={158} y={160} width={174} height={22} className="fill-grey-300 stroke-grey-700" strokeWidth={1} />
+        <rect
+          x={150}
+          y={62}
+          width={190}
+          height={128}
+          className="fill-grey-50 stroke-grey-700"
+          strokeWidth={1}
+        />
+        <rect
+          x={158}
+          y={70}
+          width={174}
+          height={22}
+          className="fill-grey-300 stroke-grey-700"
+          strokeWidth={1}
+        />
+        <rect
+          x={158}
+          y={160}
+          width={174}
+          height={22}
+          className="fill-grey-300 stroke-grey-700"
+          strokeWidth={1}
+        />
         <rect x={166} y={100} width={158} height={26} className="fill-syn-red/85" />
         <rect x={166} y={126} width={158} height={26} className="fill-ocean/85" />
 
         {/* Encoder, on the same shaft at the back. The disc turns; the read head does not. */}
-        <rect x={368} y={70} width={72} height={112} className="fill-none stroke-grey-300" strokeWidth={1} />
-        <rect x={396} y={78} width={7} height={96} className="fill-grey-300 stroke-grey-700" strokeWidth={1} />
+        <rect
+          x={368}
+          y={70}
+          width={72}
+          height={112}
+          className="fill-none stroke-grey-300"
+          strokeWidth={1}
+        />
+        <rect
+          x={396}
+          y={78}
+          width={7}
+          height={96}
+          className="fill-grey-300 stroke-grey-700"
+          strokeWidth={1}
+        />
         <rect x={386} y={80} width={28} height={12} className="fill-grey-700" />
-        <line x1={400} y1={92} x2={400} y2={100} className="stroke-grey-500" strokeWidth={1} strokeDasharray="2 2" />
+        <line
+          x1={400}
+          y1={92}
+          x2={400}
+          y2={100}
+          className="stroke-grey-500"
+          strokeWidth={1}
+          strokeDasharray="2 2"
+        />
 
         {/* Section marker: where the cross-section was cut. */}
         <line
@@ -137,12 +197,12 @@ export default function MotorSideView() {
         >
           cross-section on Servo Motors
         </Link>{' '}
-        is the slice at <span className="font-mono text-syn-red">A—A</span>.
-        The encoder is not in it, which is why it does not appear there. Where along the shaft the
-        encoder sits does not matter to any of this. What matters is that the magnets and the disc
-        sit on the same shaft and turn together. The angle between the disc&apos;s zero mark and the
-        magnets is fixed when the motor is built and never changes while it runs.
+        is the slice at <span className="font-mono text-syn-red">A—A</span>. The encoder is not in
+        it, which is why it does not appear there. Where along the shaft the encoder sits does not
+        matter to any of this. What matters is that the magnets and the disc sit on the same shaft
+        and turn together. The angle between the disc&apos;s zero mark and the magnets is fixed when
+        the motor is built and never changes while it runs.
       </p>
     </div>
-  )
+  );
 }

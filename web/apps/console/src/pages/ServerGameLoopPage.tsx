@@ -1,59 +1,59 @@
-import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import type { GameLoopHealth } from '@synapticon/motion-master-client'
-import PageHeader from '../components/PageHeader'
-import Callout from '../components/Callout'
-import GameLoopExplainer from '../components/GameLoopExplainer'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import type { GameLoopHealth } from '@synapticon/motion-master-client';
+import PageHeader from '../components/PageHeader';
+import Callout from '../components/Callout';
+import GameLoopExplainer from '../components/GameLoopExplainer';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
 
 // One shared control height (h-[38px]) for the input and its Apply button so they line up — the
 // same explicit-px approach the Motion page uses (this theme's spacing scale is geometric, so a
 // numeric height utility like h-9 is NOT ~36px). The button is inline-flex + centred to keep its
 // label vertically centred at that fixed height.
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-32 font-mono bg-white'
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-32 font-mono bg-white';
 const btnCls =
   'inline-flex items-center justify-center bg-syn-red text-white px-4 h-[38px] text-xs ' +
-  'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+  'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 
 // Flatten the client's nested {error:{error}} / {status} shape into a single message.
 function apiError(err: unknown): string {
   if (err && typeof err === 'object') {
     if ('error' in err) {
-      const inner = (err as { error: unknown }).error
+      const inner = (err as { error: unknown }).error;
       if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error)
+        return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner
+      if (typeof inner === 'string') return inner;
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      return `HTTP ${(err as { status: number }).status}`
+      return `HTTP ${(err as { status: number }).status}`;
     }
   }
-  return 'Unknown error'
+  return 'Unknown error';
 }
 
 // Poll cadence. The endpoint reports cumulative averages plus raw counters + a server timestamp, so
 // we diff successive polls to derive the *instantaneous* rate the loop is achieving right now. One
 // second is frequent enough to feel live without spamming the RT-adjacent HTTP thread.
-const POLL_INTERVAL_MS = 1000
+const POLL_INTERVAL_MS = 1000;
 
 // A loop meeting its period sits within a hair of targetHz. We flag a sustained shortfall below this
 // fraction as "not keeping up" — the coarse-timer degradation described in CLAUDE.md.
-const KEEPING_UP_FRACTION = 0.95
+const KEEPING_UP_FRACTION = 0.95;
 
 // Format a hertz figure with a sensible number of decimals for the magnitude.
 function formatHz(hz: number): string {
-  if (hz >= 100) return `${hz.toFixed(1)} Hz`
-  if (hz >= 1) return `${hz.toFixed(2)} Hz`
-  return `${hz.toFixed(3)} Hz`
+  if (hz >= 100) return `${hz.toFixed(1)} Hz`;
+  if (hz >= 1) return `${hz.toFixed(2)} Hz`;
+  return `${hz.toFixed(3)} Hz`;
 }
 
 // Format a nanosecond duration compactly: bare ns under a microsecond, then µs / ms.
 function formatNs(ns: number): string {
-  if (ns < 1_000) return `${ns} ns`
-  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(2)} µs`
-  return `${(ns / 1_000_000).toFixed(2)} ms`
+  if (ns < 1_000) return `${ns} ns`;
+  if (ns < 1_000_000) return `${(ns / 1_000).toFixed(2)} µs`;
+  return `${(ns / 1_000_000).toFixed(2)} ms`;
 }
 
 function Metric({
@@ -63,11 +63,11 @@ function Metric({
   tone = 'normal',
   title,
 }: {
-  label: string
-  value: React.ReactNode
-  sub?: React.ReactNode
-  tone?: 'normal' | 'good' | 'bad' | 'muted'
-  title?: string
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: 'normal' | 'good' | 'bad' | 'muted';
+  title?: string;
 }) {
   const valueTone =
     tone === 'good'
@@ -76,14 +76,14 @@ function Metric({
         ? 'text-status-bad'
         : tone === 'muted'
           ? 'text-grey-400'
-          : 'text-grey-900'
+          : 'text-grey-900';
   return (
     <div className="border border-grey-200 p-4" title={title}>
       <p className="eyebrow text-grey-500 mb-2 cursor-help">{label}</p>
       <p className={`font-display text-3xl font-light tabular-nums ${valueTone}`}>{value}</p>
       {sub && <p className="text-xs text-grey-600 mt-1">{sub}</p>}
     </div>
-  )
+  );
 }
 
 function RtFlag({ ok, children }: { ok: boolean; children: React.ReactNode }) {
@@ -91,87 +91,87 @@ function RtFlag({ ok, children }: { ok: boolean; children: React.ReactNode }) {
     <span className={`font-mono ${ok ? 'text-status-good' : 'text-grey-500'}`}>
       {ok ? 'yes' : 'no'} <span className="text-grey-500">{children}</span>
     </span>
-  )
+  );
 }
 
 export default function ServerGameLoopPage() {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   const query = useQuery({
     queryKey: ['gameLoop'],
     queryFn: () => api.getGameLoop(),
     refetchInterval: POLL_INTERVAL_MS,
-  })
+  });
 
-  const health = query.data?.data
+  const health = query.data?.data;
 
   // Cycle-period control. Prefill the input from the loop's current period once, then leave it under
   // the user's control (the 1 s poll must not clobber what they are typing).
-  const [periodInput, setPeriodInput] = useState('')
-  const [periodError, setPeriodError] = useState<string | null>(null)
-  const prefilled = useRef(false)
+  const [periodInput, setPeriodInput] = useState('');
+  const [periodError, setPeriodError] = useState<string | null>(null);
+  const prefilled = useRef(false);
   useEffect(() => {
     if (health && !prefilled.current) {
-      setPeriodInput(String(health.periodUs))
-      prefilled.current = true
+      setPeriodInput(String(health.periodUs));
+      prefilled.current = true;
     }
-  }, [health])
+  }, [health]);
 
   const setPeriodMutation = useMutation({
     mutationFn: (periodUs: number) => api.setGameLoopPeriod({ periodUs }),
-  })
+  });
 
   function applyPeriod() {
-    setPeriodError(null)
-    const periodUs = Number(periodInput)
+    setPeriodError(null);
+    const periodUs = Number(periodInput);
     if (!Number.isInteger(periodUs) || periodUs <= 0) {
-      setPeriodError('Enter a whole number of microseconds greater than 0.')
-      return
+      setPeriodError('Enter a whole number of microseconds greater than 0.');
+      return;
     }
     setPeriodMutation.mutate(periodUs, {
       onSuccess: () => {
         // The server reset its health counters for the new period, so drop our diff baseline —
         // otherwise the next poll diffs the fresh (smaller) counters against the pre-change sample
         // and renders a one-tick bogus rate. Same reset as the reconnect path below.
-        prev.current = null
-        setInstant(null)
-        void query.refetch()
+        prev.current = null;
+        setInstant(null);
+        void query.refetch();
       },
       onError: (err) => setPeriodError(apiError(err)),
-    })
+    });
   }
 
   // Derive the instantaneous rate by diffing this sample against the previous one: how many cycles
   // the loop actually ran, over the real wall-clock interval between the two server timestamps. This
   // catches a stall the cumulative achievedHz would smooth away over a long uptime.
-  const prev = useRef<GameLoopHealth | null>(null)
-  const [instant, setInstant] = useState<{ hz: number; skipHz: number } | null>(null)
+  const prev = useRef<GameLoopHealth | null>(null);
+  const [instant, setInstant] = useState<{ hz: number; skipHz: number } | null>(null);
 
   useEffect(() => {
-    if (!health) return
-    const last = prev.current
+    if (!health) return;
+    const last = prev.current;
     if (last && health.timestampUs > last.timestampUs) {
-      const dtSec = (health.timestampUs - last.timestampUs) / 1_000_000
+      const dtSec = (health.timestampUs - last.timestampUs) / 1_000_000;
       if (dtSec > 0) {
-        const hz = (health.executedCycles - last.executedCycles) / dtSec
-        const skipHz = (health.skippedCycles - last.skippedCycles) / dtSec
-        setInstant({ hz: Math.max(0, hz), skipHz: Math.max(0, skipHz) })
+        const hz = (health.executedCycles - last.executedCycles) / dtSec;
+        const skipHz = (health.skippedCycles - last.skippedCycles) / dtSec;
+        setInstant({ hz: Math.max(0, hz), skipHz: Math.max(0, skipHz) });
       }
     }
-    prev.current = health
-  }, [health])
+    prev.current = health;
+  }, [health]);
 
   // Reset the diff baseline whenever the connection drops so a stale sample can't produce a bogus
   // rate across a reconnect.
   useEffect(() => {
     if (query.isError) {
-      prev.current = null
-      setInstant(null)
+      prev.current = null;
+      setInstant(null);
     }
-  }, [query.isError])
+  }, [query.isError]);
 
-  const keepingUp = health ? health.achievedHz >= health.targetHz * KEEPING_UP_FRACTION : false
-  const skipping = instant ? instant.skipHz >= 1 : health ? health.skippedCycles > 0 : false
+  const keepingUp = health ? health.achievedHz >= health.targetHz * KEEPING_UP_FRACTION : false;
+  const skipping = instant ? instant.skipHz >= 1 : health ? health.skippedCycles > 0 : false;
 
   return (
     <div>
@@ -183,9 +183,9 @@ export default function ServerGameLoopPage() {
             Real-time health of the cyclic loop that drives EtherCAT process-data exchange. The loop
             targets a fixed period; on a real-time host it holds it almost exactly, but on stock
             Windows / macOS the OS timer may be too coarse to sustain a 1 ms cycle — the loop then
-            skips grid points to stay phase-locked rather than drift or burst. A steadily rising skip
-            count means the configured period is too aggressive for this machine; raise it. Refreshes
-            every second.
+            skips grid points to stay phase-locked rather than drift or burst. A steadily rising
+            skip count means the configured period is too aggressive for this machine; raise it.
+            Refreshes every second.
           </>
         }
       />
@@ -220,7 +220,11 @@ export default function ServerGameLoopPage() {
           ) : (
             <span />
           )}
-          <button onClick={() => query.refetch()} disabled={query.isFetching} className={btnOutline}>
+          <button
+            onClick={() => query.refetch()}
+            disabled={query.isFetching}
+            className={btnOutline}
+          >
             {query.isFetching ? 'Loading…' : 'Refresh'}
           </button>
         </div>
@@ -267,7 +271,13 @@ export default function ServerGameLoopPage() {
                 label="Live rate"
                 value={instant ? formatHz(instant.hz) : '—'}
                 sub="this poll, diffed from the last"
-                tone={instant ? (instant.hz >= health.targetHz * KEEPING_UP_FRACTION ? 'good' : 'bad') : 'muted'}
+                tone={
+                  instant
+                    ? instant.hz >= health.targetHz * KEEPING_UP_FRACTION
+                      ? 'good'
+                      : 'bad'
+                    : 'muted'
+                }
                 title="Instantaneous rate: executed cycles between the last two polls ÷ elapsed server time"
               />
               <Metric
@@ -279,7 +289,11 @@ export default function ServerGameLoopPage() {
                     : 'grid points dropped after overruns'
                 }
                 tone={
-                  instant && instant.skipHz >= 1 ? 'bad' : health.skippedCycles > 0 ? 'muted' : 'good'
+                  instant && instant.skipHz >= 1
+                    ? 'bad'
+                    : health.skippedCycles > 0
+                      ? 'muted'
+                      : 'good'
                 }
                 title="Cumulative cycles skipped since start (the value); highlighted red only while the loop is currently skipping (≥1/s)"
               />
@@ -337,9 +351,9 @@ export default function ServerGameLoopPage() {
                   inputMode="numeric"
                   placeholder={String(health.periodUs)}
                   onChange={(e) => {
-                    setPeriodInput(e.target.value)
-                    setPeriodMutation.reset()
-                    setPeriodError(null)
+                    setPeriodInput(e.target.value);
+                    setPeriodMutation.reset();
+                    setPeriodError(null);
                   }}
                 />
                 <span className="text-xs text-grey-500">µs</span>
@@ -362,5 +376,5 @@ export default function ServerGameLoopPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

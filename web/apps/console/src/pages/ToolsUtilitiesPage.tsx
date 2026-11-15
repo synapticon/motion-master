@@ -1,24 +1,24 @@
-import { useState } from 'react'
+import { useState } from 'react';
 import {
   apiErrorMessage,
   type FirmwarePackageName,
   type HardwareDescription,
-} from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
-import FieldRow from '../components/FieldRow'
-import FilePickerButton from '../components/FilePickerButton'
-import HardwareDescriptionView from '../components/HardwareDescriptionView'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnPrimary } from '../utils/styles'
+} from '@synapticon/motion-master-client';
+import Callout from '../components/Callout';
+import FieldRow from '../components/FieldRow';
+import FilePickerButton from '../components/FilePickerButton';
+import HardwareDescriptionView from '../components/HardwareDescriptionView';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnPrimary } from '../utils/styles';
 
 // One shared control height for every interactive control, matching the device pages: this theme's
 // spacing scale is geometric (h-9 = 6rem = 96px!), so the height has to be explicit px.
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-full bg-white font-mono'
-const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display block'
-const cardCls = 'border border-grey-200 bg-white p-5 space-y-4'
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-full bg-white font-mono';
+const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display block';
+const cardCls = 'border border-grey-200 bg-white p-5 space-y-4';
 
-const EXAMPLE_PACKAGE = 'package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip'
+const EXAMPLE_PACKAGE = 'package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip';
 
 /**
  * Decodes a SOMANET firmware package filename.
@@ -29,27 +29,27 @@ const EXAMPLE_PACKAGE = 'package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.
  * in step, and it would disagree first on exactly the odd names worth checking.
  */
 function FirmwarePackageNameTool() {
-  const { api } = useConnection()
-  const [filename, setFilename] = useState('')
-  const [result, setResult] = useState<FirmwarePackageName | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [decoding, setDecoding] = useState(false)
+  const { api } = useConnection();
+  const [filename, setFilename] = useState('');
+  const [result, setResult] = useState<FirmwarePackageName | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [decoding, setDecoding] = useState(false);
 
   async function decode(name: string) {
-    const trimmed = name.trim()
+    const trimmed = name.trim();
     if (trimmed === '') {
-      return
+      return;
     }
-    setDecoding(true)
-    setError(null)
-    setResult(null)
+    setDecoding(true);
+    setError(null);
+    setResult(null);
     try {
-      const res = await api.getFirmwarePackageName({ filename: trimmed })
-      setResult(res.data)
+      const res = await api.getFirmwarePackageName({ filename: trimmed });
+      setResult(res.data);
     } catch (err) {
-      setError(apiErrorMessage(err, 'Could not decode that filename.'))
+      setError(apiErrorMessage(err, 'Could not decode that filename.'));
     } finally {
-      setDecoding(false)
+      setDecoding(false);
     }
   }
 
@@ -67,9 +67,9 @@ function FirmwarePackageNameTool() {
 
       <form
         className="flex items-end gap-3"
-        onSubmit={e => {
-          e.preventDefault()
-          void decode(filename)
+        onSubmit={(e) => {
+          e.preventDefault();
+          void decode(filename);
         }}
       >
         <div className="flex-1 space-y-1">
@@ -83,7 +83,7 @@ function FirmwarePackageNameTool() {
             spellCheck={false}
             placeholder={EXAMPLE_PACKAGE}
             value={filename}
-            onChange={e => setFilename(e.target.value)}
+            onChange={(e) => setFilename(e.target.value)}
           />
         </div>
         <button
@@ -99,8 +99,8 @@ function FirmwarePackageNameTool() {
         type="button"
         className="text-xs text-ocean hover:underline cursor-pointer"
         onClick={() => {
-          setFilename(EXAMPLE_PACKAGE)
-          void decode(EXAMPLE_PACKAGE)
+          setFilename(EXAMPLE_PACKAGE);
+          void decode(EXAMPLE_PACKAGE);
         }}
       >
         Try an example
@@ -151,7 +151,7 @@ function FirmwarePackageNameTool() {
         </div>
       )}
     </section>
-  )
+  );
 }
 
 /**
@@ -163,22 +163,22 @@ function FirmwarePackageNameTool() {
  * decides which firmware package the hardware takes.
  */
 function HardwareDescriptionTool() {
-  const { api } = useConnection()
-  const [result, setResult] = useState<HardwareDescription | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [parsing, setParsing] = useState(false)
+  const { api } = useConnection();
+  const [result, setResult] = useState<HardwareDescription | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [parsing, setParsing] = useState(false);
 
   async function parse(file: File) {
-    setParsing(true)
-    setError(null)
-    setResult(null)
+    setParsing(true);
+    setError(null);
+    setResult(null);
     try {
-      const res = await api.parseHardwareDescription(await file.text())
-      setResult(res.data)
+      const res = await api.parseHardwareDescription(await file.text());
+      setResult(res.data);
     } catch (err) {
-      setError(apiErrorMessage(err, 'Could not parse that file.'))
+      setError(apiErrorMessage(err, 'Could not parse that file.'));
     } finally {
-      setParsing(false)
+      setParsing(false);
     }
   }
 
@@ -195,7 +195,7 @@ function HardwareDescriptionTool() {
 
       {/* No `accept`: the file is named `.hardware_description`, an extension no dialog filter
           matches, so restricting by type would hide the only file anyone wants to pick. */}
-      <FilePickerButton accept="" onFile={file => void parse(file)} className="h-[38px]">
+      <FilePickerButton accept="" onFile={(file) => void parse(file)} className="h-[38px]">
         {parsing ? 'Parsing…' : 'Choose file…'}
       </FilePickerButton>
 
@@ -207,7 +207,7 @@ function HardwareDescriptionTool() {
         </div>
       )}
     </section>
-  )
+  );
 }
 
 /**
@@ -230,5 +230,5 @@ export default function ToolsUtilitiesPage() {
         <HardwareDescriptionTool />
       </div>
     </div>
-  )
+  );
 }

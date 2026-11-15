@@ -1,4 +1,4 @@
-import { parseIntegerFlexible } from '@synapticon/motion-master-client'
+import { parseIntegerFlexible } from '@synapticon/motion-master-client';
 
 // A text input for an integer value that can be viewed and edited in either decimal or
 // hexadecimal. It is deliberately stateless: the "base" is read straight off the string
@@ -9,39 +9,39 @@ import { parseIntegerFlexible } from '@synapticon/motion-master-client'
 // it renders as a plain input with no toggle.
 
 interface HexDecInputProps {
-  value: string
-  onChange: (value: string) => void
+  value: string;
+  onChange: (value: string) => void;
   // Whether the hex/dec toggle applies — true only for integer-typed objects.
-  canHex?: boolean
+  canHex?: boolean;
   // Disables the text input (the value isn't editable, e.g. a read-only object). The hex/dec
   // toggle stays live so read-only values can still be viewed in either base; freeze it with
   // `toggleDisabled` (e.g. while an op is in flight).
-  disabled?: boolean
-  toggleDisabled?: boolean
-  placeholder?: string
-  title?: string
+  disabled?: boolean;
+  toggleDisabled?: boolean;
+  placeholder?: string;
+  title?: string;
   // Visual classes for the <input> (borders/padding/font) — width is handled by the flex layout.
-  inputClassName: string
+  inputClassName: string;
   // Sizing classes for the wrapper (e.g. 'w-40' or 'w-full'); the input flexes to fill it.
-  wrapperClassName?: string
+  wrapperClassName?: string;
   // Optional zero-padding for the hex form's digits (e.g. 4 → 0x000F), applied to the magnitude.
-  hexPadDigits?: number
+  hexPadDigits?: number;
 }
 
 function isHexForm(value: string): boolean {
-  return /^\s*-?0[xX]/.test(value)
+  return /^\s*-?0[xX]/.test(value);
 }
 
 // Reformat a flexible-int string into the requested base, or null if it isn't a parseable integer
 // (empty, mid-edit, or a non-integer) — in which case the caller leaves the text untouched.
 function toBase(value: string, base: 'dec' | 'hex', hexPadDigits?: number): string | null {
-  const n = parseIntegerFlexible(value.trim())
-  if (n === null) return null
-  if (base === 'dec') return n.toString(10)
-  const negative = n < 0n
-  const magnitude = (negative ? -n : n).toString(16).toUpperCase()
-  const padded = hexPadDigits ? magnitude.padStart(hexPadDigits, '0') : magnitude
-  return `${negative ? '-' : ''}0x${padded}`
+  const n = parseIntegerFlexible(value.trim());
+  if (n === null) return null;
+  if (base === 'dec') return n.toString(10);
+  const negative = n < 0n;
+  const magnitude = (negative ? -n : n).toString(16).toUpperCase();
+  const padded = hexPadDigits ? magnitude.padStart(hexPadDigits, '0') : magnitude;
+  return `${negative ? '-' : ''}0x${padded}`;
 }
 
 export default function HexDecInput({
@@ -56,18 +56,18 @@ export default function HexDecInput({
   wrapperClassName = 'inline-flex',
   hexPadDigits,
 }: HexDecInputProps) {
-  const hex = isHexForm(value)
+  const hex = isHexForm(value);
   // The toggle can only fire when the current text is a parseable integer; mid-edit garbage or an
   // empty field leaves nothing to convert, so the button is inert rather than silently clearing.
-  const converted = toBase(value, hex ? 'dec' : 'hex', hexPadDigits)
-  const canToggle = canHex && !toggleDisabled && converted !== null
+  const converted = toBase(value, hex ? 'dec' : 'hex', hexPadDigits);
+  const canToggle = canHex && !toggleDisabled && converted !== null;
 
   return (
     <div className={`${wrapperClassName} items-stretch`}>
       <input
         type="text"
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         placeholder={placeholder}
         title={title}
@@ -90,5 +90,5 @@ export default function HexDecInput({
         </button>
       )}
     </div>
-  )
+  );
 }

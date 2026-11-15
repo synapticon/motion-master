@@ -1,79 +1,83 @@
-import { useQuery } from '@tanstack/react-query'
-import type { DcSyncStatus } from '@synapticon/motion-master-client'
-import PageHeader from '../components/PageHeader'
-import DcSyncExplainer from '../components/DcSyncExplainer'
-import SlavePositionBadge from '../components/SlavePositionBadge'
-import { WireTiming, useWireTiming } from '../components/WireTiming'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
-import NoEscNotice from '../components/NoEscNotice'
-import { useSupportsEsc } from '../hooks/useSupportsEsc'
+import { useQuery } from '@tanstack/react-query';
+import type { DcSyncStatus } from '@synapticon/motion-master-client';
+import PageHeader from '../components/PageHeader';
+import DcSyncExplainer from '../components/DcSyncExplainer';
+import SlavePositionBadge from '../components/SlavePositionBadge';
+import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
+import NoEscNotice from '../components/NoEscNotice';
+import { useSupportsEsc } from '../hooks/useSupportsEsc';
 
 // Once the drift-compensation loop settles, a locked slave tracks the reference clock to within a
 // few tens of nanoseconds; we treat anything under 1 µs as synced and flag a larger deviation. The
 // reference clock and non-DC slaves are not measured against this.
-const SYNC_TOLERANCE_NS = 1000
+const SYNC_TOLERANCE_NS = 1000;
 
 const inSync = (d: DcSyncStatus): boolean =>
-  !d.dcCapable || d.referenceClock || Math.abs(d.systemTimeDifference) < SYNC_TOLERANCE_NS
+  !d.dcCapable || d.referenceClock || Math.abs(d.systemTimeDifference) < SYNC_TOLERANCE_NS;
 
 // Format a nanosecond figure compactly: bare ns up to a microsecond, then µs / ms with the sign
 // preserved so the reader can see which way a slave's clock leans relative to the reference.
 function formatNs(ns: number): string {
-  const sign = ns < 0 ? '−' : ''
-  const abs = Math.abs(ns)
-  if (abs < 1_000) return `${sign}${abs} ns`
-  if (abs < 1_000_000) return `${sign}${(abs / 1_000).toFixed(2)} µs`
-  return `${sign}${(abs / 1_000_000).toFixed(2)} ms`
+  const sign = ns < 0 ? '−' : '';
+  const abs = Math.abs(ns);
+  if (abs < 1_000) return `${sign}${abs} ns`;
+  if (abs < 1_000_000) return `${sign}${(abs / 1_000).toFixed(2)} µs`;
+  return `${sign}${(abs / 1_000_000).toFixed(2)} ms`;
 }
 
 function Difference({ device }: { device: DcSyncStatus }) {
   if (!device.dcCapable) {
-    return <span className="text-grey-400">—</span>
+    return <span className="text-grey-400">—</span>;
   }
   if (device.referenceClock) {
-    return <span className="text-grey-500 font-mono">0 ns (reference)</span>
+    return <span className="text-grey-500 font-mono">0 ns (reference)</span>;
   }
-  const synced = inSync(device)
+  const synced = inSync(device);
   return (
     <span className={`font-mono ${synced ? 'text-grey-800' : 'text-status-bad font-bold'}`}>
       {formatNs(device.systemTimeDifference)}
     </span>
-  )
+  );
 }
 
 function RoleBadge({ device }: { device: DcSyncStatus }) {
   if (!device.dcCapable) {
-    return <span className="text-[11px] font-display uppercase tracking-wide text-grey-400">no DC</span>
+    return (
+      <span className="text-[11px] font-display uppercase tracking-wide text-grey-400">no DC</span>
+    );
   }
   if (device.referenceClock) {
     return (
-      <span className="text-[11px] font-display uppercase tracking-wide text-syn-red">reference</span>
-    )
+      <span className="text-[11px] font-display uppercase tracking-wide text-syn-red">
+        reference
+      </span>
+    );
   }
   return (
     <span className="text-[11px] font-display uppercase tracking-wide text-grey-500">follower</span>
-  )
+  );
 }
 
 export default function FieldbusDcSyncPage() {
-  const { api } = useConnection()
-  const { timing, measure } = useWireTiming()
-  const supportsEsc = useSupportsEsc()
+  const { api } = useConnection();
+  const { timing, measure } = useWireTiming();
+  const supportsEsc = useSupportsEsc();
 
   const query = useQuery({
     queryKey: ['dcSync'],
     enabled: supportsEsc,
     queryFn: () => measure(() => api.getDcSync()),
     refetchInterval: 2000,
-  })
+  });
 
-  const devices = query.data?.data ?? []
-  const dcDevices = devices.filter(d => d.dcCapable)
-  const unsynced = dcDevices.filter(d => !inSync(d))
-  const reference = dcDevices.find(d => d.referenceClock)
+  const devices = query.data?.data ?? [];
+  const dcDevices = devices.filter((d) => d.dcCapable);
+  const unsynced = dcDevices.filter((d) => !inSync(d));
+  const reference = dcDevices.find((d) => d.referenceClock);
 
-  const th = 'px-4 py-2 font-display uppercase tracking-wide font-medium'
+  const th = 'px-4 py-2 font-display uppercase tracking-wide font-medium';
 
   if (!supportsEsc) {
     return (
@@ -87,7 +91,7 @@ export default function FieldbusDcSyncPage() {
           <NoEscNotice feature="DC sync" />
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -114,7 +118,10 @@ export default function FieldbusDcSyncPage() {
           {dcDevices.length > 0 ? (
             <p className="text-xs text-grey-600">
               {dcDevices.length} DC-capable {dcDevices.length === 1 ? 'slave' : 'slaves'}
-              {reference ? `, reference clock at #${reference.slavePosition}` : ', no reference clock'}.{' '}
+              {reference
+                ? `, reference clock at #${reference.slavePosition}`
+                : ', no reference clock'}
+              .{' '}
               {unsynced.length === 0 ? (
                 <span className="text-status-good">All locked to the reference.</span>
               ) : (
@@ -176,7 +183,7 @@ export default function FieldbusDcSyncPage() {
                 </tr>
               </thead>
               <tbody>
-                {devices.map(device => (
+                {devices.map((device) => (
                   <tr key={device.slavePosition} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2">
                       <SlavePositionBadge position={device.slavePosition} />
@@ -207,5 +214,5 @@ export default function FieldbusDcSyncPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

@@ -1,129 +1,129 @@
-import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router'
-import type uPlot from 'uplot'
-import type { HrdRecording } from '@synapticon/motion-master-client'
-import Checkbox from '../components/Checkbox'
-import DevicePageHeader from '../components/DevicePageHeader'
-import HrdExplainer from '../components/HrdExplainer'
-import MonitoringChart, { SAMPLE_INDEX } from '../components/MonitoringChart'
-import { WireTiming, useWireTiming } from '../components/WireTiming'
-import { useConnection } from '../contexts/ConnectionContext'
-import { downloadBytes } from '../utils/download'
-import { formatBytes } from '../utils/format'
-import { btnOutline, btnPrimary } from '../utils/styles'
+import { useMemo, useState } from 'react';
+import { Link, useParams } from 'react-router';
+import type uPlot from 'uplot';
+import type { HrdRecording } from '@synapticon/motion-master-client';
+import Checkbox from '../components/Checkbox';
+import DevicePageHeader from '../components/DevicePageHeader';
+import HrdExplainer from '../components/HrdExplainer';
+import MonitoringChart, { SAMPLE_INDEX } from '../components/MonitoringChart';
+import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { useConnection } from '../contexts/ConnectionContext';
+import { downloadBytes } from '../utils/download';
+import { formatBytes } from '../utils/format';
+import { btnOutline, btnPrimary } from '../utils/styles';
 
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 // The two recordings the drive can make, with what each is for. The value is what the API takes;
 // the label is the API's own wording, so what is read here reads the same as what was recorded.
 const DATA_CHOICES = [
   { value: 'encoder-raw', label: 'Encoder raw data' },
   { value: 'system-identification', label: 'System identification data' },
-] as const
+] as const;
 
-type HrdData = (typeof DATA_CHOICES)[number]['value']
+type HrdData = (typeof DATA_CHOICES)[number]['value'];
 
 // Series that start hidden. `raw` is the whole 32-bit encoder word, so its scale (up to ~268
 // million) flattens the two 14-bit tracks plotted beside it into a straight line; it is the column
 // an algorithm wants and the one an eye does not. The legend toggles it back on.
-const HIDDEN_BY_DEFAULT = ['raw']
+const HIDDEN_BY_DEFAULT = ['raw'];
 
 // Surfaces the node layer's error string from a failed request (matching the other device pages).
 function apiError(err: unknown): string {
   if (err && typeof err === 'object') {
     if ('error' in err) {
-      const inner = (err as { error: unknown }).error
+      const inner = (err as { error: unknown }).error;
       if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error)
+        return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner
+      if (typeof inner === 'string') return inner;
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      return `HTTP ${(err as { status: number }).status}`
+      return `HTTP ${(err as { status: number }).status}`;
     }
   }
-  if (err instanceof Error) return err.message
-  return 'Unknown error'
+  if (err instanceof Error) return err.message;
+  return 'Unknown error';
 }
 
 export default function DeviceHrdPage() {
-  const { deviceId } = useParams()
-  const slavePosition = Number(deviceId)
-  const { api } = useConnection()
-  const { timing, measure } = useWireTiming()
+  const { deviceId } = useParams();
+  const slavePosition = Number(deviceId);
+  const { api } = useConnection();
+  const { timing, measure } = useWireTiming();
 
-  const [data, setData] = useState<HrdData>('encoder-raw')
-  const [recording, setRecording] = useState<HrdRecording | null>(null)
-  const [reading, setReading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [downloading, setDownloading] = useState(false)
+  const [data, setData] = useState<HrdData>('encoder-raw');
+  const [recording, setRecording] = useState<HrdRecording | null>(null);
+  const [reading, setReading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   // Which columns are plotted. Empty means "not chosen yet", which is filled in from the recording
   // when one arrives — the columns are not known until then, and they differ per data selection.
-  const [shown, setShown] = useState<Set<string>>(new Set())
+  const [shown, setShown] = useState<Set<string>>(new Set());
 
   async function handleRead() {
-    if (reading) return
-    setReading(true)
-    setError(null)
+    if (reading) return;
+    setReading(true);
+    setError(null);
     try {
-      const response = await measure(() => api.readHrdRecording(slavePosition, { data }))
-      setRecording(response.data)
-      setShown(new Set(response.data.columns))
+      const response = await measure(() => api.readHrdRecording(slavePosition, { data }));
+      setRecording(response.data);
+      setShown(new Set(response.data.columns));
     } catch (err) {
-      setRecording(null)
-      setError(apiError(err))
+      setRecording(null);
+      setError(apiError(err));
     } finally {
-      setReading(false)
+      setReading(false);
     }
   }
 
   // CSV comes from the server, not from the rows already on this page: it is the same read decoded
   // the other way, so a file saved here is byte-for-byte what a script fetching the endpoint gets.
   async function handleDownloadCsv() {
-    if (downloading) return
-    setDownloading(true)
-    setError(null)
+    if (downloading) return;
+    setDownloading(true);
+    setError(null);
     try {
-      const url = `${api.baseUrl}/api/devices/${slavePosition}/hrd?data=${data}`
-      const response = await fetch(url, { headers: { Accept: 'text/csv' } })
+      const url = `${api.baseUrl}/api/devices/${slavePosition}/hrd?data=${data}`;
+      const response = await fetch(url, { headers: { Accept: 'text/csv' } });
       if (!response.ok) {
-        const json = await response.json().catch(() => null)
-        throw new Error(json?.error ?? `HTTP ${response.status}`)
+        const json = await response.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${response.status}`);
       }
-      const bytes = new Uint8Array(await response.arrayBuffer())
-      downloadBytes(bytes, `hrd-slave-${slavePosition}-${data}.csv`)
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      downloadBytes(bytes, `hrd-slave-${slavePosition}-${data}.csv`);
     } catch (err) {
-      setError(apiError(err))
+      setError(apiError(err));
     } finally {
-      setDownloading(false)
+      setDownloading(false);
     }
   }
 
   // uPlot data for the chosen columns: x is the sample number (the samples are evenly spaced and
   // the recording carries no timestamps), then one array per selected column.
   const chart = useMemo(() => {
-    const empty = { data: [[]] as unknown as uPlot.AlignedData, labels: [] as string[] }
-    if (!recording || recording.samples.length === 0) return empty
+    const empty = { data: [[]] as unknown as uPlot.AlignedData, labels: [] as string[] };
+    if (!recording || recording.samples.length === 0) return empty;
     const columns = recording.columns
       .map((name, i) => ({ name, i }))
-      .filter(({ name }) => shown.has(name))
-    if (columns.length === 0) return empty
-    const xs = recording.samples.map((_, i) => i)
-    const ys = columns.map(({ i }) => recording.samples.map((row) => row[i]))
-    return { data: [xs, ...ys] as uPlot.AlignedData, labels: columns.map((c) => c.name) }
-  }, [recording, shown])
+      .filter(({ name }) => shown.has(name));
+    if (columns.length === 0) return empty;
+    const xs = recording.samples.map((_, i) => i);
+    const ys = columns.map(({ i }) => recording.samples.map((row) => row[i]));
+    return { data: [xs, ...ys] as uPlot.AlignedData, labels: columns.map((c) => c.name) };
+  }, [recording, shown]);
 
   function toggle(column: string) {
     setShown((current) => {
-      const next = new Set(current)
+      const next = new Set(current);
       if (next.has(column)) {
-        next.delete(column)
+        next.delete(column);
       } else {
-        next.add(column)
+        next.add(column);
       }
-      return next
-    })
+      return next;
+    });
   }
 
   return (
@@ -140,10 +140,10 @@ export default function DeviceHrdPage() {
         <section className="border border-grey-200 p-4 space-y-4">
           <h3 className="font-display uppercase text-sm tracking-wide">Read a recording</h3>
           <p className="text-xs text-grey-600 max-w-3xl">
-            Fetches the drive's <code>hr_data</code> files over FoE and decodes them. Choose the same
-            data the recording was made with — nothing on the drive says which it holds, so the wrong
-            choice decodes the same bytes into different, plausible-looking numbers. Recording itself
-            is the{' '}
+            Fetches the drive's <code>hr_data</code> files over FoE and decodes them. Choose the
+            same data the recording was made with — nothing on the drive says which it holds, so the
+            wrong choice decodes the same bytes into different, plausible-looking numbers. Recording
+            itself is the{' '}
             <Link
               to={`/devices/${slavePosition}/procedures/hrd-streaming`}
               className="text-ocean hover:underline"
@@ -230,10 +230,7 @@ export default function DeviceHrdPage() {
               <>
                 <div className="flex flex-wrap gap-4">
                   {recording.columns.map((column) => (
-                    <label
-                      key={column}
-                      className="flex items-center gap-2 text-sm cursor-pointer"
-                    >
+                    <label key={column} className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox checked={shown.has(column)} onChange={() => toggle(column)} />
                       <span className="font-mono">{column}</span>
                     </label>
@@ -251,5 +248,5 @@ export default function DeviceHrdPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

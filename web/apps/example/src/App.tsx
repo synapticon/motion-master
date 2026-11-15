@@ -1,27 +1,29 @@
-import { useState } from 'react'
-import { Routes, Route, Link, useLocation } from 'react-router'
-import { Api, API_BASE_URL, formatHex } from '@synapticon/motion-master-client'
-import { PageHeader, Callout, Button } from '@synapticon/ui'
+import { useState } from 'react';
+import { Routes, Route, Link, useLocation } from 'react-router';
+import { Api, API_BASE_URL, formatHex } from '@synapticon/motion-master-client';
+import { PageHeader, Callout, Button } from '@synapticon/ui';
 
 // A shared library used offline: the client ships pure, framework-agnostic helpers
 // (no server needed) alongside the HTTP/WebSocket client.
-const DEMO_VALUE = 0x80a0
+const DEMO_VALUE = 0x80a0;
 
 // The same client the real apps use, pointed at a local Motion Master.
-const api = new Api({ baseUrl: API_BASE_URL })
+const api = new Api({ baseUrl: API_BASE_URL });
 
 function ServerCheck() {
   const [state, setState] = useState<
-    { status: 'idle' | 'loading' } | { status: 'ok'; version: string } | { status: 'err'; message: string }
-  >({ status: 'idle' })
+    | { status: 'idle' | 'loading' }
+    | { status: 'ok'; version: string }
+    | { status: 'err'; message: string }
+  >({ status: 'idle' });
 
   async function check() {
-    setState({ status: 'loading' })
+    setState({ status: 'loading' });
     try {
-      const res = await api.getVersion()
-      setState({ status: 'ok', version: res.data.version })
+      const res = await api.getVersion();
+      setState({ status: 'ok', version: res.data.version });
     } catch (e) {
-      setState({ status: 'err', message: e instanceof Error ? e.message : String(e) })
+      setState({ status: 'err', message: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -42,7 +44,7 @@ function ServerCheck() {
         </Callout>
       )}
     </div>
-  )
+  );
 }
 
 function Home() {
@@ -91,11 +93,11 @@ function Home() {
         </p>
       </section>
     </div>
-  )
+  );
 }
 
 function About() {
-  const { pathname } = useLocation()
+  const { pathname } = useLocation();
   return (
     <div className="flex flex-col gap-4 px-8 py-7">
       <p className="text-sm text-grey-600">
@@ -106,7 +108,7 @@ function About() {
         ← Back home
       </Link>
     </div>
-  )
+  );
 }
 
 export default function App() {
@@ -122,5 +124,5 @@ export default function App() {
         <Route path="/about" element={<About />} />
       </Routes>
     </div>
-  )
+  );
 }

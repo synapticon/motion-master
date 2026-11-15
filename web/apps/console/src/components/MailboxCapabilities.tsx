@@ -1,7 +1,7 @@
 interface MailboxCapabilitiesProps {
-  coeDetails: number
-  foeDetails: number
-  eoeDetails: number
+  coeDetails: number;
+  foeDetails: number;
+  eoeDetails: number;
 }
 
 // CoE detail bits (ECT_COEDET_*), advertised in the device EEPROM. The rich flag set; FoE/EoE
@@ -26,7 +26,7 @@ const COE_BITS: { bit: number; label: string; desc: string }[] = [
     label: 'Complete Access',
     desc: 'SDO Complete Access. Advertised only — SOMANET drives support Complete Access even when this reads off, so Motion Master probes actual support at runtime rather than trusting this bit.',
   },
-]
+];
 
 function Chip({ on, label, desc }: { on: boolean; label: string; desc: string }) {
   return (
@@ -41,7 +41,7 @@ function Chip({ on, label, desc }: { on: boolean; label: string; desc: string })
       />
       {label}
     </span>
-  )
+  );
 }
 
 // Decodes the advertised CoE/FoE/EoE mailbox detail bytes into labelled capability chips. Shared by
@@ -62,11 +62,7 @@ export default function MailboxCapabilities({
         label="FoE"
         desc="File over EtherCAT (firmware transfer) enabled."
       />
-      <Chip
-        on={(eoeDetails & 0x01) !== 0}
-        label="EoE"
-        desc="Ethernet over EtherCAT enabled."
-      />
+      <Chip on={(eoeDetails & 0x01) !== 0} label="EoE" desc="Ethernet over EtherCAT enabled." />
     </div>
-  )
+  );
 }

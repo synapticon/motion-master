@@ -1,12 +1,17 @@
-import { useQuery } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
-import { type SlaveConfig, type SyncManagerConfig, type FmmuConfig, formatHex } from '@synapticon/motion-master-client'
-import PageHeader from '../components/PageHeader'
-import ConfigExplainer from '../components/ConfigExplainer'
-import MailboxCapabilities from '../components/MailboxCapabilities'
-import SlavePositionBadge from '../components/SlavePositionBadge'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { useQuery } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+import {
+  type SlaveConfig,
+  type SyncManagerConfig,
+  type FmmuConfig,
+  formatHex,
+} from '@synapticon/motion-master-client';
+import PageHeader from '../components/PageHeader';
+import ConfigExplainer from '../components/ConfigExplainer';
+import MailboxCapabilities from '../components/MailboxCapabilities';
+import SlavePositionBadge from '../components/SlavePositionBadge';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
 
 // SOEM SMtype: 0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs.
 const SM_TYPE: Record<number, string> = {
@@ -15,7 +20,7 @@ const SM_TYPE: Record<number, string> = {
   2: 'Mailbox In',
   3: 'Outputs (RxPDO)',
   4: 'Inputs (TxPDO)',
-}
+};
 
 // ESC FMMU Type register (reg 0x060B): bit0 = read (Inputs/TxPDO), bit1 = write (Outputs/RxPDO).
 const FMMU_TYPE: Record<number, string> = {
@@ -23,20 +28,20 @@ const FMMU_TYPE: Record<number, string> = {
   1: 'Inputs',
   2: 'Outputs',
   3: 'SM status',
-}
+};
 
 // SyncManager configuration-register block in the ESC (8 bytes per SM from 0x0800). An FMMU whose
 // physical target falls here maps a mailbox SM's status byte into logical space so the master can
 // poll mailbox-full state via the cyclic LRW datagram — it is not process data.
-const SM_REGISTER_BLOCK_START = 0x0800
-const SM_REGISTER_BLOCK_END = 0x0880
+const SM_REGISTER_BLOCK_START = 0x0800;
+const SM_REGISTER_BLOCK_END = 0x0880;
 
 const fmmuType = (f: FmmuConfig): string => {
   if (f.physicalStart >= SM_REGISTER_BLOCK_START && f.physicalStart < SM_REGISTER_BLOCK_END) {
-    return 'Mailbox state'
+    return 'Mailbox state';
   }
-  return FMMU_TYPE[f.type] ?? `Type ${f.type}`
-}
+  return FMMU_TYPE[f.type] ?? `Type ${f.type}`;
+};
 
 // Mailbox protocol bits (SOEM ECT_MBXPROT_*): bit, abbreviation, full name.
 const MBX_PROTOCOLS: [number, string, string][] = [
@@ -46,12 +51,12 @@ const MBX_PROTOCOLS: [number, string, string][] = [
   [0x08, 'FoE', 'File over EtherCAT'],
   [0x10, 'SoE', 'Servo Drive Profile over EtherCAT'],
   [0x20, 'VoE', 'Vendor-specific over EtherCAT'],
-]
+];
 
-const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
+const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit);
 
 function hex32(n: number) {
-  return `0x${n.toString(16).toUpperCase().padStart(8, '0')}`
+  return `0x${n.toString(16).toUpperCase().padStart(8, '0')}`;
 }
 
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
@@ -61,7 +66,7 @@ function Field({ label, value, hint }: { label: string; value: ReactNode; hint?:
       <p className="font-mono text-sm text-grey-800 mt-0.5">{value}</p>
       {hint && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
-  )
+  );
 }
 
 function Th({ children, hint }: { children: ReactNode; hint: string }) {
@@ -72,12 +77,12 @@ function Th({ children, hint }: { children: ReactNode; hint: string }) {
     >
       {children}
     </th>
-  )
+  );
 }
 
 function SyncManagerTable({ entries }: { entries: SyncManagerConfig[] }) {
   if (entries.length === 0) {
-    return <p className="text-xs text-grey-500">No Sync Managers configured.</p>
+    return <p className="text-xs text-grey-500">No Sync Managers configured.</p>;
   }
   return (
     <div className="border border-grey-200 overflow-x-auto">
@@ -85,7 +90,9 @@ function SyncManagerTable({ entries }: { entries: SyncManagerConfig[] }) {
         <thead>
           <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
             <Th hint="Sync Manager index in the ESC">SM</Th>
-            <Th hint="Sync Manager role: mailbox in/out or cyclic process data (RxPDO/TxPDO)">Type</Th>
+            <Th hint="Sync Manager role: mailbox in/out or cyclic process data (RxPDO/TxPDO)">
+              Type
+            </Th>
             <Th hint="Physical ESC memory address the Sync Manager guards">Phys addr</Th>
             <Th hint="Size in bytes of the memory buffer the Sync Manager guards">Length</Th>
             <Th hint="Raw SM control/flags register (buffer mode, direction, watchdog, enable)">
@@ -94,7 +101,7 @@ function SyncManagerTable({ entries }: { entries: SyncManagerConfig[] }) {
           </tr>
         </thead>
         <tbody>
-          {entries.map(sm => (
+          {entries.map((sm) => (
             <tr key={sm.index} className="border-b border-grey-100 last:border-0">
               <td className="px-4 py-2 font-mono">SM{sm.index}</td>
               <td className="px-4 py-2 text-grey-700">{SM_TYPE[sm.type] ?? `Type ${sm.type}`}</td>
@@ -106,12 +113,12 @@ function SyncManagerTable({ entries }: { entries: SyncManagerConfig[] }) {
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 function FmmuTable({ entries }: { entries: FmmuConfig[] }) {
   if (entries.length === 0) {
-    return <p className="text-xs text-grey-500">No FMMUs configured.</p>
+    return <p className="text-xs text-grey-500">No FMMUs configured.</p>;
   }
   return (
     <div className="border border-grey-200 overflow-x-auto">
@@ -131,58 +138,57 @@ function FmmuTable({ entries }: { entries: FmmuConfig[] }) {
           </tr>
         </thead>
         <tbody>
-          {entries.map(f => {
-            const type = fmmuType(f)
+          {entries.map((f) => {
+            const type = fmmuType(f);
             const typeHint =
               type === 'Mailbox state'
                 ? "A 1-byte flag, not process data: it tells the master when this slave has a mailbox message waiting to be read, so the master only fetches it when there's something there instead of constantly asking."
-                : undefined
+                : undefined;
             return (
-            <tr key={f.index} className="border-b border-grey-100 last:border-0">
-              <td className="px-4 py-2 font-mono">FMMU{f.index}</td>
-              <td className="px-4 py-2 text-grey-700">
-                {typeHint ? (
-                  <span
-                    title={typeHint}
-                    className="cursor-help"
-                  >
-                    {type}
-                  </span>
-                ) : (
-                  type
-                )}
-              </td>
-              <td className="px-4 py-2 font-mono">
-                {formatHex(f.logicalStart, 8)}.{f.logicalStartBit}–{f.logicalEndBit}
-              </td>
-              <td className="px-4 py-2 font-mono">{f.length} B</td>
-              <td className="px-4 py-2 font-mono">
-                {formatHex(f.physicalStart)}.{f.physicalStartBit}
-              </td>
-              <td className="px-4 py-2">
-                {f.active ? (
-                  <span className="text-status-good">yes</span>
-                ) : (
-                  <span className="text-grey-400">no</span>
-                )}
-              </td>
-            </tr>
-            )
+              <tr key={f.index} className="border-b border-grey-100 last:border-0">
+                <td className="px-4 py-2 font-mono">FMMU{f.index}</td>
+                <td className="px-4 py-2 text-grey-700">
+                  {typeHint ? (
+                    <span title={typeHint} className="cursor-help">
+                      {type}
+                    </span>
+                  ) : (
+                    type
+                  )}
+                </td>
+                <td className="px-4 py-2 font-mono">
+                  {formatHex(f.logicalStart, 8)}.{f.logicalStartBit}–{f.logicalEndBit}
+                </td>
+                <td className="px-4 py-2 font-mono">{f.length} B</td>
+                <td className="px-4 py-2 font-mono">
+                  {formatHex(f.physicalStart)}.{f.physicalStartBit}
+                </td>
+                <td className="px-4 py-2">
+                  {f.active ? (
+                    <span className="text-status-good">yes</span>
+                  ) : (
+                    <span className="text-grey-400">no</span>
+                  )}
+                </td>
+              </tr>
+            );
           })}
         </tbody>
       </table>
     </div>
-  )
+  );
 }
 
 function SlaveCard({ slave }: { slave: SlaveConfig }) {
-  const protocols = decodeProtocols(slave.mailbox.protocols)
+  const protocols = decodeProtocols(slave.mailbox.protocols);
   return (
     <section className="border border-grey-200">
       <header className="border-b border-grey-200 bg-grey-50 px-4 py-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <SlavePositionBadge position={slave.slavePosition} />
         <span className="text-sm text-grey-800 font-medium">
-          {slave.productName || slave.deviceName || <span className="text-grey-400">unknown device</span>}
+          {slave.productName || slave.deviceName || (
+            <span className="text-grey-400">unknown device</span>
+          )}
         </span>
         <span
           className="font-mono text-[11px] text-grey-500 cursor-help"
@@ -214,9 +220,21 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
             value={hex32(slave.vendorId)}
             hint="Manufacturer ID from EEPROM (0x22D2 = Synapticon)"
           />
-          <Field label="Product code" value={hex32(slave.productCode)} hint="Product code from EEPROM" />
-          <Field label="Revision" value={hex32(slave.revisionNumber)} hint="Revision number from EEPROM" />
-          <Field label="Serial" value={String(slave.serialNumber)} hint="Serial number from EEPROM" />
+          <Field
+            label="Product code"
+            value={hex32(slave.productCode)}
+            hint="Product code from EEPROM"
+          />
+          <Field
+            label="Revision"
+            value={hex32(slave.revisionNumber)}
+            hint="Revision number from EEPROM"
+          />
+          <Field
+            label="Serial"
+            value={String(slave.serialNumber)}
+            hint="Serial number from EEPROM"
+          />
           <Field
             label="Output / Input"
             value={`${slave.outputBits} / ${slave.inputBits} bits`}
@@ -239,21 +257,16 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
           <Field
             label="Protocols"
             value={
-              protocols.length ? (
-                protocols.map(([bit, abbr, full], i) => (
-                  <span key={bit}>
-                    {i > 0 && <span className="text-grey-400"> · </span>}
-                    <span
-                      title={full}
-                      className="cursor-help"
-                    >
-                      {abbr}
+              protocols.length
+                ? protocols.map(([bit, abbr, full], i) => (
+                    <span key={bit}>
+                      {i > 0 && <span className="text-grey-400"> · </span>}
+                      <span title={full} className="cursor-help">
+                        {abbr}
+                      </span>
                     </span>
-                  </span>
-                ))
-              ) : (
-                '—'
-              )
+                  ))
+                : '—'
             }
             hint="Mailbox protocols the slave supports"
           />
@@ -298,18 +311,18 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
         </div>
       </div>
     </section>
-  )
+  );
 }
 
 export default function FieldbusConfigurationPage() {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   const query = useQuery({
     queryKey: ['busConfig'],
     queryFn: () => api.getBusConfig(),
-  })
+  });
 
-  const slaves = query.data?.data ?? []
+  const slaves = query.data?.data ?? [];
 
   return (
     <div>
@@ -318,9 +331,9 @@ export default function FieldbusConfigurationPage() {
         title="Configuration"
         description={
           <>
-            The static EtherCAT Slave Controller configuration the master programmed during the
-            last scan — addresses, mailbox, distributed clock, and the Sync Managers and FMMUs that
-            place each slave's process data on the bus. Read from cached state with no bus I/O.
+            The static EtherCAT Slave Controller configuration the master programmed during the last
+            scan — addresses, mailbox, distributed clock, and the Sync Managers and FMMUs that place
+            each slave's process data on the bus. Read from cached state with no bus I/O.
           </>
         }
       />
@@ -349,10 +362,10 @@ export default function FieldbusConfigurationPage() {
           </p>
         )}
 
-        {slaves.map(slave => (
+        {slaves.map((slave) => (
           <SlaveCard key={slave.slavePosition} slave={slave} />
         ))}
       </div>
     </div>
-  )
+  );
 }

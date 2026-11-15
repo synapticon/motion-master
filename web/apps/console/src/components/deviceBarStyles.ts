@@ -1,6 +1,6 @@
 // The classes every row of DeviceBar shares, so its controls line up across rows.
 
-export const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display'
+export const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display';
 
 // The two buttons share one **explicit** height and are inline-flex centred, the same rule every
 // control pair in this app follows. Left to derive their height from padding they do not agree:
@@ -14,19 +14,19 @@ export const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-
 // its content width — the bar wraps whole controls onto a second row instead.
 export const barBtn =
   'inline-flex shrink-0 items-center justify-center whitespace-nowrap h-[30px] px-4 text-xs ' +
-  'cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-export const barBtnPrimary = `${barBtn} bg-syn-red text-white hover:bg-ocean`
-export const barBtnOutline = `${barBtn} border border-syn-red text-syn-red hover:bg-syn-red hover:text-white`
+  'cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+export const barBtnPrimary = `${barBtn} bg-syn-red text-white hover:bg-ocean`;
+export const barBtnOutline = `${barBtn} border border-syn-red text-syn-red hover:bg-syn-red hover:text-white`;
 // An icon-only button: the same height, square, for a secondary action whose tooltip and aria-label
 // carry the words.
 export const barBtnIcon =
   'inline-flex shrink-0 items-center justify-center h-[30px] w-[30px] border cursor-pointer ' +
-  'transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-export const barBtnIconOutline = `${barBtnIcon} border-syn-red text-syn-red hover:bg-syn-red hover:text-white`
-export const barBtnIconPrimary = `${barBtnIcon} border-syn-red bg-syn-red text-white hover:bg-ocean hover:border-ocean`
+  'transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+export const barBtnIconOutline = `${barBtnIcon} border-syn-red text-syn-red hover:bg-syn-red hover:text-white`;
+export const barBtnIconPrimary = `${barBtnIcon} border-syn-red bg-syn-red text-white hover:bg-ocean hover:border-ocean`;
 
 // Selects share the buttons' explicit height for the reason in barBtn — a control pair that
 // derives its height from content does not agree with one that does not.
 export const barSelect =
   'h-[30px] border border-grey-300 bg-white px-2 text-xs disabled:opacity-50 ' +
-  'disabled:cursor-not-allowed'
+  'disabled:cursor-not-allowed';

@@ -1,50 +1,50 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Search, X } from 'lucide-react'
-import { type DeviceParameter, formatHex } from '@synapticon/motion-master-client'
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
+import { type DeviceParameter, formatHex } from '@synapticon/motion-master-client';
 
 interface ParameterPickerProps {
   /** The device's enumerated object dictionary. May be empty while a scan is in flight. */
-  params: DeviceParameter[]
+  params: DeviceParameter[];
   /** Currently selected object index, or null when nothing is picked. */
-  selectedIndex: number | null
+  selectedIndex: number | null;
   /** Currently selected object subindex, or null when nothing is picked. */
-  selectedSubindex: number | null
-  onSelect: (param: DeviceParameter) => void
-  disabled?: boolean
+  selectedSubindex: number | null;
+  onSelect: (param: DeviceParameter) => void;
+  disabled?: boolean;
   /** Shown on the trigger button when no parameter is selected. */
-  placeholder?: string
+  placeholder?: string;
   /**
    * Predicate for entries that should be shown but not selectable — rendered greyed, skipped by
    * keyboard navigation, and ignored on click. Used to keep meaningless picks (e.g. PDO mapping
    * objects) visible-but-inert rather than silently hidden.
    */
-  isDisabled?: (param: DeviceParameter) => boolean
+  isDisabled?: (param: DeviceParameter) => boolean;
   /** Right-aligned tag + hover title shown on rows flagged by `isDisabled`. */
-  disabledHint?: string
+  disabledHint?: string;
   /** Width utility for the trigger; the dropdown sizes itself to match. Defaults to `w-[32rem]`. */
-  className?: string
+  className?: string;
 }
 
 // The display label for one object dictionary entry: "0x6064:00 — Position actual value".
 // Stable across the picker (trigger, list, search haystack) so the formats never drift.
 function paramLabel(p: DeviceParameter): string {
-  return `${formatHex(p.index, 4)}:${formatHex(p.subindex, 2, false)} — ${p.name}`
+  return `${formatHex(p.index, 4)}:${formatHex(p.subindex, 2, false)} — ${p.name}`;
 }
 
 // The lowercased haystack a query is matched against. Folds in both the rendered hex form
 // ("0x6064:00") and the bare decimal index/subindex, so a user can search by name, by hex, by
 // decimal, or by the "index:subindex" pair without thinking about which the device reports in.
 function haystack(p: DeviceParameter): string {
-  return `${formatHex(p.index, 4)}:${formatHex(p.subindex, 2, false)} ${p.name} ${p.index} ${p.subindex}`.toLowerCase()
+  return `${formatHex(p.index, 4)}:${formatHex(p.subindex, 2, false)} ${p.name} ${p.index} ${p.subindex}`.toLowerCase();
 }
 
 // Every whitespace-separated token of the query must appear in the haystack (AND match), so
 // "6064 position" narrows to the one entry matching both, regardless of token order.
 function matches(p: DeviceParameter, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (q === '') return true
-  const hay = haystack(p)
-  return q.split(/\s+/).every((tok) => hay.includes(tok))
+  const q = query.trim().toLowerCase();
+  if (q === '') return true;
+  const hay = haystack(p);
+  return q.split(/\s+/).every((tok) => hay.includes(tok));
 }
 
 /**
@@ -64,13 +64,13 @@ export default function ParameterPicker({
   disabledHint,
   className = 'w-[32rem]',
 }: ParameterPickerProps) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [highlight, setHighlight] = useState(0)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLUListElement>(null)
-  const listId = useId()
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const listId = useId();
 
   const selected = useMemo(
     () =>
@@ -78,77 +78,77 @@ export default function ParameterPicker({
         ? (params.find((p) => p.index === selectedIndex && p.subindex === selectedSubindex) ?? null)
         : null,
     [params, selectedIndex, selectedSubindex],
-  )
+  );
 
-  const filtered = useMemo(() => params.filter((p) => matches(p, query)), [params, query])
+  const filtered = useMemo(() => params.filter((p) => matches(p, query)), [params, query]);
   // Per-row selectability, aligned with `filtered`. Disabled rows stay visible but inert.
   const disabledFlags = useMemo(
     () => filtered.map((p) => isDisabled?.(p) ?? false),
     [filtered, isDisabled],
-  )
+  );
 
   // The next selectable row at or after `start` in direction `dir` (+1/−1), or −1 if none.
   function findEnabled(start: number, dir: number): number {
     for (let i = start; i >= 0 && i < filtered.length; i += dir) {
-      if (!disabledFlags[i]) return i
+      if (!disabledFlags[i]) return i;
     }
-    return -1
+    return -1;
   }
 
   // Close on an outside click so the dropdown behaves like a native control.
   useEffect(() => {
-    if (!open) return
+    if (!open) return;
     function onDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
 
   // On open, focus the search box and clear any prior query.
   useEffect(() => {
     if (open) {
-      setQuery('')
+      setQuery('');
       // Focus after the dropdown mounts.
-      requestAnimationFrame(() => inputRef.current?.focus())
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [open])
+  }, [open]);
 
   // As the filter changes (and on open), park the highlight on the first selectable row.
   useEffect(() => {
-    const first = findEnabled(0, 1)
-    setHighlight(first === -1 ? 0 : first)
+    const first = findEnabled(0, 1);
+    setHighlight(first === -1 ? 0 : first);
     // findEnabled reads filtered/disabledFlags; re-run when those change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, disabledFlags])
+  }, [filtered, disabledFlags]);
 
   useEffect(() => {
-    if (!open) return
-    const el = listRef.current?.children[highlight] as HTMLElement | undefined
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [highlight, open])
+    if (!open) return;
+    const el = listRef.current?.children[highlight] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [highlight, open]);
 
   function choose(p: DeviceParameter) {
-    onSelect(p)
-    setOpen(false)
+    onSelect(p);
+    setOpen(false);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      const next = findEnabled(highlight + 1, 1)
-      if (next !== -1) setHighlight(next)
+      e.preventDefault();
+      const next = findEnabled(highlight + 1, 1);
+      if (next !== -1) setHighlight(next);
     } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      const prev = findEnabled(highlight - 1, -1)
-      if (prev !== -1) setHighlight(prev)
+      e.preventDefault();
+      const prev = findEnabled(highlight - 1, -1);
+      if (prev !== -1) setHighlight(prev);
     } else if (e.key === 'Enter') {
-      e.preventDefault()
-      const p = filtered[highlight]
-      if (p && !disabledFlags[highlight]) choose(p)
+      e.preventDefault();
+      const p = filtered[highlight];
+      if (p && !disabledFlags[highlight]) choose(p);
     } else if (e.key === 'Escape') {
-      e.preventDefault()
-      setOpen(false)
+      e.preventDefault();
+      setOpen(false);
     }
   }
 
@@ -187,8 +187,8 @@ export default function ParameterPicker({
               <button
                 type="button"
                 onClick={() => {
-                  setQuery('')
-                  inputRef.current?.focus()
+                  setQuery('');
+                  inputRef.current?.focus();
                 }}
                 className="shrink-0 text-grey-400 hover:text-grey-700"
                 title="Clear search"
@@ -205,10 +205,9 @@ export default function ParameterPicker({
               </li>
             ) : (
               filtered.map((p, i) => {
-                const isSelected =
-                  p.index === selectedIndex && p.subindex === selectedSubindex
-                const rowDisabled = disabledFlags[i]
-                const isHighlighted = i === highlight && !rowDisabled
+                const isSelected = p.index === selectedIndex && p.subindex === selectedSubindex;
+                const rowDisabled = disabledFlags[i];
+                const isHighlighted = i === highlight && !rowDisabled;
                 return (
                   <li
                     key={`${p.index}:${p.subindex}`}
@@ -216,10 +215,10 @@ export default function ParameterPicker({
                     aria-selected={isSelected}
                     aria-disabled={rowDisabled}
                     onClick={() => {
-                      if (!rowDisabled) choose(p)
+                      if (!rowDisabled) choose(p);
                     }}
                     onMouseEnter={() => {
-                      if (!rowDisabled) setHighlight(i)
+                      if (!rowDisabled) setHighlight(i);
                     }}
                     title={rowDisabled ? disabledHint : undefined}
                     className={`flex items-center gap-2 px-3 py-1.5 text-sm ${
@@ -248,12 +247,12 @@ export default function ParameterPicker({
                       isSelected && <Check className="ml-auto h-4 w-4 shrink-0" />
                     )}
                   </li>
-                )
+                );
               })
             )}
           </ul>
         </div>
       )}
     </div>
-  )
+  );
 }

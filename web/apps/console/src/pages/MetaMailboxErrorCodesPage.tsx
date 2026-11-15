@@ -1,18 +1,18 @@
-import { useQuery } from '@tanstack/react-query'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { useQuery } from '@tanstack/react-query';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline } from '../utils/styles';
 
 export default function MetaMailboxErrorCodesPage() {
-  const { api } = useConnection()
+  const { api } = useConnection();
 
   const query = useQuery({
     queryKey: ['mailboxErrorCodes'],
     queryFn: () => api.getMailboxErrorCodes(),
     staleTime: Infinity,
-  })
+  });
 
-  const codes = query.data?.data ?? []
+  const codes = query.data?.data ?? [];
 
   return (
     <div>
@@ -47,18 +47,23 @@ export default function MetaMailboxErrorCodesPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['Code', 'Hex', 'Name', 'Description'].map(h => (
-                    <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                  {['Code', 'Hex', 'Name', 'Description'].map((h) => (
+                    <th
+                      key={h}
+                      className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
+                    >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {codes.map(c => (
+                {codes.map((c) => (
                   <tr key={c.code} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{c.code}</td>
-                    <td className="px-4 py-2 font-mono">0x{c.code.toString(16).toUpperCase().padStart(4, '0')}</td>
+                    <td className="px-4 py-2 font-mono">
+                      0x{c.code.toString(16).toUpperCase().padStart(4, '0')}
+                    </td>
                     <td className="px-4 py-2 font-mono">{c.name}</td>
                     <td className="px-4 py-2 text-grey-600">{c.description}</td>
                   </tr>
@@ -67,10 +72,8 @@ export default function MetaMailboxErrorCodesPage() {
             </table>
           </div>
         )}
-        {query.isFetching && !query.data && (
-          <p className="text-xs text-grey-600">Loading…</p>
-        )}
+        {query.isFetching && !query.data && <p className="text-xs text-grey-600">Loading…</p>}
       </div>
     </div>
-  )
+  );
 }

@@ -1,4 +1,4 @@
-import type { EncoderConfiguration } from '@synapticon/motion-master-client'
+import type { EncoderConfiguration } from '@synapticon/motion-master-client';
 
 // The encoders the status procedure lists. Ports 3 to 5 take an external encoder, which the status
 // reads as an iC-MU only when register 0x74 names an iC-MU part. The server decides with the same rule
@@ -9,5 +9,5 @@ export function isIcMuEncoder(encoder: EncoderConfiguration): boolean {
     encoder.sensorPort <= 5 &&
     (encoder.type === 'biss' || encoder.type === 'internal') &&
     encoder.singleturnBits !== 0
-  )
+  );
 }

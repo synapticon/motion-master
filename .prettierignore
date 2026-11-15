@@ -2,5 +2,9 @@
 # generation, so a reformat would fail that job.
 web/packages/motion-master-client/src/generated/
 
+# Generated from the pinned ESI. tools/generate-object-addresses.sh --check compares it byte for byte
+# with what the generator writes.
+web/packages/motion-master-client/src/objects.ts
+
 **/dist/
 **/dev-dist/

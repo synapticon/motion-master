@@ -14,9 +14,9 @@
 
 /** A thrown value that might carry a server message. Deliberately loose — this is a `catch` value. */
 interface MaybeApiError {
-  error?: unknown
-  status?: unknown
-  statusText?: unknown
+  error?: unknown;
+  status?: unknown;
+  statusText?: unknown;
 }
 
 /**
@@ -32,17 +32,17 @@ interface MaybeApiError {
  */
 export function apiErrorMessage(err: unknown, fallback = 'Unknown error'): string {
   if (typeof err === 'object' && err !== null) {
-    const candidate = err as MaybeApiError
+    const candidate = err as MaybeApiError;
     // The generated client's HttpResponse: the parsed body sits in `error`.
     if (typeof candidate.error === 'object' && candidate.error !== null) {
-      const body = candidate.error as MaybeApiError
+      const body = candidate.error as MaybeApiError;
       if (typeof body.error === 'string' && body.error !== '') {
-        return body.error
+        return body.error;
       }
     }
     // A body handed over directly, or an already-unwrapped one.
     if (typeof candidate.error === 'string' && candidate.error !== '') {
-      return candidate.error
+      return candidate.error;
     }
     // No body to read — a network failure, or a response with no JSON. The status is what is left,
     // and it is still more use than a generic sentence.
@@ -50,12 +50,12 @@ export function apiErrorMessage(err: unknown, fallback = 'Unknown error'): strin
       const statusText =
         typeof candidate.statusText === 'string' && candidate.statusText !== ''
           ? ` ${candidate.statusText}`
-          : ''
-      return `HTTP ${candidate.status}${statusText}`
+          : '';
+      return `HTTP ${candidate.status}${statusText}`;
     }
   }
   if (err instanceof Error && err.message !== '') {
-    return err.message
+    return err.message;
   }
-  return fallback
+  return fallback;
 }

@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiErrorMessage, formatHex, type Cia402Status } from '@synapticon/motion-master-client'
-import type { DeviceBarContext } from './DeviceBar'
-import { barBtnOutline, barBtnPrimary, barSelect, labelCls } from './deviceBarStyles'
-import SlavePositionBadge from './SlavePositionBadge'
-import StoreParametersButton from './StoreParametersButton'
-import { useConnection } from '../contexts/ConnectionContext'
-import { cia402StatusKey } from '../hooks/useCia402Status'
-import { findMode, useOperationModes } from '../hooks/useOperationModes'
+import { useEffect, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiErrorMessage, formatHex, type Cia402Status } from '@synapticon/motion-master-client';
+import type { DeviceBarContext } from './DeviceBar';
+import { barBtnOutline, barBtnPrimary, barSelect, labelCls } from './deviceBarStyles';
+import SlavePositionBadge from './SlavePositionBadge';
+import StoreParametersButton from './StoreParametersButton';
+import { useConnection } from '../contexts/ConnectionContext';
+import { cia402StatusKey } from '../hooks/useCia402Status';
+import { findMode, useOperationModes } from '../hooks/useOperationModes';
 
 // Per-state badge colour: green when fully enabled, amber for the transient quick-stop and
 // fault-reaction states, red for a latched fault, neutral otherwise. Matches the AL-state badges in
@@ -21,7 +21,7 @@ const STATE_BADGE: Record<Cia402Status['state'], string> = {
   QuickStopActive: 'bg-status-warn text-grey-900',
   FaultReactionActive: 'bg-status-warn text-grey-900',
   Fault: 'bg-syn-red text-white',
-}
+};
 
 // The CiA402 states a master may ask a drive to reach, ordered as the state machine climbs. The
 // other three — Not Ready To Switch On, Fault Reaction Active and Fault — are entered by the drive
@@ -32,11 +32,11 @@ const CIA402_TARGETS = [
   { value: 'SwitchedOn', label: 'Switched On' },
   { value: 'OperationEnabled', label: 'Operation Enabled' },
   { value: 'QuickStopActive', label: 'Quick Stop Active' },
-] as const
-type Cia402TargetState = (typeof CIA402_TARGETS)[number]['value']
+] as const;
+type Cia402TargetState = (typeof CIA402_TARGETS)[number]['value'];
 
 interface DeviceStatusRowProps {
-  context: DeviceBarContext
+  context: DeviceBarContext;
 }
 
 /**
@@ -58,61 +58,60 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
     statusError,
     canCommand,
     whyDisabled,
-  } = context
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
+  } = context;
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
 
   // The drive's own mode table, so a manufacturer mode reads as itself. The status response names
   // only the standard modes — it is CiA402's view — so 0x6061 = -2 arrives as "Unknown" and is
   // resolved here to "Diagnostics".
-  const modesQuery = useOperationModes(slavePosition, isCia402 && mailboxActive)
-  const activeMode = status ? findMode(modesQuery.data?.modes, status.operationMode) : undefined
-  const modeName = activeMode?.name ?? status?.modeName
+  const modesQuery = useOperationModes(slavePosition, isCia402 && mailboxActive);
+  const activeMode = status ? findMode(modesQuery.data?.modes, status.operationMode) : undefined;
+  const modeName = activeMode?.name ?? status?.modeName;
 
   const commandMutation = useMutation({
     mutationFn: (command: 'quickStop' | 'faultReset') =>
       api.runCia402Command(slavePosition, { command }),
     onSuccess: (r) => queryClient.setQueryData(cia402StatusKey(slavePosition), r.data),
-  })
+  });
 
   // Both selects seed from what the drive currently reports and then belong to the user until they
   // press the button beside them — the seed-once rule the Motion page's inputs follow. A select
   // that rewrote itself under the cursor as the drive changed would be unusable.
-  const [selectedMode, setSelectedMode] = useState<number | null>(null)
-  const [selectedState, setSelectedState] = useState<Cia402TargetState | null>(null)
+  const [selectedMode, setSelectedMode] = useState<number | null>(null);
+  const [selectedState, setSelectedState] = useState<Cia402TargetState | null>(null);
   useEffect(() => {
-    if (selectedMode === null && status) setSelectedMode(status.operationMode)
-  }, [status, selectedMode])
+    if (selectedMode === null && status) setSelectedMode(status.operationMode);
+  }, [status, selectedMode]);
   useEffect(() => {
-    if (selectedState !== null || !status) return
+    if (selectedState !== null || !status) return;
     // Seed with where the drive is, when that is somewhere it could also be sent. From a state it
     // cannot be sent to — Fault, or still starting up — seed with the one that gets it out.
     setSelectedState(
       CIA402_TARGETS.some((t) => t.value === status.state)
         ? (status.state as Cia402TargetState)
         : 'SwitchOnDisabled',
-    )
-  }, [status, selectedState])
+    );
+  }, [status, selectedState]);
 
   const setModeMutation = useMutation({
     mutationFn: (mode: number) => api.setCia402OperationMode(slavePosition, { mode }),
     onSuccess: (r) => queryClient.setQueryData(cia402StatusKey(slavePosition), r.data),
-  })
+  });
 
   const transitionMutation = useMutation({
     // The server walks whatever transitions it takes and answers with where the drive landed, so
     // there is nothing to sequence here.
-    mutationFn: (state: Cia402TargetState) =>
-      api.transitionToCia402State(slavePosition, { state }),
+    mutationFn: (state: Cia402TargetState) => api.transitionToCia402State(slavePosition, { state }),
     onSuccess: (r) => queryClient.setQueryData(cia402StatusKey(slavePosition), r.data),
-  })
+  });
 
   // Writing 0x6060 is an SDO, so it needs a mailbox — PREOP or above. It does not need OP, unlike
   // anything that moves the state machine: the drive adopts a requested mode without advancing.
-  const canSetMode = isCia402 && mailboxActive
-  const modes = modesQuery.data?.modes ?? []
-  const standardModes = modes.filter((m) => m.kind === 'standard')
-  const manufacturerModes = modes.filter((m) => m.kind === 'manufacturer')
+  const canSetMode = isCia402 && mailboxActive;
+  const modes = modesQuery.data?.modes ?? [];
+  const standardModes = modes.filter((m) => m.kind === 'standard');
+  const manufacturerModes = modes.filter((m) => m.kind === 'manufacturer');
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-2 sm:px-8">
@@ -303,5 +302,5 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
         </div>
       )}
     </div>
-  )
+  );
 }

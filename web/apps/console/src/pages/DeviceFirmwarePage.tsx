@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   apiErrorMessage,
   type FirmwareCompatibility,
@@ -8,34 +8,34 @@ import {
   type ProcedureRequest,
   type ProcedureSnapshot,
   type ProgressStep,
-} from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
-import DevicePageHeader from '../components/DevicePageHeader'
-import HardwareDescriptionView from '../components/HardwareDescriptionView'
-import IntegroVariantView from '../components/IntegroVariantView'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline, btnPrimary } from '../utils/styles'
-import { userCacheUrl } from '../utils/userCache'
+} from '@synapticon/motion-master-client';
+import Callout from '../components/Callout';
+import DevicePageHeader from '../components/DevicePageHeader';
+import HardwareDescriptionView from '../components/HardwareDescriptionView';
+import IntegroVariantView from '../components/IntegroVariantView';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline, btnPrimary } from '../utils/styles';
+import { userCacheUrl } from '../utils/userCache';
 
-const PROCEDURE = 'firmware-installation'
-const CACHE_DIRECTORY = 'firmwares/'
+const PROCEDURE = 'firmware-installation';
+const CACHE_DIRECTORY = 'firmwares/';
 
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 const STEP_DOT: Record<ProgressStep['status'], string> = {
   idle: 'bg-grey-300',
   running: 'bg-ocean',
   succeeded: 'bg-green-600',
   failed: 'bg-syn-red',
-}
+};
 
 // How the page names each kind of entry an install always writes.
 const ALWAYS_WRITTEN: Record<Exclude<FirmwarePackageEntry['kind'], 'extra-file'>, string> = {
   'app-firmware': 'application firmware',
   'com-firmware': 'communication firmware',
   sii: 'SII',
-}
+};
 
 // What each step of the installation does, for a reader who has not read the procedure.
 const STEP_TITLE: Record<string, string> = {
@@ -48,117 +48,119 @@ const STEP_TITLE: Record<string, string> = {
   'com-firmware': 'Write the communication firmware',
   'activate-firmware': 'Activate the firmware',
   'final-state': 'Leave the device in the final state',
-}
+};
 
 function isNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
+  return (
+    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
+  );
 }
 
 function baseName(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1)
+  return path.slice(path.lastIndexOf('/') + 1);
 }
 
 function stepValueText(value: unknown): string {
   if (value === undefined || value === null) {
-    return ''
+    return '';
   }
-  return typeof value === 'string' ? value : JSON.stringify(value)
+  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
 export default function DeviceFirmwarePage() {
-  const { deviceId } = useParams()
-  const slavePosition = Number(deviceId)
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
-  const fileInput = useRef<HTMLInputElement>(null)
+  const { deviceId } = useParams();
+  const slavePosition = Number(deviceId);
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const versionQuery = useQuery({
     queryKey: ['firmware-version', slavePosition],
-    queryFn: () => api.readParameter(slavePosition, 0x100a, 0).then(r => String(r.data.value)),
+    queryFn: () => api.readParameter(slavePosition, 0x100a, 0).then((r) => String(r.data.value)),
     retry: false,
-  })
+  });
   const hardwareQuery = useQuery({
     queryKey: ['hardware-description', slavePosition],
-    queryFn: () => api.getDeviceHardwareDescription(slavePosition).then(r => r.data),
+    queryFn: () => api.getDeviceHardwareDescription(slavePosition).then((r) => r.data),
     retry: false,
-  })
+  });
   const descriptorsQuery = useQuery({
     queryKey: ['firmware-descriptors', slavePosition],
-    queryFn: () => api.getDeviceFirmwareDescriptors(slavePosition).then(r => r.data),
+    queryFn: () => api.getDeviceFirmwareDescriptors(slavePosition).then((r) => r.data),
     retry: false,
-  })
+  });
   // Only an Integro carries a .variant, so a 404 is an answer, not a failure.
   const variantQuery = useQuery({
     queryKey: ['integro-variant', slavePosition],
-    queryFn: () => api.getDeviceIntegroVariant(slavePosition).then(r => r.data),
+    queryFn: () => api.getDeviceIntegroVariant(slavePosition).then((r) => r.data),
     retry: false,
-  })
+  });
   const proceduresQuery = useQuery({
     queryKey: ['procedures', slavePosition],
-    queryFn: () => api.listProcedures(slavePosition).then(r => r.data),
+    queryFn: () => api.listProcedures(slavePosition).then((r) => r.data),
     retry: false,
-  })
+  });
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => api.listUserCacheFiles().then(r => r.data),
+    queryFn: () => api.listUserCacheFiles().then((r) => r.data),
     retry: false,
-  })
+  });
   const snapshotQuery = useQuery({
     queryKey: ['procedure', slavePosition, PROCEDURE],
-    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then(r => r.data),
-    refetchInterval: query => (query.state.data?.status === 'running' ? 1000 : false),
+    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then((r) => r.data),
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 1000 : false),
     refetchIntervalInBackground: true,
     retry: false,
-  })
+  });
 
   const packages = (cacheQuery.data?.files ?? [])
-    .map(file => file.path)
-    .filter(path => path.startsWith(CACHE_DIRECTORY) && path.toLowerCase().endsWith('.zip'))
+    .map((file) => file.path)
+    .filter((path) => path.startsWith(CACHE_DIRECTORY) && path.toLowerCase().endsWith('.zip'))
     .map(baseName)
-    .sort()
+    .sort();
 
   // The server's verdict for each package. The page matches nothing itself.
   const verdicts = useQueries({
-    queries: packages.map(filename => ({
+    queries: packages.map((filename) => ({
       queryKey: ['firmware-compatibility', slavePosition, filename],
       queryFn: () =>
-        api.checkDeviceFirmwareCompatibility(slavePosition, { filename }).then(r => r.data),
+        api.checkDeviceFirmwareCompatibility(slavePosition, { filename }).then((r) => r.data),
       staleTime: Infinity,
       retry: false,
     })),
-  })
+  });
 
   const descriptor = proceduresQuery.data?.find(
-    listing => listing.descriptor.name === PROCEDURE,
-  )?.descriptor
-  const finalStateParameter = descriptor?.parameters.find(p => p.name === 'finalState')
-  const extraFilesParameter = descriptor?.parameters.find(p => p.name === 'extraFiles')
+    (listing) => listing.descriptor.name === PROCEDURE,
+  )?.descriptor;
+  const finalStateParameter = descriptor?.parameters.find((p) => p.name === 'finalState');
+  const extraFilesParameter = descriptor?.parameters.find((p) => p.name === 'extraFiles');
 
-  const [finalState, setFinalState] = useState<number | undefined>()
-  const [selected, setSelected] = useState<string | undefined>()
+  const [finalState, setFinalState] = useState<number | undefined>();
+  const [selected, setSelected] = useState<string | undefined>();
   // The choice belongs to one package, so choosing another package starts with none selected.
   const [extraFiles, setExtraFiles] = useState<{ filename?: string; names: string[] }>({
     names: [],
-  })
-  const finalStateValue = finalState ?? (finalStateParameter?.defaultValue as number | undefined)
-  const extraFilesValue = extraFiles.filename === selected ? extraFiles.names : []
+  });
+  const finalStateValue = finalState ?? (finalStateParameter?.defaultValue as number | undefined);
+  const extraFilesValue = extraFiles.filename === selected ? extraFiles.names : [];
 
   const entriesQuery = useQuery({
     queryKey: ['firmware-package-entries', selected],
     queryFn: () =>
-      api.listFirmwarePackageEntries({ filename: selected as string }).then(r => r.data.entries),
+      api.listFirmwarePackageEntries({ filename: selected as string }).then((r) => r.data.entries),
     enabled: selected !== undefined,
     staleTime: Infinity,
     retry: false,
-  })
+  });
   const toggleExtraFile = (name: string, checked: boolean) => {
     setExtraFiles({
       filename: selected,
       names: checked
         ? [...extraFilesValue, name]
-        : extraFilesValue.filter(other => other !== name),
-    })
-  }
+        : extraFilesValue.filter((other) => other !== name),
+    });
+  };
 
   const upload = useMutation({
     // The generated client JSON-encodes request bodies, which turns a File into "{}", so the raw
@@ -168,17 +170,17 @@ export default function DeviceFirmwarePage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: file,
-      })
+      });
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        throw new Error(body?.error ?? `HTTP ${res.status}`)
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
       }
     },
     onSuccess: (_data, file) => {
-      setSelected(file.name)
-      void queryClient.invalidateQueries({ queryKey: ['user-cache'] })
+      setSelected(file.name);
+      void queryClient.invalidateQueries({ queryKey: ['user-cache'] });
     },
-  })
+  });
   const install = useMutation({
     mutationFn: (packageFilename: string) =>
       api.startProcedure(slavePosition, PROCEDURE, {
@@ -190,28 +192,28 @@ export default function DeviceFirmwarePage() {
       }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ['procedure', slavePosition, PROCEDURE] }),
-  })
+  });
 
-  const snapshot = snapshotQuery.data
-  const running = snapshot?.status === 'running' || install.isPending
+  const snapshot = snapshotQuery.data;
+  const running = snapshot?.status === 'running' || install.isPending;
 
   // The device runs other firmware after a run, so its version is read again.
-  const finishedAt = snapshot?.finishedAt
+  const finishedAt = snapshot?.finishedAt;
   useEffect(() => {
     if (finishedAt) {
-      void queryClient.invalidateQueries({ queryKey: ['firmware-version', slavePosition] })
+      void queryClient.invalidateQueries({ queryKey: ['firmware-version', slavePosition] });
     }
-  }, [finishedAt, queryClient, slavePosition])
+  }, [finishedAt, queryClient, slavePosition]);
 
-  const selectedIndex = selected ? packages.indexOf(selected) : -1
-  const selectedVerdict = selectedIndex >= 0 ? verdicts[selectedIndex]?.data : undefined
-  const deviceDescriptors = descriptorsQuery.data
+  const selectedIndex = selected ? packages.indexOf(selected) : -1;
+  const selectedVerdict = selectedIndex >= 0 ? verdicts[selectedIndex]?.data : undefined;
+  const deviceDescriptors = descriptorsQuery.data;
   const descriptorText = (value: string | undefined) =>
     descriptorsQuery.isPending
       ? 'Reading…'
       : descriptorsQuery.isError
         ? apiErrorMessage(descriptorsQuery.error)
-        : (value ?? '—')
+        : (value ?? '—');
 
   return (
     <div>
@@ -266,12 +268,12 @@ export default function DeviceFirmwarePage() {
                 type="file"
                 accept=".zip"
                 className="hidden"
-                onChange={event => {
-                  const file = event.target.files?.[0]
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
                   if (file) {
-                    upload.mutate(file)
+                    upload.mutate(file);
                   }
-                  event.target.value = ''
+                  event.target.value = '';
                 }}
               />
               <button
@@ -286,8 +288,8 @@ export default function DeviceFirmwarePage() {
           </div>
           <p className="px-5 pt-4 text-xs text-grey-600">
             The packages the server keeps in {CACHE_DIRECTORY} of its user cache
-            {cacheQuery.data ? ` (${cacheQuery.data.root})` : ''}, each checked against this
-            device by the server. A package added from disk is kept there too.
+            {cacheQuery.data ? ` (${cacheQuery.data.root})` : ''}, each checked against this device
+            by the server. A package added from disk is kept there too.
           </p>
           {upload.isError && (
             <div className="px-5 pt-3">
@@ -327,7 +329,7 @@ export default function DeviceFirmwarePage() {
           </div>
           {descriptor && descriptor.caveats.length > 0 && (
             <ul className="px-5 pt-4 space-y-1 text-xs text-grey-700 list-disc list-inside">
-              {descriptor.caveats.map(caveat => (
+              {descriptor.caveats.map((caveat) => (
                 <li key={caveat}>{caveat}</li>
               ))}
             </ul>
@@ -341,10 +343,10 @@ export default function DeviceFirmwarePage() {
                 id="firmware-package"
                 className={`${inputCls} max-w-[32rem]`}
                 value={selected ?? ''}
-                onChange={event => setSelected(event.target.value || undefined)}
+                onChange={(event) => setSelected(event.target.value || undefined)}
               >
                 <option value="">Choose a package</option>
-                {packages.map(filename => (
+                {packages.map((filename) => (
                   <option key={filename} value={filename}>
                     {filename}
                   </option>
@@ -360,9 +362,9 @@ export default function DeviceFirmwarePage() {
                   id="firmware-final-state"
                   className={inputCls}
                   value={finalStateValue}
-                  onChange={event => setFinalState(Number(event.target.value))}
+                  onChange={(event) => setFinalState(Number(event.target.value))}
                 >
-                  {(finalStateParameter.options ?? []).map(option => (
+                  {(finalStateParameter.options ?? []).map((option) => (
                     <option key={String(option.value)} value={Number(option.value)}>
                       {option.title}
                     </option>
@@ -381,7 +383,7 @@ export default function DeviceFirmwarePage() {
               )}
               {entriesQuery.data && (
                 <ul className="space-y-1 text-sm">
-                  {entriesQuery.data.map(entry => (
+                  {entriesQuery.data.map((entry) => (
                     <li key={entry.name}>
                       {entry.kind === 'extra-file' ? (
                         <label className="flex items-center gap-2 cursor-pointer">
@@ -389,7 +391,7 @@ export default function DeviceFirmwarePage() {
                             type="checkbox"
                             checked={extraFilesValue.includes(entry.name)}
                             disabled={running}
-                            onChange={event => toggleExtraFile(entry.name, event.target.checked)}
+                            onChange={(event) => toggleExtraFile(entry.name, event.target.checked)}
                           />
                           <span className="font-mono">{entry.name}</span>
                         </label>
@@ -442,7 +444,7 @@ export default function DeviceFirmwarePage() {
         {snapshot && snapshot.status !== 'idle' && <InstallRun snapshot={snapshot} />}
       </div>
     </div>
-  )
+  );
 }
 
 function PackageRow({
@@ -453,12 +455,12 @@ function PackageRow({
   selected,
   onSelect,
 }: {
-  filename: string
-  verdict: FirmwareCompatibility | undefined
-  error: unknown
-  pending: boolean
-  selected: boolean
-  onSelect: () => void
+  filename: string;
+  verdict: FirmwareCompatibility | undefined;
+  error: unknown;
+  pending: boolean;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   return (
     <tr
@@ -485,11 +487,11 @@ function PackageRow({
         )}
       </td>
     </tr>
-  )
+  );
 }
 
 function InstallRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
-  const failed = snapshot.steps.find(step => step.status === 'failed')
+  const failed = snapshot.steps.find((step) => step.status === 'failed');
   return (
     <section className="border border-grey-200 bg-white">
       <div className="px-5 py-3 border-b border-grey-200 flex items-center justify-between">
@@ -498,7 +500,7 @@ function InstallRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
       </div>
       <table className="w-full text-xs">
         <tbody>
-          {snapshot.steps.map(step => (
+          {snapshot.steps.map((step) => (
             <tr key={step.id} className="border-b border-grey-100 last:border-0 align-top">
               <td className="pl-5 py-2 w-6">
                 <span
@@ -529,7 +531,7 @@ function InstallRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
         </div>
       )}
     </section>
-  )
+  );
 }
 
 function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -539,5 +541,5 @@ function Field({ label, value, hint }: { label: string; value: string; hint?: st
       <dd className="font-mono break-all">{value}</dd>
       {hint && <dd className="text-xs text-grey-500">{hint}</dd>}
     </div>
-  )
+  );
 }

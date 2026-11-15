@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Pause, Play } from 'lucide-react'
+import { useEffect, useState } from 'react';
+import { Pause, Play } from 'lucide-react';
 
 // How three fixed coils point a field in any direction, for the Learn pages.
 //
@@ -18,87 +18,122 @@ import { Pause, Play } from 'lucide-react'
 // cross-section's slider shows. Where the axes sit inside a real machine depends on how it is
 // wound. Only the 120 degree spacing is common to every winding.
 
-const SIZE = 260
-const C = SIZE / 2
-const R = 96
+const SIZE = 260;
+const C = SIZE / 2;
+const R = 96;
 
-const rad = (deg: number) => (deg * Math.PI) / 180
-const polar = (r: number, deg: number) => ({ x: C + r * Math.cos(rad(deg)), y: C - r * Math.sin(rad(deg)) })
+const rad = (deg: number) => (deg * Math.PI) / 180;
+const polar = (r: number, deg: number) => ({
+  x: C + r * Math.cos(rad(deg)),
+  y: C - r * Math.sin(rad(deg)),
+});
 
-const DRAW_OFFSET = 90
+const DRAW_OFFSET = 90;
 
 const PHASES = [
   { label: 'U', axis: 0 },
   { label: 'V', axis: 120 },
   { label: 'W', axis: 240 },
-]
+];
 
-function Arrow({ deg, length, className, width = 3 }: { deg: number; length: number; className: string; width?: number }) {
+function Arrow({
+  deg,
+  length,
+  className,
+  width = 3,
+}: {
+  deg: number;
+  length: number;
+  className: string;
+  width?: number;
+}) {
   if (Math.abs(length) < 2) {
-    return null
+    return null;
   }
-  const sign = length < 0 ? 180 : 0
-  const at = deg + sign
-  const size = Math.abs(length)
-  const tail = polar(0, at)
-  const tip = polar(size, at)
-  const left = polar(size - 10, at + 6)
-  const right = polar(size - 10, at - 6)
+  const sign = length < 0 ? 180 : 0;
+  const at = deg + sign;
+  const size = Math.abs(length);
+  const tail = polar(0, at);
+  const tip = polar(size, at);
+  const left = polar(size - 10, at + 6);
+  const right = polar(size - 10, at - 6);
   return (
     <g>
-      <line x1={tail.x} y1={tail.y} x2={tip.x} y2={tip.y} className={`stroke-current ${className}`} strokeWidth={width} strokeLinecap="round" />
-      <polygon points={`${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`} className={`fill-current ${className}`} />
+      <line
+        x1={tail.x}
+        y1={tail.y}
+        x2={tip.x}
+        y2={tip.y}
+        className={`stroke-current ${className}`}
+        strokeWidth={width}
+        strokeLinecap="round"
+      />
+      <polygon
+        points={`${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`}
+        className={`fill-current ${className}`}
+      />
     </g>
-  )
+  );
 }
 
 export default function StatorFieldFigure() {
-  const [angle, setAngle] = useState(35)
-  const [spinning, setSpinning] = useState(false)
+  const [angle, setAngle] = useState(35);
+  const [spinning, setSpinning] = useState(false);
 
   useEffect(() => {
     if (!spinning) {
-      return
+      return;
     }
-    let frame = 0
-    let previous = performance.now()
+    let frame = 0;
+    let previous = performance.now();
     const step = (now: number) => {
-      const seconds = (now - previous) / 1000
-      previous = now
-      setAngle(a => (a + seconds * 60) % 360)
-      frame = requestAnimationFrame(step)
-    }
-    frame = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(frame)
-  }, [spinning])
+      const seconds = (now - previous) / 1000;
+      previous = now;
+      setAngle((a) => (a + seconds * 60) % 360);
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [spinning]);
 
-  const currents = PHASES.map(phase => Math.cos(rad(angle - phase.axis)))
+  const currents = PHASES.map((phase) => Math.cos(rad(angle - phase.axis)));
 
   // Field lines: parallel chords across the bore, all pointing the way the resultant does.
-  const lines = [-0.66, -0.33, 0, 0.33, 0.66].map(offset => {
-    const d = offset * R
-    const half = Math.sqrt(Math.max(R * R - d * d, 0)) * 0.92
-    const drawn = angle + DRAW_OFFSET
-    const n = { x: Math.cos(rad(drawn + 90)), y: -Math.sin(rad(drawn + 90)) }
-    const t = { x: Math.cos(rad(drawn)), y: -Math.sin(rad(drawn)) }
-    const cx = C + n.x * d
-    const cy = C + n.y * d
+  const lines = [-0.66, -0.33, 0, 0.33, 0.66].map((offset) => {
+    const d = offset * R;
+    const half = Math.sqrt(Math.max(R * R - d * d, 0)) * 0.92;
+    const drawn = angle + DRAW_OFFSET;
+    const n = { x: Math.cos(rad(drawn + 90)), y: -Math.sin(rad(drawn + 90)) };
+    const t = { x: Math.cos(rad(drawn)), y: -Math.sin(rad(drawn)) };
+    const cx = C + n.x * d;
+    const cy = C + n.y * d;
     return {
       x1: cx - t.x * half,
       y1: cy - t.y * half,
       x2: cx + t.x * half,
       y2: cy + t.y * half,
-    }
-  })
+    };
+  });
 
   return (
     <div className="border border-grey-200 max-w-2xl">
       <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-grey-200">
         <div className="p-4">
-          <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="w-full max-w-[300px] mx-auto" role="img"
-            aria-label={`Three phase currents summing to one field pointing at ${angle.toFixed(0)} degrees`}>
+          <svg
+            viewBox={`0 0 ${SIZE} ${SIZE}`}
+            className="w-full max-w-[300px] mx-auto"
+            role="img"
+            aria-label={`Three phase currents summing to one field pointing at ${angle.toFixed(0)} degrees`}
+          >
             <defs>
-              <marker id="fieldTip" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <marker
+                id="fieldTip"
+                markerWidth="6"
+                markerHeight="6"
+                refX="5"
+                refY="3"
+                orient="auto"
+              >
                 <path d="M0,0 L6,3 L0,6 Z" className="fill-grey-400" />
               </marker>
             </defs>
@@ -107,23 +142,46 @@ export default function StatorFieldFigure() {
 
             {/* The field in the bore: parallel lines, all running the way the sum points. */}
             {lines.map((line, i) => (
-              <line key={i} {...line} className="stroke-grey-400" strokeWidth={1} markerEnd="url(#fieldTip)" />
+              <line
+                key={i}
+                {...line}
+                className="stroke-grey-400"
+                strokeWidth={1}
+                markerEnd="url(#fieldTip)"
+              />
             ))}
 
             {/* The three fixed axes, and each phase's contribution along its own axis. */}
             {PHASES.map((phase, i) => {
-              const a = polar(R + 12, phase.axis + DRAW_OFFSET)
-              const b = polar(R + 12, phase.axis + DRAW_OFFSET + 180)
+              const a = polar(R + 12, phase.axis + DRAW_OFFSET);
+              const b = polar(R + 12, phase.axis + DRAW_OFFSET + 180);
               return (
                 <g key={phase.label}>
-                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="stroke-grey-300" strokeWidth={1} strokeDasharray="3 3" />
-                  <text {...polar(R + 24, phase.axis + DRAW_OFFSET)} textAnchor="middle" dominantBaseline="middle"
-                    className="fill-grey-500 text-[11px] font-mono">
+                  <line
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    className="stroke-grey-300"
+                    strokeWidth={1}
+                    strokeDasharray="3 3"
+                  />
+                  <text
+                    {...polar(R + 24, phase.axis + DRAW_OFFSET)}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    className="fill-grey-500 text-[11px] font-mono"
+                  >
                     {phase.label}
                   </text>
-                  <Arrow deg={phase.axis + DRAW_OFFSET} length={currents[i] * 72} className="text-grey-500" width={2} />
+                  <Arrow
+                    deg={phase.axis + DRAW_OFFSET}
+                    length={currents[i] * 72}
+                    className="text-grey-500"
+                    width={2}
+                  />
                 </g>
-              )
+              );
             })}
 
             {/* The sum. Its length is 1.5 of a single phase, and never changes as the angle turns. */}
@@ -144,9 +202,9 @@ export default function StatorFieldFigure() {
               max={359}
               step={1}
               value={Math.round(angle)}
-              onChange={e => {
-                setSpinning(false)
-                setAngle(Number(e.target.value))
+              onChange={(e) => {
+                setSpinning(false);
+                setAngle(Number(e.target.value));
               }}
               className="w-full h-1 appearance-none bg-grey-200 accent-syn-red cursor-pointer"
             />
@@ -179,10 +237,14 @@ export default function StatorFieldFigure() {
 
           <button
             type="button"
-            onClick={() => setSpinning(s => !s)}
+            onClick={() => setSpinning((s) => !s)}
             className="h-[38px] inline-flex items-center gap-1.5 px-3 text-xs border border-syn-red text-syn-red hover:bg-syn-red hover:text-white transition-colors cursor-pointer"
           >
-            {spinning ? <Pause className="h-3.5 w-3.5" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />}
+            {spinning ? (
+              <Pause className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <Play className="h-3.5 w-3.5" aria-hidden />
+            )}
             {spinning ? 'Stop' : 'Turn the field'}
           </button>
         </div>
@@ -197,29 +259,29 @@ export default function StatorFieldFigure() {
         </p>
         <p>
           The red arrow is the three added together, and the thin grey lines are the field it makes
-          across the bore. Turn the field and watch the red arrow sweep smoothly through directions no
-          single coil points in. That is the whole trick: three fixed coils, one field, aimed
+          across the bore. Turn the field and watch the red arrow sweep smoothly through directions
+          no single coil points in. That is the whole trick: three fixed coils, one field, aimed
           anywhere.
         </p>
         <p>
-          Each percentage is the current in that phase at that instant, measured against the peak the
-          drive is using. A negative one means the current runs the other way through that winding.
-          Add the three up at any angle and they come to zero, which they have to: there are three
-          wires and no fourth, so whatever goes in through one phase comes back through the other
-          two.
+          Each percentage is the current in that phase at that instant, measured against the peak
+          the drive is using. A negative one means the current runs the other way through that
+          winding. Add the three up at any angle and they come to zero, which they have to: there
+          are three wires and no fourth, so whatever goes in through one phase comes back through
+          the other two.
         </p>
         <p>
-          Turn the field and each bar traces a sine wave, the three of them a third of a cycle apart.
-          That is what <strong>three-phase</strong> means.
+          Turn the field and each bar traces a sine wave, the three of them a third of a cycle
+          apart. That is what <strong>three-phase</strong> means.
         </p>
         <p>
           The red arrow&apos;s length never changes as it turns, which is not a coincidence either —
           three currents shaped like <span className="font-mono">cos(θ)</span>,{' '}
-          <span className="font-mono">cos(θ−120)</span> and <span className="font-mono">cos(θ−240)</span>{' '}
-          always sum to the same magnitude. A motor driven this way makes steady torque rather than a
-          lumpy one.
+          <span className="font-mono">cos(θ−120)</span> and{' '}
+          <span className="font-mono">cos(θ−240)</span> always sum to the same magnitude. A motor
+          driven this way makes steady torque rather than a lumpy one.
         </p>
       </div>
     </div>
-  )
+  );
 }

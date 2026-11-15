@@ -1,11 +1,15 @@
-import type { ReactNode } from 'react'
-import { AlertTriangle, CheckCircle, Info, XCircle, type LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react';
+import { AlertTriangle, CheckCircle, Info, XCircle, type LucideIcon } from 'lucide-react';
 
-export type CalloutVariant = 'danger' | 'warning' | 'error' | 'success' | 'info'
+export type CalloutVariant = 'danger' | 'warning' | 'error' | 'success' | 'info';
 
 const variants: Record<CalloutVariant, { container: string; icon: string; Icon: LucideIcon }> = {
   // Safety / destructive action — brand red, the strongest emphasis.
-  danger: { container: 'border-syn-red/40 bg-syn-red/5', icon: 'text-syn-red', Icon: AlertTriangle },
+  danger: {
+    container: 'border-syn-red/40 bg-syn-red/5',
+    icon: 'text-syn-red',
+    Icon: AlertTriangle,
+  },
   // Caution / degraded state the user should notice but that is not an error.
   warning: {
     container: 'border-status-warn/40 bg-status-warn/5',
@@ -13,7 +17,11 @@ const variants: Record<CalloutVariant, { container: string; icon: string; Icon: 
     Icon: AlertTriangle,
   },
   // A failure that already happened (request error, invalid input).
-  error: { container: 'border-status-bad/40 bg-status-bad/5', icon: 'text-status-bad', Icon: XCircle },
+  error: {
+    container: 'border-status-bad/40 bg-status-bad/5',
+    icon: 'text-status-bad',
+    Icon: XCircle,
+  },
   // A check that passed. The counterpart to `warning` rather than a way to praise the user: it earns
   // its place where the *absence* of a warning would be ambiguous — "we checked, and it is fine"
   // reads differently from a page that simply says nothing.
@@ -28,7 +36,7 @@ const variants: Record<CalloutVariant, { container: string; icon: string; Icon: 
     icon: 'text-status-info',
     Icon: Info,
   },
-}
+};
 
 /**
  * A bordered callout for warnings, errors, and notices that we reuse across pages.
@@ -42,12 +50,12 @@ export default function Callout({
   className = '',
   children,
 }: {
-  variant?: CalloutVariant
-  icon?: boolean
-  className?: string
-  children: ReactNode
+  variant?: CalloutVariant;
+  icon?: boolean;
+  className?: string;
+  children: ReactNode;
 }) {
-  const { container, icon: iconCls, Icon } = variants[variant]
+  const { container, icon: iconCls, Icon } = variants[variant];
   return (
     <div
       className={`flex items-start gap-2 border ${container} px-4 py-3 text-xs leading-5 text-grey-700 ${className}`}
@@ -55,5 +63,5 @@ export default function Callout({
       {icon && <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${iconCls}`} aria-hidden />}
       <div className="min-w-0">{children}</div>
     </div>
-  )
+  );
 }

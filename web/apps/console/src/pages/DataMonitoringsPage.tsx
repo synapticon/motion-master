@@ -1,56 +1,56 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-generator'
-import { Download, Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react'
-import type uPlot from 'uplot'
-import type { DeviceParameter, Monitoring } from '@synapticon/motion-master-client'
-import CycleStatsBar from '../components/CycleStatsBar'
-import MonitoringChart from '../components/MonitoringChart'
-import PageHeader from '../components/PageHeader'
-import ParameterPicker from '../components/ParameterPicker'
-import SlavePositionBadge from '../components/SlavePositionBadge'
-import { useConnection } from '../contexts/ConnectionContext'
-import { type SampleRows, useMonitoringSocket } from '../contexts/MonitoringSocketContext'
-import { type CycleStats, cycleStats } from '../utils/cycleStats'
-import { downloadText } from '../utils/download'
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-generator';
+import { Download, Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react';
+import type uPlot from 'uplot';
+import type { DeviceParameter, Monitoring } from '@synapticon/motion-master-client';
+import CycleStatsBar from '../components/CycleStatsBar';
+import MonitoringChart from '../components/MonitoringChart';
+import PageHeader from '../components/PageHeader';
+import ParameterPicker from '../components/ParameterPicker';
+import SlavePositionBadge from '../components/SlavePositionBadge';
+import { useConnection } from '../contexts/ConnectionContext';
+import { type SampleRows, useMonitoringSocket } from '../contexts/MonitoringSocketContext';
+import { type CycleStats, cycleStats } from '../utils/cycleStats';
+import { downloadText } from '../utils/download';
 
-const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 const btnCls =
-  'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+  'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 const btnGhostCls =
-  'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+  'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 
 function apiError(err: unknown): string {
   if (err && typeof err === 'object') {
     if ('error' in err) {
-      const inner = (err as { error: unknown }).error
+      const inner = (err as { error: unknown }).error;
       if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error)
+        return String((inner as { error: unknown }).error);
       }
-      if (typeof inner === 'string') return inner
+      if (typeof inner === 'string') return inner;
     }
     if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      const { status } = err as { status: number }
-      return `HTTP ${status}`
+      const { status } = err as { status: number };
+      return `HTTP ${status}`;
     }
   }
-  return 'Unknown error'
+  return 'Unknown error';
 }
 
 function parseHexOrDec(s: string): number | null {
-  const t = s.trim()
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) return parseInt(t.slice(2), 16)
-  if (/^[0-9]+$/.test(t)) return parseInt(t, 10)
-  return null
+  const t = s.trim();
+  if (/^0[xX][0-9a-fA-F]+$/.test(t)) return parseInt(t.slice(2), 16);
+  if (/^[0-9]+$/.test(t)) return parseInt(t, 10);
+  return null;
 }
 
 function toHex(n: number, pad: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(pad, '0')}`
+  return `0x${n.toString(16).toUpperCase().padStart(pad, '0')}`;
 }
 
 function paramKey(pos: number, index: number, subindex: number): string {
-  return `${pos}:${index}:${subindex}`
+  return `${pos}:${index}:${subindex}`;
 }
 
 // CiA301 PDO mapping objects: RxPDO 0x1600–0x17FF, TxPDO 0x1A00–0x1BFF. Their sub-entries encode
@@ -58,7 +58,7 @@ function paramKey(pos: number, index: number, subindex: number): string {
 // them is meaningless, and in a long list they're easily mistaken for real parameters. The picker
 // shows them greyed-out and unselectable rather than offering them as a pick.
 function isPdoMappingObject(p: DeviceParameter): boolean {
-  return (p.index >= 0x1600 && p.index <= 0x17ff) || (p.index >= 0x1a00 && p.index <= 0x1bff)
+  return (p.index >= 0x1600 && p.index <= 0x17ff) || (p.index >= 0x1a00 && p.index <= 0x1bff);
 }
 
 // A memorable, URL-safe identifier + Title-cased label for a new monitoring, e.g. topic
@@ -69,35 +69,35 @@ function generateMonitoringName(): { topic: string; name: string } {
     dictionaries: [adjectives, colors, animals],
     separator: ' ',
     style: 'capital',
-  }).split(' ')
-  return { topic: words.join('-').toLowerCase(), name: words.join(' ') }
+  }).split(' ');
+  return { topic: words.join('-').toLowerCase(), name: words.join(' ') };
 }
 
 // A device known to the bus (subset of the getDevices payload we use here).
 interface DeviceInfo {
-  slavePosition: number
-  name: string
+  slavePosition: number;
+  name: string;
 }
 
 // One row in the create form's parameter list.
 interface ParamRowState {
-  devicePosition: string
-  index: string
-  subindex: string
+  devicePosition: string;
+  index: string;
+  subindex: string;
 }
 
-const emptyRow: ParamRowState = { devicePosition: '', index: '', subindex: '' }
+const emptyRow: ParamRowState = { devicePosition: '', index: '', subindex: '' };
 
 export default function DataMonitoringsPage() {
-  const { api, hasScanned } = useConnection()
-  const queryClient = useQueryClient()
+  const { api, hasScanned } = useConnection();
+  const queryClient = useQueryClient();
 
   const devicesQuery = useQuery({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
     enabled: hasScanned,
-  })
-  const devices: DeviceInfo[] = devicesQuery.data?.data ?? []
+  });
+  const devices: DeviceInfo[] = devicesQuery.data?.data ?? [];
 
   // Cached object dictionaries for every device, so we can resolve parameter names and offer
   // a pick-from-list in the form. Empty for devices whose OD has not been enumerated.
@@ -107,34 +107,34 @@ export default function DataMonitoringsPage() {
       queryFn: () => api.getDeviceParameters(d.slavePosition),
       enabled: hasScanned,
     })),
-  })
+  });
   const paramsByDevice = useMemo(() => {
-    const map = new Map<number, DeviceParameter[]>()
+    const map = new Map<number, DeviceParameter[]>();
     devices.forEach((d, i) => {
-      map.set(d.slavePosition, paramQueries[i]?.data?.data ?? [])
-    })
-    return map
-  }, [devices, paramQueries])
+      map.set(d.slavePosition, paramQueries[i]?.data?.data ?? []);
+    });
+    return map;
+  }, [devices, paramQueries]);
   const nameByKey = useMemo(() => {
-    const map = new Map<string, string>()
+    const map = new Map<string, string>();
     for (const [pos, params] of paramsByDevice) {
-      for (const p of params) map.set(paramKey(pos, p.index, p.subindex), p.name)
+      for (const p of params) map.set(paramKey(pos, p.index, p.subindex), p.name);
     }
-    return map
-  }, [paramsByDevice])
+    return map;
+  }, [paramsByDevice]);
 
   const monitoringsQuery = useQuery({
     queryKey: ['monitorings'],
     queryFn: () => api.listMonitorings(),
     enabled: hasScanned,
     refetchInterval: 5000, // keep the list (and per-parameter source classification) fresh
-  })
-  const monitorings: Monitoring[] = monitoringsQuery.data?.data ?? []
+  });
+  const monitorings: Monitoring[] = monitoringsQuery.data?.data ?? [];
 
   const deleteMutation = useMutation({
     mutationFn: (topic: string) => api.deleteMonitoring(topic),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['monitorings'] }),
-  })
+  });
 
   if (!hasScanned) {
     return (
@@ -144,7 +144,7 @@ export default function DataMonitoringsPage() {
           Connect and scan the bus to create and view monitorings.
         </p>
       </div>
-    )
+    );
   }
 
   return (
@@ -179,7 +179,7 @@ export default function DataMonitoringsPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 // --- Monitoring card ---------------------------------------------------------
@@ -190,100 +190,103 @@ function MonitoringCard({
   onDelete,
   deleting,
 }: {
-  monitoring: Monitoring
-  nameByKey: Map<string, string>
-  onDelete: () => void
-  deleting: boolean
+  monitoring: Monitoring;
+  nameByKey: Map<string, string>;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
-  const { subscribe } = useMonitoringSocket()
-  const params = monitoring.parameters
-  const seriesCount = params.length
+  const { subscribe } = useMonitoringSocket();
+  const params = monitoring.parameters;
+  const seriesCount = params.length;
 
-  const [playing, setPlaying] = useState(true)
-  const playingRef = useRef(true)
+  const [playing, setPlaying] = useState(true);
+  const playingRef = useRef(true);
   useEffect(() => {
-    playingRef.current = playing
-  }, [playing])
+    playingRef.current = playing;
+  }, [playing]);
 
-  const [retention, setRetention] = useState(10000)
-  const retentionRef = useRef(10000)
+  const [retention, setRetention] = useState(10000);
+  const retentionRef = useRef(10000);
   useEffect(() => {
-    retentionRef.current = retention
-  }, [retention])
+    retentionRef.current = retention;
+  }, [retention]);
 
   // Live buffer kept in refs (mutated in place for speed); a fresh outer tuple is pushed to
   // `data` state each batch so the chart's setData runs without copying the whole buffer.
   // x values are microseconds elapsed since the first sample (t0Ref), so the axis shows relative
   // time at the data's true resolution rather than coarse whole-second wall-clock ticks.
-  const t0Ref = useRef<number | null>(null)
-  const xsRef = useRef<number[]>([])
-  const ysRef = useRef<(number | null)[][]>(params.map(() => []))
+  const t0Ref = useRef<number | null>(null);
+  const xsRef = useRef<number[]>([]);
+  const ysRef = useRef<(number | null)[][]>(params.map(() => []));
   const [data, setData] = useState<uPlot.AlignedData>(
     () => [[], ...params.map(() => [])] as uPlot.AlignedData,
-  )
-  const [count, setCount] = useState(0)
+  );
+  const [count, setCount] = useState(0);
   // Cycle-time statistics over the buffer, recomputed at most ~4×/s (the median sort is O(N log N))
   // even though data streams faster.
-  const [stats, setStats] = useState<CycleStats | null>(null)
-  const statsAtRef = useRef(0)
+  const [stats, setStats] = useState<CycleStats | null>(null);
+  const statsAtRef = useRef(0);
 
   // Stable across list refetches (which hand back new param objects): keyed on the content
   // signature so the chart isn't torn down every poll. Names live in the table below.
   const sig = useMemo(
     () => params.map((p) => `${p.devicePosition}:${p.index}:${p.subindex}`).join('|'),
     [params],
-  )
+  );
   const labels = useMemo(
-    () => params.map((p) => `${p.devicePosition}·${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`),
+    () =>
+      params.map(
+        (p) => `${p.devicePosition}·${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`,
+      ),
     [sig],
-  )
+  );
   // Parameter names, positionally aligned with `labels`, surfaced as the legend row's hover title
   // (the legend itself shows the compact device·index:subindex key). Empty when the name is unknown.
   const titles = useMemo(
     () => params.map((p) => nameByKey.get(paramKey(p.devicePosition, p.index, p.subindex)) ?? ''),
     [sig, nameByKey],
-  )
+  );
 
   useEffect(() => {
     const onBatch = (rows: SampleRows) => {
-      if (!playingRef.current) return
+      if (!playingRef.current) return;
       for (const row of rows) {
         // row[0] is the cycle timestamp in epoch microseconds. Plot microseconds elapsed since the
         // first sample so the x-axis keeps the data's resolution (the chart formats it as µs/ms/s).
-        const ts = typeof row[0] === 'number' ? row[0] : 0
-        if (t0Ref.current === null) t0Ref.current = ts
-        xsRef.current.push(ts - t0Ref.current)
+        const ts = typeof row[0] === 'number' ? row[0] : 0;
+        if (t0Ref.current === null) t0Ref.current = ts;
+        xsRef.current.push(ts - t0Ref.current);
         for (let i = 0; i < seriesCount; i++) {
-          const v = row[i + 1]
-          ysRef.current[i].push(typeof v === 'number' ? v : null)
+          const v = row[i + 1];
+          ysRef.current[i].push(typeof v === 'number' ? v : null);
         }
       }
-      const overflow = xsRef.current.length - retentionRef.current
+      const overflow = xsRef.current.length - retentionRef.current;
       if (overflow > 0) {
-        xsRef.current.splice(0, overflow)
-        for (const ys of ysRef.current) ys.splice(0, overflow)
+        xsRef.current.splice(0, overflow);
+        for (const ys of ysRef.current) ys.splice(0, overflow);
       }
-      setData([xsRef.current, ...ysRef.current] as uPlot.AlignedData)
-      setCount(xsRef.current.length)
+      setData([xsRef.current, ...ysRef.current] as uPlot.AlignedData);
+      setCount(xsRef.current.length);
       // Recompute cycle-time stats at most ~4×/s — the median sort is O(N log N) and the buffer can
       // hold thousands of points, but the figures don't need per-batch updates.
-      const nowMs = performance.now()
+      const nowMs = performance.now();
       if (nowMs - statsAtRef.current > 250) {
-        statsAtRef.current = nowMs
-        setStats(cycleStats(xsRef.current))
+        statsAtRef.current = nowMs;
+        setStats(cycleStats(xsRef.current));
       }
-    }
-    return subscribe(monitoring.topic, onBatch)
-  }, [subscribe, monitoring.topic, seriesCount])
+    };
+    return subscribe(monitoring.topic, onBatch);
+  }, [subscribe, monitoring.topic, seriesCount]);
 
   function clear() {
-    t0Ref.current = null
-    xsRef.current = []
-    ysRef.current = params.map(() => [])
-    setData([[], ...params.map(() => [])] as uPlot.AlignedData)
-    setCount(0)
-    setStats(null)
-    statsAtRef.current = 0
+    t0Ref.current = null;
+    xsRef.current = [];
+    ysRef.current = params.map(() => []);
+    setData([[], ...params.map(() => [])] as uPlot.AlignedData);
+    setCount(0);
+    setStats(null);
+    statsAtRef.current = 0;
   }
 
   // Export the retained buffer as CSV. First column is the cycle time in microseconds elapsed since
@@ -297,17 +300,20 @@ function MonitoringCard({
   // cannot tell a smooth capture from one that froze and caught up. Gaps and duplicated timestamps
   // are the evidence, and they are only visible if the column is there.
   function downloadCsv() {
-    const xs = xsRef.current
-    const ys = ysRef.current
-    const rowCount = xs.length
-    if (rowCount === 0) return
-    const header = ['t_us', ...params.map((p) => `${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`)]
-    const lines = [header.join(',')]
+    const xs = xsRef.current;
+    const ys = ysRef.current;
+    const rowCount = xs.length;
+    if (rowCount === 0) return;
+    const header = [
+      't_us',
+      ...params.map((p) => `${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`),
+    ];
+    const lines = [header.join(',')];
     for (let r = 0; r < rowCount; r++) {
-      const values = ys.map((series) => (series[r] == null ? '' : String(series[r])))
-      lines.push([String(xs[r]), ...values].join(','))
+      const values = ys.map((series) => (series[r] == null ? '' : String(series[r])));
+      lines.push([String(xs[r]), ...values].join(','));
     }
-    downloadText(lines.join('\n'), `${monitoring.topic}.csv`, 'text/csv')
+    downloadText(lines.join('\n'), `${monitoring.topic}.csv`, 'text/csv');
   }
 
   return (
@@ -348,9 +354,12 @@ function MonitoringCard({
         </thead>
         <tbody>
           {monitoring.parameters.map((p) => {
-            const name = nameByKey.get(paramKey(p.devicePosition, p.index, p.subindex))
+            const name = nameByKey.get(paramKey(p.devicePosition, p.index, p.subindex));
             return (
-              <tr key={paramKey(p.devicePosition, p.index, p.subindex)} className="border-t border-grey-100">
+              <tr
+                key={paramKey(p.devicePosition, p.index, p.subindex)}
+                className="border-t border-grey-100"
+              >
                 <td className="px-5 py-2">
                   <SlavePositionBadge position={p.devicePosition} />
                 </td>
@@ -362,7 +371,7 @@ function MonitoringCard({
                   <SourceBadge source={p.source} />
                 </td>
               </tr>
-            )
+            );
           })}
         </tbody>
       </table>
@@ -377,9 +386,9 @@ function MonitoringCard({
               // sample is a full pause-duration ahead of the last one — that bridging Δt would
               // otherwise corrupt the trace and the cycle-time stats.
               if (!playing) {
-                clear()
+                clear();
               }
-              setPlaying((p) => !p)
+              setPlaying((p) => !p);
             }}
             title={
               playing
@@ -416,8 +425,8 @@ function MonitoringCard({
               value={retention}
               inputMode="numeric"
               onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n) && n > 0) setRetention(Math.floor(n))
+                const n = Number(e.target.value);
+                if (Number.isFinite(n) && n > 0) setRetention(Math.floor(n));
               }}
             />
             samples
@@ -431,11 +440,11 @@ function MonitoringCard({
         <MonitoringChart data={data} labels={labels} titles={titles} />
       </div>
     </div>
-  )
+  );
 }
 
 function SourceBadge({ source }: { source: string }) {
-  const pdo = source === 'pdo'
+  const pdo = source === 'pdo';
   return (
     <span
       title={
@@ -443,12 +452,13 @@ function SourceBadge({ source }: { source: string }) {
           ? 'PDO — decoded live from the process image each tick'
           : 'SDO — polled in the background and read from cache'
       }
-      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wide uppercase cursor-help ${pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
-        }`}
+      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wide uppercase cursor-help ${
+        pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
+      }`}
     >
       {source}
     </span>
-  )
+  );
 }
 
 // --- Create form -------------------------------------------------------------
@@ -458,81 +468,81 @@ function CreateMonitoringForm({
   paramsByDevice,
   onCreated,
 }: {
-  devices: DeviceInfo[]
-  paramsByDevice: Map<number, DeviceParameter[]>
-  onCreated: () => void
+  devices: DeviceInfo[];
+  paramsByDevice: Map<number, DeviceParameter[]>;
+  onCreated: () => void;
 }) {
-  const { api } = useConnection()
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [topic, setTopic] = useState('')
-  const [interval, setInterval] = useState('16')
-  const [rows, setRows] = useState<ParamRowState[]>([{ ...emptyRow }])
-  const [error, setError] = useState<string | null>(null)
+  const { api } = useConnection();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [topic, setTopic] = useState('');
+  const [interval, setInterval] = useState('16');
+  const [rows, setRows] = useState<ParamRowState[]>([{ ...emptyRow }]);
+  const [error, setError] = useState<string | null>(null);
 
   // Fill the topic + name with a fresh funny pair (both stay editable). Used to seed the form on
   // open and from the 🎲 button.
   function reroll() {
-    const g = generateMonitoringName()
-    setTopic(g.topic)
-    setName(g.name)
+    const g = generateMonitoringName();
+    setTopic(g.topic);
+    setName(g.name);
   }
 
   const createMutation = useMutation({
     mutationFn: (body: {
-      topic: string
-      name?: string
-      interval: number
-      parameters: number[][]
+      topic: string;
+      name?: string;
+      interval: number;
+      parameters: number[][];
     }) => api.createMonitoring(body),
     onSuccess: () => {
-      setName('')
-      setTopic('')
-      setInterval('16')
-      setRows([{ ...emptyRow }])
-      setError(null)
-      setOpen(false)
-      onCreated()
+      setName('');
+      setTopic('');
+      setInterval('16');
+      setRows([{ ...emptyRow }]);
+      setError(null);
+      setOpen(false);
+      onCreated();
     },
     onError: (err) => setError(apiError(err)),
-  })
+  });
 
   function setRow(i: number, patch: Partial<ParamRowState>) {
-    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   }
 
   function submit() {
-    setError(null)
+    setError(null);
     if (!/^[A-Za-z0-9._-]{1,64}$/.test(topic)) {
-      setError('Topic must be 1–64 chars of A–Z, a–z, 0–9, . _ -')
-      return
+      setError('Topic must be 1–64 chars of A–Z, a–z, 0–9, . _ -');
+      return;
     }
-    const intervalMs = Number(interval)
+    const intervalMs = Number(interval);
     if (!Number.isInteger(intervalMs) || intervalMs < 5 || intervalMs > 2000) {
-      setError('Interval must be an integer between 5 and 2000 ms')
-      return
+      setError('Interval must be an integer between 5 and 2000 ms');
+      return;
     }
-    const parameters: number[][] = []
+    const parameters: number[][] = [];
     for (const [i, r] of rows.entries()) {
-      const pos = parseHexOrDec(r.devicePosition)
-      const index = parseHexOrDec(r.index)
-      const subindex = parseHexOrDec(r.subindex)
+      const pos = parseHexOrDec(r.devicePosition);
+      const index = parseHexOrDec(r.index);
+      const subindex = parseHexOrDec(r.subindex);
       if (pos === null || index === null || subindex === null) {
-        setError(`Parameter ${i + 1}: device, index and subindex are required`)
-        return
+        setError(`Parameter ${i + 1}: device, index and subindex are required`);
+        return;
       }
-      parameters.push([pos, index, subindex])
+      parameters.push([pos, index, subindex]);
     }
     if (parameters.length === 0) {
-      setError('Add at least one parameter')
-      return
+      setError('Add at least one parameter');
+      return;
     }
     createMutation.mutate({
       topic,
       name: name.trim() === '' ? undefined : name.trim(),
       interval: intervalMs,
       parameters,
-    })
+    });
   }
 
   if (!open) {
@@ -541,14 +551,14 @@ function CreateMonitoringForm({
         type="button"
         className={btnCls}
         onClick={() => {
-          reroll() // seed a funny topic + name so creating one is a single click
-          setOpen(true)
+          reroll(); // seed a funny topic + name so creating one is a single click
+          setOpen(true);
         }}
         title="Open the form to define a new monitoring — pick the drive parameters to record and a flush interval."
       >
         New monitoring
       </button>
-    )
+    );
   }
 
   return (
@@ -567,15 +577,30 @@ function CreateMonitoringForm({
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         <div>
           <label className={labelCls}>Topic</label>
-          <input className={inputCls} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="left-leg" />
+          <input
+            className={inputCls}
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            placeholder="left-leg"
+          />
         </div>
         <div>
           <label className={labelCls}>Name (optional)</label>
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Left Leg" />
+          <input
+            className={inputCls}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Left Leg"
+          />
         </div>
         <div>
           <label className={labelCls}>Flush interval (ms)</label>
-          <input className={inputCls} value={interval} onChange={(e) => setInterval(e.target.value)} inputMode="numeric" />
+          <input
+            className={inputCls}
+            value={interval}
+            onChange={(e) => setInterval(e.target.value)}
+            inputMode="numeric"
+          />
           <p className="mt-1 text-[10px] text-grey-400">
             5–2000 ms (16 ms ≈ one batch per 60 Hz frame). How often a batch is sent; the stream is
             lossless (every cycle), so this trades message size against frequency, not resolution.
@@ -593,7 +618,9 @@ function CreateMonitoringForm({
               devices={devices}
               paramsByDevice={paramsByDevice}
               onChange={(patch) => setRow(i, patch)}
-              onRemove={rows.length > 1 ? () => setRows((rs) => rs.filter((_, j) => j !== i)) : undefined}
+              onRemove={
+                rows.length > 1 ? () => setRows((rs) => rs.filter((_, j) => j !== i)) : undefined
+              }
             />
           ))}
         </div>
@@ -637,7 +664,7 @@ function CreateMonitoringForm({
         </button>
       </div>
     </div>
-  )
+  );
 }
 
 function ParamRow({
@@ -647,14 +674,14 @@ function ParamRow({
   onChange,
   onRemove,
 }: {
-  row: ParamRowState
-  devices: DeviceInfo[]
-  paramsByDevice: Map<number, DeviceParameter[]>
-  onChange: (patch: Partial<ParamRowState>) => void
-  onRemove?: () => void
+  row: ParamRowState;
+  devices: DeviceInfo[];
+  paramsByDevice: Map<number, DeviceParameter[]>;
+  onChange: (patch: Partial<ParamRowState>) => void;
+  onRemove?: () => void;
 }) {
-  const pos = parseHexOrDec(row.devicePosition)
-  const deviceParams = pos !== null ? (paramsByDevice.get(pos) ?? []) : []
+  const pos = parseHexOrDec(row.devicePosition);
+  const deviceParams = pos !== null ? (paramsByDevice.get(pos) ?? []) : [];
 
   return (
     <div className="flex flex-wrap items-end gap-2">
@@ -719,5 +746,5 @@ function ParamRow({
         </button>
       )}
     </div>
-  )
+  );
 }

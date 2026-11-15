@@ -1,10 +1,10 @@
-import { useState } from 'react'
-import { Link } from 'react-router'
-import PageHeader from '../components/PageHeader'
-import LearnSections from '../components/LearnSections'
-import type { LearnSectionEntry } from '../components/LearnSections'
-import CommutationOffsetLab from '../components/CommutationOffsetLab'
-import Callout from '../components/Callout'
+import { useState } from 'react';
+import { Link } from 'react-router';
+import PageHeader from '../components/PageHeader';
+import LearnSections from '../components/LearnSections';
+import type { LearnSectionEntry } from '../components/LearnSections';
+import CommutationOffsetLab from '../components/CommutationOffsetLab';
+import Callout from '../components/Callout';
 
 // Learn → Commutation Offset.
 //
@@ -18,7 +18,7 @@ import Callout from '../components/Callout'
 export default function LearnCommutationOffsetPage() {
   // The lab keeps its own pole pair control, so this page works without the cross-section beside
   // it.
-  const [polePairs, setPolePairs] = useState(1)
+  const [polePairs, setPolePairs] = useState(1);
 
   const sections: LearnSectionEntry[] = [
     {
@@ -29,7 +29,10 @@ export default function LearnCommutationOffsetPage() {
         <>
           <p>
             Three facts from{' '}
-            <Link to="/learn/servo-motors" className="text-syn-red hover:text-ocean transition-colors">
+            <Link
+              to="/learn/servo-motors"
+              className="text-syn-red hover:text-ocean transition-colors"
+            >
               Servo Motors
             </Link>{' '}
             and{' '}
@@ -43,20 +46,29 @@ export default function LearnCommutationOffsetPage() {
             <li>
               The encoder measures the shaft faithfully, but where its own zero sits relative to the
               magnets was settled by assembly and means nothing to the drive.{' '}
-              <Link to="/learn/encoders#where-it-sits" className="text-syn-red hover:text-ocean transition-colors">
+              <Link
+                to="/learn/encoders#where-it-sits"
+                className="text-syn-red hover:text-ocean transition-colors"
+              >
                 Where the encoder sits
               </Link>
             </li>
             <li>
               Commutation happens in electrical angle, which is shaft angle multiplied by the pole
               pair count.{' '}
-              <Link to="/learn/servo-motors#shaft-and-electrical-angle" className="text-syn-red hover:text-ocean transition-colors">
+              <Link
+                to="/learn/servo-motors#shaft-and-electrical-angle"
+                className="text-syn-red hover:text-ocean transition-colors"
+              >
                 Two angles
               </Link>
             </li>
             <li>
               An encoder reports counts, not degrees. Degrees are the drive&apos;s arithmetic.{' '}
-              <Link to="/learn/encoders#counts-and-resolution" className="text-syn-red hover:text-ocean transition-colors">
+              <Link
+                to="/learn/encoders#counts-and-resolution"
+                className="text-syn-red hover:text-ocean transition-colors"
+              >
                 What the encoder reports
               </Link>
             </li>
@@ -76,10 +88,9 @@ export default function LearnCommutationOffsetPage() {
           <p>
             It is not that a wrong offset makes heat and a right one does not. Current heats the
             windings either way, because the winding has resistance and I²R does not care which
-            direction the current points. What the offset
-            decides is how much torque you get per amp. With the wrong number the drive has to send
-            more current to reach the same torque, and it pays for the extra in heat it gets nothing
-            back for.
+            direction the current points. What the offset decides is how much torque you get per
+            amp. With the wrong number the drive has to send more current to reach the same torque,
+            and it pays for the extra in heat it gets nothing back for.
           </p>
         </>
       ),
@@ -103,9 +114,9 @@ export default function LearnCommutationOffsetPage() {
           </p>
           <p>
             Then move the stored offset away from the correct value and watch the controller dial.
-            The drive keeps pointing its current a quarter turn ahead of where it{' '}
-            <em>believes</em> the magnets are, so the further its belief drifts, the less of that
-            current makes torque. <strong>Measure the offset</strong> puts the right number in.
+            The drive keeps pointing its current a quarter turn ahead of where it <em>believes</em>{' '}
+            the magnets are, so the further its belief drifts, the less of that current makes
+            torque. <strong>Measure the offset</strong> puts the right number in.
           </p>
           <p>
             The two readouts to watch are the band, measured in degrees of shaft rotation, and the
@@ -124,10 +135,10 @@ export default function LearnCommutationOffsetPage() {
           <p>
             Torque comes from current at right angles to the rotor&apos;s magnetic axis. Current
             pointing straight at the magnets only pulls them outward against the bearings, which
-            turns nothing. So the drive points its current a quarter turn ahead of where it
-            believes the magnets are: 90 electrical degrees. Field-oriented control names the two
-            directions — the magnet axis is the <strong>d axis</strong>, the torque-producing axis
-            90 degrees on is the <strong>q axis</strong>.
+            turns nothing. So the drive points its current a quarter turn ahead of where it believes
+            the magnets are: 90 electrical degrees. Field-oriented control names the two directions
+            — the magnet axis is the <strong>d axis</strong>, the torque-producing axis 90 degrees
+            on is the <strong>q axis</strong>.
           </p>
           <p>
             Which side the current sits on is what sets the direction of travel. A quarter turn
@@ -174,10 +185,10 @@ export default function LearnCommutationOffsetPage() {
         <>
           <p>
             Before anything can be measured there has to be something to measure against, and what
-            that is turns out not to be obvious. The magnets carry no marking. There is nothing on the rotor to measure from. Electrical zero is a{' '}
-            <strong>convention</strong>, and it lives on the stator: it is the position where the
-            rotor&apos;s north lines up with a chosen reference direction in the windings,
-            conventionally the magnetic axis of phase U.
+            that is turns out not to be obvious. The magnets carry no marking. There is nothing on
+            the rotor to measure from. Electrical zero is a <strong>convention</strong>, and it
+            lives on the stator: it is the position where the rotor&apos;s north lines up with a
+            chosen reference direction in the windings, conventionally the magnetic axis of phase U.
           </p>
           <p>
             It has to be that way round. The stator is the half the drive controls. It decides the
@@ -214,9 +225,9 @@ export default function LearnCommutationOffsetPage() {
           <p>
             No drive can work the number out from what it already knows, so every drive finds it by
             experiment. The most direct method drives current into the windings at an electrical
-            angle the drive chooses. The rotor swings into line with that field the way a compass needle
-            lines up with a magnet. The drive then reads the encoder and knows, for that one moment,
-            what the encoder says when the magnets are at a known angle. The offset follows.
+            angle the drive chooses. The rotor swings into line with that field the way a compass
+            needle lines up with a magnet. The drive then reads the encoder and knows, for that one
+            moment, what the encoder says when the magnets are at a known angle. The offset follows.
           </p>
           <p>
             Notice what is actually measured. Not the offset — there is no sensor for it. One
@@ -235,7 +246,7 @@ export default function LearnCommutationOffsetPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['Step', 'Value', 'Known or measured'].map(h => (
+                  {['Step', 'Value', 'Known or measured'].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
@@ -249,7 +260,9 @@ export default function LearnCommutationOffsetPage() {
                 <tr className="border-b border-grey-100">
                   <td className="px-4 py-2">Drive picks a field direction</td>
                   <td className="px-4 py-2 font-mono">0° electrical</td>
-                  <td className="px-4 py-2">Chosen. It energises U, V, W to point the field there.</td>
+                  <td className="px-4 py-2">
+                    Chosen. It energises U, V, W to point the field there.
+                  </td>
                 </tr>
                 <tr className="border-b border-grey-100">
                   <td className="px-4 py-2">Rotor swings into line</td>
@@ -304,10 +317,10 @@ export default function LearnCommutationOffsetPage() {
             current, held still, and it trades precision for the fact that nothing turns.
           </p>
           <p>
-            How often it has to be repeated depends on which kind of encoder is fitted. An
-            absolute encoder holds its meaning across a power cycle, so the offset is measured once
-            at commissioning and stored. An incremental one starts from nothing at every power-up,
-            so the relationship has to be established again each time the drive comes up.
+            How often it has to be repeated depends on which kind of encoder is fitted. An absolute
+            encoder holds its meaning across a power cycle, so the offset is measured once at
+            commissioning and stored. An incremental one starts from nothing at every power-up, so
+            the relationship has to be established again each time the drive comes up.
           </p>
           <p>
             Either way the measurement holds only while the encoder stays where it was. Loosen it,
@@ -342,7 +355,7 @@ export default function LearnCommutationOffsetPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['0x2009:03', 'Method', 'Movement', 'Brake', 'Needs'].map(h => (
+                  {['0x2009:03', 'Method', 'Movement', 'Brake', 'Needs'].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
@@ -421,7 +434,7 @@ export default function LearnCommutationOffsetPage() {
         </>
       ),
     },
-  ]
+  ];
 
   return (
     <div>
@@ -437,5 +450,5 @@ export default function LearnCommutationOffsetPage() {
       </div>
       <LearnSections sections={sections} />
     </div>
-  )
+  );
 }

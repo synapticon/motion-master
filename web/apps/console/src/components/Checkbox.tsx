@@ -1,20 +1,20 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react';
 
 interface CheckboxProps {
-  checked: boolean
-  onChange: (checked: boolean) => void
+  checked: boolean;
+  onChange: (checked: boolean) => void;
   /**
    * Renders the dash state: some but not all of what this controls is checked. Only meaningful on
    * a "select all" checkbox. `checked` is ignored visually while this is set, matching the native
    * behaviour, so pass `checked={allSelected}` and let this override it.
    */
-  indeterminate?: boolean
-  disabled?: boolean
-  title?: string
-  'aria-label'?: string
+  indeterminate?: boolean;
+  disabled?: boolean;
+  title?: string;
+  'aria-label'?: string;
   /** Extra classes. The accent, cursor and disabled treatment are supplied and should not be
       restated at the call site — that is the point of this component. */
-  className?: string
+  className?: string;
 }
 
 // The one checkbox in the app. It exists because there were four hand-rolled ones that disagreed:
@@ -32,26 +32,26 @@ export default function Checkbox({
   'aria-label': ariaLabel,
   className = '',
 }: CheckboxProps) {
-  const ref = useRef<HTMLInputElement>(null)
+  const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (ref.current) {
-      ref.current.indeterminate = indeterminate
+      ref.current.indeterminate = indeterminate;
     }
-  }, [indeterminate])
+  }, [indeterminate]);
 
   return (
     <input
       ref={ref}
       type="checkbox"
       checked={checked}
-      onChange={e => onChange(e.target.checked)}
+      onChange={(e) => onChange(e.target.checked)}
       disabled={disabled}
       title={title}
       aria-label={ariaLabel}
       className={`accent-syn-red cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
     />
-  )
+  );
 }
 
 /**
@@ -68,5 +68,5 @@ export function selectAllState(selected: number, total: number) {
     indeterminate: selected > 0 && selected < total,
     /** True when a click should select everything; false when it should clear. */
     selectsAll: selected === 0,
-  }
+  };
 }

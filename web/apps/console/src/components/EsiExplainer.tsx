@@ -1,4 +1,4 @@
-import Explainer from './Explainer'
+import Explainer from './Explainer';
 
 // The "What is an ESI file?" teaching panel for the Tools ESI page. Kept as its own component so
 // the explanation lives in one place if a device-scoped ESI view is ever added, matching how
@@ -29,11 +29,11 @@ export default function EsiExplainer() {
       <p>
         <strong>The dictionary is assembled, not just read.</strong> A modular device splits its
         objects across a device description and one or more <strong>modules</strong> plugged into{' '}
-        <strong>slots</strong>. On a SOMANET drive the device itself declares only the
-        communication objects (<code>0x1xxx</code>) — every CiA 402 object (<code>0x6040</code>{' '}
-        Controlword, <code>0x6060</code> Modes of operation, <code>0x607A</code> Target position, …)
-        lives in a module. The table below merges them, and the <strong>Source</strong> column
-        records where each entry came from.
+        <strong>slots</strong>. On a SOMANET drive the device itself declares only the communication
+        objects (<code>0x1xxx</code>) — every CiA 402 object (<code>0x6040</code> Controlword,{' '}
+        <code>0x6060</code> Modes of operation, <code>0x607A</code> Target position, …) lives in a
+        module. The table below merges them, and the <strong>Source</strong> column records where
+        each entry came from.
       </p>
       <p>
         <strong>When a slot offers a choice.</strong> Some slots list several mutually exclusive
@@ -49,5 +49,5 @@ export default function EsiExplainer() {
         spelling, kept verbatim so a value can be compared against the source file by eye.
       </p>
     </Explainer>
-  )
+  );
 }

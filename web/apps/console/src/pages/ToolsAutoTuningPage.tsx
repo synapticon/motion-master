@@ -1,28 +1,28 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import AutoTuningExplainer from '../components/AutoTuningExplainer'
-import FilePickerButton from '../components/FilePickerButton'
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline, btnPrimary } from '../utils/styles'
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import AutoTuningExplainer from '../components/AutoTuningExplainer';
+import FilePickerButton from '../components/FilePickerButton';
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline, btnPrimary } from '../utils/styles';
 
-const inputCls = 'h-[38px] border border-grey-300 px-3 text-sm w-full bg-white'
-const labelCls = 'block text-xs text-grey-500 mb-1'
+const inputCls = 'h-[38px] border border-grey-300 px-3 text-sm w-full bg-white';
+const labelCls = 'block text-xs text-grey-500 mb-1';
 
 // How often to re-read the status. It is a startup snapshot on the server and changes only when
 // Motion Master restarts, so this is slow on purpose — it exists so a page left open after a
 // restart stops claiming the old state.
-const STATUS_POLL_MS = 15000
+const STATUS_POLL_MS = 15000;
 
 interface Example {
   /** Stable key for the picker. */
-  id: string
+  id: string;
   /** What the picker shows. */
-  label: string
+  label: string;
   /** One line on what the function does, and what the numbers in the example are. */
-  description: string
+  description: string;
   /** The request body, exactly as it is sent. */
-  body: unknown
+  body: unknown;
 }
 
 // Every function the endpoint forwards, with a request that runs. The values come from the
@@ -260,63 +260,63 @@ const EXAMPLES: Example[] = [
       data: { plant_model: { numerator: [1.0], denominator: [0.00015, 0.000206] } },
     },
   },
-]
+];
 
 function pretty(value: unknown): string {
-  return JSON.stringify(value, null, 2)
+  return JSON.stringify(value, null, 2);
 }
 
 interface Reply {
-  status: number
+  status: number;
   /** The body as text, pretty-printed when it parsed as JSON. */
-  text: string
+  text: string;
   /** True when the reply reports a failure: a non-2xx status, or an `error` property. */
-  failed: boolean
+  failed: boolean;
   /** Round trip measured in the browser, so it includes this server and the child process. */
-  wallMs: number
+  wallMs: number;
   /** The `duration` the auto-tuning program reported, in seconds, when it reported one. */
-  duration?: number
+  duration?: number;
 }
 
 export default function ToolsAutoTuningPage() {
-  const { api } = useConnection()
-  const [selectedId, setSelectedId] = useState(EXAMPLES[0].id)
-  const [text, setText] = useState(() => pretty(EXAMPLES[0].body))
-  const [csv, setCsv] = useState<{ name: string; text: string } | null>(null)
-  const [running, setRunning] = useState(false)
-  const [reply, setReply] = useState<Reply | null>(null)
-  const [requestError, setRequestError] = useState<string | null>(null)
+  const { api } = useConnection();
+  const [selectedId, setSelectedId] = useState(EXAMPLES[0].id);
+  const [text, setText] = useState(() => pretty(EXAMPLES[0].body));
+  const [csv, setCsv] = useState<{ name: string; text: string } | null>(null);
+  const [running, setRunning] = useState(false);
+  const [reply, setReply] = useState<Reply | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   const status = useQuery({
     queryKey: ['autoTuning'],
     queryFn: () => api.getAutoTuning(),
     refetchInterval: STATUS_POLL_MS,
-  }).data?.data
+  }).data?.data;
 
-  const example = EXAMPLES.find(e => e.id === selectedId) ?? EXAMPLES[0]
-  const wantsCsv = example.id === 'identify_plant_model'
+  const example = EXAMPLES.find((e) => e.id === selectedId) ?? EXAMPLES[0];
+  const wantsCsv = example.id === 'identify_plant_model';
 
   function select(id: string) {
-    const next = EXAMPLES.find(e => e.id === id) ?? EXAMPLES[0]
-    setSelectedId(id)
-    setText(pretty(next.body))
-    setReply(null)
-    setRequestError(null)
+    const next = EXAMPLES.find((e) => e.id === id) ?? EXAMPLES[0];
+    setSelectedId(id);
+    setText(pretty(next.body));
+    setReply(null);
+    setRequestError(null);
   }
 
   async function run() {
-    setRunning(true)
-    setReply(null)
-    setRequestError(null)
-    const startedAt = performance.now()
+    setRunning(true);
+    setReply(null);
+    setRequestError(null);
+    const startedAt = performance.now();
     try {
-      const body: unknown = JSON.parse(text)
+      const body: unknown = JSON.parse(text);
       // A measurement file is held outside the editor and spliced in here. Putting 200 KB of CSV in
       // a textarea makes every keystroke redraw it, and nobody edits those numbers by hand.
       if (csv && typeof body === 'object' && body !== null) {
-        const data = (body as { data?: Record<string, unknown> }).data
+        const data = (body as { data?: Record<string, unknown> }).data;
         if (data && 'csv' in data) {
-          data.csv = csv.text
+          data.csv = csv.text;
         }
       }
       // A direct fetch rather than the generated client, because this page's job is to show what the
@@ -327,17 +327,18 @@ export default function ToolsAutoTuningPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      })
-      const raw = await response.text()
-      const wallMs = performance.now() - startedAt
-      let parsed: unknown = null
+      });
+      const raw = await response.text();
+      const wallMs = performance.now() - startedAt;
+      let parsed: unknown = null;
       try {
-        parsed = JSON.parse(raw)
+        parsed = JSON.parse(raw);
       } catch {
-        parsed = null
+        parsed = null;
       }
-      const object = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
-      const duration = typeof object?.duration === 'number' ? object.duration : undefined
+      const object =
+        typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null;
+      const duration = typeof object?.duration === 'number' ? object.duration : undefined;
       setReply({
         status: response.status,
         text: parsed === null ? raw : pretty(parsed),
@@ -346,7 +347,7 @@ export default function ToolsAutoTuningPage() {
         failed: !response.ok || object?.error !== undefined,
         wallMs,
         duration,
-      })
+      });
     } catch (err) {
       setRequestError(
         err instanceof SyntaxError
@@ -354,14 +355,14 @@ export default function ToolsAutoTuningPage() {
           : err instanceof Error
             ? err.message
             : 'The request failed.',
-      )
+      );
     } finally {
-      setRunning(false)
+      setRunning(false);
     }
   }
 
   async function loadCsv(file: File) {
-    setCsv({ name: file.name, text: await file.text() })
+    setCsv({ name: file.name, text: await file.text() });
   }
 
   return (
@@ -412,10 +413,10 @@ export default function ToolsAutoTuningPage() {
                 <select
                   id="auto-tuning-operation"
                   value={selectedId}
-                  onChange={e => select(e.target.value)}
+                  onChange={(e) => select(e.target.value)}
                   className={inputCls}
                 >
-                  {EXAMPLES.map(e => (
+                  {EXAMPLES.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.label}
                     </option>
@@ -459,7 +460,7 @@ export default function ToolsAutoTuningPage() {
               <textarea
                 id="auto-tuning-body"
                 value={text}
-                onChange={e => setText(e.target.value)}
+                onChange={(e) => setText(e.target.value)}
                 spellCheck={false}
                 rows={18}
                 className="w-full border border-grey-300 p-3 font-mono text-xs bg-white"
@@ -479,7 +480,8 @@ export default function ToolsAutoTuningPage() {
               {reply && (
                 <span className="text-xs text-grey-500 font-mono">
                   {reply.status} · {reply.wallMs.toFixed(0)} ms
-                  {reply.duration !== undefined && ` · compute ${(reply.duration * 1000).toFixed(1)} ms`}
+                  {reply.duration !== undefined &&
+                    ` · compute ${(reply.duration * 1000).toFixed(1)} ms`}
                 </span>
               )}
             </div>
@@ -511,5 +513,5 @@ export default function ToolsAutoTuningPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

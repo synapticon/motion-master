@@ -8,14 +8,13 @@ export default function ConnectionExplainer() {
   return (
     <Explainer title="How does the Console reach Motion Master?">
       <p>
-        This Console is a web app served from{' '}
-        <code>https://motion-master.synapticon.com</code>. Motion Master itself runs on your own
-        hardware and is a <em>different</em> origin, so every request the page makes to it is a{' '}
-        <strong>cross-origin</strong> request over HTTPS — and the browser will refuse it outright
-        unless the backend presents a certificate that is both publicly trusted and issued for the
-        exact name you are connecting to. Crucially there is <strong>no click-through</strong>: the
-        warning page you get when browsing to a site with a bad certificate does not exist for
-        background requests. They simply fail.
+        This Console is a web app served from <code>https://motion-master.synapticon.com</code>.
+        Motion Master itself runs on your own hardware and is a <em>different</em> origin, so every
+        request the page makes to it is a <strong>cross-origin</strong> request over HTTPS — and the
+        browser will refuse it outright unless the backend presents a certificate that is both
+        publicly trusted and issued for the exact name you are connecting to. Crucially there is{' '}
+        <strong>no click-through</strong>: the warning page you get when browsing to a site with a
+        bad certificate does not exist for background requests. They simply fail.
       </p>
 
       <p>
@@ -48,8 +47,8 @@ export default function ConnectionExplainer() {
               First, that machine must be listening to the network: set{' '}
               <code>server.bindAddress</code> to <code>0.0.0.0</code> in its config file, since the
               default of <code>127.0.0.1</code> accepts connections only from itself. Note the API
-              has <strong>no authentication</strong> — anything that can reach it can command
-              motion — so do this only on a network you trust.
+              has <strong>no authentication</strong> — anything that can reach it can command motion
+              — so do this only on a network you trust.
             </p>
             <p className="mt-2">
               Second, the browser needs a name. No certificate authority will issue one for a bare
@@ -94,9 +93,7 @@ export default function ConnectionExplainer() {
         </div>
 
         <div>
-          <dt className="font-medium text-grey-900">
-            Or skip the hostname and use the IP address
-          </dt>
+          <dt className="font-medium text-grey-900">Or skip the hostname and use the IP address</dt>
           <dd>
             Entering the plain address works too, and needs no administrator rights — useful on a
             locked-down machine, and the only option on a phone or tablet, which cannot edit a hosts
@@ -127,8 +124,8 @@ export default function ConnectionExplainer() {
               genuine certificate and a real hostname do not exempt it. Granting it once covers this
               Console from then on. <strong>Denying it makes requests fail silently</strong>, which
               looks exactly like a server that is not running — so if the connection fails and
-              everything else checks out, look at the permission (the icon at the left of Chrome&apos;s
-              address bar).
+              everything else checks out, look at the permission (the icon at the left of
+              Chrome&apos;s address bar).
             </p>
             <p className="mt-2">
               On managed browsers an administrator can grant it centrally with the{' '}
@@ -154,8 +151,8 @@ export default function ConnectionExplainer() {
               itself current: it fetches a fresh one at startup when the current one is missing,
               expired, or within a week of expiring, and <strong>Refresh certificate</strong> does
               it on demand. Setting <code>tls.autoUpdate</code> to <code>false</code> in the config
-              file turns that off for air-gapped installs, which instead need{' '}
-              <code>cert.pem</code> and <code>key.pem</code> copied next to the binary periodically.
+              file turns that off for air-gapped installs, which instead need <code>cert.pem</code>{' '}
+              and <code>key.pem</code> copied next to the binary periodically.
             </p>
             <p className="mt-2">
               Once a certificate has actually expired, the button can no longer help — this page

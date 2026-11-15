@@ -1,5 +1,5 @@
-import PageHeader from '../components/PageHeader'
-import Callout from '../components/Callout'
+import PageHeader from '../components/PageHeader';
+import Callout from '../components/Callout';
 
 // One component serves every Learn topic that has a sidebar entry and no text yet, so a topic
 // becomes a real page by replacing its route, not by deleting a stub.
@@ -13,5 +13,5 @@ export default function LearnComingSoonPage({ title, topic }: { title: string; t
         </Callout>
       </div>
     </div>
-  )
+  );
 }

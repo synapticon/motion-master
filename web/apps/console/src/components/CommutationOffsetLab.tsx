@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Crosshair, Pause, Play, RotateCcw } from 'lucide-react'
-import PolePairSelector from './PolePairSelector'
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Crosshair, Pause, Play, RotateCcw } from 'lucide-react';
+import PolePairSelector from './PolePairSelector';
 
 // The interactive model behind the Learn → Commutation Offset page.
 //
@@ -26,35 +26,35 @@ import PolePairSelector from './PolePairSelector'
 // Torque follows from projecting the applied current onto the axis that actually produces torque:
 // cos(error) of it makes torque, sin(error) of it makes only heat.
 
-const norm360 = (deg: number) => ((deg % 360) + 360) % 360
-const signed180 = (deg: number) => norm360(deg + 180) - 180
-const rad = (deg: number) => (deg * Math.PI) / 180
+const norm360 = (deg: number) => ((deg % 360) + 360) % 360;
+const signed180 = (deg: number) => norm360(deg + 180) - 180;
+const rad = (deg: number) => (deg * Math.PI) / 180;
 
-const SIZE = 280
-const C = SIZE / 2
+const SIZE = 280;
+const C = SIZE / 2;
 
 // Screen point for a maths-convention angle: 0 at the right, increasing counter-clockwise. SVG's y
 // axis points down, hence the subtraction.
 function polar(r: number, deg: number) {
-  return { x: C + r * Math.cos(rad(deg)), y: C - r * Math.sin(rad(deg)) }
+  return { x: C + r * Math.cos(rad(deg)), y: C - r * Math.sin(rad(deg)) };
 }
 
 // An annulus sector from `fromDeg` counter-clockwise by `spanDeg`. Used for the magnet poles and
 // for every shaded angle band, so they all share one path builder.
 function sector(rInner: number, rOuter: number, fromDeg: number, spanDeg: number) {
-  const span = Math.min(Math.max(spanDeg, 0.001), 359.999)
-  const large = span > 180 ? 1 : 0
-  const a = polar(rOuter, fromDeg)
-  const b = polar(rOuter, fromDeg + span)
-  const c = polar(rInner, fromDeg + span)
-  const d = polar(rInner, fromDeg)
+  const span = Math.min(Math.max(spanDeg, 0.001), 359.999);
+  const large = span > 180 ? 1 : 0;
+  const a = polar(rOuter, fromDeg);
+  const b = polar(rOuter, fromDeg + span);
+  const c = polar(rInner, fromDeg + span);
+  const d = polar(rInner, fromDeg);
   return [
     `M ${a.x.toFixed(2)} ${a.y.toFixed(2)}`,
     `A ${rOuter} ${rOuter} 0 ${large} 0 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`,
     `L ${c.x.toFixed(2)} ${c.y.toFixed(2)}`,
     `A ${rInner} ${rInner} 0 ${large} 1 ${d.x.toFixed(2)} ${d.y.toFixed(2)}`,
     'Z',
-  ].join(' ')
+  ].join(' ');
 }
 
 // A line from the centre out to `r`, the shape every pointer and axis marker on both dials uses.
@@ -66,15 +66,15 @@ function Ray({
   width = 2,
   dashed = false,
 }: {
-  deg: number
-  from?: number
-  to: number
-  className: string
-  width?: number
-  dashed?: boolean
+  deg: number;
+  from?: number;
+  to: number;
+  className: string;
+  width?: number;
+  dashed?: boolean;
 }) {
-  const a = polar(from, deg)
-  const b = polar(to, deg)
+  const a = polar(from, deg);
+  const b = polar(to, deg);
   return (
     <line
       x1={a.x}
@@ -86,26 +86,26 @@ function Ray({
       strokeLinecap="round"
       strokeDasharray={dashed ? '4 3' : undefined}
     />
-  )
+  );
 }
 
 // An arrowhead at the tip of a ray, so the two vectors on the electrical dial read as vectors.
 function Arrowhead({ deg, r, className }: { deg: number; r: number; className: string }) {
-  const tip = polar(r, deg)
-  const left = polar(r - 11, deg + 5)
-  const right = polar(r - 11, deg - 5)
+  const tip = polar(r, deg);
+  const left = polar(r - 11, deg + 5);
+  const right = polar(r - 11, deg - 5);
   return (
     <polygon
       points={`${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`}
       className={className}
     />
-  )
+  );
 }
 
-type DragTarget = 'rotor' | 'encoder'
+type DragTarget = 'rotor' | 'encoder';
 
 const sliderClass =
-  'w-full h-1 appearance-none bg-grey-200 accent-syn-red cursor-pointer disabled:cursor-not-allowed'
+  'w-full h-1 appearance-none bg-grey-200 accent-syn-red cursor-pointer disabled:cursor-not-allowed';
 
 // One labelled row of the readout table.
 function Readout({
@@ -114,10 +114,10 @@ function Readout({
   hint,
   emphasis = false,
 }: {
-  label: string
-  value: string
-  hint?: string
-  emphasis?: boolean
+  label: string;
+  value: string;
+  hint?: string;
+  emphasis?: boolean;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-1.5 border-b border-grey-100 last:border-0">
@@ -131,12 +131,20 @@ function Readout({
         {value}
       </span>
     </div>
-  )
+  );
 }
 
 // One legend entry: a short line in the colour it explains, then the label. Both dials carry one,
 // because four unlabelled strokes on a circle is a puzzle rather than a diagram.
-function Key({ className, label, dashed = false }: { className: string; label: string; dashed?: boolean }) {
+function Key({
+  className,
+  label,
+  dashed = false,
+}: {
+  className: string;
+  label: string;
+  dashed?: boolean;
+}) {
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] text-grey-600">
       <svg width="18" height="8" aria-hidden className="shrink-0">
@@ -153,103 +161,103 @@ function Key({ className, label, dashed = false }: { className: string; label: s
       </svg>
       {label}
     </span>
-  )
+  );
 }
 
 export default function CommutationOffsetLab({
   polePairs,
   onPolePairsChange,
 }: {
-  polePairs: number
-  onPolePairsChange: (polePairs: number) => void
+  polePairs: number;
+  onPolePairsChange: (polePairs: number) => void;
 }) {
-  const [shaft, setShaft] = useState(35)
-  const [mount, setMount] = useState(110)
-  const [storedOffset, setStoredOffset] = useState(0)
-  const [spinning, setSpinning] = useState(false)
+  const [shaft, setShaft] = useState(35);
+  const [mount, setMount] = useState(110);
+  const [storedOffset, setStoredOffset] = useState(0);
+  const [spinning, setSpinning] = useState(false);
 
-  const drag = useRef<{ target: DragTarget; grab: number } | null>(null)
+  const drag = useRef<{ target: DragTarget; grab: number } | null>(null);
 
-  const encoderReading = norm360(shaft - mount)
-  const trueElectrical = norm360(shaft * polePairs)
-  const driveElectrical = norm360(encoderReading * polePairs + storedOffset)
-  const correctOffset = norm360(mount * polePairs)
-  const error = signed180(driveElectrical - trueElectrical)
-  const torque = Math.cos(rad(error))
-  const heatOnly = Math.abs(Math.sin(rad(error)))
-  const aligned = Math.abs(error) < 0.5
+  const encoderReading = norm360(shaft - mount);
+  const trueElectrical = norm360(shaft * polePairs);
+  const driveElectrical = norm360(encoderReading * polePairs + storedOffset);
+  const correctOffset = norm360(mount * polePairs);
+  const error = signed180(driveElectrical - trueElectrical);
+  const torque = Math.cos(rad(error));
+  const heatOnly = Math.abs(Math.sin(rad(error)));
+  const aligned = Math.abs(error) < 0.5;
 
   // The rotor turns on its own so the two dials can be watched together: the electrical angle
   // advances `polePairs` times per mechanical turn, and a wrong offset holds its lag the whole way
   // round rather than washing out.
   useEffect(() => {
     if (!spinning) {
-      return
+      return;
     }
-    let frame = 0
-    let previous = performance.now()
+    let frame = 0;
+    let previous = performance.now();
     const step = (now: number) => {
-      const seconds = (now - previous) / 1000
-      previous = now
-      setShaft(s => norm360(s + seconds * 36))
-      frame = requestAnimationFrame(step)
-    }
-    frame = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(frame)
-  }, [spinning])
+      const seconds = (now - previous) / 1000;
+      previous = now;
+      setShaft((s) => norm360(s + seconds * 36));
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [spinning]);
 
   const pointerAngle = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const x = ((event.clientX - rect.left) / rect.width) * SIZE - C
-    const y = C - ((event.clientY - rect.top) / rect.height) * SIZE
-    return { deg: norm360((Math.atan2(y, x) * 180) / Math.PI), radius: Math.hypot(x, y) }
-  }, [])
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * SIZE - C;
+    const y = C - ((event.clientY - rect.top) / rect.height) * SIZE;
+    return { deg: norm360((Math.atan2(y, x) * 180) / Math.PI), radius: Math.hypot(x, y) };
+  }, []);
 
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    const { deg, radius } = pointerAngle(event)
+    const { deg, radius } = pointerAngle(event);
     if (radius <= 74) {
-      drag.current = { target: 'rotor', grab: norm360(shaft - deg) }
+      drag.current = { target: 'rotor', grab: norm360(shaft - deg) };
     } else if (radius <= 116) {
-      drag.current = { target: 'encoder', grab: norm360(encoderReading - deg) }
+      drag.current = { target: 'encoder', grab: norm360(encoderReading - deg) };
     } else {
-      return
+      return;
     }
-    setSpinning(false)
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
+    setSpinning(false);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     if (!drag.current) {
-      return
+      return;
     }
-    const { deg } = pointerAngle(event)
-    const angle = norm360(deg + drag.current.grab)
+    const { deg } = pointerAngle(event);
+    const angle = norm360(deg + drag.current.grab);
     if (drag.current.target === 'rotor') {
-      setShaft(angle)
+      setShaft(angle);
     } else {
       // Turning the disc against a stationary shaft is exactly what re-mounting the encoder does,
       // so the grabbed zero mark follows the pointer and the mounting offset absorbs the change.
-      setMount(norm360(shaft - angle))
+      setMount(norm360(shaft - angle));
     }
-  }
+  };
 
   const endDrag = (event: React.PointerEvent<SVGSVGElement>) => {
     if (drag.current) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-      drag.current = null
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      drag.current = null;
     }
-  }
+  };
 
   const reset = () => {
-    setSpinning(false)
-    setShaft(35)
-    setMount(110)
-    setStoredOffset(0)
-    onPolePairsChange(1)
-  }
+    setSpinning(false);
+    setShaft(35);
+    setMount(110);
+    setStoredOffset(0);
+    onPolePairsChange(1);
+  };
 
-  const poles = Array.from({ length: polePairs * 2 }, (_, i) => i)
-  const poleSpan = 180 / polePairs
+  const poles = Array.from({ length: polePairs * 2 }, (_, i) => i);
+  const poleSpan = 180 / polePairs;
 
   return (
     <div className="border border-grey-200">
@@ -271,11 +279,17 @@ export default function CommutationOffsetLab({
             onPointerCancel={endDrag}
           >
             {/* Encoder disc: the ring that turns with the shaft and carries the zero mark. */}
-            <circle cx={C} cy={C} r={104} className="fill-grey-50 stroke-grey-300" strokeWidth={1} />
+            <circle
+              cx={C}
+              cy={C}
+              r={104}
+              className="fill-grey-50 stroke-grey-300"
+              strokeWidth={1}
+            />
             <circle cx={C} cy={C} r={84} className="fill-white stroke-grey-300" strokeWidth={1} />
             {Array.from({ length: 36 }, (_, i) => {
-              const a = polar(94, encoderReading + i * 10)
-              const b = polar(i % 9 === 0 ? 84 : 89, encoderReading + i * 10)
+              const a = polar(94, encoderReading + i * 10);
+              const b = polar(i % 9 === 0 ? 84 : 89, encoderReading + i * 10);
               return (
                 <line
                   key={i}
@@ -286,7 +300,7 @@ export default function CommutationOffsetLab({
                   className="stroke-grey-300"
                   strokeWidth={1}
                 />
-              )
+              );
             })}
 
             {/* The mounting offset: the arc between the encoder's zero mark and the magnet axis.
@@ -298,7 +312,7 @@ export default function CommutationOffsetLab({
             />
 
             {/* Rotor poles, alternating north and south, turning with the shaft. */}
-            {poles.map(i => (
+            {poles.map((i) => (
               <path
                 key={i}
                 d={sector(18, 68, shaft - poleSpan / 2 + i * poleSpan, poleSpan)}
@@ -338,12 +352,7 @@ export default function CommutationOffsetLab({
               points={`${polar(106, 0).x},${polar(106, 0).y} ${polar(118, 4).x},${polar(118, 4).y} ${polar(118, -4).x},${polar(118, -4).y}`}
               className="fill-grey-700"
             />
-            <text
-              x={C}
-              y={SIZE - 4}
-              className="fill-grey-500 text-[9px]"
-              textAnchor="middle"
-            >
+            <text x={C} y={SIZE - 4} className="fill-grey-500 text-[9px]" textAnchor="middle">
               read head fixed to the housing · zero mark turns with the shaft
             </text>
           </svg>
@@ -366,7 +375,13 @@ export default function CommutationOffsetLab({
             role="img"
             aria-label={`Rotor electrical angle ${trueElectrical.toFixed(0)} degrees, drive believes ${driveElectrical.toFixed(0)} degrees, error ${error.toFixed(0)} degrees`}
           >
-            <circle cx={C} cy={C} r={104} className="fill-grey-50 stroke-grey-200" strokeWidth={1} />
+            <circle
+              cx={C}
+              cy={C}
+              r={104}
+              className="fill-grey-50 stroke-grey-200"
+              strokeWidth={1}
+            />
 
             {/* The error wedge: everything that goes wrong lives in this angle. */}
             {!aligned && (
@@ -381,8 +396,8 @@ export default function CommutationOffsetLab({
             )}
 
             {Array.from({ length: 12 }, (_, i) => {
-              const a = polar(104, i * 30)
-              const b = polar(97, i * 30)
+              const a = polar(104, i * 30);
+              const b = polar(97, i * 30);
               return (
                 <line
                   key={i}
@@ -393,7 +408,7 @@ export default function CommutationOffsetLab({
                   className="stroke-grey-300"
                   strokeWidth={1}
                 />
-              )
+              );
             })}
 
             {/* Where the current would go if the offset were right — the target, drawn faintly. */}
@@ -464,9 +479,9 @@ export default function CommutationOffsetLab({
               max={359}
               step={1}
               value={Math.round(shaft)}
-              onChange={e => {
-                setSpinning(false)
-                setShaft(Number(e.target.value))
+              onChange={(e) => {
+                setSpinning(false);
+                setShaft(Number(e.target.value));
               }}
               className={sliderClass}
             />
@@ -483,7 +498,7 @@ export default function CommutationOffsetLab({
               max={359}
               step={1}
               value={Math.round(mount)}
-              onChange={e => setMount(Number(e.target.value))}
+              onChange={(e) => setMount(Number(e.target.value))}
               className={sliderClass}
             />
             <p className="text-[11px] text-grey-500 leading-4 mt-1">
@@ -510,7 +525,7 @@ export default function CommutationOffsetLab({
               max={359}
               step={1}
               value={Math.round(storedOffset)}
-              onChange={e => setStoredOffset(Number(e.target.value))}
+              onChange={(e) => setStoredOffset(Number(e.target.value))}
               className={sliderClass}
             />
             <p className="text-[11px] text-grey-500 leading-4 mt-1">
@@ -530,7 +545,7 @@ export default function CommutationOffsetLab({
             </button>
             <button
               type="button"
-              onClick={() => setSpinning(s => !s)}
+              onClick={() => setSpinning((s) => !s)}
               className="h-[38px] inline-flex items-center gap-1.5 px-3 text-xs border border-syn-red text-syn-red hover:bg-syn-red hover:text-white transition-colors cursor-pointer"
             >
               {spinning ? (
@@ -567,5 +582,5 @@ export default function CommutationOffsetLab({
         </div>
       </div>
     </div>
-  )
+  );
 }

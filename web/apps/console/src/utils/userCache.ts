@@ -7,11 +7,11 @@
 /// resolves an empty `recorder.dumpDir` to `<user cache root>/dumps`. A deployment that overrides
 /// `recorder.dumpDir` to a path outside the cache writes dumps somewhere this store cannot see —
 /// callers should treat an empty listing as "none here", never as "none exist".
-export const DUMPS_FOLDER = 'dumps'
+export const DUMPS_FOLDER = 'dumps';
 
 /// Folder the server finds a device's ESI in, relative to the user-cache root. A file is named
 /// `esi-<vendor>-<version>.xml`; the source of truth is `EsiCache` in libs/node/esi_cache.h.
-export const ESIS_FOLDER = 'esis'
+export const ESIS_FOLDER = 'esis';
 
 /// Encodes a cache-relative path for use in a `/api/user-cache/...` URL.
 ///
@@ -19,16 +19,16 @@ export const ESIS_FOLDER = 'esis'
 /// percent-decodes it), so encoding the whole string would turn its `/` separators into `%2F` and
 /// the server would see one long filename instead of a nested path.
 export function encodeUserCachePath(path: string): string {
-  return path.split('/').map(encodeURIComponent).join('/')
+  return path.split('/').map(encodeURIComponent).join('/');
 }
 
 /// Absolute URL of one file in the user cache.
 export function userCacheUrl(baseUrl: string, path: string): string {
-  return `${baseUrl}/api/user-cache/${encodeUserCachePath(path)}`
+  return `${baseUrl}/api/user-cache/${encodeUserCachePath(path)}`;
 }
 
 /// The file's own name, without its folders — what a browser download should be called (a download
 /// cannot create directories, and a `/` in the suggested name is stripped anyway).
 export function userCacheBasename(path: string): string {
-  return path.split('/').pop() ?? path
+  return path.split('/').pop() ?? path;
 }

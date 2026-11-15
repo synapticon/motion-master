@@ -1,52 +1,52 @@
-import { Routes, Route } from 'react-router'
-import RootLayout from './layouts/RootLayout'
-import ConnectionPage from './pages/ConnectionPage'
-import FieldbusControlPage from './pages/FieldbusControlPage'
-import FieldbusConfigurationPage from './pages/FieldbusConfigurationPage'
-import FieldbusProcessImagePage from './pages/FieldbusProcessImagePage'
-import FieldbusDiagnosticsPage from './pages/FieldbusDiagnosticsPage'
-import FieldbusDcSyncPage from './pages/FieldbusDcSyncPage'
-import DataProcessDataPage from './pages/DataProcessDataPage'
-import DataMonitoringsPage from './pages/DataMonitoringsPage'
-import DataRecorderPage from './pages/DataRecorderPage'
-import StorageParameterCachePage from './pages/StorageParameterCachePage'
-import ServerGameLoopPage from './pages/ServerGameLoopPage'
-import ServerLogPage from './pages/ServerLogPage'
-import ServerRequestsPage from './pages/ServerRequestsPage'
-import ReferenceApiDocsPage from './pages/ReferenceApiDocsPage'
-import LearnServoMotorsPage from './pages/LearnServoMotorsPage'
-import LearnEncodersPage from './pages/LearnEncodersPage'
-import LearnCommutationOffsetPage from './pages/LearnCommutationOffsetPage'
-import LearnComingSoonPage from './pages/LearnComingSoonPage'
-import MetaAlStatusCodesPage from './pages/MetaAlStatusCodesPage'
-import MetaEscRegistersPage from './pages/MetaEscRegistersPage'
-import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage'
-import MetaIcHausRegistersPage from './pages/MetaIcHausRegistersPage'
-import MetaKueblerRegistersPage from './pages/MetaKueblerRegistersPage'
-import MetaMailboxErrorCodesPage from './pages/MetaMailboxErrorCodesPage'
-import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
-import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
-import ToolsAutoTuningPage from './pages/ToolsAutoTuningPage'
-import ToolsEniPage from './pages/ToolsEniPage'
-import ToolsEsiPage from './pages/ToolsEsiPage'
-import ToolsIntegroVariantPage from './pages/ToolsIntegroVariantPage'
-import ToolsSiiPage from './pages/ToolsSiiPage'
-import ToolsUtilitiesPage from './pages/ToolsUtilitiesPage'
-import StorageUserCachePage from './pages/StorageUserCachePage'
-import DeviceConfigurationPage from './pages/DeviceConfigurationPage'
-import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage'
-import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
-import DeviceSiiPage from './pages/DeviceSiiPage'
-import DeviceTuningPage from './pages/DeviceTuningPage'
-import DeviceRegistersPage from './pages/DeviceRegistersPage'
-import DeviceFirmwarePage from './pages/DeviceFirmwarePage'
-import DeviceFoePage from './pages/DeviceFoePage'
-import DeviceHrdPage from './pages/DeviceHrdPage'
-import DeviceIcMuEncodersPage from './pages/DeviceIcMuEncodersPage'
-import DeviceParametersPage from './pages/DeviceParametersPage'
-import DevicePdoMappingPage from './pages/DevicePdoMappingPage'
-import DeviceMotionPage from './pages/DeviceMotionPage'
-import DeviceProceduresPage from './pages/DeviceProceduresPage'
+import { Routes, Route } from 'react-router';
+import RootLayout from './layouts/RootLayout';
+import ConnectionPage from './pages/ConnectionPage';
+import FieldbusControlPage from './pages/FieldbusControlPage';
+import FieldbusConfigurationPage from './pages/FieldbusConfigurationPage';
+import FieldbusProcessImagePage from './pages/FieldbusProcessImagePage';
+import FieldbusDiagnosticsPage from './pages/FieldbusDiagnosticsPage';
+import FieldbusDcSyncPage from './pages/FieldbusDcSyncPage';
+import DataProcessDataPage from './pages/DataProcessDataPage';
+import DataMonitoringsPage from './pages/DataMonitoringsPage';
+import DataRecorderPage from './pages/DataRecorderPage';
+import StorageParameterCachePage from './pages/StorageParameterCachePage';
+import ServerGameLoopPage from './pages/ServerGameLoopPage';
+import ServerLogPage from './pages/ServerLogPage';
+import ServerRequestsPage from './pages/ServerRequestsPage';
+import ReferenceApiDocsPage from './pages/ReferenceApiDocsPage';
+import LearnServoMotorsPage from './pages/LearnServoMotorsPage';
+import LearnEncodersPage from './pages/LearnEncodersPage';
+import LearnCommutationOffsetPage from './pages/LearnCommutationOffsetPage';
+import LearnComingSoonPage from './pages/LearnComingSoonPage';
+import MetaAlStatusCodesPage from './pages/MetaAlStatusCodesPage';
+import MetaEscRegistersPage from './pages/MetaEscRegistersPage';
+import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage';
+import MetaIcHausRegistersPage from './pages/MetaIcHausRegistersPage';
+import MetaKueblerRegistersPage from './pages/MetaKueblerRegistersPage';
+import MetaMailboxErrorCodesPage from './pages/MetaMailboxErrorCodesPage';
+import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage';
+import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage';
+import ToolsAutoTuningPage from './pages/ToolsAutoTuningPage';
+import ToolsEniPage from './pages/ToolsEniPage';
+import ToolsEsiPage from './pages/ToolsEsiPage';
+import ToolsIntegroVariantPage from './pages/ToolsIntegroVariantPage';
+import ToolsSiiPage from './pages/ToolsSiiPage';
+import ToolsUtilitiesPage from './pages/ToolsUtilitiesPage';
+import StorageUserCachePage from './pages/StorageUserCachePage';
+import DeviceConfigurationPage from './pages/DeviceConfigurationPage';
+import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage';
+import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage';
+import DeviceSiiPage from './pages/DeviceSiiPage';
+import DeviceTuningPage from './pages/DeviceTuningPage';
+import DeviceRegistersPage from './pages/DeviceRegistersPage';
+import DeviceFirmwarePage from './pages/DeviceFirmwarePage';
+import DeviceFoePage from './pages/DeviceFoePage';
+import DeviceHrdPage from './pages/DeviceHrdPage';
+import DeviceIcMuEncodersPage from './pages/DeviceIcMuEncodersPage';
+import DeviceParametersPage from './pages/DeviceParametersPage';
+import DevicePdoMappingPage from './pages/DevicePdoMappingPage';
+import DeviceMotionPage from './pages/DeviceMotionPage';
+import DeviceProceduresPage from './pages/DeviceProceduresPage';
 
 export default function App() {
   return (
@@ -83,13 +83,20 @@ export default function App() {
           <Route path="commutation-offset" element={<LearnCommutationOffsetPage />} />
           <Route
             path="encoder-calibration"
-            element={<LearnComingSoonPage title="Encoder Calibration" topic="encoder calibration" />}
+            element={
+              <LearnComingSoonPage title="Encoder Calibration" topic="encoder calibration" />
+            }
           />
           <Route
             path="filters"
-            element={<LearnComingSoonPage title="Filters" topic="the filters used in motion control" />}
+            element={
+              <LearnComingSoonPage title="Filters" topic="the filters used in motion control" />
+            }
           />
-          <Route path="tuning" element={<LearnComingSoonPage title="Tuning" topic="control loop tuning" />} />
+          <Route
+            path="tuning"
+            element={<LearnComingSoonPage title="Tuning" topic="control loop tuning" />}
+          />
         </Route>
         <Route path="meta">
           <Route path="al-status-codes" element={<MetaAlStatusCodesPage />} />
@@ -130,5 +137,5 @@ export default function App() {
         </Route>
       </Route>
     </Routes>
-  )
+  );
 }

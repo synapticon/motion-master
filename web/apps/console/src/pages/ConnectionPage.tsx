@@ -1,48 +1,48 @@
-import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isIpv4, lanAddress, lanHostname } from '@synapticon/motion-master-client';
-import { version as uiVersion } from 'virtual:swagger-spec'
-import Callout from '../components/Callout'
+import { version as uiVersion } from 'virtual:swagger-spec';
+import Callout from '../components/Callout';
 import ConnectionExplainer from '../components/ConnectionExplainer';
-import PageHeader from '../components/PageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { formatBytes } from '../utils/format'
-import { btnOutline, btnPrimary } from '../utils/styles'
+import PageHeader from '../components/PageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { formatBytes } from '../utils/format';
+import { btnOutline, btnPrimary } from '../utils/styles';
 
-const RELEASES_URL = 'https://github.com/synapticon/motion-master/releases'
+const RELEASES_URL = 'https://github.com/synapticon/motion-master/releases';
 
-const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 // A valid TCP port is an integer in 1..65535. Guards the endpoint form so a typo (e.g. an extra
 // digit → 622811) can't be persisted and then crash the app on the next load when the monitoring
 // WebSocket URL is constructed from it.
 function isValidPort(s: string): boolean {
-  const n = Number(s.trim())
-  return Number.isInteger(n) && n >= 1 && n <= 65535
+  const n = Number(s.trim());
+  return Number.isInteger(n) && n >= 1 && n <= 65535;
 }
 
 function apiError(err: unknown): string {
   if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error
+    const inner = (err as { error: unknown }).error;
     if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error)
+      return String((inner as { error: unknown }).error);
     }
   }
-  return 'Unknown error'
+  return 'Unknown error';
 }
 
 function formatDate(iso?: string): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 // System sizes render as "—" when absent or zero, because the backend reports 0 for a value it
 // could not determine on the current platform — unlike a file size, where 0 is a real answer. The
 // formatting itself is the shared one, so a size reads the same here as on the storage pages.
 function formatSystemBytes(bytes?: number): string {
-  return bytes ? formatBytes(bytes) : '—'
+  return bytes ? formatBytes(bytes) : '—';
 }
 
 // Combines the two related deployment facts into one cell: the container runtime MM runs inside (if
@@ -51,10 +51,10 @@ function formatSystemBytes(bytes?: number): string {
 function containerSummary(container?: string, dockerVersion?: string): string {
   const runtime = container
     ? container.charAt(0).toUpperCase() + container.slice(1)
-    : 'None (bare metal)'
-  if (!dockerVersion) return runtime
-  if (container === 'docker') return `Docker ${dockerVersion}`
-  return `Docker ${dockerVersion} · ${runtime}`
+    : 'None (bare metal)';
+  if (!dockerVersion) return runtime;
+  if (container === 'docker') return `Docker ${dockerVersion}`;
+  return `Docker ${dockerVersion} · ${runtime}`;
 }
 
 // A labelled read-only field used in the certificate detail grid.
@@ -64,10 +64,15 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       <p className={labelCls}>{label}</p>
       <p className="text-sm break-all">{value}</p>
     </div>
-  )
+  );
 }
 
-type ChainLink = { subject: string; issuer: string; organization: string; issuerOrganization: string }
+type ChainLink = {
+  subject: string;
+  issuer: string;
+  organization: string;
+  issuerOrganization: string;
+};
 
 // Renders the served certificate chain leaf-first. The PEM stops at the intermediate (the root
 // lives in the OS trust store and is not transmitted), so we append a synthetic root node named by
@@ -75,10 +80,10 @@ type ChainLink = { subject: string; issuer: string; organization: string; issuer
 // in which case there is no separate root to show. Each entry shows the common name with the
 // organization (O) beside it, since the friendly CA name ("Let's Encrypt") lives in O, not the CN.
 function CertChain({ chain }: { chain: ChainLink[] }) {
-  const last = chain[chain.length - 1]
-  const rootName = last && last.issuer !== last.subject ? last.issuer : null
-  const selfSigned = chain.length === 1 && chain[0].issuer === chain[0].subject
-  const role = (i: number) => (selfSigned ? 'Self-signed' : i === 0 ? 'Leaf' : 'Intermediate CA')
+  const last = chain[chain.length - 1];
+  const rootName = last && last.issuer !== last.subject ? last.issuer : null;
+  const selfSigned = chain.length === 1 && chain[0].issuer === chain[0].subject;
+  const role = (i: number) => (selfSigned ? 'Self-signed' : i === 0 ? 'Leaf' : 'Intermediate CA');
   return (
     <div>
       <p className={labelCls}>Certificate chain</p>
@@ -102,12 +107,13 @@ function CertChain({ chain }: { chain: ChainLink[] }) {
         )}
       </ol>
     </div>
-  )
+  );
 }
 
 export default function ConnectionPage() {
-  const { host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online } = useConnection()
-  const queryClient = useQueryClient()
+  const { host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online } =
+    useConnection();
+  const queryClient = useQueryClient();
 
   // The context host/httpPort/wsPort are the *committed* endpoint: they drive the API client and
   // the (app-wide, url-keyed) WebSocket connection. Editing them live would rebuild that socket on
@@ -115,14 +121,14 @@ export default function ConnectionPage() {
   // constructing a WebSocket from half-typed values (e.g. `wss://…:622811`). So the fields edit a
   // local draft and only commit on Apply; the drafts re-sync whenever the committed endpoint
   // changes elsewhere (Load defaults).
-  const [draftHost, setDraftHost] = useState(host)
-  const [draftHttpPort, setDraftHttpPort] = useState(httpPort)
-  const [draftWsPort, setDraftWsPort] = useState(wsPort)
+  const [draftHost, setDraftHost] = useState(host);
+  const [draftHttpPort, setDraftHttpPort] = useState(httpPort);
+  const [draftWsPort, setDraftWsPort] = useState(wsPort);
   useEffect(() => {
-    setDraftHost(host)
-    setDraftHttpPort(httpPort)
-    setDraftWsPort(wsPort)
-  }, [host, httpPort, wsPort])
+    setDraftHost(host);
+    setDraftHttpPort(httpPort);
+    setDraftWsPort(wsPort);
+  }, [host, httpPort, wsPort]);
 
   // No certificate can be issued for a bare IP address, so an address typed here has an equivalent
   // hostname the bundled certificate does cover. It is *offered*, never substituted: connecting
@@ -132,16 +138,16 @@ export default function ConnectionPage() {
   const lanSuggestion = isIpv4(draftHost) ? lanHostname(draftHost) : null;
 
   const endpointDirty =
-    draftHost.trim() !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort
-  const httpPortValid = isValidPort(draftHttpPort)
-  const wsPortValid = isValidPort(draftWsPort)
-  const endpointValid = draftHost.trim() !== '' && httpPortValid && wsPortValid
+    draftHost.trim() !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort;
+  const httpPortValid = isValidPort(draftHttpPort);
+  const wsPortValid = isValidPort(draftWsPort);
+  const endpointValid = draftHost.trim() !== '' && httpPortValid && wsPortValid;
   const applyEndpoint = () => {
-    if (!endpointValid) return
-    setHost(draftHost.trim())
-    setHttpPort(draftHttpPort.trim())
-    setWsPort(draftWsPort.trim())
-  }
+    if (!endpointValid) return;
+    setHost(draftHost.trim());
+    setHttpPort(draftHttpPort.trim());
+    setWsPort(draftWsPort.trim());
+  };
 
   // When a LAN endpoint is unreachable, the most common cause is name resolution rather than the
   // server being down — so offer the hosts-file entry that settles it. Derived from the committed
@@ -158,36 +164,36 @@ export default function ConnectionPage() {
   const certQuery = useQuery({
     queryKey: ['cert'],
     queryFn: () => api.getCert(),
-  })
-  const cert = certQuery.data?.data
+  });
+  const cert = certQuery.data?.data;
 
   const configQuery = useQuery({
     queryKey: ['startedConfig'],
     queryFn: () => api.getStartedConfig(),
-  })
-  const startedConfig = configQuery.data?.data
+  });
+  const startedConfig = configQuery.data?.data;
 
   const systemQuery = useQuery({
     queryKey: ['systemInfo'],
     queryFn: () => api.getSystemInfo(),
-  })
-  const system = systemQuery.data?.data
+  });
+  const system = systemQuery.data?.data;
 
   const versionQuery = useQuery({
     queryKey: ['version'],
     queryFn: () => api.getVersion(),
-  })
-  const serverVersion = versionQuery.data?.data.version
+  });
+  const serverVersion = versionQuery.data?.data.version;
   // Both this web app's build version (the swagger spec's info.version, bumped in lock-step with the
   // app by tools/bump-version.sh) and the server's reported version come from the same VERSION file,
   // so an exact string mismatch means the locally installed server is out of step with this PWA —
   // which Synapticon always serves at its latest release.
-  const versionMismatch = !!serverVersion && serverVersion !== uiVersion
+  const versionMismatch = !!serverVersion && serverVersion !== uiVersion;
 
   const refreshMutation = useMutation({
     mutationFn: () => api.refreshCert(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cert'] }),
-  })
+  });
 
   // Expiry status drives the badge colour: expired (bad) → expiring soon (warn) → healthy (good).
   const status = cert
@@ -196,7 +202,7 @@ export default function ConnectionPage() {
       : cert.expiresSoon
         ? { label: `Expires in ${cert.daysRemaining} days`, cls: 'text-status-warn' }
         : { label: `Valid · ${cert.daysRemaining} days left`, cls: 'text-status-good' }
-    : null
+    : null;
 
   return (
     <div>
@@ -279,9 +285,9 @@ export default function ConnectionPage() {
           <h2 className="eyebrow mb-3">Endpoint</h2>
           <form
             className="border border-grey-200 p-5"
-            onSubmit={e => {
-              e.preventDefault()
-              applyEndpoint()
+            onSubmit={(e) => {
+              e.preventDefault();
+              applyEndpoint();
             }}
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -290,7 +296,7 @@ export default function ConnectionPage() {
                 <input
                   type="text"
                   value={draftHost}
-                  onChange={e => setDraftHost(e.target.value)}
+                  onChange={(e) => setDraftHost(e.target.value)}
                   placeholder="local.motion-master.synapticon.com or 192.168.1.50"
                   className={inputCls}
                 />
@@ -329,7 +335,7 @@ export default function ConnectionPage() {
                 <input
                   type="text"
                   value={draftHttpPort}
-                  onChange={e => setDraftHttpPort(e.target.value)}
+                  onChange={(e) => setDraftHttpPort(e.target.value)}
                   placeholder="61447"
                   className={inputCls}
                   aria-invalid={!httpPortValid}
@@ -343,7 +349,7 @@ export default function ConnectionPage() {
                 <input
                   type="text"
                   value={draftWsPort}
-                  onChange={e => setDraftWsPort(e.target.value)}
+                  onChange={(e) => setDraftWsPort(e.target.value)}
                   placeholder="62281"
                   className={inputCls}
                   aria-invalid={!wsPortValid}
@@ -379,10 +385,10 @@ export default function ConnectionPage() {
                 <span className="font-display font-medium">Cannot reach {host}.</span> This name is
                 not published in DNS, so <em>this</em> computer — the one running the browser, not{' '}
                 {unreachableLanAddress} — needs one hosts-file line pointing the name at that
-                address. That is not a workaround: it is how this connection is meant to work, and it
-                costs nothing in security, because the certificate is checked against the name and
-                never against how the name was resolved. You still get a genuine, publicly-trusted
-                HTTPS connection with no warning.
+                address. That is not a workaround: it is how this connection is meant to work, and
+                it costs nothing in security, because the certificate is checked against the name
+                and never against how the name was resolved. You still get a genuine,
+                publicly-trusted HTTPS connection with no warning.
               </p>
               <p className="mt-2">
                 Also confirm that Motion Master on {unreachableLanAddress} has{' '}
@@ -510,8 +516,8 @@ export default function ConnectionPage() {
               <h2 className="eyebrow mb-3">Started Configuration</h2>
               <div className="border border-grey-200 p-5 space-y-3">
                 <p className="text-xs text-grey-600 max-w-prose">
-                  The configuration Motion Master booted with — the JSONC config file overlaid on the
-                  built-in defaults. Read-only: to change a value, edit the file and restart.{' '}
+                  The configuration Motion Master booted with — the JSONC config file overlaid on
+                  the built-in defaults. Read-only: to change a value, edit the file and restart.{' '}
                   <a
                     href="https://github.com/synapticon/motion-master/blob/main/apps/motion_master/motion-master.example.jsonc"
                     target="_blank"
@@ -565,7 +571,10 @@ export default function ConnectionPage() {
                     <Field label="Hostname" value={system.hostname || '—'} />
                     <Field label="CPU" value={system.cpuModel || '—'} />
                     <Field label="Logical cores" value={system.cpuCores || '—'} />
-                    <Field label="Total memory" value={formatSystemBytes(system.totalMemoryBytes)} />
+                    <Field
+                      label="Total memory"
+                      value={formatSystemBytes(system.totalMemoryBytes)}
+                    />
                     <Field
                       label="Disk (free / total)"
                       value={`${formatSystemBytes(system.diskFreeBytes)} / ${formatSystemBytes(system.diskTotalBytes)}`}
@@ -582,5 +591,5 @@ export default function ConnectionPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

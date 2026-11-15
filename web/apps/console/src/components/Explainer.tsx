@@ -1,14 +1,14 @@
-import { useState } from 'react'
-import type { ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 
 interface ExplainerProps {
   /** Header label, e.g. "What is SII?". */
-  title: string
+  title: string;
   /** Explanatory body, revealed when the panel is expanded. */
-  children: ReactNode
+  children: ReactNode;
   /** Whether the panel starts expanded. Defaults to collapsed. */
-  defaultOpen?: boolean
+  defaultOpen?: boolean;
 }
 
 // A collapsible teaching panel: a clickable header (collapsed by default) over a block of
@@ -16,12 +16,12 @@ interface ExplainerProps {
 // crowding the working controls. Reused across pages (SII, Control, …) for a consistent "what is
 // this?" affordance.
 export default function Explainer({ title, children, defaultOpen = false }: ExplainerProps) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="border border-grey-200">
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-grey-50 transition-colors cursor-pointer"
       >
@@ -37,5 +37,5 @@ export default function Explainer({ title, children, defaultOpen = false }: Expl
         </div>
       )}
     </section>
-  )
+  );
 }

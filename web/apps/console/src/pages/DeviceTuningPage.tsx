@@ -1,38 +1,38 @@
-import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   apiErrorMessage,
   type ControllerTuningComputed,
   type ControllerTuningWrite,
   type ProcedureSnapshot,
   type ProgressStep,
-} from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
-import Checkbox from '../components/Checkbox'
-import DevicePageHeader from '../components/DevicePageHeader'
-import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline, btnPrimary } from '../utils/styles'
+} from '@synapticon/motion-master-client';
+import Callout from '../components/Callout';
+import Checkbox from '../components/Checkbox';
+import DevicePageHeader from '../components/DevicePageHeader';
+import { useConnection } from '../contexts/ConnectionContext';
+import { btnOutline, btnPrimary } from '../utils/styles';
 
-const PROCEDURE = 'controller-auto-tuning'
-const LIMITS_PROCEDURE = 'set-integral-limits'
+const PROCEDURE = 'controller-auto-tuning';
+const LIMITS_PROCEDURE = 'set-integral-limits';
 
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white'
-const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
+const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 const STEP_DOT: Record<ProgressStep['status'], string> = {
   idle: 'bg-grey-300',
   running: 'bg-ocean',
   succeeded: 'bg-green-600',
   failed: 'bg-syn-red',
-}
+};
 
-type Controller = 'position' | 'velocity'
+type Controller = 'position' | 'velocity';
 
 interface GainObject {
-  index: number
-  subindex: number
-  label: string
+  index: number;
+  subindex: number;
+  label: string;
 }
 
 // The objects the tuning writes, in the order it writes them.
@@ -50,88 +50,92 @@ const GAINS: Record<Controller, GainObject[]> = {
     { index: 0x2011, subindex: 0x02, label: 'Ki' },
     { index: 0x2011, subindex: 0x03, label: 'Kd' },
   ],
-}
+};
 
 // The limits set-integral-limits writes, in the order it writes them.
 const LIMITS: GainObject[] = [
   { index: 0x2011, subindex: 0x04, label: 'Velocity controller' },
   { index: 0x2012, subindex: 0x04, label: 'Position loop' },
   { index: 0x2012, subindex: 0x08, label: 'Velocity loop of the position controller' },
-]
+];
 
 interface LimitsWrite {
-  limits: { object: string; before: number; after: number }[]
-  skipped: string[]
+  limits: { object: string; before: number; after: number }[];
+  skipped: string[];
 }
 
 function objectName(index: number, subindex: number): string {
-  return `0x${index.toString(16).toUpperCase()}:${subindex.toString(16).toUpperCase().padStart(2, '0')}`
+  return `0x${index.toString(16).toUpperCase()}:${subindex.toString(16).toUpperCase().padStart(2, '0')}`;
 }
 
 function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find(step => step.id === id)?.value as T | undefined
+  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
 }
 
 function isNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
+  return (
+    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
+  );
 }
 
 function formatNumber(value: unknown): string {
   if (typeof value !== 'number') {
-    return value == null ? '—' : String(value)
+    return value == null ? '—' : String(value);
   }
-  return Number.isInteger(value) ? String(value) : value.toPrecision(6)
+  return Number.isInteger(value) ? String(value) : value.toPrecision(6);
 }
 
 export default function DeviceTuningPage() {
-  const { deviceId } = useParams()
-  const slavePosition = Number(deviceId)
-  const { api } = useConnection()
-  const queryClient = useQueryClient()
+  const { deviceId } = useParams();
+  const slavePosition = Number(deviceId);
+  const { api } = useConnection();
+  const queryClient = useQueryClient();
 
-  const [controller, setController] = useState<Controller>('position')
-  const [controllerType, setControllerType] = useState<'PI-P' | 'P-PI'>('PI-P')
-  const [full, setFull] = useState(true)
-  const [dampingRatioPermil, setDampingRatioPermil] = useState(1000)
-  const [settlingTimeMs, setSettlingTimeMs] = useState(200)
-  const [bandwidthMilliHz, setBandwidthMilliHz] = useState(5000)
+  const [controller, setController] = useState<Controller>('position');
+  const [controllerType, setControllerType] = useState<'PI-P' | 'P-PI'>('PI-P');
+  const [full, setFull] = useState(true);
+  const [dampingRatioPermil, setDampingRatioPermil] = useState(1000);
+  const [settlingTimeMs, setSettlingTimeMs] = useState(200);
+  const [bandwidthMilliHz, setBandwidthMilliHz] = useState(5000);
 
   const plantModelQuery = useQuery({
     queryKey: ['plant-model', slavePosition],
-    queryFn: () => api.getDevicePlantModel(slavePosition).then(r => r.data),
+    queryFn: () => api.getDevicePlantModel(slavePosition).then((r) => r.data),
     retry: false,
-  })
+  });
 
   // Each gain object is read on its own, because a drive may lack a Kd object and that is an
   // answer, not a failure of the others.
   const gainsQuery = useQuery({
     queryKey: ['controller-gains', slavePosition],
     queryFn: async () => {
-      const objects = [...GAINS.position, ...GAINS.velocity, ...LIMITS]
+      const objects = [...GAINS.position, ...GAINS.velocity, ...LIMITS];
       const results = await Promise.allSettled(
-        objects.map(o => api.readParameter(slavePosition, o.index, o.subindex).then(r => r.data)),
-      )
-      const values = new Map<string, number | 'missing' | string>()
+        objects.map((o) =>
+          api.readParameter(slavePosition, o.index, o.subindex).then((r) => r.data),
+        ),
+      );
+      const values = new Map<string, number | 'missing' | string>();
       results.forEach((result, i) => {
-        const key = objectName(objects[i].index, objects[i].subindex)
+        const key = objectName(objects[i].index, objects[i].subindex);
         if (result.status === 'fulfilled') {
-          values.set(key, result.value.value as number)
+          values.set(key, result.value.value as number);
         } else {
-          values.set(key, isNotFound(result.reason) ? 'missing' : apiErrorMessage(result.reason))
+          values.set(key, isNotFound(result.reason) ? 'missing' : apiErrorMessage(result.reason));
         }
-      })
-      return values
+      });
+      return values;
     },
     retry: false,
-  })
+  });
 
   const snapshotQuery = useQuery({
     queryKey: ['procedure', slavePosition, PROCEDURE],
-    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then(r => r.data),
-    refetchInterval: query => (query.state.data?.status === 'running' ? 300 : false),
+    queryFn: () => api.getProcedure(slavePosition, PROCEDURE).then((r) => r.data),
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 300 : false),
     refetchIntervalInBackground: true,
     retry: false,
-  })
+  });
 
   const start = useMutation({
     mutationFn: () =>
@@ -148,42 +152,42 @@ export default function DeviceTuningPage() {
       }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ['procedure', slavePosition, PROCEDURE] }),
-  })
+  });
 
   const limitsQuery = useQuery({
     queryKey: ['procedure', slavePosition, LIMITS_PROCEDURE],
-    queryFn: () => api.getProcedure(slavePosition, LIMITS_PROCEDURE).then(r => r.data),
-    refetchInterval: query => (query.state.data?.status === 'running' ? 300 : false),
+    queryFn: () => api.getProcedure(slavePosition, LIMITS_PROCEDURE).then((r) => r.data),
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 300 : false),
     refetchIntervalInBackground: true,
     retry: false,
-  })
+  });
   const setLimits = useMutation({
     mutationFn: () => api.startProcedure(slavePosition, LIMITS_PROCEDURE, {}),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ['procedure', slavePosition, LIMITS_PROCEDURE] }),
-  })
+  });
 
-  const snapshot = snapshotQuery.data
-  const limitsSnapshot = limitsQuery.data
+  const snapshot = snapshotQuery.data;
+  const limitsSnapshot = limitsQuery.data;
   const running =
     snapshot?.status === 'running' ||
     start.isPending ||
     limitsSnapshot?.status === 'running' ||
-    setLimits.isPending
+    setLimits.isPending;
   // The gains change at the end of a run, so they are read again once it has finished.
-  const finishedAt = snapshot?.finishedAt
-  const limitsFinishedAt = limitsSnapshot?.finishedAt
+  const finishedAt = snapshot?.finishedAt;
+  const limitsFinishedAt = limitsSnapshot?.finishedAt;
   useEffect(() => {
     if (finishedAt || limitsFinishedAt) {
-      void queryClient.invalidateQueries({ queryKey: ['controller-gains', slavePosition] })
+      void queryClient.invalidateQueries({ queryKey: ['controller-gains', slavePosition] });
     }
-  }, [finishedAt, limitsFinishedAt, queryClient, slavePosition])
+  }, [finishedAt, limitsFinishedAt, queryClient, slavePosition]);
 
-  const noPlantModel = isNotFound(plantModelQuery.error)
+  const noPlantModel = isNotFound(plantModelQuery.error);
   const elapsedSeconds =
     snapshot?.startedAt && snapshot.finishedAt
       ? ((snapshot.finishedAt - snapshot.startedAt) / 1000).toFixed(1)
-      : undefined
+      : undefined;
 
   return (
     <div>
@@ -241,10 +245,7 @@ export default function DeviceTuningPage() {
                 label="Chirp"
                 value={`${plantModelQuery.data.chirp.startFrequencyHz}–${plantModelQuery.data.chirp.endFrequencyHz} Hz`}
               />
-              <Field
-                label="Amplitude"
-                value={`${plantModelQuery.data.chirp.amplitudePermil} ‰`}
-              />
+              <Field label="Amplitude" value={`${plantModelQuery.data.chirp.amplitudePermil} ‰`} />
               <Field label="Duration" value={`${plantModelQuery.data.chirp.durationMs} ms`} />
               <Field label="Signal" value={plantModelQuery.data.chirp.signalType} />
             </dl>
@@ -264,7 +265,7 @@ export default function DeviceTuningPage() {
                 id="tuning-controller"
                 className={inputCls}
                 value={controller}
-                onChange={event => setController(event.target.value as Controller)}
+                onChange={(event) => setController(event.target.value as Controller)}
               >
                 <option value="position">Position</option>
                 <option value="velocity">Velocity</option>
@@ -279,7 +280,7 @@ export default function DeviceTuningPage() {
                   id="tuning-type"
                   className={inputCls}
                   value={controllerType}
-                  onChange={event => setControllerType(event.target.value as 'PI-P' | 'P-PI')}
+                  onChange={(event) => setControllerType(event.target.value as 'PI-P' | 'P-PI')}
                 >
                   <option value="PI-P">PI-P</option>
                   <option value="P-PI">P-PI</option>
@@ -368,7 +369,7 @@ export default function DeviceTuningPage() {
         />
       </div>
     </div>
-  )
+  );
 }
 
 function NumberField({
@@ -380,13 +381,13 @@ function NumberField({
   step,
   onChange,
 }: {
-  id: string
-  label: string
-  value: number
-  min: number
-  max: number
-  step: number
-  onChange: (value: number) => void
+  id: string;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
 }) {
   return (
     <div>
@@ -401,10 +402,10 @@ function NumberField({
         min={min}
         max={max}
         step={step}
-        onChange={event => onChange(Number(event.target.value))}
+        onChange={(event) => onChange(Number(event.target.value))}
       />
     </div>
-  )
+  );
 }
 
 function GainsCard({
@@ -414,13 +415,13 @@ function GainsCard({
   onRead,
   busy,
 }: {
-  values: Map<string, number | string> | undefined
-  error: string | undefined
-  written: ControllerTuningWrite | undefined
-  onRead: () => void
-  busy: boolean
+  values: Map<string, number | string> | undefined;
+  error: string | undefined;
+  written: ControllerTuningWrite | undefined;
+  onRead: () => void;
+  busy: boolean;
 }) {
-  const before = new Map((written?.gains ?? []).map(gain => [gain.object, gain.before]))
+  const before = new Map((written?.gains ?? []).map((gain) => [gain.object, gain.before]));
   return (
     <section className="border border-grey-200 bg-white">
       <div className="px-5 py-3 border-b border-grey-200 flex items-center justify-between">
@@ -431,7 +432,7 @@ function GainsCard({
       </div>
       {error && <p className="px-5 py-3 text-sm text-status-bad">{error}</p>}
       <div className="grid sm:grid-cols-2 gap-6 px-5 py-4">
-        {(['position', 'velocity'] as const).map(controller => (
+        {(['position', 'velocity'] as const).map((controller) => (
           <table key={controller} className="w-full text-sm">
             <caption className="text-left text-xs text-grey-600 uppercase tracking-wide pb-2">
               {controller === 'position' ? 'Position controller' : 'Velocity controller'}
@@ -445,9 +446,9 @@ function GainsCard({
               </tr>
             </thead>
             <tbody>
-              {GAINS[controller].map(gain => {
-                const name = objectName(gain.index, gain.subindex)
-                const value = values?.get(name)
+              {GAINS[controller].map((gain) => {
+                const name = objectName(gain.index, gain.subindex);
+                const value = values?.get(name);
                 return (
                   <tr key={name} className="border-t border-grey-100">
                     <td className="py-1.5 font-mono text-xs">{name}</td>
@@ -465,14 +466,14 @@ function GainsCard({
                       {before.has(name) ? formatNumber(before.get(name)) : ''}
                     </td>
                   </tr>
-                )
+                );
               })}
             </tbody>
           </table>
         ))}
       </div>
     </section>
-  )
+  );
 }
 
 function LimitsCard({
@@ -482,15 +483,15 @@ function LimitsCard({
   onSet,
   error,
 }: {
-  values: Map<string, number | string> | undefined
-  snapshot: ProcedureSnapshot | undefined
-  busy: boolean
-  onSet: () => void
-  error: string | undefined
+  values: Map<string, number | string> | undefined;
+  snapshot: ProcedureSnapshot | undefined;
+  busy: boolean;
+  onSet: () => void;
+  error: string | undefined;
 }) {
-  const written = stepValue<LimitsWrite>(snapshot, 'write')
-  const before = new Map((written?.limits ?? []).map(limit => [limit.object, limit.before]))
-  const failed = snapshot?.steps.find(step => step.status === 'failed')
+  const written = stepValue<LimitsWrite>(snapshot, 'write');
+  const before = new Map((written?.limits ?? []).map((limit) => [limit.object, limit.before]));
+  const failed = snapshot?.steps.find((step) => step.status === 'failed');
   return (
     <section className="border border-grey-200 bg-white">
       <div className="px-5 py-3 border-b border-grey-200">
@@ -513,9 +514,9 @@ function LimitsCard({
             </tr>
           </thead>
           <tbody>
-            {LIMITS.map(limit => {
-              const name = objectName(limit.index, limit.subindex)
-              const value = values?.get(name)
+            {LIMITS.map((limit) => {
+              const name = objectName(limit.index, limit.subindex);
+              const value = values?.get(name);
               return (
                 <tr key={name} className="border-t border-grey-100">
                   <td className="py-1.5 font-mono text-xs">{name}</td>
@@ -533,7 +534,7 @@ function LimitsCard({
                     {before.has(name) ? formatNumber(before.get(name)) : ''}
                   </td>
                 </tr>
-              )
+              );
             })}
           </tbody>
         </table>
@@ -559,23 +560,23 @@ function LimitsCard({
         </span>
       </div>
     </section>
-  )
+  );
 }
 
 function TuningRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
-  const computed = stepValue<ControllerTuningComputed>(snapshot, 'compute')
-  const written = stepValue<ControllerTuningWrite>(snapshot, 'write')
+  const computed = stepValue<ControllerTuningComputed>(snapshot, 'compute');
+  const written = stepValue<ControllerTuningWrite>(snapshot, 'write');
   const noise = stepValue<{ measured: boolean; noiseRpm?: number; warning?: string | null }>(
     snapshot,
     'noise',
-  )
-  const failed = snapshot.steps.find(step => step.status === 'failed')
+  );
+  const failed = snapshot.steps.find((step) => step.status === 'failed');
   const state =
     computed?.state && typeof computed.state === 'object'
       ? Object.entries(computed.state as Record<string, unknown>).filter(
           ([, value]) => typeof value === 'number',
         )
-      : []
+      : [];
   return (
     <section className="border border-grey-200 bg-white">
       <div className="px-5 py-3 border-b border-grey-200 flex items-center justify-between">
@@ -584,7 +585,7 @@ function TuningRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
       </div>
       <table className="w-full text-xs">
         <tbody>
-          {snapshot.steps.map(step => (
+          {snapshot.steps.map((step) => (
             <tr key={step.id} className="border-b border-grey-100 last:border-0 align-top">
               <td className="pl-5 py-2 w-6">
                 <span
@@ -645,7 +646,7 @@ function TuningRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
               </tr>
             </thead>
             <tbody>
-              {written.gains.map(gain => (
+              {written.gains.map((gain) => (
                 <tr key={gain.object} className="border-t border-grey-100">
                   <td className="py-1.5 font-mono text-xs">{gain.object}</td>
                   <td className="py-1.5 text-right font-mono">{formatNumber(gain.before)}</td>
@@ -662,7 +663,7 @@ function TuningRun({ snapshot }: { snapshot: ProcedureSnapshot }) {
         </div>
       )}
     </section>
-  )
+  );
 }
 
 function Field({ label, value }: { label: string; value: string | number }) {
@@ -671,5 +672,5 @@ function Field({ label, value }: { label: string; value: string | number }) {
       <dt className={labelCls}>{label}</dt>
       <dd className="font-mono">{value}</dd>
     </div>
-  )
+  );
 }

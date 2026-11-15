@@ -1,7 +1,7 @@
-import type { HardwareDescription, HardwareProduct } from '@synapticon/motion-master-client'
-import FieldRow from './FieldRow'
+import type { HardwareDescription, HardwareProduct } from '@synapticon/motion-master-client';
+import FieldRow from './FieldRow';
 
-const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display block'
+const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display block';
 
 /** One product — device or assembly — with its components listed. */
 function ProductFields({ title, product }: { title: string; product: HardwareProduct }) {
@@ -39,7 +39,7 @@ function ProductFields({ title, product }: { title: string; product: HardwarePro
         </div>
       )}
     </div>
-  )
+  );
 }
 
 /**
@@ -52,7 +52,7 @@ function ProductFields({ title, product }: { title: string; product: HardwarePro
 export default function HardwareDescriptionView({
   description,
 }: {
-  description: HardwareDescription
+  description: HardwareDescription;
 }) {
   return (
     <div className="space-y-4">
@@ -70,5 +70,5 @@ export default function HardwareDescriptionView({
         </p>
       )}
     </div>
-  )
+  );
 }

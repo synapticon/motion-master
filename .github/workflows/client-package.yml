@@ -28,6 +28,11 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      # A helper added to one client fails here until it is in the other client too, or until
+      # clients/PARITY.md names it as one language's own. The runner image has python3.
+      - name: The two clients match the parity table
+        run: node tools/check-client-parity.mjs
+
       - name: Build the client
         run: pnpm run build:client
 

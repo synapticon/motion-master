@@ -63,7 +63,7 @@ AFTER_STOP_SECONDS = 1.0
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--velocity", type=int, default=250, help="target velocity, units of 0x60FF")
     ap.add_argument("--seconds", type=float, default=2.0, help="how long to hold the velocity")

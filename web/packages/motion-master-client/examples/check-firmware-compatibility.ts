@@ -17,6 +17,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, filename } = cli()
+    .description(
+      'Check whether a firmware package belongs on a device (GET .../firmware-compatibility).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--filename <name>', 'the package filename, a path is allowed')
     .parse()

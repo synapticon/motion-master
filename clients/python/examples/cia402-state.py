@@ -22,7 +22,7 @@ from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     args = ap.parse_args()
 

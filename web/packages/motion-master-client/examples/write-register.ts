@@ -39,6 +39,7 @@ async function main(): Promise<void> {
     address,
     data: text,
   } = cli()
+    .description('Write bytes to an ESC register of a device (POST .../registers/{address}).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--address <n>', 'the address of the register', integer)
     .requiredOption('--data <bytes>', 'bytes separated by commas, such as 0,0')

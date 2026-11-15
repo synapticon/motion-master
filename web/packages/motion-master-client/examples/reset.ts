@@ -10,8 +10,13 @@
 //     pnpm example examples/reset.ts
 
 import { MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli } from './options';
 
 async function main(): Promise<void> {
+  cli()
+    .description('Close the fieldbus driver and clear the device list (POST /api/reset).')
+    .parse();
+
   const client = await MotionMasterClient.fromConfig();
   await client.reset();
   console.log('reset: the fieldbus driver is closed and the device list is empty');

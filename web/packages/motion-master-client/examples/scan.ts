@@ -6,8 +6,11 @@
 //     pnpm example examples/scan.ts
 
 import { alStateName, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli } from './options';
 
 async function main(): Promise<void> {
+  cli().description('Scan the bus and list the devices it finds (POST /api/scan).').parse();
+
   const client = await MotionMasterClient.fromConfig();
   await client.init();
 

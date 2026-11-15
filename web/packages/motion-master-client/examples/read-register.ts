@@ -21,6 +21,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, address, length } = cli()
+    .description(
+      'Read bytes from an ESC register of a device (GET .../registers/{address}?length=N).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .addOption(
       new Option('--address <n>', 'the address of the register')

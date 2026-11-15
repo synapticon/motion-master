@@ -34,6 +34,9 @@ const STARTS = ['none', 'immediately', 'after-hrd-stream-start'];
 
 async function main(): Promise<void> {
   const { slave, startFrequency, targetFrequency, amplitude, time, signal, start } = cli()
+    .description(
+      'Configure the system identification chirp of a drive, and arm it (system-identification).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--start-frequency <n>', 'sweep start, mHz', integer)
     .requiredOption('--target-frequency <n>', 'sweep end, mHz', integer)

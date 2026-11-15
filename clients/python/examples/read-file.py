@@ -24,7 +24,7 @@ FILES_DIR = Path(__file__).resolve().parent.parent / "files"
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--filename", required=True, help="FoE filename as the firmware knows it")
     ap.add_argument("--output", help="local path to save to (default: files/<filename>)")

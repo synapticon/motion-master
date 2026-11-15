@@ -24,7 +24,7 @@ from motion_master_client import MotionMasterClient, run  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--seconds", type=int, default=10, help="capture length, 1 to 300")
     args = ap.parse_args()
 

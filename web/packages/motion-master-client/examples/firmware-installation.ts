@@ -50,6 +50,7 @@ async function main(): Promise<void> {
     package: packagePath,
     finalState: finalStateName,
   } = cli()
+    .description('Install a SOMANET firmware package on a device (firmware-installation).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--package <path>', 'path to the .zip firmware package')
     .addOption(

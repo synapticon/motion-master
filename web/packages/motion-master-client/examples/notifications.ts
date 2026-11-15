@@ -16,6 +16,7 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { count } = cli()
+    .description('Print the notifications that the server sends over the WebSocket, until Ctrl-C.')
     .option('--count <n>', 'stop after N notifications (0 = until Ctrl-C)', integer, 0)
     .parse()
     .opts<{ count: number }>();

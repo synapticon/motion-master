@@ -14,6 +14,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave } = cli()
+    .description(
+      'List the files stored on a device with their sizes (GET /api/devices/{slavePosition}/files).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .parse()
     .opts<{ slave: number }>();

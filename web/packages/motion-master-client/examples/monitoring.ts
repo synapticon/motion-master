@@ -93,6 +93,7 @@ function printSummary(m: MonitoringRecording, slave: number, velocity: number): 
 
 async function main(): Promise<void> {
   const { slave, velocity, seconds, every, output } = cli()
+    .description('Record a velocity move with a monitoring, print it, and save every cycle as CSV.')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .option('--velocity <n>', 'target velocity, units of 0x60FF', integer, 250)
     .option('--seconds <s>', 'how long to hold the velocity', float, 2)

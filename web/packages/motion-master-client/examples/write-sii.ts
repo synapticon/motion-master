@@ -17,6 +17,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, file } = cli()
+    .description(
+      'Write a raw SII image to the EEPROM of a device (PUT /api/devices/{slavePosition}/sii).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--file <path>', 'the raw SII image, as read-sii.py --output saves it')
     .parse()

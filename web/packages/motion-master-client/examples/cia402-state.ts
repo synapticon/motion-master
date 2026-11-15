@@ -15,6 +15,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave } = cli()
+    .description(
+      'Print the CiA 402 state of a drive with its actual and target values (GET .../cia402).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .parse()
     .opts<{ slave: number }>();

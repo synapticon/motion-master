@@ -13,6 +13,7 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { period } = cli()
+    .description('Change the cycle period of the real-time game loop (PUT /api/game-loop).')
     .requiredOption('--period <us>', 'cycle period in microseconds', integer)
     .parse()
     .opts<{ period: number }>();

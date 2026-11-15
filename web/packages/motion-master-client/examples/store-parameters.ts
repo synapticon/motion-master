@@ -25,6 +25,9 @@ const PROCEDURE = 'store-parameters';
 
 async function main(): Promise<void> {
   const { slave } = cli()
+    .description(
+      'Store the current parameter values of a device in its flash (procedure store-parameters).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .parse()
     .opts<{ slave: number }>();

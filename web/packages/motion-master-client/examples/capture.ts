@@ -16,6 +16,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { seconds } = cli()
+    .description(
+      'Record the EtherCAT frames on the bus adapter for some seconds, and print the summary.',
+    )
     .option('--seconds <n>', 'capture length, 1 to 300', integer, 10)
     .parse()
     .opts<{ seconds: number }>();

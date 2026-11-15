@@ -32,7 +32,7 @@ TOPIC = "python-example"
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--interval", type=int, default=100, help="flush cadence in ms (5-2000)")
     ap.add_argument("--count", type=int, default=0, help="stop after N batches (0 = until Ctrl-C)")

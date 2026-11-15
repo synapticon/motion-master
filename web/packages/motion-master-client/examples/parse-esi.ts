@@ -23,6 +23,7 @@ import { cli } from './options';
 
 async function main(): Promise<void> {
   const command = cli()
+    .description('Parse an ESI file and list the devices it describes (POST /api/esi/parse).')
     .argument('<esi>', 'path to the ESI XML file')
     .option('--output <path>', 'save the whole parsed response as JSON to this path')
     .parse();

@@ -19,7 +19,7 @@ from motion_master_client import MotionMasterClient, run  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--period", type=int, required=True, help="cycle period in microseconds")
     args = ap.parse_args()
 

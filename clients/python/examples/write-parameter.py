@@ -44,7 +44,7 @@ def convert(current, text):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--index", type=auto_int, required=True)
     ap.add_argument("--subindex", type=auto_int, required=True)

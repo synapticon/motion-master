@@ -6,8 +6,15 @@
 //     pnpm example examples/server-info.ts
 
 import { MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli } from './options';
 
 async function main(): Promise<void> {
+  cli()
+    .description(
+      'Print the server version, the host, the network adapters and the game loop health.',
+    )
+    .parse();
+
   const client = await MotionMasterClient.fromConfig();
 
   const { version } = (await client.api.getVersion()).data;

@@ -64,6 +64,9 @@ async function main(): Promise<void> {
     subindex,
     value: text,
   } = cli()
+    .description(
+      'Write one parameter, converted to its data type (PUT .../parameters/{index}/{subindex}).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--index <n>', 'the index of the object', integer)
     .requiredOption('--subindex <n>', 'the subindex of the object', integer)

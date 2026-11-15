@@ -8,6 +8,7 @@ devices, not an error.
     python scan.py
 """
 
+import argparse
 import logging
 import sys
 from pathlib import Path
@@ -17,6 +18,8 @@ from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
 
 
 def main():
+    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()
     client.init()

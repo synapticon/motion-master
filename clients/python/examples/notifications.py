@@ -24,7 +24,7 @@ from motion_master_client import MotionMasterClient, run  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
         "--count", type=int, default=0, help="stop after N notifications (0 = until Ctrl-C)"
     )

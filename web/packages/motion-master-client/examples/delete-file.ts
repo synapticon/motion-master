@@ -22,6 +22,7 @@ function encodeFilename(name: string): string {
 
 async function main(): Promise<void> {
   const { slave, filename } = cli()
+    .description('Delete a file from the flash of a SOMANET device (DELETE .../files/{filename}).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--filename <name>', 'the name of the file on the device')
     .parse()

@@ -11,6 +11,7 @@ next script that needs a bus opens the driver and scans again.
     python reset.py
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from motion_master_client import MotionMasterClient, run  # noqa: E402
 
 
 def main():
+    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
+
     client = MotionMasterClient.from_config()
     client.reset()
     print("reset: the fieldbus driver is closed and the device list is empty")

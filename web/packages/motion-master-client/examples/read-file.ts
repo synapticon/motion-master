@@ -18,6 +18,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, filename, output } = cli()
+    .description(
+      'Read a file from a device over FoE (GET /api/devices/{slavePosition}/files/{filename}).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--filename <name>', 'FoE filename as the firmware knows it')
     .option('--output <path>', 'local path to save to (default: files/<filename>)')

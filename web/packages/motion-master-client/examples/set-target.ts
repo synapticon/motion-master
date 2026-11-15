@@ -29,6 +29,9 @@ async function main(): Promise<void> {
     target: kind,
     value,
   } = cli()
+    .description(
+      'Set the position, velocity or torque target of a CiA 402 drive (POST .../cia402/target).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .addOption(
       new Option('--target <kind>', 'the target to set').choices(KINDS).makeOptionMandatory(),

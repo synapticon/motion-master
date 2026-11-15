@@ -65,6 +65,7 @@ function decodeValue(param: DeviceParameter): string {
 
 async function main(): Promise<void> {
   const { slave } = cli()
+    .description('Read the whole object dictionary of a device with its values and print it.')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .parse()
     .opts<{ slave: number }>();

@@ -25,6 +25,9 @@ const PROCEDURE = 'device-locate';
 
 async function main(): Promise<void> {
   const { slave, duration } = cli()
+    .description(
+      'Blink the LEDs of a device, so that someone at the machine can find it (device-locate).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .option('--duration <s>', 'seconds, 1 to 3600', integer, 10)
     .parse()

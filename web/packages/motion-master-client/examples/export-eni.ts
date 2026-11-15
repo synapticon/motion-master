@@ -19,6 +19,7 @@ import { cli } from './options';
 
 async function main(): Promise<void> {
   const { output } = cli()
+    .description('Save the bus as an ENI file (GET /api/eni).')
     .option('--output <path>', 'local path to save to (default: files/eni.xml)')
     .parse()
     .opts<{ output?: string }>();

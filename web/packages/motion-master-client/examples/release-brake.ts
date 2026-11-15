@@ -19,6 +19,7 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, settle } = cli()
+    .description('Release the brake of a SOMANET drive (POST .../brake/release).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .option('--settle <ms>', 'extra wait in ms', integer, 50)
     .parse()

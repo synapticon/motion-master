@@ -22,7 +22,7 @@ from motion_master_client import MotionMasterClient, run  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("esi", help="path to the ESI XML file")
     ap.add_argument("--output", help="save the whole parsed response as JSON to this path")
     args = ap.parse_args()

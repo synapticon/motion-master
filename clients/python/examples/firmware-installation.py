@@ -42,7 +42,7 @@ STATES = {s.name.lower(): s for s in AlState if s}
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--package", required=True, help="path to the .zip firmware package")
     ap.add_argument("--final-state", choices=STATES, default="preop")

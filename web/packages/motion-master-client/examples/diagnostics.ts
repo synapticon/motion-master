@@ -17,6 +17,7 @@ const PORT_COUNTERS = ['rxError', 'invalidFrame', 'forwardedError', 'lostLink'] 
 
 async function main(): Promise<void> {
   const { slave } = cli()
+    .description('Print the ESC error counters and the distributed clock sync of the devices.')
     .option('--slave <n>', 'one device position (default: every device)', integer)
     .parse()
     .opts<{ slave?: number }>();

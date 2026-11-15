@@ -28,6 +28,9 @@ async function main(): Promise<void> {
     file,
     filename: name,
   } = cli()
+    .description(
+      'Write a local file to a device over FoE (PUT /api/devices/{slavePosition}/files/{filename}).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--file <path>', 'the local file to write')
     .option('--filename <name>', 'the name on the device (default: the local name)')

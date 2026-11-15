@@ -36,6 +36,9 @@ const GROUPS: NonNullable<ProcedureRequest['group']>[] = [
 
 async function main(): Promise<void> {
   const { slave, group } = cli()
+    .description(
+      'Restore the default parameter values of a device (procedure restore-default-parameters).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .addOption(
       new Option('--group <group>', 'the 0x1011 group to restore').choices(GROUPS).default('all'),

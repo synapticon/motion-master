@@ -24,7 +24,7 @@ PORT_COUNTERS = ("rxError", "invalidFrame", "forwardedError", "lostLink")
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, help="one device position (default: every device)")
     args = ap.parse_args()
 

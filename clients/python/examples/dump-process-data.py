@@ -26,7 +26,7 @@ FILES_DIR = Path(__file__).resolve().parent.parent / "files"
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
         "--output", help="local path to save to (default: files/process-data-<time>.mmpd)"
     )

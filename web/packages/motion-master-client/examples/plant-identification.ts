@@ -31,6 +31,9 @@ const SIGNALS = ['logarithmic', 'linear'];
 
 async function main(): Promise<void> {
   const { slave, startFrequency, targetFrequency, amplitude, time, signal } = cli()
+    .description(
+      'Identify the plant model of a drive, and write plant_model.csv (plant-identification).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--start-frequency <n>', 'sweep start, mHz', integer)
     .requiredOption('--target-frequency <n>', 'sweep end, mHz', integer)

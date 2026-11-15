@@ -40,6 +40,9 @@ async function main(): Promise<void> {
     subindex,
     data: text,
   } = cli()
+    .description(
+      'Write raw bytes to one object with an SDO download (PUT .../sdo/{index}/{subindex}).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--index <n>', 'the index of the object', integer)
     .requiredOption('--subindex <n>', 'the subindex of the object', integer)

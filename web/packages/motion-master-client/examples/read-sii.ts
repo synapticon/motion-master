@@ -18,6 +18,7 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, output } = cli()
+    .description('Read the SII of a device, the configuration in its EEPROM (GET .../sii).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .option('--output <path>', 'save the raw EEPROM image to this path')
     .parse()

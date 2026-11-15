@@ -28,6 +28,9 @@ function printPart(title: string, part: HardwareDescription['device']): void {
 
 async function main(): Promise<void> {
   const { slave } = cli()
+    .description(
+      'Print what a device says it is (GET /api/devices/{slavePosition}/hardware-description).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .parse()
     .opts<{ slave: number }>();

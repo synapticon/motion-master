@@ -19,6 +19,9 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, index, subindex, cache } = cli()
+    .description(
+      'Read one parameter with its name, data type and value (GET .../parameters/{index}/{subindex}).',
+    )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .addOption(
       new Option('--index <n>', 'the index of the object')

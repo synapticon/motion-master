@@ -26,6 +26,7 @@ const STATES = Object.fromEntries(
 
 async function main(): Promise<void> {
   const { state: name, slave } = cli()
+    .description('Move the devices to an EtherCAT AL state.')
     .addOption(
       new Option('--state <state>', 'the AL state to move the devices to')
         .choices(Object.keys(STATES))

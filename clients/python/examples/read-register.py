@@ -27,7 +27,7 @@ def auto_int(text):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--address", type=auto_int, default=0x0000)
     ap.add_argument("--length", type=auto_int, default=4, help="number of bytes")

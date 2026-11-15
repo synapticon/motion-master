@@ -37,7 +37,7 @@ PROCEDURE = "system-identification"
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--start-frequency", type=int, required=True, help="sweep start, mHz")
     ap.add_argument("--target-frequency", type=int, required=True, help="sweep end, mHz")

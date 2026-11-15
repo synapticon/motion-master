@@ -19,6 +19,7 @@ import { cli, integer } from './options';
 
 async function main(): Promise<void> {
   const { slave, output } = cli()
+    .description('Print the PDO mapping of a device, grouped by PDO (GET .../pdo-mapping).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .option('--output <path>', 'also save the mapping as JSON to this path')
     .parse()

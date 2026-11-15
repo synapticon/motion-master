@@ -31,6 +31,7 @@ const PROCEDURE = 'offset-detection';
 
 async function main(): Promise<void> {
   const { slave } = cli()
+    .description('Run offset detection on a SOMANET drive (POST .../procedures/offset-detection).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .parse()
     .opts<{ slave: number }>();

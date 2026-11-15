@@ -33,6 +33,7 @@ function rowTime(timestampUs: number): string {
 
 async function main(): Promise<void> {
   const { slave, interval, count } = cli()
+    .description('Stream live process data over the monitoring WebSocket.')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .option('--interval <ms>', 'flush cadence in ms (5-2000)', integer, 100)
     .option('--count <n>', 'stop after N batches (0 = until Ctrl-C)', integer, 0)

@@ -7,6 +7,7 @@ script needs no fieldbus driver, so it opens none and leaves the server as it is
     python server-info.py
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from motion_master_client import MotionMasterClient, run  # noqa: E402
 
 
 def main():
+    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
+
     client = MotionMasterClient.from_config()
 
     version = client.call("getVersion").json()["version"]

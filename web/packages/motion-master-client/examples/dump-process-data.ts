@@ -19,6 +19,7 @@ import { cli } from './options';
 
 async function main(): Promise<void> {
   const { output } = cli()
+    .description('Save the recorder of the server as a .mmpd file (GET /api/process-data/dump).')
     .option('--output <path>', 'local path to save to (default: files/process-data-<time>.mmpd)')
     .parse()
     .opts<{ output?: string }>();

@@ -158,6 +158,9 @@ function describe(descriptor: Descriptor): void {
 
 async function main(): Promise<void> {
   const command = cli()
+    .description(
+      'List the procedures of a device, describe one, or run one by name with its parameters.',
+    )
     .argument('[name]', 'the procedure to run (default: list them)')
     .argument('[params...]', 'parameters as name=value')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)

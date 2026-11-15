@@ -41,6 +41,7 @@ function requestObjects(objects: PdoMapping['outputs']): PdoMappingRequestObject
 
 async function main(): Promise<void> {
   const { slave, file } = cli()
+    .description('Write the PDO mapping of a device from a JSON file (PUT .../pdo-mapping).')
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
     .requiredOption('--file <path>', 'the mapping as JSON')
     .parse()

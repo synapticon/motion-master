@@ -42,7 +42,7 @@ def request_objects(objects):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--file", required=True, help="the mapping as JSON")
     args = ap.parse_args()

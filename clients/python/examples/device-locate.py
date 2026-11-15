@@ -30,7 +30,7 @@ PROCEDURE = "device-locate"
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--duration", type=int, default=10, help="seconds, 1 to 3600 (default: 10)")
     args = ap.parse_args()

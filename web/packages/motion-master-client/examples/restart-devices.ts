@@ -31,6 +31,9 @@ const STATES = Object.fromEntries(
 
 async function main(): Promise<void> {
   const { state, slave } = cli()
+    .description(
+      'Restart devices through INIT up to an AL state (POST /api/devices/state/restart).',
+    )
     .addOption(
       new Option('--state <state>', 'the AL state to restart to')
         .choices(Object.keys(STATES))

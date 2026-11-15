@@ -41,7 +41,7 @@ export interface Cia402Status {
    * Active operation mode (display object 0x6061), as an INTEGER8 value.
    * @example 9
    */
-  modeOfOperation: number;
+  operationMode: number;
   /**
    * Human-readable name of the active operation mode.
    * @example "CyclicSyncVelocity"

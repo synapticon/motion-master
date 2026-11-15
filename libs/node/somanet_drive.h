@@ -1074,7 +1074,7 @@ enum class OsCommandStatus : uint8_t {
 ///        not here (open phase detection's 0 is "open terminal A", phase resistance's 0 is
 ///        "current amplitude error", ...).
 enum class OsCommandError : uint8_t {
-  kNotAllowed = 251,  ///< Preconditions not met (wrong mode of operation, say).
+  kNotAllowed = 251,  ///< Preconditions not met (wrong operation mode, say).
   kAborted = 252,     ///< The abort the master requested via 0x1024 was carried out.
   /// No downstream service acknowledged the command (or the abort) within the drive's own
   /// reception timeout — 20000 drive-control cycles, so **about 20 seconds** at a 1 ms loop, and it

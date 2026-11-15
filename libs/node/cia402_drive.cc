@@ -17,8 +17,8 @@ void to_json(nlohmann::json& j, const Cia402Status& s) {
       {"state", cia402::toString(s.state)},
       {"statusword", s.statusword},
       {"controlword", s.controlword},
-      {"modeOfOperation", static_cast<int>(s.modeOfOperationDisplay)},
-      {"modeName", cia402::toString(s.modeOfOperationDisplay)},
+      {"operationMode", static_cast<int>(s.operationMode)},
+      {"modeName", cia402::toString(s.operationMode)},
       {"targetPosition", s.targetPosition ? nlohmann::json(*s.targetPosition) : nullptr},
       {"targetVelocity", s.targetVelocity ? nlohmann::json(*s.targetVelocity) : nullptr},
       {"targetTorque", s.targetTorque ? nlohmann::json(*s.targetTorque) : nullptr},
@@ -242,7 +242,7 @@ std::expected<Cia402Status, std::string> Cia402Drive::readStatus() const {
   status.state = cia402::decodeState(*sw);
   status.statusword = *sw;
   status.controlword = *cw;
-  status.modeOfOperationDisplay = *mode;
+  status.operationMode = *mode;
   status.targetPosition = optional(targetPosition());
   status.targetVelocity = optional(targetVelocity());
   status.targetTorque = optional(targetTorque());

@@ -2,7 +2,7 @@
 """Print the CiA 402 state of a drive with its actual and target values (GET .../cia402).
 
 CiA 402 is the device profile for drives. The server decodes the Statusword into the state of the
-profile's state machine, and reads the mode of operation, the actual values, the targets and the
+profile's state machine, and reads the operation mode, the actual values, the targets and the
 drive's error report.
 
 Opens the fieldbus driver, scans and moves the device to PREOP first when needed. A device in
@@ -36,7 +36,7 @@ def main():
         f"state {s['state']}, statusword 0x{s['statusword']:04x}, "
         f"controlword 0x{s['controlword']:04x}"
     )
-    print(f"mode {s['modeName']} ({s['modeOfOperation']}), error report {s['errorDescription']}")
+    print(f"mode {s['modeName']} ({s['operationMode']}), error report {s['errorDescription']}")
     print(f"  position  actual {s['actualPosition']:>12}  target {s['targetPosition']:>12}")
     print(f"  velocity  actual {s['actualVelocity']:>12}  target {s['targetVelocity']:>12}")
     print(f"  torque    actual {s['actualTorque']:>12}  target {s['targetTorque']:>12}")

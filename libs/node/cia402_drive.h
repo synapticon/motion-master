@@ -17,10 +17,10 @@ namespace mm::node {
 ///        operation mode (display object 0x6061), and the setpoint currently commanded for that
 ///        mode. Read in one shot by @c Cia402Drive::readStatus.
 struct Cia402Status {
-  cia402::State state{};                           ///< Decoded from the statusword (0x6041).
-  uint16_t statusword = 0;                         ///< Raw statusword (0x6041).
-  uint16_t controlword = 0;                        ///< Last-commanded controlword (0x6040).
-  cia402::OperationMode modeOfOperationDisplay{};  ///< Active operation mode (0x6061).
+  cia402::State state{};                  ///< Decoded from the statusword (0x6041).
+  uint16_t statusword = 0;                ///< Raw statusword (0x6041).
+  uint16_t controlword = 0;               ///< Last-commanded controlword (0x6040).
+  cia402::OperationMode operationMode{};  ///< Active operation mode (0x6061).
   /// The three targets and the three actual values, one pair per quantity: position 0x607A and
   /// 0x6064, velocity 0x60FF and 0x606C, torque 0x6071 and 0x6077 (INTEGER16 widened to int32).
   /// Every one is read, whatever the active mode; a reader picks the pair of the mode it is in.
@@ -40,7 +40,7 @@ struct Cia402Status {
 };
 
 /// @brief Serialises a @c Cia402Status. Emits `state`/`modeName` as human-readable strings
-///        alongside the numeric `statusword`, `controlword`, and `modeOfOperation`.
+///        alongside the numeric `statusword`, `controlword`, and `operationMode`.
 void to_json(nlohmann::json& j, const Cia402Status& s);
 
 /// @brief Position range limit (0x607B) — the range position values wrap around in.

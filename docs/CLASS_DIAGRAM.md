@@ -549,7 +549,7 @@ The whole surface is three rules, each visible in that `execute`:
 
 Two consequences worth knowing:
 
-- **Driving the CiA402 state machine from a cycle is the right place for it.** Mode of operation,
+- **Driving the CiA402 state machine from a cycle is the right place for it.** Operation mode,
   controlword and statusword are all exchanged every cycle, so the climb to Operation Enabled is one
   write per cycle with the wire doing the waiting, where an off-RT caller must sleep and poll. What
   stays off the RT thread is the EtherCAT **AL** state (INIT / PREOP / SAFEOP / OP) — seconds of

@@ -830,7 +830,7 @@ TEST(Cia402Drive, ReadStatusReportsAllFields) {
   EXPECT_EQ(status->state, State::kOperationEnabled);
   EXPECT_EQ(status->statusword, statuswordFor(State::kOperationEnabled));
   EXPECT_EQ(status->controlword, 0x000F);
-  EXPECT_EQ(status->modeOfOperationDisplay, OperationMode::kCyclicSyncVelocity);
+  EXPECT_EQ(status->operationMode, OperationMode::kCyclicSyncVelocity);
   EXPECT_EQ(status->targetPosition, 0);
   EXPECT_EQ(status->targetVelocity, 250000);
   EXPECT_EQ(status->targetTorque, 0);
@@ -1125,7 +1125,7 @@ TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
   s.state = State::kOperationEnabled;
   s.statusword = 0x1237;
   s.controlword = 0x000F;
-  s.modeOfOperationDisplay = OperationMode::kCyclicSyncVelocity;
+  s.operationMode = OperationMode::kCyclicSyncVelocity;
   s.targetVelocity = 100000;
   s.actualPosition = 99874;
   s.actualVelocity = 249000;
@@ -1133,7 +1133,7 @@ TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
   EXPECT_EQ(j.at("state"), "OperationEnabled");
   EXPECT_EQ(j.at("statusword"), 0x1237);
   EXPECT_EQ(j.at("controlword"), 0x000F);
-  EXPECT_EQ(j.at("modeOfOperation"), 9);
+  EXPECT_EQ(j.at("operationMode"), 9);
   EXPECT_EQ(j.at("modeName"), "CyclicSyncVelocity");
   EXPECT_TRUE(j.at("targetPosition").is_null());
   EXPECT_EQ(j.at("targetVelocity"), 100000);

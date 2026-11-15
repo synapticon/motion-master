@@ -2,7 +2,7 @@
 """Set the position, velocity or torque target of a CiA 402 drive (POST .../cia402/target).
 
 The value is in the units of the object: 0x607A for position, 0x60FF for velocity, and 0x6071
-for torque, in per mille of rated torque. Choose the target that matches the mode of operation of
+for torque, in per mille of rated torque. Choose the target that matches the operation mode of
 the drive. A drive that is enabled in that mode moves to the target at once. The server writes
 the target in the process data when the device exchanges it, and with an SDO write otherwise.
 cia402-state.py prints the targets and the actual values.

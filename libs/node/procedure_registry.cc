@@ -104,7 +104,7 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
       "The iC-MU soft reset (0x07 into register 0x75) restarts the chip and is acknowledged "
       "without a value, so that one access reports no reading.",
       "The mailbox must be active, so the device has to be in PREOP or above — but it need not be "
-      "enabled, in any particular mode of operation, or exchanging process data.",
+      "enabled, in any particular operation mode, or exchanging process data.",
   };
   encoderRegister.movesMotor = false;
   encoderRegister.requiresEnabled = false;

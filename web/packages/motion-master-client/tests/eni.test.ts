@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw/http';
 import { describe, expect, it } from 'vitest';
-import { apiErrorMessage } from '../src/index';
+import { apiErrorMessage, HttpError } from '../src/index';
 import { fakeServer, HTTP_URL, server } from './fakes';
 
 const XML = '<?xml version="1.0"?><EtherCATConfig/>';
@@ -16,7 +16,7 @@ describe('exportEni', () => {
     expect(await client.exportEni()).toEqual({ xml: XML, warnings: 2 });
   });
 
-  it('throws the refused response, which apiErrorMessage reads as for a generated call', async () => {
+  it('throws an HttpError with the reason of the server', async () => {
     const { client } = fakeServer({});
     server.use(
       http.get(`${HTTP_URL}/api/eni`, () =>
@@ -24,8 +24,11 @@ describe('exportEni', () => {
       ),
     );
     const error = await client.exportEni().catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(Response);
-    expect((error as Response).status).toBe(409);
+    expect(error).toBeInstanceOf(HttpError);
+    expect(error).toMatchObject({
+      status: 409,
+      request: { method: 'GET', url: `${HTTP_URL}/api/eni` },
+    });
     expect(apiErrorMessage(error)).toBe('the bus is not in SAFEOP or OP');
   });
 });

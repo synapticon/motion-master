@@ -49,15 +49,13 @@ export async function readConfig(path?: string): Promise<ClientSettings> {
   if (path) {
     file = resolve(path);
     if (!existsSync(file)) {
-      throw new Error(`${file} not found`);
+      throw notFound(`${file} not found`);
     }
   } else {
     const candidates = [...new Set([resolve(CONFIG_NAME), join(packageDir, CONFIG_NAME)])];
     const found = candidates.find((candidate) => existsSync(candidate));
     if (!found) {
-      throw new Error(
-        missingConfigMessage(candidates, join(packageDir, TEMPLATE_NAME), existsSync),
-      );
+      throw notFound(missingConfigMessage(candidates, join(packageDir, TEMPLATE_NAME), existsSync));
     }
     file = found;
   }
@@ -78,6 +76,11 @@ export async function readConfig(path?: string): Promise<ClientSettings> {
     wsUrl: `wss://${config.host}:${config.wsPort}`,
     fieldbus: config.fieldbus,
   };
+}
+
+/** Returns an error for a file that is not there, with the code Node.js gives such an error. */
+function notFound(message: string): Error {
+  return Object.assign(new Error(message), { code: 'ENOENT' });
 }
 
 /** Says where `readConfig` looked, and how to make the file. */

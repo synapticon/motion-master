@@ -63,10 +63,13 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `ProcedureError` | `ProcedureError` | | |
 | `CaptureError` | `CaptureError` | | |
 | `ProcessDataDumpError` | `ProcessDataDumpError` | | |
+| — | `ConnectionError` | | Python raises `requests.ConnectionError`, which carries the URL of the request. `fetch` throws a bare `TypeError`, so the TypeScript client throws its own error. |
+| — | `HttpError` | | Python raises `requests.HTTPError`, which carries the method, the status and the body. A refused `fetch` throws nothing, so the TypeScript client throws its own error. |
 | `step_changes` | `stepChanges` | | |
 | `format_step` | `formatStep` | | |
-| `error_line` | `apiErrorMessage` | pending | |
-| `run` | — | pending | |
+| `error_line` | `errorLine` | | |
+| — | `apiErrorMessage` | | Returns a message for any error, with a fallback, for a page to show. `errorLine` returns `null` for a bug, so that a program shows its stack trace. |
+| `run` | `run` | | |
 | `MMPD_FLAG_INCOMPLETE_START` | `MMPD_FLAG_INCOMPLETE_START` | | |
 | `mmpd_flags` | — | | Returns the flags of a `.mmpd` file. TypeScript reads them from the header that `parseMmpd()` decodes: `parseMmpd(bytes).header.flags`. |
 | — | `MmpdFile` | | The decoded `.mmpd` file. The Console plots a dump in the browser, and the Python client has no decoder of the format yet. |

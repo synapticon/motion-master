@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { wireTimeMs } from '@synapticon/motion-master-client';
+import { HttpError, wireTimeMs } from '@synapticon/motion-master-client';
 
 // Shared readout for the server-measured device wire time next to the browser-observed HTTP
 // round-trip, used by every page that performs a fieldbus operation. The gap between the two is
@@ -82,8 +82,8 @@ export function useWireTiming() {
       setTiming({ wireMs: wireTimeMs(res), roundTripMs: performance.now() - start });
       return res;
     } catch (err) {
-      if (err instanceof Response) {
-        setTiming({ wireMs: wireTimeMs(err), roundTripMs: performance.now() - start });
+      if (err instanceof HttpError) {
+        setTiming({ wireMs: wireTimeMs(err.response), roundTripMs: performance.now() - start });
       }
       throw err;
     }

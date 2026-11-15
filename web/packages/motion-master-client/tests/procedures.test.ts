@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatStep, ProcedureError, type ProcedureSnapshot, stepChanges } from '../src/index';
+import {
+  formatStep,
+  HttpError,
+  ProcedureError,
+  type ProcedureSnapshot,
+  stepChanges,
+} from '../src/index';
 import { type Answer, fakeServer } from './fakes';
 
 const PATH = '/api/devices/1/procedures/store-parameters';
@@ -74,7 +80,7 @@ describe('runProcedure', () => {
       message:
         "store-parameters on device 1: device 1 has no procedure 'store-parameters' (HTTP 404)",
     });
-    expect((error as Error).cause).toBeInstanceOf(Response);
+    expect((error as Error).cause).toBeInstanceOf(HttpError);
   });
 });
 

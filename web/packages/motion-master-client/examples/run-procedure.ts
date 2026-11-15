@@ -35,6 +35,7 @@ import {
   ProcedureError,
   type ProcedureRequest,
   type ProcedureSnapshot,
+  run,
   stepChanges,
   type TargetAlState,
 } from '@synapticon/motion-master-client';
@@ -155,69 +156,73 @@ function describe(descriptor: Descriptor): void {
   }
 }
 
-const { values: args, positionals } = parseArgs({
-  allowPositionals: true,
-  options: {
-    slave: { type: 'string', default: '1' },
-    state: { type: 'string', default: 'preop' },
-    describe: { type: 'boolean', default: false },
-  },
-});
-const [name, ...assignments] = positionals;
-const slave = Number(args.slave);
-const state =
-  STATES[args.state] ?? fail(`--state must be one of ${Object.keys(STATES).join(', ')}`);
+async function main(): Promise<void> {
+  const { values: args, positionals } = parseArgs({
+    allowPositionals: true,
+    options: {
+      slave: { type: 'string', default: '1' },
+      state: { type: 'string', default: 'preop' },
+      describe: { type: 'boolean', default: false },
+    },
+  });
+  const [name, ...assignments] = positionals;
+  const slave = Number(args.slave);
+  const state =
+    STATES[args.state] ?? fail(`--state must be one of ${Object.keys(STATES).join(', ')}`);
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(state, { positions: [slave] });
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(state, { positions: [slave] });
 
-const procedures = (await client.api.listProcedures(slave)).data;
-const descriptors = new Map(procedures.map((p) => [p.descriptor.name, p.descriptor]));
+  const procedures = (await client.api.listProcedures(slave)).data;
+  const descriptors = new Map(procedures.map((p) => [p.descriptor.name, p.descriptor]));
 
-if (name === undefined) {
-  for (const d of descriptors.values()) {
-    console.log(`  ${d.name.padEnd(32)} ${d.title}${flags(d)}`);
-  }
-  process.exit(0);
-}
-
-const descriptor = descriptors.get(name) ?? fail(`slave ${slave} has no procedure '${name}'`);
-if (args.describe) {
-  describe(descriptor);
-  process.exit(0);
-}
-
-const params = buildParams(descriptor, assignments);
-
-// Ctrl-C aborts the signal, so that runProcedure() cancels the run before the program ends.
-const controller = new AbortController();
-process.once('SIGINT', () => controller.abort(new Error('cancelled')));
-
-let snapshot: ProcedureSnapshot | undefined;
-try {
-  for await (const [current, changed] of stepChanges(
-    client.runProcedure(slave, name, { params, signal: controller.signal }),
-  )) {
-    snapshot = current;
-    for (const step of changed) {
-      console.log(formatStep(step));
+  if (name === undefined) {
+    for (const d of descriptors.values()) {
+      console.log(`  ${d.name.padEnd(32)} ${d.title}${flags(d)}`);
     }
+    process.exit(0);
   }
-} catch (e) {
-  if (e instanceof ProcedureError) {
-    fail(e.message);
+
+  const descriptor = descriptors.get(name) ?? fail(`slave ${slave} has no procedure '${name}'`);
+  if (args.describe) {
+    describe(descriptor);
+    process.exit(0);
   }
-  if (controller.signal.aborted) {
-    fail('\ncancelled');
+
+  const params = buildParams(descriptor, assignments);
+
+  // Ctrl-C aborts the signal, so that runProcedure() cancels the run before the program ends.
+  const controller = new AbortController();
+  process.once('SIGINT', () => controller.abort(new Error('cancelled')));
+
+  let snapshot: ProcedureSnapshot | undefined;
+  try {
+    for await (const [current, changed] of stepChanges(
+      client.runProcedure(slave, name, { params, signal: controller.signal }),
+    )) {
+      snapshot = current;
+      for (const step of changed) {
+        console.log(formatStep(step));
+      }
+    }
+  } catch (e) {
+    if (e instanceof ProcedureError) {
+      fail(e.message);
+    }
+    if (controller.signal.aborted) {
+      fail('\ncancelled');
+    }
+    throw e;
   }
-  throw e;
+
+  if (snapshot?.error) {
+    console.log(`error: ${snapshot.error}`);
+  }
+  console.log(`${name} ${snapshot?.status}`);
+  if (snapshot?.status !== 'succeeded') {
+    process.exitCode = 1;
+  }
 }
 
-if (snapshot?.error) {
-  console.log(`error: ${snapshot.error}`);
-}
-console.log(`${name} ${snapshot?.status}`);
-if (snapshot?.status !== 'succeeded') {
-  process.exitCode = 1;
-}
+await run(main);

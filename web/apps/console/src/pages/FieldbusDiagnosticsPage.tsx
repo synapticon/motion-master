@@ -15,17 +15,7 @@ import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
-
-// Unwraps the {error: {error: "..."}} shape the generated client rejects with.
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error;
-    if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error);
-    }
-  }
-  return 'Unknown error';
-}
+import { apiErrorMessage } from '@synapticon/motion-master-client';
 
 // Trims the float milliseconds (ticks × base, e.g. 100.0) to a tidy string.
 const formatMs = (ms: number): string => Number(ms.toFixed(3)).toString();
@@ -304,7 +294,7 @@ function WatchdogControl({
           </div>
 
           {mutation.isError && (
-            <p className="text-xs text-status-bad font-mono">{apiError(mutation.error)}</p>
+            <p className="text-xs text-status-bad font-mono">{apiErrorMessage(mutation.error)}</p>
           )}
           {mutation.isSuccess && draft === null && (
             <p className="text-xs text-status-good font-mono">
@@ -465,7 +455,7 @@ function CaptureSection() {
       setError(null);
     },
     onSuccess: (data) => setResult({ path: data.path, summary: data.summary }),
-    onError: (err) => setError(apiError(err)),
+    onError: (err) => setError(apiErrorMessage(err)),
   });
 
   const start = useMutation({
@@ -481,7 +471,7 @@ function CaptureSection() {
       if (isNotImplemented(err)) {
         run.mutate(Math.min(n, TIMED_CAPTURE_MAX_SECONDS));
       } else {
-        setError(apiError(err));
+        setError(apiErrorMessage(err));
       }
     },
   });
@@ -498,7 +488,7 @@ function CaptureSection() {
     onError: (err) => {
       // Nothing to stop any more, or the capture failed: either way no capture runs.
       setStarted(null);
-      setError(apiError(err));
+      setError(apiErrorMessage(err));
     },
   });
 
@@ -522,7 +512,7 @@ function CaptureSection() {
       setError(null);
     },
     onSuccess: (data) => setResult(data),
-    onError: (err) => setError(err instanceof Error ? err.message : apiError(err)),
+    onError: (err) => setError(err instanceof Error ? err.message : apiErrorMessage(err)),
   });
 
   const n = Number(seconds);

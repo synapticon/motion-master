@@ -115,7 +115,7 @@ An example imports the package by its name, as a program that installed it from 
 | `notifications.ts` | Prints the notifications of the server until Ctrl-C, or `--count` of them. It opens no fieldbus driver. |
 | `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`, prints it as a table, and saves every cycle as CSV in `files/`. **The motor turns.** |
 
-Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another.
+Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another. Each one runs its `main()` through `run()`, so an error a user can act on, such as a server that is not running, ends the program with one line instead of a stack trace.
 
 ## Helpers
 
@@ -139,7 +139,7 @@ The client has helpers for the steps that most programs begin with. They have th
 - `quickStop(slavePosition)` sends a quick stop. The drive stops on its quick stop ramp.
 - `runProcedure(slavePosition, name, { params, pollIntervalMs, signal })` starts a procedure and yields its snapshot at every poll, 500 ms apart by default, until the run ends. Leaving the loop early, or an abort of `signal`, cancels the run. It throws a `ProcedureError` when the server refuses the start.
 - `processDataMark()` returns the recorder clock of the server, in epoch microseconds. `processDataDump({ fromUs, toUs })` returns the `.mmpd` dump of the cycles between two marks as bytes, or of the whole recorder without them, and `parseMmpd()` decodes it. It returns `null` when the server has no cycle to dump, and throws a `ProcessDataDumpError` for any other refusal.
-- `exportEni()` returns the bus as an ENI document, `{ xml, warnings }`. `parseEni(xml)` reads an ENI document and returns its network with each datagram annotated. A refused request throws the response, as a call of `client.api` does.
+- `exportEni()` returns the bus as an ENI document, `{ xml, warnings }`. `parseEni(xml)` reads an ENI document and returns its network with each datagram annotated.
 - `startCapture({ adapter, seconds })` starts a capture of the EtherCAT frames that runs until `stopCapture()`, which returns the path of the pcap file in the user cache and the summary of late frames. Linux and macOS servers only. Both throw a `CaptureError` with the server's reason.
 - `stepChanges(run)` yields each snapshot of a run as `[snapshot, changed]`, where `changed` lists the steps whose status changed. `formatStep(step)` turns a step into one line.
 
@@ -151,7 +151,9 @@ for await (const [snapshot, changed] of stepChanges(client.runProcedure(1, 'stor
 }
 ```
 
-`ensureScanned`, `ensureState` and `restart` throw a `StateError` when a device does not answer or does not reach its state. A failed HTTP request throws the response, and `apiErrorMessage(error)` gives its reason.
+`errorLine(error)` returns one line for an error a user can act on, such as `POST /api/devices/state/transition: HTTP 409, …` or `cannot connect to …`, and `null` for a bug. `run(main)` calls `main` in Node.js and ends the program with that line and exit code 1, while a bug keeps its stack trace. Set `MM_TRACEBACK=1` to get the stack trace for every error.
+
+`ensureScanned`, `ensureState` and `restart` throw a `StateError` when a device does not answer or does not reach its state. A failed HTTP request throws an `HttpError`, and a server that the client cannot reach throws a `ConnectionError`.
 
 The helpers log each step they take, such as `found 1 device(s)`, through the [`debug`](https://www.npmjs.com/package/debug) package. The log is off by default. To turn it on in Node.js, set the environment variable:
 
@@ -171,15 +173,23 @@ const { data: devices } = await client.api.getDevices()
 const { data: value } = await client.api.readParameter(1, 0x6064, 0)
 ```
 
-A request that fails rejects with the response object, not with an `Error`. The server puts its reason in the body. `apiErrorMessage` gets that reason from any rejected value:
+Every request of the client, `client.api` included, throws an `Error` when it fails:
+
+- `HttpError` when the server refuses the request. It has `request`, `response`, `status` and `reason`, the reason the server gives. `response` has its body unread.
+- `ConnectionError` when the request does not reach the server. It has `request`, and `cause` is the error of `fetch`.
+
+`apiErrorMessage(error)` returns the reason of an `HttpError` and the message of any other error, for a page to show:
 
 ```ts
-import { apiErrorMessage } from '@synapticon/motion-master-client'
+import { apiErrorMessage, HttpError } from '@synapticon/motion-master-client';
 
 try {
-  await client.api.scan()
+  await client.api.scan();
 } catch (err) {
-  console.error(apiErrorMessage(err))
+  if (err instanceof HttpError && err.status === 409) {
+    // The bus is busy.
+  }
+  console.error(apiErrorMessage(err));
 }
 ```
 

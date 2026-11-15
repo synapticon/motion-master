@@ -14,22 +14,26 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
-import { AlState, MotionMasterClient, parseMmpd } from '@synapticon/motion-master-client';
+import { AlState, MotionMasterClient, parseMmpd, run } from '@synapticon/motion-master-client';
 import { FILES_DIR, fileStamp } from './files';
 
-const { values: args } = parseArgs({ options: { output: { type: 'string' } } });
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({ options: { output: { type: 'string' } } });
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(AlState.SAFEOP);
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(AlState.SAFEOP);
 
-const content = await client.processDataDump();
-if (content === null) {
-  console.error('the server has no cycle to dump');
-  process.exit(1);
+  const content = await client.processDataDump();
+  if (content === null) {
+    console.error('the server has no cycle to dump');
+    process.exit(1);
+  }
+
+  const out = args.output ?? `${FILES_DIR}/process-data-${fileStamp()}.mmpd`;
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, content);
+  console.log(`saved ${content.length} byte(s), ${parseMmpd(content).rowCount} cycle(s) -> ${out}`);
 }
 
-const out = args.output ?? `${FILES_DIR}/process-data-${fileStamp()}.mmpd`;
-mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, content);
-console.log(`saved ${content.length} byte(s), ${parseMmpd(content).rowCount} cycle(s) -> ${out}`);
+await run(main);

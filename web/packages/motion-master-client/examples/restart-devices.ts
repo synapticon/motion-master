@@ -16,6 +16,7 @@ import {
   AlState,
   alStateName,
   MotionMasterClient,
+  run,
   type TargetAlState,
 } from '@synapticon/motion-master-client';
 
@@ -26,30 +27,34 @@ const STATES = Object.fromEntries(
     .map(([name, value]) => [name.toLowerCase(), value]),
 ) as Record<string, TargetAlState>;
 
-const { values: args } = parseArgs({
-  options: {
-    state: { type: 'string', default: 'op' },
-    slave: { type: 'string' },
-  },
-});
-const target = STATES[args.state];
-if (target === undefined) {
-  throw new Error(`--state must be one of ${Object.keys(STATES).join(', ')}`);
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({
+    options: {
+      state: { type: 'string', default: 'op' },
+      slave: { type: 'string' },
+    },
+  });
+  const target = STATES[args.state];
+  if (target === undefined) {
+    throw new Error(`--state must be one of ${Object.keys(STATES).join(', ')}`);
+  }
+
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureScanned();
+
+  const body = args.slave ? { target, positions: [Number(args.slave)] } : { target };
+  const result = (await client.api.restartDevices(body)).data;
+  for (const d of result.devices) {
+    const mark = d.reached
+      ? ''
+      : `  not reached, alStatusCode 0x${d.alStatusCode.toString(16).padStart(4, '0')}`;
+    console.log(`  ${String(d.slavePosition).padStart(3)}  ${alStateName(d.alState)}${mark}`);
+  }
+  if (!result.ok) {
+    console.error(`the restart stopped at ${alStateName(result.step)}`);
+    process.exitCode = 1;
+  }
 }
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureScanned();
-
-const body = args.slave ? { target, positions: [Number(args.slave)] } : { target };
-const result = (await client.api.restartDevices(body)).data;
-for (const d of result.devices) {
-  const mark = d.reached
-    ? ''
-    : `  not reached, alStatusCode 0x${d.alStatusCode.toString(16).padStart(4, '0')}`;
-  console.log(`  ${String(d.slavePosition).padStart(3)}  ${alStateName(d.alState)}${mark}`);
-}
-if (!result.ok) {
-  console.error(`the restart stopped at ${alStateName(result.step)}`);
-  process.exitCode = 1;
-}
+await run(main);

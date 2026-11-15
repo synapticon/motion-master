@@ -12,7 +12,7 @@
 //     pnpm example examples/read-hardware-description.ts --slave 2
 
 import { parseArgs } from 'node:util';
-import { AlState, MotionMasterClient } from '@synapticon/motion-master-client';
+import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 
 type HardwareDescription = Awaited<ReturnType<MotionMasterClient['hardwareDescription']>>;
 
@@ -26,15 +26,19 @@ function printPart(title: string, part: HardwareDescription['device']): void {
   }
 }
 
-const { values: args } = parseArgs({ options: { slave: { type: 'string', default: '1' } } });
-const slave = Number(args.slave);
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({ options: { slave: { type: 'string', default: '1' } } });
+  const slave = Number(args.slave);
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(AlState.PREOP, { positions: [slave] });
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-const hd = await client.hardwareDescription(slave);
-printPart('device', hd.device);
-if (hd.assembly) {
-  printPart('assembly', hd.assembly);
+  const hd = await client.hardwareDescription(slave);
+  printPart('device', hd.device);
+  if (hd.assembly) {
+    printPart('assembly', hd.assembly);
+  }
 }
+
+await run(main);

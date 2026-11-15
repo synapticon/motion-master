@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Cia402 } from '../src/index';
+import { Cia402, HttpError } from '../src/index';
 import { type Answer, fakeServer, fakeSocket } from './fakes';
 
 const CREATED = {
@@ -93,7 +93,7 @@ describe('monitoring', () => {
     expect(error).toMatchObject({
       message: 'cannot create monitoring bad topic: invalid topic (HTTP 400)',
     });
-    expect(error.cause).toBeInstanceOf(Response);
+    expect(error.cause).toBeInstanceOf(HttpError);
     expect(server.calls()).toEqual(['POST /api/monitorings']);
   });
 

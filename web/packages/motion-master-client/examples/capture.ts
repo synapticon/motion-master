@@ -12,15 +12,19 @@
 //     pnpm example examples/capture.ts --seconds 30
 
 import { parseArgs } from 'node:util';
-import { MotionMasterClient } from '@synapticon/motion-master-client';
+import { MotionMasterClient, run } from '@synapticon/motion-master-client';
 
-const { values: args } = parseArgs({ options: { seconds: { type: 'string', default: '10' } } });
-const seconds = Number(args.seconds);
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({ options: { seconds: { type: 'string', default: '10' } } });
+  const seconds = Number(args.seconds);
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
 
-console.log(`recording for ${seconds} s...`);
-const result = (await client.api.runCapture({ seconds })).data;
-console.log(`pcap on the server: ${result.path}`);
-console.log(JSON.stringify(result.summary, null, 2));
+  console.log(`recording for ${seconds} s...`);
+  const result = (await client.api.runCapture({ seconds })).data;
+  console.log(`pcap on the server: ${result.path}`);
+  console.log(JSON.stringify(result.summary, null, 2));
+}
+
+await run(main);

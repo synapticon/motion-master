@@ -18,55 +18,60 @@ import {
   ProcedureError,
   type ProcedureRequest,
   type ProcedureSnapshot,
+  run,
   stepChanges,
 } from '@synapticon/motion-master-client';
 
 const PROCEDURE = 'device-locate';
 
-const { values: args } = parseArgs({
-  options: {
-    slave: { type: 'string', default: '1' },
-    duration: { type: 'string', default: '10' },
-  },
-});
-const slave = Number(args.slave);
-// The duration in seconds, 1 to 3600, as the procedure defines it.
-const params = { duration: Number(args.duration) } as ProcedureRequest;
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({
+    options: {
+      slave: { type: 'string', default: '1' },
+      duration: { type: 'string', default: '10' },
+    },
+  });
+  const slave = Number(args.slave);
+  // The duration in seconds, 1 to 3600, as the procedure defines it.
+  const params = { duration: Number(args.duration) } as ProcedureRequest;
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(AlState.PREOP, { positions: [slave] });
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-// Ctrl-C aborts the signal, so that runProcedure() cancels the run before the program ends.
-const controller = new AbortController();
-process.once('SIGINT', () => controller.abort(new Error('cancelled')));
+  // Ctrl-C aborts the signal, so that runProcedure() cancels the run before the program ends.
+  const controller = new AbortController();
+  process.once('SIGINT', () => controller.abort(new Error('cancelled')));
 
-let snapshot: ProcedureSnapshot | undefined;
-try {
-  for await (const [current, changed] of stepChanges(
-    client.runProcedure(slave, PROCEDURE, { params, signal: controller.signal }),
-  )) {
-    snapshot = current;
-    for (const step of changed) {
-      console.log(formatStep(step));
+  let snapshot: ProcedureSnapshot | undefined;
+  try {
+    for await (const [current, changed] of stepChanges(
+      client.runProcedure(slave, PROCEDURE, { params, signal: controller.signal }),
+    )) {
+      snapshot = current;
+      for (const step of changed) {
+        console.log(formatStep(step));
+      }
     }
+  } catch (e) {
+    if (e instanceof ProcedureError) {
+      console.error(e.message);
+      process.exit(1);
+    }
+    if (controller.signal.aborted) {
+      console.error('\ncancelled');
+      process.exit(1);
+    }
+    throw e;
   }
-} catch (e) {
-  if (e instanceof ProcedureError) {
-    console.error(e.message);
-    process.exit(1);
+
+  if (snapshot?.error) {
+    console.log(`error: ${snapshot.error}`);
   }
-  if (controller.signal.aborted) {
-    console.error('\ncancelled');
-    process.exit(1);
+  console.log(`${PROCEDURE} ${snapshot?.status}`);
+  if (snapshot?.status !== 'succeeded') {
+    process.exitCode = 1;
   }
-  throw e;
 }
 
-if (snapshot?.error) {
-  console.log(`error: ${snapshot.error}`);
-}
-console.log(`${PROCEDURE} ${snapshot?.status}`);
-if (snapshot?.status !== 'succeeded') {
-  process.exitCode = 1;
-}
+await run(main);

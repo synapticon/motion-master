@@ -48,13 +48,6 @@ const STEP_DOT: Record<ProgressStep['status'], string> = {
   failed: 'bg-syn-red',
 };
 
-// Surfaces the node layer's error string from a failed request. The unwrapping itself lives in the
-// client library, which owns the generated client and therefore its error shape — the pages that
-// still hand-roll it predate that helper.
-function apiError(err: unknown): string {
-  return apiErrorMessage(err);
-}
-
 // Wall-clock time of a run boundary, to the millisecond — 11:01:28.762. The precision is the point:
 // plenty of procedures finish inside a second, so second-resolution timestamps would render a start
 // and its finish as the same instant. Every component is named explicitly because
@@ -137,7 +130,7 @@ export default function DeviceProceduresPage() {
         <ProceduresExplainer />
 
         {listQuery.isError ? (
-          <Callout variant="error">{apiError(listQuery.error)}</Callout>
+          <Callout variant="error">{apiErrorMessage(listQuery.error)}</Callout>
         ) : listQuery.isPending ? (
           <p className="text-sm text-grey-500">Reading procedures…</p>
         ) : listings.length === 0 ? (
@@ -197,9 +190,9 @@ export default function DeviceProceduresPage() {
                 cancelling={cancelMutation.isPending}
                 requestError={
                   startMutation.isError
-                    ? apiError(startMutation.error)
+                    ? apiErrorMessage(startMutation.error)
                     : cancelMutation.isError
-                      ? apiError(cancelMutation.error)
+                      ? apiErrorMessage(cancelMutation.error)
                       : null
                 }
               />
@@ -602,8 +595,8 @@ function FirmwareCompatibilityNotice({
     return (
       <Callout variant="info">
         <p>
-          Could not check whether this package fits: {apiError(query.error)}. The installation is
-          not affected — nothing about it depends on this check.
+          Could not check whether this package fits: {apiErrorMessage(query.error)}. The
+          installation is not affected — nothing about it depends on this check.
         </p>
       </Callout>
     );

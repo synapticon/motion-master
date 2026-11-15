@@ -11,6 +11,7 @@ import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import { formatBytes } from '../utils/format';
 import { btnOutline, btnPrimary } from '../utils/styles';
+import { apiErrorMessage } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
@@ -28,28 +29,6 @@ type HrdData = (typeof DATA_CHOICES)[number]['value'];
 // million) flattens the two 14-bit tracks plotted beside it into a straight line; it is the column
 // an algorithm wants and the one an eye does not. The legend toggles it back on.
 const HIDDEN_BY_DEFAULT = ['raw'];
-
-// Surfaces the node layer's error string from a failed request (matching the other device pages).
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error;
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error);
-      }
-      if (typeof inner === 'string') {
-        return inner;
-      }
-    }
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      return `HTTP ${(err as { status: number }).status}`;
-    }
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return 'Unknown error';
-}
 
 export default function DeviceHrdPage() {
   const { deviceId } = useParams();
@@ -78,7 +57,7 @@ export default function DeviceHrdPage() {
       setShown(new Set(response.data.columns));
     } catch (err) {
       setRecording(null);
-      setError(apiError(err));
+      setError(apiErrorMessage(err));
     } finally {
       setReading(false);
     }
@@ -102,7 +81,7 @@ export default function DeviceHrdPage() {
       const bytes = new Uint8Array(await response.arrayBuffer());
       downloadBytes(bytes, `hrd-slave-${slavePosition}-${data}.csv`);
     } catch (err) {
-      setError(apiError(err));
+      setError(apiErrorMessage(err));
     } finally {
       setDownloading(false);
     }

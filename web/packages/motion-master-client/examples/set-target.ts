@@ -17,27 +17,32 @@ import {
   AlState,
   type Cia402TargetKind,
   MotionMasterClient,
+  run,
 } from '@synapticon/motion-master-client';
 
 const KINDS: Cia402TargetKind[] = ['position', 'velocity', 'torque'];
 
-const { values: args } = parseArgs({
-  options: {
-    slave: { type: 'string', default: '1' },
-    target: { type: 'string' },
-    value: { type: 'string' },
-  },
-});
-const kind = KINDS.find((k) => k === args.target);
-if (kind === undefined || args.value === undefined) {
-  throw new Error(`--target must be one of ${KINDS.join(', ')}, and --value is required`);
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({
+    options: {
+      slave: { type: 'string', default: '1' },
+      target: { type: 'string' },
+      value: { type: 'string' },
+    },
+  });
+  const kind = KINDS.find((k) => k === args.target);
+  if (kind === undefined || args.value === undefined) {
+    throw new Error(`--target must be one of ${KINDS.join(', ')}, and --value is required`);
+  }
+  const slave = Number(args.slave);
+  const value = Number(args.value);
+
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(AlState.PREOP, { positions: [slave] });
+
+  await client.setTarget(slave, kind, value);
+  console.log(`slave ${slave} ${kind} target = ${value}`);
 }
-const slave = Number(args.slave);
-const value = Number(args.value);
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(AlState.PREOP, { positions: [slave] });
-
-await client.setTarget(slave, kind, value);
-console.log(`slave ${slave} ${kind} target = ${value}`);
+await run(main);

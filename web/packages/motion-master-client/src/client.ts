@@ -9,7 +9,14 @@ import { AlState, alStateName } from './al-state';
 import type { Cia402State, OperationMode } from './cia402';
 import { readConfig, type FieldbusSettings } from './config';
 import type { EniExport, EniParseResult } from './eni';
-import { CaptureError, ProcedureError, ProcessDataDumpError, StateError } from './errors';
+import {
+  CaptureError,
+  ConnectionError,
+  HttpError,
+  ProcedureError,
+  ProcessDataDumpError,
+  StateError,
+} from './errors';
 import { Api } from './generated/Api';
 import type { Cia402Status, ProcedureRequest, ProcedureSnapshot } from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
@@ -126,49 +133,14 @@ function uniqueTopic(): string {
 }
 
 /**
- * Returns the server's reason for a refused request: the `error` of its JSON body, or the status
- * text when the body has none.
+ * Returns the request of a failed fetch, for its error: the URL, the method and the headers. The
+ * body is left out, because a stream cannot be read twice.
  */
-function reasonOf(response: Response): string {
-  const body = (response as { error?: { error?: unknown } }).error;
-  return typeof body?.error === 'string' ? body.error : response.statusText;
-}
-
-/**
- * Returns the server's reason for a refused request that `fetch` sent: the `error` of its JSON body,
- * or its text, or the status text when the body is empty.
- */
-async function fetchReasonOf(response: Response): Promise<string> {
-  const text = (await response.text()).trim();
-  try {
-    const body = JSON.parse(text) as { error?: unknown };
-    if (typeof body.error === 'string') {
-      return body.error;
-    }
-  } catch {
-    // Not JSON: the text itself is the reason.
+function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {
+  if (input instanceof Request) {
+    return new Request(input.url, { method: input.method, headers: input.headers });
   }
-  return text || response.statusText;
-}
-
-/**
- * Throws a refused response the way the generated client does: the response itself, with its parsed
- * JSON body in `error`. So `apiErrorMessage` reads the reason of every refused request alike.
- */
-async function throwRefused(response: Response): Promise<never> {
-  const text = await response.text();
-  let body: unknown = text;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    // Not JSON: the text is the body.
-  }
-  throw Object.assign(response, { data: null, error: body });
-}
-
-/** Returns whether `error` is a response of the generated client with the HTTP status `status`. */
-function hasStatus(error: unknown, status: number): boolean {
-  return error instanceof Response && error.status === status;
+  return new Request(input, { method: init?.method, headers: init?.headers });
 }
 
 export class MotionMasterClient {
@@ -188,19 +160,34 @@ export class MotionMasterClient {
   readonly fieldbus?: FieldbusSettings;
 
   private readonly httpBaseUrl: string;
-  private readonly customFetch?: ApiConfig['customFetch'];
+  // The fetch of this client: customFetch or the global fetch, wrapped to throw a ConnectionError or
+  // an HttpError. Only this client uses the wrapper; the global fetch stays as it is.
+  private readonly fetch: typeof fetch;
 
   constructor(options: MotionMasterClientOptions = {}) {
     this.httpBaseUrl = options.baseUrl ?? API_BASE_URL;
-    this.customFetch = options.customFetch;
     this.fieldbus = options.fieldbus;
-    // The generated HttpClient copies its config onto itself with Object.assign, so a
-    // `customFetch: undefined` replaces its default fetch and every request fails with
-    // "this.customFetch is not a function". Pass the key only when there is a value.
-    this.api = new Api({
-      baseUrl: this.httpBaseUrl,
-      ...(options.customFetch ? { customFetch: options.customFetch } : {}),
-    });
+    this.fetch = async (input, init) => {
+      // Read the global fetch at each request, not once: a tool that replaces it after this client
+      // was built, as MSW does in the tests, then still gets the requests.
+      const doFetch = options.customFetch ?? globalThis.fetch;
+      let response: Response;
+      try {
+        response = await doFetch(input, init);
+      } catch (error) {
+        // fetch rejects with a TypeError when the request does not reach the server. An abort
+        // rejects with an AbortError, which stays as it is.
+        if (error instanceof TypeError) {
+          throw new ConnectionError(requestOf(input, init), { cause: error });
+        }
+        throw error;
+      }
+      if (!response.ok) {
+        throw await HttpError.from(requestOf(input, init), response);
+      }
+      return response;
+    };
+    this.api = new Api({ baseUrl: this.httpBaseUrl, customFetch: this.fetch });
     this.ws = new WebSocketConnection({
       url: options.wsUrl ?? WS_URL,
       WebSocket: options.WebSocket,
@@ -239,7 +226,7 @@ export class MotionMasterClient {
       await this.api.init(body);
       log('opened the %s driver', body.driver ?? 'soem');
     } catch (error) {
-      if (!hasStatus(error, 409)) {
+      if (!(error instanceof HttpError && error.status === 409)) {
         throw error;
       }
     }
@@ -506,11 +493,11 @@ export class MotionMasterClient {
     try {
       snapshot = (await this.api.startProcedure(slavePosition, name, params)).data;
     } catch (error) {
-      if (!(error instanceof Response)) {
+      if (!(error instanceof HttpError)) {
         throw error;
       }
       throw new ProcedureError(
-        `${name} on device ${slavePosition}: ${reasonOf(error)} (HTTP ${error.status})`,
+        `${name} on device ${slavePosition}: ${error.reason} (HTTP ${error.status})`,
         { cause: error },
       );
     }
@@ -581,15 +568,12 @@ export class MotionMasterClient {
     try {
       created = (await this.api.createMonitoring(body)).data;
     } catch (error) {
-      if (!(error instanceof Response)) {
+      if (!(error instanceof HttpError)) {
         throw error;
       }
-      throw new Error(
-        `cannot create monitoring ${topic}: ${reasonOf(error)} (HTTP ${error.status})`,
-        {
-          cause: error,
-        },
-      );
+      throw new Error(`cannot create monitoring ${topic}: ${error.reason} (HTTP ${error.status})`, {
+        cause: error,
+      });
     }
     const recording = new MonitoringRecording(topic, created.parameters);
 
@@ -684,13 +668,12 @@ export class MotionMasterClient {
       log('capturing on %s into %s', started.adapter, started.path);
       return started.path;
     } catch (error) {
-      if (!(error instanceof Response)) {
+      if (!(error instanceof HttpError)) {
         throw error;
       }
-      throw new CaptureError(
-        `the capture did not start: ${reasonOf(error)} (HTTP ${error.status})`,
-        { cause: error },
-      );
+      throw new CaptureError(`the capture did not start: ${error.reason} (HTTP ${error.status})`, {
+        cause: error,
+      });
     }
   }
 
@@ -707,11 +690,11 @@ export class MotionMasterClient {
       log('stopped the capture into %s', stopped.path);
       return stopped;
     } catch (error) {
-      if (!(error instanceof Response)) {
+      if (!(error instanceof HttpError)) {
         throw error;
       }
       throw new CaptureError(
-        `the capture did not stop cleanly: ${reasonOf(error)} (HTTP ${error.status})`,
+        `the capture did not stop cleanly: ${error.reason} (HTTP ${error.status})`,
         { cause: error },
       );
     }
@@ -743,27 +726,24 @@ export class MotionMasterClient {
     options: { fromUs?: number; toUs?: number; signal?: AbortSignal } = {},
   ): Promise<Uint8Array | null> {
     const { fromUs, toUs, signal } = options;
-    const query = new URLSearchParams();
-    if (fromUs !== undefined) {
-      query.set('from', String(fromUs));
-    }
-    if (toUs !== undefined) {
-      query.set('to', String(toUs));
-    }
-    const search = query.size > 0 ? `?${query.toString()}` : '';
-    // The generated client reads no error body of a binary request, so this one goes by fetch.
-    const response = await this.send(`/api/process-data/dump${search}`, {
-      headers: { Accept: 'application/octet-stream' },
-      signal,
-    });
-    if (response.status === 409) {
-      log('no process-data dump: %s', await fetchReasonOf(response));
-      return null;
-    }
-    if (!response.ok) {
-      const reason = await fetchReasonOf(response);
+    let response: Response;
+    try {
+      // No response format: the generated client returns the answer with its body unread.
+      response = await this.api.streamProcessDataDump(
+        { from: fromUs, to: toUs },
+        { headers: { Accept: 'application/octet-stream' }, signal },
+      );
+    } catch (error) {
+      if (!(error instanceof HttpError)) {
+        throw error;
+      }
+      if (error.status === 409) {
+        log('no process-data dump: %s', error.reason);
+        return null;
+      }
       throw new ProcessDataDumpError(
-        `the process-data dump failed: ${reason} (HTTP ${response.status})`,
+        `the process-data dump failed: ${error.reason} (HTTP ${error.status})`,
+        { cause: error },
       );
     }
     return new Uint8Array(await response.arrayBuffer());
@@ -774,17 +754,14 @@ export class MotionMasterClient {
    * read.
    *
    * A bus that has not reached SAFEOP or OP answers 409, because before that there is no mapping to
-   * describe. A refused request throws the response, as the generated client does.
+   * describe. A refused request throws an HttpError.
    */
   async exportEni(options: { signal?: AbortSignal } = {}): Promise<EniExport> {
-    // The generated client takes the document for a binary file, so this request goes by fetch.
-    const response = await this.send('/api/eni', {
+    // No response format: the generated client returns the answer with its body unread.
+    const response = await this.api.exportEni({
       headers: { Accept: 'application/xml' },
       signal: options.signal,
     });
-    if (!response.ok) {
-      return throwRefused(response);
-    }
     const warnings = Number.parseInt(response.headers.get('X-Eni-Warnings') ?? '0', 10);
     return { xml: await response.text(), warnings: Number.isFinite(warnings) ? warnings : 0 };
   }
@@ -792,25 +769,19 @@ export class MotionMasterClient {
   /**
    * Reads an ENI document (`parseEni`) and returns its network, with each datagram annotated. Any
    * ENI that follows ETG.2100 is read, not only one that `exportEni()` wrote. A refused request
-   * throws the response, as the generated client does.
+   * throws an HttpError.
    */
   async parseEni(xml: string, options: { signal?: AbortSignal } = {}): Promise<EniParseResult> {
-    const response = await this.send('/api/eni/parse', {
+    // The generated api.parseEni sends a body it has no formatter for as JSON, so the document would
+    // arrive as a quoted JSON string. Its answer types `network` as a bare object; EniParseResult
+    // has the full shape.
+    const response = await this.fetch(`${this.httpBaseUrl}/api/eni/parse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
       body: xml,
       signal: options.signal,
     });
-    if (!response.ok) {
-      return throwRefused(response);
-    }
     return (await response.json()) as EniParseResult;
-  }
-
-  /** Sends a request that the generated client cannot send, with the `fetch` of the client. */
-  private send(path: string, init: RequestInit): Promise<Response> {
-    const doFetch = this.customFetch ?? fetch;
-    return doFetch(`${this.httpBaseUrl}${path}`, init);
   }
 
   /** Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown. */

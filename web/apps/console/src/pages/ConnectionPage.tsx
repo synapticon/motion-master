@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { isIpv4, lanAddress, lanHostname } from '@synapticon/motion-master-client';
+import { apiErrorMessage, isIpv4, lanAddress, lanHostname } from '@synapticon/motion-master-client';
 import { version as uiVersion } from 'virtual:swagger-spec';
 import Callout from '../components/Callout';
 import ConnectionExplainer from '../components/ConnectionExplainer';
@@ -20,16 +20,6 @@ const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 function isValidPort(s: string): boolean {
   const n = Number(s.trim());
   return Number.isInteger(n) && n >= 1 && n <= 65535;
-}
-
-function apiError(err: unknown): string {
-  if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error;
-    if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error);
-    }
-  }
-  return 'Unknown error';
 }
 
 function formatDate(iso?: string): string {
@@ -515,7 +505,9 @@ export default function ConnectionPage() {
                   </div>
                 )}
                 {refreshMutation.isError && (
-                  <p className="text-status-bad text-xs mt-2">{apiError(refreshMutation.error)}</p>
+                  <p className="text-status-bad text-xs mt-2">
+                    {apiErrorMessage(refreshMutation.error)}
+                  </p>
                 )}
               </div>
             </section>

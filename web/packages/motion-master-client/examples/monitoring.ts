@@ -30,9 +30,10 @@ import { parseArgs } from 'node:util';
 import {
   AlState,
   Cia402,
-  MotionMasterClient,
   type MonitoringRecording,
+  MotionMasterClient,
   OperationMode,
+  run,
   Somanet,
 } from '@synapticon/motion-master-client';
 import { FILES_DIR, fileStamp } from './files';
@@ -87,54 +88,58 @@ function printSummary(m: MonitoringRecording, slave: number, velocity: number): 
   );
 }
 
-const { values: args } = parseArgs({
-  options: {
-    slave: { type: 'string', default: '1' },
-    velocity: { type: 'string', default: '250' },
-    seconds: { type: 'string', default: '2' },
-    every: { type: 'string', default: '100' },
-    output: { type: 'string' },
-  },
-});
-const slave = Number(args.slave);
-const velocity = Number(args.velocity);
-
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(AlState.OP, { positions: [slave] });
-
-const parameters = OBJECTS.map((address) => [slave, address] as const);
-let m: MonitoringRecording;
-try {
-  m = await client.monitoring(
-    parameters,
-    async () => {
-      await client.setOperationMode(slave, OperationMode.CYCLIC_SYNC_VELOCITY);
-      // A target left from an earlier run would turn the motor at the enable.
-      await client.setTarget(slave, 'velocity', 0);
-      await client.enable(slave);
-      console.log(`turning at ${velocity} for ${args.seconds} s`);
-      await client.setTarget(slave, 'velocity', velocity);
-      await sleep(Number(args.seconds) * 1000);
-      await client.setTarget(slave, 'velocity', 0);
-      await sleep(AFTER_STOP_MS);
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({
+    options: {
+      slave: { type: 'string', default: '1' },
+      velocity: { type: 'string', default: '250' },
+      seconds: { type: 'string', default: '2' },
+      every: { type: 'string', default: '100' },
+      output: { type: 'string' },
     },
-    { intervalMs: 50 },
-  );
-} finally {
-  // Never leave the drive enabled, also when a step above failed.
-  await client.disable(slave).catch(() => {});
+  });
+  const slave = Number(args.slave);
+  const velocity = Number(args.velocity);
+
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(AlState.OP, { positions: [slave] });
+
+  const parameters = OBJECTS.map((address) => [slave, address] as const);
+  let m: MonitoringRecording;
+  try {
+    m = await client.monitoring(
+      parameters,
+      async () => {
+        await client.setOperationMode(slave, OperationMode.CYCLIC_SYNC_VELOCITY);
+        // A target left from an earlier run would turn the motor at the enable.
+        await client.setTarget(slave, 'velocity', 0);
+        await client.enable(slave);
+        console.log(`turning at ${velocity} for ${args.seconds} s`);
+        await client.setTarget(slave, 'velocity', velocity);
+        await sleep(Number(args.seconds) * 1000);
+        await client.setTarget(slave, 'velocity', 0);
+        await sleep(AFTER_STOP_MS);
+      },
+      { intervalMs: 50 },
+    );
+  } finally {
+    // Never leave the drive enabled, also when a step above failed.
+    await client.disable(slave).catch(() => {});
+  }
+
+  m.names.forEach((name, i) => {
+    if (m.sources[i] !== 'pdo') {
+      console.log(`note: ${name} is not in the process data, so it has one value per flush`);
+    }
+  });
+
+  m.printTable({ everyMs: Number(args.every) });
+  printSummary(m, slave, velocity);
+
+  const out = args.output ?? `${FILES_DIR}/monitoring-${fileStamp()}.csv`;
+  await m.writeCsv(out);
+  console.log(`saved ${m.rows.length} row(s) -> ${out}`);
 }
 
-m.names.forEach((name, i) => {
-  if (m.sources[i] !== 'pdo') {
-    console.log(`note: ${name} is not in the process data, so it has one value per flush`);
-  }
-});
-
-m.printTable({ everyMs: Number(args.every) });
-printSummary(m, slave, velocity);
-
-const out = args.output ?? `${FILES_DIR}/monitoring-${fileStamp()}.csv`;
-await m.writeCsv(out);
-console.log(`saved ${m.rows.length} row(s) -> ${out}`);
+await run(main);

@@ -14,20 +14,24 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
-import { AlState, MotionMasterClient } from '@synapticon/motion-master-client';
+import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { FILES_DIR } from './files';
 
-const { values: args } = parseArgs({ options: { output: { type: 'string' } } });
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({ options: { output: { type: 'string' } } });
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(AlState.SAFEOP);
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(AlState.SAFEOP);
 
-const eni = await client.exportEni();
-const out = args.output ?? `${FILES_DIR}/eni.xml`;
-mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, eni.xml, 'utf8');
-console.log(`saved ${eni.xml.length} character(s) -> ${out}`);
-if (eni.warnings) {
-  console.log(`${eni.warnings} part(s) of the bus could not be read; the server log says which`);
+  const eni = await client.exportEni();
+  const out = args.output ?? `${FILES_DIR}/eni.xml`;
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, eni.xml, 'utf8');
+  console.log(`saved ${eni.xml.length} character(s) -> ${out}`);
+  if (eni.warnings) {
+    console.log(`${eni.warnings} part(s) of the bus could not be read; the server log says which`);
+  }
 }
+
+await run(main);

@@ -9,6 +9,7 @@ export * from './generated/Api';
 
 export * from './api-error';
 export * from './errors';
+export { errorLine, run } from './error-line';
 export * from './procedures';
 export { MonitoringRecording } from './monitoring-recording';
 export type { DeviceParameterAddress } from './parameter-address';

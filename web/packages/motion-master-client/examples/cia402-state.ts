@@ -11,20 +11,26 @@
 //     pnpm example examples/cia402-state.ts --slave 2
 
 import { parseArgs } from 'node:util';
-import { AlState, MotionMasterClient } from '@synapticon/motion-master-client';
+import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 
-const { values: args } = parseArgs({ options: { slave: { type: 'string', default: '1' } } });
-const slave = Number(args.slave);
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({ options: { slave: { type: 'string', default: '1' } } });
+  const slave = Number(args.slave);
 
-const client = await MotionMasterClient.fromConfig();
-await client.init();
-await client.ensureState(AlState.PREOP, { positions: [slave] });
+  const client = await MotionMasterClient.fromConfig();
+  await client.init();
+  await client.ensureState(AlState.PREOP, { positions: [slave] });
 
-const s = (await client.api.getCia402Status(slave)).data;
-const hex = (value: number) => `0x${value.toString(16).padStart(4, '0')}`;
-const column = (value: number | null) => String(value).padStart(12);
-console.log(`state ${s.state}, statusword ${hex(s.statusword)}, controlword ${hex(s.controlword)}`);
-console.log(`mode ${s.modeName} (${s.operationMode}), error report ${s.errorDescription}`);
-console.log(`  position  actual ${column(s.actualPosition)}  target ${column(s.targetPosition)}`);
-console.log(`  velocity  actual ${column(s.actualVelocity)}  target ${column(s.targetVelocity)}`);
-console.log(`  torque    actual ${column(s.actualTorque)}  target ${column(s.targetTorque)}`);
+  const s = (await client.api.getCia402Status(slave)).data;
+  const hex = (value: number) => `0x${value.toString(16).padStart(4, '0')}`;
+  const column = (value: number | null) => String(value).padStart(12);
+  console.log(
+    `state ${s.state}, statusword ${hex(s.statusword)}, controlword ${hex(s.controlword)}`,
+  );
+  console.log(`mode ${s.modeName} (${s.operationMode}), error report ${s.errorDescription}`);
+  console.log(`  position  actual ${column(s.actualPosition)}  target ${column(s.targetPosition)}`);
+  console.log(`  velocity  actual ${column(s.actualVelocity)}  target ${column(s.targetVelocity)}`);
+  console.log(`  torque    actual ${column(s.actualTorque)}  target ${column(s.targetTorque)}`);
+}
+
+await run(main);

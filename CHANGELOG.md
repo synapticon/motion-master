@@ -44,6 +44,11 @@ the HTTP/WebSocket API may break between any two alphas.
   program reads with `for await`, as the Python client does.
 - The Python client names the notifications topic `NOTIFICATION_TOPIC`, as the TypeScript client
   does.
+- The TypeScript client turns an error a user can act on into one line with `errorLine(error)`, and
+  `run(main)` ends a Node.js program with that line, as `error_line` and `run` of the Python client
+  do. Its examples run through `run()`.
+- The Python client's `error_line()` and `run()` also give one line for a `CaptureError` and a
+  `ProcessDataDumpError`.
 
 ### Changed
 
@@ -53,9 +58,14 @@ the HTTP/WebSocket API may break between any two alphas.
   throws `ProcessDataDumpError` for any other refusal. The free function `fetchProcessDataDump()` is
   gone.
 - The TypeScript client exports and reads an ENI with `exportEni()` and `parseEni(xml)` on the
-  client, which replace the free functions `fetchEni(baseUrl)` and `parseEni(baseUrl, xml)`. A
-  refused request throws the response, as a call of `client.api` does. The Python client has the
-  same two as `export_eni()` and `parse_eni(xml)`.
+  client, which replace the free functions `fetchEni(baseUrl)` and `parseEni(baseUrl, xml)`. The
+  Python client has the same two as `export_eni()` and `parse_eni(xml)`.
+- Every request of the TypeScript client, `client.api` included, throws an `HttpError` when the
+  server refuses it, and a `ConnectionError` when it does not reach the server. A refused request
+  threw the response object. Both errors carry the `request`, and `HttpError` also carries the
+  `response`, its `status` and the server's `reason`, as `requests.ConnectionError` and
+  `requests.HTTPError` of the Python client do. The `request` has no body. `apiErrorMessage()`
+  reads only these errors now. The Console pages use it in place of their own copies.
 - The Python client's `wait_for_value()` takes `timeout_ms` and `interval_ms`, in milliseconds. It
   took `timeout` and `interval` in seconds.
 - The Python client's `run_procedure()` takes `poll_interval_ms`, in milliseconds. It took

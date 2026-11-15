@@ -294,7 +294,15 @@ def error_line(error):
             reason = r.text or r.reason
         path = urllib.parse.urlsplit(r.url).path
         return f"{r.request.method} {path}: HTTP {r.status_code}, {reason}"
-    if isinstance(error, (StateError, ProcedureError, FileNotFoundError, ConnectionError)):
+    user_errors = (
+        StateError,
+        ProcedureError,
+        CaptureError,
+        ProcessDataDumpError,
+        FileNotFoundError,
+        ConnectionError,
+    )
+    if isinstance(error, user_errors):
         return str(error)
     return None
 
@@ -303,8 +311,8 @@ def run(main):
     """Call main() and exit with one line on stderr when it fails with an error a user can act on.
 
     Those errors are: no connection to the server, an HTTP error status, a StateError, a
-    ProcedureError and a missing file. Any other error is a bug, so it keeps its traceback. Set
-    MM_TRACEBACK=1 to get the traceback for every error.
+    ProcedureError, a CaptureError, a ProcessDataDumpError and a missing file. Any other error is a
+    bug, so it keeps its traceback. Set MM_TRACEBACK=1 to get the traceback for every error.
     """
     try:
         main()

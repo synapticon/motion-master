@@ -247,8 +247,9 @@ function DeviceSection({
   const { api } = useConnection();
 
   // The iC-MU page is listed only for a drive with an encoder it can configure. The encoder objects
-  // exist once the dictionary is read, from PREOP up, and the link stays hidden until they answer.
-  const hasDictionary = state !== undefined && state.alState >= 2;
+  // are read over the CoE mailbox, which PREOP, SAFEOP and OP have and BOOT has not, and the link
+  // stays hidden until they answer.
+  const hasDictionary = mailboxActiveFor(state) === true;
   const encodersQuery = useQuery({
     queryKey: ['encoders', Number(deviceId)],
     queryFn: () => api.getEncoders(Number(deviceId)).then((r) => r.data),

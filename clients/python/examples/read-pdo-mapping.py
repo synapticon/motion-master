@@ -48,12 +48,12 @@ def main():
     for direction in ("outputs", "inputs"):
         print(f"{direction}:")
         for pdo in mapping[direction]:
-            print(f"  0x{pdo['pdoIndex']:04x}")
+            print(f"  0x{pdo['pdoIndex']:04X}")
             for e in pdo["entries"]:
                 name = names.get((e["index"], e["subindex"]), "")
                 print(
                     f"    bit {e['bitOffset']:>4}  {e['bitLength']:>2} bit(s)  "
-                    f"0x{e['index']:04x}:{e['subindex']:02x}  {name}"
+                    f"0x{e['index']:04X}:{e['subindex']:02X}  {name}"
                 )
 
 

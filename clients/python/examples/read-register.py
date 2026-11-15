@@ -44,7 +44,7 @@ def main():
         query={"length": args.length},
     ).json()["data"]
 
-    line = f"slave {args.slave} 0x{args.address:04x}: {bytes(data).hex(' ')}"
+    line = f"slave {args.slave} 0x{args.address:04X}: {bytes(data).hex(' ')}"
     if len(data) <= 8:
         value = int.from_bytes(bytes(data), "little")
         line += f" = {value} (0x{value:x})"

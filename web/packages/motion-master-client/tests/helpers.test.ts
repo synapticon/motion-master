@@ -113,7 +113,7 @@ describe('ensureState', () => {
       ],
     });
     await expect(c.ensureState(AlState.OP)).rejects.toThrow(
-      'not every device reached OP: device 2 in SAFEOP with alStatusCode 0x001d',
+      'not every device reached OP: device 2 in SAFEOP with alStatusCode 0x001D',
     );
   });
 });

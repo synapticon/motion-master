@@ -40,7 +40,7 @@ def main():
         body["positions"] = [args.slave]
     result = client.call("restartDevices", body=body).json()
     for d in result["devices"]:
-        mark = "" if d["reached"] else f"  not reached, alStatusCode 0x{d['alStatusCode']:04x}"
+        mark = "" if d["reached"] else f"  not reached, alStatusCode 0x{d['alStatusCode']:04X}"
         print(f"  {d['slavePosition']:3d}  {AlState(d['alState']).name}{mark}")
     if not result["ok"]:
         sys.exit(f"the restart stopped at {AlState(result['step']).name}")

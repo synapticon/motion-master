@@ -37,9 +37,14 @@ def main():
         f"controlword 0x{s['controlword']:04X}"
     )
     print(f"mode {s['modeName']} ({s['operationMode']}), error report {s['errorDescription']}")
-    print(f"  position  actual {s['actualPosition']:>12}  target {s['targetPosition']:>12}")
-    print(f"  velocity  actual {s['actualVelocity']:>12}  target {s['targetVelocity']:>12}")
-    print(f"  torque    actual {s['actualTorque']:>12}  target {s['targetTorque']:>12}")
+    print(f"  position  actual {column(s['actualPosition'])}  target {column(s['targetPosition'])}")
+    print(f"  velocity  actual {column(s['actualVelocity'])}  target {column(s['targetVelocity'])}")
+    print(f"  torque    actual {column(s['actualTorque'])}  target {column(s['targetTorque'])}")
+
+
+def column(value):
+    """Return a value right-aligned in 12 characters, and "-" for a value the drive did not give."""
+    return f"{'-' if value is None else value:>12}"
 
 
 if __name__ == "__main__":

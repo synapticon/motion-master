@@ -39,8 +39,10 @@ export function objectName(index: number, subindex: number): string {
       }
     }
   }
-  return (
-    objectNames.get(`${index}:${subindex}`) ??
-    `${formatHex(index)}:${formatHex(subindex, 2, false)}`
-  );
+  return objectNames.get(`${index}:${subindex}`) ?? objectAddressText(index, subindex);
+}
+
+/** Returns the address of an object in hex, such as `0x6041:00`. */
+export function objectAddressText(index: number, subindex: number): string {
+  return `${formatHex(index)}:${formatHex(subindex, 2, false)}`;
 }

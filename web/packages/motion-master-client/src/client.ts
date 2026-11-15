@@ -24,7 +24,12 @@ import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
 import { MonitoringRecording } from './monitoring-recording';
 import type { ObjectAddress } from './objects';
-import { type DeviceParameterAddress, parameterTriple } from './parameter-address';
+import { formatHex } from './hex';
+import {
+  type DeviceParameterAddress,
+  objectAddressText,
+  parameterTriple,
+} from './parameter-address';
 import { listen } from './stream';
 import {
   type MonitoringBatch,
@@ -100,8 +105,8 @@ function notReached(
     .filter((d) => !d.reached)
     .map(
       (d) =>
-        `device ${d.slavePosition} in ${alStateName(d.alState)} with alStatusCode 0x` +
-        d.alStatusCode.toString(16).padStart(4, '0'),
+        `device ${d.slavePosition} in ${alStateName(d.alState)} with alStatusCode ` +
+        formatHex(d.alStatusCode),
     )
     .join(', ');
   return `not every device reached ${alStateName(step)}: ${failed}`;
@@ -348,10 +353,9 @@ export class MotionMasterClient {
         return value;
       }
       if (performance.now() >= deadline) {
-        const index = address.index.toString(16).padStart(4, '0');
-        const subindex = address.subindex.toString(16).padStart(2, '0');
+        const where = objectAddressText(address.index, address.subindex);
         throw new DOMException(
-          `device ${slavePosition} 0x${index}:${subindex} is ${String(value)} after ${timeoutMs} ms`,
+          `device ${slavePosition} ${where} is ${String(value)} after ${timeoutMs} ms`,
           'TimeoutError',
         );
       }

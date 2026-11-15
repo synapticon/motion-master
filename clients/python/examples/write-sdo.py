@@ -44,7 +44,7 @@ def main():
     r = client.call("sdoDownload", path=path, body={"data": data}, check=False)
     if r.status_code != 200:
         sys.exit(r.json().get("error", r.text))
-    print(f"slave {args.slave} 0x{args.index:04x}:{args.subindex:02x} <- {bytes(data).hex(' ')}")
+    print(f"slave {args.slave} 0x{args.index:04X}:{args.subindex:02X} <- {bytes(data).hex(' ')}")
 
 
 if __name__ == "__main__":

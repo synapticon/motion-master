@@ -15,6 +15,7 @@ import { parseArgs } from 'node:util';
 import {
   AlState,
   alStateName,
+  formatHex,
   MotionMasterClient,
   run,
   type TargetAlState,
@@ -46,9 +47,7 @@ async function main(): Promise<void> {
   const body = args.slave ? { target, positions: [Number(args.slave)] } : { target };
   const result = (await client.api.restartDevices(body)).data;
   for (const d of result.devices) {
-    const mark = d.reached
-      ? ''
-      : `  not reached, alStatusCode 0x${d.alStatusCode.toString(16).padStart(4, '0')}`;
+    const mark = d.reached ? '' : `  not reached, alStatusCode ${formatHex(d.alStatusCode)}`;
     console.log(`  ${String(d.slavePosition).padStart(3)}  ${alStateName(d.alState)}${mark}`);
   }
   if (!result.ok) {

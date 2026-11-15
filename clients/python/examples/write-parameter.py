@@ -68,7 +68,7 @@ def main():
         sys.exit(r.json().get("error", r.text))
     after = r.json()
     print(
-        f"slave {args.slave} 0x{args.index:04x}:{args.subindex:02x} {after['name']} "
+        f"slave {args.slave} 0x{args.index:04X}:{args.subindex:02X} {after['name']} "
         f"({after['dataTypeName']}): {before['value']!r} -> {after['value']!r}"
     )
 

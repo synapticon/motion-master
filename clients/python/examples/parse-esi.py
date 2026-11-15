@@ -41,10 +41,10 @@ def main():
         print(f"saved -> {out}")
 
     vendor = result["vendor"]
-    print(f"{vendor['name']} (vendor 0x{vendor['id']:08x}), ESI version {result['version']}")
+    print(f"{vendor['name']} (vendor 0x{vendor['id']:08X}), ESI version {result['version']}")
     for d in result["devices"]:
         print(
-            f"  {d['name']}: product 0x{d['productCode']:08x}, revision 0x{d['revisionNo']:08x}, "
+            f"  {d['name']}: product 0x{d['productCode']:08X}, revision 0x{d['revisionNo']:08X}, "
             f"{d['objectCount']} object(s) of its own, {len(d['entries'])} entries with its "
             f"modules, {d['rxPdoCount']} RxPDO(s), {d['txPdoCount']} TxPDO(s), "
             f"{len(d['warnings'])} warning(s)"

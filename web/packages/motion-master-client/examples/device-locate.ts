@@ -15,7 +15,6 @@ import {
   AlState,
   formatStep,
   MotionMasterClient,
-  ProcedureError,
   type ProcedureRequest,
   type ProcedureSnapshot,
   run,
@@ -54,13 +53,10 @@ async function main(): Promise<void> {
       }
     }
   } catch (e) {
-    if (e instanceof ProcedureError) {
-      console.error(e.message);
-      process.exit(1);
-    }
     if (controller.signal.aborted) {
       console.error('\ncancelled');
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     throw e;
   }

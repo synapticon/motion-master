@@ -30,7 +30,7 @@ def main():
         state = AlState(states[d["slavePosition"]]["alState"]).name
         print(
             f"  {d['slavePosition']:3d}  {d['productName']:<30}  serial {d['serialNumber']:<12}"
-            f"  revision 0x{d['revisionNumber']:08x}  {state}"
+            f"  revision 0x{d['revisionNumber']:08X}  {state}"
         )
 
 

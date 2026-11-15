@@ -60,7 +60,7 @@ def main():
     )
 
     order = client.call("getMonitoring", path={"topic": TOPIC}).json()["parameters"]
-    header = ", ".join(f"0x{p['index']:04x}:{p['subindex']:02x}({p['source']})" for p in order)
+    header = ", ".join(f"0x{p['index']:04X}:{p['subindex']:02X}({p['source']})" for p in order)
     print(f"subscribed to '{TOPIC}' [{header}] -- Ctrl-C to stop")
 
     batches = 0

@@ -83,7 +83,7 @@ def main():
             # A target left from an earlier run would turn the motor at the enable.
             client.set_target(args.slave, "velocity", 0)
             client.enable(args.slave)
-            print(f"turning at {args.velocity} for {args.seconds} s")
+            print(f"turning at {args.velocity} for {args.seconds:g} s")
             client.set_target(args.slave, "velocity", args.velocity)
             time.sleep(args.seconds)
             client.set_target(args.slave, "velocity", 0)
@@ -116,14 +116,21 @@ def print_summary(m, slave, velocity):
         return
     t_off = m.first(slave, Cia402.TARGET_VELOCITY, lambda v: v != velocity, after=t_target)
     held = m.values(slave, Cia402.VELOCITY_ACTUAL_VALUE, start=t_target, end=t_off)
+    # A value is None while the device does not exchange process data.
+    held = [v for v in held if v is not None]
     # The second half of the hold, where the step response has settled.
     settled = held[len(held) // 2 :]
     if not settled:
         print("no velocity was recorded while the target was held")
         return
     mean = sum(settled) / len(settled)
+    # Measured in the direction of the target, so that a negative velocity works too.
+    direction = 1 if velocity >= 0 else -1
     t_reached = m.first(
-        slave, Cia402.VELOCITY_ACTUAL_VALUE, lambda v: v >= velocity * 0.95, after=t_target
+        slave,
+        Cia402.VELOCITY_ACTUAL_VALUE,
+        lambda v: v is not None and v * direction >= abs(velocity) * 0.95,
+        after=t_target,
     )
     reached = f"{(t_reached - t_target) / 1000:.0f} ms" if t_reached is not None else "never"
     print(

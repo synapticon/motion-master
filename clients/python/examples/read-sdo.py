@@ -44,7 +44,7 @@ def main():
 
     value = int.from_bytes(bytes(data), "little")
     print(
-        f"slave {args.slave} 0x{args.index:04x}:{args.subindex:02x} = "
+        f"slave {args.slave} 0x{args.index:04X}:{args.subindex:02X} = "
         f"{value} (0x{value:x}), {len(data)} byte(s): {data}"
     )
 

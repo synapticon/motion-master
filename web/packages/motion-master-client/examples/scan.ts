@@ -5,7 +5,7 @@
 //
 //     pnpm example examples/scan.ts
 
-import { alStateName, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { alStateName, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
 
 async function main(): Promise<void> {
   const client = await MotionMasterClient.fromConfig();
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
       console.log(
         `  ${String(d.slavePosition).padStart(3)}  ${d.productName.padEnd(30)}  ` +
           `serial ${String(d.serialNumber).padEnd(12)}  ` +
-          `revision 0x${d.revisionNumber.toString(16).padStart(8, '0')}  ${state}`,
+          `revision ${formatHex(d.revisionNumber, 8)}  ${state}`,
       );
     }
   }

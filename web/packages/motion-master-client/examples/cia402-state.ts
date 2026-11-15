@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   await client.ensureState(AlState.PREOP, { positions: [slave] });
 
   const s = (await client.api.getCia402Status(slave)).data;
-  const column = (value: number | null) => String(value).padStart(12);
+  const column = (value: number | null) => String(value ?? '-').padStart(12);
   console.log(
     `state ${s.state}, statusword ${formatHex(s.statusword)}, controlword ${formatHex(s.controlword)}`,
   );

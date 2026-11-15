@@ -48,7 +48,7 @@ def main():
         query={"source": "cache"} if args.cache else None,
     ).json()
     print(
-        f"slave {args.slave} 0x{p['index']:04x}:{p['subindex']:02x} {p['name']} "
+        f"slave {args.slave} 0x{p['index']:04X}:{p['subindex']:02X} {p['name']} "
         f"({p['dataTypeName']}) = {p['value']!r}"
     )
 

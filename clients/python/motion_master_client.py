@@ -192,7 +192,7 @@ def _not_reached(result, step):
     """Say which devices of a state change did not reach `step`, and why."""
     failed = ", ".join(
         f"device {d['slavePosition']} in {AlState(d['alState']).name}"
-        f" with alStatusCode 0x{d['alStatusCode']:04x}"
+        f" with alStatusCode 0x{d['alStatusCode']:04X}"
         for d in result["devices"]
         if not d["reached"]
     )
@@ -547,7 +547,8 @@ class MotionMasterClient:
             warnings = int(r.headers.get("X-Eni-Warnings", "0"))
         except ValueError:
             warnings = 0
-        return {"xml": r.text, "warnings": warnings}
+        # The server names no charset, and an ENI is UTF-8. r.text would guess the encoding.
+        return {"xml": r.content.decode("utf-8"), "warnings": warnings}
 
     def parse_eni(self, xml):
         """Read an ENI document (parseEni) and return its network, with each datagram annotated.
@@ -616,7 +617,7 @@ class MotionMasterClient:
             if time.monotonic() >= deadline:
                 index, subindex = obj
                 raise TimeoutError(
-                    f"device {position} 0x{index:04x}:{subindex:02x} is {value}"
+                    f"device {position} 0x{index:04X}:{subindex:02X} is {value}"
                     f" after {timeout_ms} ms"
                 )
             time.sleep(interval_ms / 1000)
@@ -743,11 +744,9 @@ class MotionMasterClient:
         path = _path(position, procedureName=name)
         r = self.call("startProcedure", path=path, body=params or {}, check=False)
         if not r.ok:
-            try:
-                reason = r.json()["error"]
-            except (ValueError, KeyError):
-                reason = r.text
-            raise ProcedureError(f"{name} on device {position}: {reason} (HTTP {r.status_code})")
+            raise ProcedureError(
+                f"{name} on device {position}: {_reason(r)} (HTTP {r.status_code})"
+            )
         snapshot = r.json()
         try:
             while True:
@@ -759,7 +758,12 @@ class MotionMasterClient:
         finally:
             if snapshot["status"] == "running":
                 log.info("cancelling %s on device %d", name, position)
-                self.call("cancelProcedure", path=path, check=False)
+                # A failed cancel has nothing to add to the error or the early exit that brought
+                # the run here, and must not replace it.
+                try:
+                    self.call("cancelProcedure", path=path, check=False)
+                except requests.RequestException:
+                    pass
 
     def notifications(self):
         """Subscribe to the notifications topic and yield the data of each notification.
@@ -912,7 +916,7 @@ class MonitoringRecording:
             if (p["devicePosition"], p["index"], p["subindex"]) == (position, index, subindex):
                 with self._lock:
                     return [(row[0], row[i + 1]) for row in self.rows]
-        raise KeyError(f"device {position} 0x{index:04x}:{subindex:02x} is not in this monitoring")
+        raise KeyError(f"device {position} 0x{index:04X}:{subindex:02X} is not in this monitoring")
 
     def values(self, position, obj, start=None, end=None):
         """Return the values of one object from the cycles with start <= timestampUs < end.
@@ -1100,4 +1104,8 @@ class MonitoringRecording:
         self._connection.close()
         if self._thread is not None:
             self._thread.join(timeout=5)
-        self._client.call("deleteMonitoring", path={"topic": self.topic}, check=False)
+        # A failed delete must not replace the error that ended the recording.
+        try:
+            self._client.call("deleteMonitoring", path={"topic": self.topic}, check=False)
+        except requests.RequestException:
+            pass

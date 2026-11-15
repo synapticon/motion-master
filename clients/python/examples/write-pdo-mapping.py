@@ -86,9 +86,9 @@ def main():
         print(f"{direction}:")
         for pdo in read_back[direction]:
             entries = ", ".join(
-                f"0x{e['index']:04x}:{e['subindex']:02x}/{e['bitLength']}" for e in pdo["entries"]
+                f"0x{e['index']:04X}:{e['subindex']:02X}/{e['bitLength']}" for e in pdo["entries"]
             )
-            print(f"  0x{pdo['pdoIndex']:04x}  {entries}")
+            print(f"  0x{pdo['pdoIndex']:04X}  {entries}")
 
 
 if __name__ == "__main__":

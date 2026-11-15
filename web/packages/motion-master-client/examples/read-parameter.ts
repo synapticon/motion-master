@@ -14,7 +14,7 @@
 //     pnpm example examples/read-parameter.ts --index 0x2031 --subindex 1 --cache
 
 import { parseArgs } from 'node:util';
-import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { AlState, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
 
 async function main(): Promise<void> {
   const { values: args } = parseArgs({
@@ -37,8 +37,8 @@ async function main(): Promise<void> {
   const query = args.cache ? { source: 'cache' as const } : undefined;
   const p = (await client.api.readParameter(slave, index, subindex, query)).data;
   console.log(
-    `slave ${slave} 0x${p.index.toString(16).padStart(4, '0')}:` +
-      `${p.subindex.toString(16).padStart(2, '0')} ${p.name} (${p.dataTypeName}) = ` +
+    `slave ${slave} ${formatHex(p.index)}:${formatHex(p.subindex, 2, false)} ` +
+      `${p.name} (${p.dataTypeName}) = ` +
       JSON.stringify(p.value),
   );
 }

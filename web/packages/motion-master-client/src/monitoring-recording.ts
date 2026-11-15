@@ -7,7 +7,7 @@ import { formatHex } from './hex';
 import type { Monitoring } from './generated/data-contracts';
 import { importNode, type NodeModules } from './node-modules';
 import type { ObjectAddress } from './objects';
-import { objectName } from './parameter-address';
+import { objectAddressText, objectName } from './parameter-address';
 import type { MonitoringRow } from './web-socket-connection';
 
 /**
@@ -52,9 +52,8 @@ export class MonitoringRecording {
         p.subindex === address.subindex,
     );
     if (i < 0) {
-      const index = address.index.toString(16).padStart(4, '0');
-      const subindex = address.subindex.toString(16).padStart(2, '0');
-      throw new Error(`device ${devicePosition} 0x${index}:${subindex} is not in this monitoring`);
+      const where = objectAddressText(address.index, address.subindex);
+      throw new Error(`device ${devicePosition} ${where} is not in this monitoring`);
     }
     return this.rows.map((row) => [row[0] as number, row[i + 1] as T | null]);
   }

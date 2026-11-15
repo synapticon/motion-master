@@ -48,7 +48,7 @@ def main():
     )
     if r.status_code != 200:
         sys.exit(r.json().get("error", r.text))
-    print(f"slave {args.slave} 0x{args.address:04x} <- {bytes(data).hex(' ')}")
+    print(f"slave {args.slave} 0x{args.address:04X} <- {bytes(data).hex(' ')}")
 
 
 if __name__ == "__main__":

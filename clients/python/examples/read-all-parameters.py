@@ -66,7 +66,7 @@ def main():
 
     for p in params:
         print(
-            f"  0x{p['index']:04x}:{p['subindex']:02x}  "
+            f"  0x{p['index']:04X}:{p['subindex']:02X}  "
             f"{p['dataTypeName']:<14}  {decode_value(p):<24}  {p['name']}"
         )
     print(f"{len(params)} parameter(s)")

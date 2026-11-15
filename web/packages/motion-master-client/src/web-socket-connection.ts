@@ -206,15 +206,7 @@ export class WebSocketConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    const socket = this.socket;
-    this.socket = null;
-    if (socket) {
-      socket.onopen = null;
-      socket.onmessage = null;
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.close();
-    }
+    this.detach()?.close();
     this.setState('closed');
   }
 
@@ -304,6 +296,12 @@ export class WebSocketConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.detach()?.close();
+    this.setState('closed');
+  }
+
+  /** Takes the socket from this connection and removes its handlers. Returns it, or `null`. */
+  private detach(): WebSocketLike | null {
     const socket = this.socket;
     this.socket = null;
     if (socket) {
@@ -311,9 +309,8 @@ export class WebSocketConnection {
       socket.onmessage = null;
       socket.onclose = null;
       socket.onerror = null;
-      socket.close();
     }
-    this.setState('closed');
+    return socket;
   }
 
   private setState(state: ReadyState): void {
@@ -334,13 +331,7 @@ export class WebSocketConnection {
   }
 
   private handleDisconnect(): void {
-    if (this.socket) {
-      this.socket.onopen = null;
-      this.socket.onmessage = null;
-      this.socket.onclose = null;
-      this.socket.onerror = null;
-      this.socket = null;
-    }
+    this.detach();
     this.setState('closed');
     if (this.closedByUser || this.reconnectDelayMs <= 0) {
       return;

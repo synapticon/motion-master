@@ -83,6 +83,16 @@ the HTTP/WebSocket API may break between any two alphas.
   Ctrl-C, so that the program disables the drive and deletes the monitoring. Node.js ended at once
   on Ctrl-C and left the drive enabled and turning.
 - `runProcedure()` of the TypeScript client starts no run when its `signal` is aborted already.
+- Both clients and their examples write hex in capitals, as `formatHex()` does: `alStatusCode
+  0x001D` and `0x6041:00` in a message, and every address, revision and status code an example
+  prints.
+- In the Python client, a failed cancel of a procedure or a failed delete of a monitoring no longer
+  replaces the error that ended the run or the recording. `export_eni()` decodes the document as
+  UTF-8, because the server names no charset. A refused request with no body gives the status text
+  as its reason.
+- The examples print `-` for a value that a drive does not give, where the Python `cia402-state.py`
+  crashed. The summary of `monitoring` skips values that are missing and works for a negative
+  velocity. `run-procedure` and `device-locate` leave a `ProcedureError` to `run()`.
 - The TypeScript client refuses a `baseUrl` that is not http or https, and a `wsUrl` that is not ws
   or wss, such as `localhost:61447`. Such a URL failed at the first request as "cannot connect to
   null". `fromConfig()` names a missing `host`, `httpPort` or `wsPort`.

@@ -32,7 +32,6 @@ import {
   AlState,
   formatStep,
   MotionMasterClient,
-  ProcedureError,
   type ProcedureRequest,
   type ProcedureSnapshot,
   run,
@@ -181,13 +180,13 @@ async function main(): Promise<void> {
     for (const d of descriptors.values()) {
       console.log(`  ${d.name.padEnd(32)} ${d.title}${flags(d)}`);
     }
-    process.exit(0);
+    return;
   }
 
   const descriptor = descriptors.get(name) ?? fail(`slave ${slave} has no procedure '${name}'`);
   if (args.describe) {
     describe(descriptor);
-    process.exit(0);
+    return;
   }
 
   const params = buildParams(descriptor, assignments);
@@ -207,11 +206,10 @@ async function main(): Promise<void> {
       }
     }
   } catch (e) {
-    if (e instanceof ProcedureError) {
-      fail(e.message);
-    }
     if (controller.signal.aborted) {
-      fail('\ncancelled');
+      console.error('\ncancelled');
+      process.exitCode = 1;
+      return;
     }
     throw e;
   }

@@ -70,13 +70,16 @@ function printSummary(m: MonitoringRecording, slave: number, velocity: number): 
     return;
   }
   const mean = settled.reduce((a, b) => a + b, 0) / settled.length;
+  // A spread of a long hold into Math.min would pass too many arguments, so reduce instead.
+  const min = settled.reduce((a, b) => Math.min(a, b));
+  const max = settled.reduce((a, b) => Math.max(a, b));
+  // Measured in the direction of the target, so that a negative velocity works too.
+  const direction = Math.sign(velocity);
   const tReached = m.first(
     slave,
     Cia402.VELOCITY_ACTUAL_VALUE,
-    (v) => (v ?? 0) >= velocity * 0.95,
-    {
-      after: tTarget,
-    },
+    (v) => v !== null && v * direction >= Math.abs(velocity) * 0.95,
+    { after: tTarget },
   );
   const reached = tReached !== null ? `${((tReached - tTarget) / 1000).toFixed(0)} ms` : 'never';
   const first = m.rows[0][0] as number;
@@ -84,7 +87,7 @@ function printSummary(m: MonitoringRecording, slave: number, velocity: number): 
   console.log(
     `${m.rows.length} cycles over ${((last - first) / 1e6).toFixed(2)} s; ` +
       `95 % of the target after ${reached}; second half of the hold: mean ${mean.toFixed(1)}, ` +
-      `min ${Math.min(...settled)}, max ${Math.max(...settled)} over ${settled.length} cycles`,
+      `min ${min}, max ${max} over ${settled.length} cycles`,
   );
 }
 

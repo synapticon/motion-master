@@ -21,18 +21,29 @@ async function main(): Promise<void> {
     .parse()
     .opts<{ count: number }>();
 
+  // Ctrl-C aborts the signal, so that the loop ends and the program says so.
+  const controller = new AbortController();
+  process.once('SIGINT', () => controller.abort(new Error('stopped')));
+
   const client = await MotionMasterClient.fromConfig();
   console.log("subscribed to 'notifications' -- Ctrl-C to stop");
   let received = 0;
-  for await (const data of client.notifications()) {
-    const time =
-      new Date().toTimeString().slice(0, 8) + '.' + String(Date.now() % 1000).padStart(3, '0');
-    const { event, ...rest } = data;
-    console.log(`  ${time}  ${event}  ${JSON.stringify(rest)}`);
-    received += 1;
-    if (count && received >= count) {
-      break;
+  try {
+    for await (const data of client.notifications({ signal: controller.signal })) {
+      const now = new Date();
+      const time = `${now.toTimeString().slice(0, 8)}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+      const { event, ...rest } = data;
+      console.log(`  ${time}  ${event ?? '?'}  ${JSON.stringify(rest)}`);
+      received += 1;
+      if (count && received >= count) {
+        break;
+      }
     }
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      throw error;
+    }
+    console.log('\nstopping');
   }
 }
 

@@ -128,7 +128,8 @@ def main():
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument("--state", choices=STATES, default="preop")
     ap.add_argument("--describe", action="store_true", help="describe the procedure, do not run it")
-    args = ap.parse_args()
+    # Intermixed, so that an option may stand between two name=value arguments.
+    args = ap.parse_intermixed_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     client = MotionMasterClient.from_config()

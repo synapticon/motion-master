@@ -16,6 +16,7 @@ The defaults read the Statusword, 0x6041:00.
 """
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -49,7 +50,7 @@ def main():
     ).json()
     print(
         f"slave {args.slave} 0x{p['index']:04X}:{p['subindex']:02X} {p['name']} "
-        f"({p['dataTypeName']}) = {p['value']!r}"
+        f"({p['dataTypeName']}) = {json.dumps(p['value'], ensure_ascii=False, separators=(",", ":"))}"
     )
 
 

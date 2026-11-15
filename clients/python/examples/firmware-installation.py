@@ -27,11 +27,13 @@ import logging
 import sys
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
     AlState,
     MotionMasterClient,
-    ProcedureError,
+    error_line,
     format_step,
     run,
     step_changes,
@@ -56,18 +58,16 @@ def main():
 
     # The check reads two files of the device over FoE, so it fails on a device with no mailbox,
     # such as one in INIT. The install goes ahead without it.
-    r = client.call(
-        "checkDeviceFirmwareCompatibility",
-        path={"slavePosition": args.slave},
-        query={"filename": package.name},
-        check=False,
-    )
-    if r.status_code == 200:
-        result = r.json()
+    try:
+        result = client.call(
+            "checkDeviceFirmwareCompatibility",
+            path={"slavePosition": args.slave},
+            query={"filename": package.name},
+        ).json()
         verdict = "fits" if result["compatible"] else "DOES NOT FIT"
         print(f"package {verdict} the device: {result['explanation']}")
-    else:
-        print(f"could not check the package against the device: {r.json().get('error', r.text)}")
+    except requests.HTTPError as error:
+        print(f"could not check the package against the device: {error_line(error)}")
 
     client.call(
         "putUserCacheFile",
@@ -84,8 +84,6 @@ def main():
         for snapshot, changed in changes:
             for step in changed:
                 print(format_step(step))
-    except ProcedureError as e:
-        sys.exit(str(e))
     except KeyboardInterrupt:
         print("\ncancelled", file=sys.stderr)
         sys.exit(1)

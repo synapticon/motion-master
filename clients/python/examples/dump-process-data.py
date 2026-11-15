@@ -37,9 +37,9 @@ def main():
     client.init()
     client.ensure_state(AlState.SAFEOP)
 
-    content = client.call(
-        "streamProcessDataDump", headers={"Accept": "application/octet-stream"}
-    ).content
+    content = client.process_data_dump()
+    if content is None:
+        sys.exit("the server has no cycle to dump")
 
     if args.output:
         out = Path(args.output)

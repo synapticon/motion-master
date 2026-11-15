@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   const parameters = await client.parameters(slave);
   const names = new Map(parameters.map((p) => [`${p.index}:${p.subindex}`, p.name]));
 
-  if (output !== undefined) {
+  if (output) {
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, JSON.stringify(mapping, null, 2));
     console.log(`saved -> ${output}`);

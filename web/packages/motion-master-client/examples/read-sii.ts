@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureScanned();
 
-  if (output !== undefined) {
+  if (output) {
     // The Accept header selects the raw image over the parsed JSON. With no response format, the
     // generated client returns the answer with its body unread.
     const response = await client.api.readSii(slave, {

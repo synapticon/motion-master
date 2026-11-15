@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   }
   const result = (await response.json()) as EsiParseResult;
 
-  if (args.output !== undefined) {
+  if (args.output) {
     const out = args.output;
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify(result, null, 2));

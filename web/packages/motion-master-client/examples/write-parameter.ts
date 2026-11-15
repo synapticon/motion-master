@@ -32,6 +32,11 @@ function parseInteger(text: string): number {
   if (value === null) {
     throw new Error(`'${text}' is not an integer`);
   }
+  // The request is JSON, and a JSON number from JavaScript holds an integer exactly only up to
+  // 2^53 - 1. Python's int has no such limit.
+  if (!Number.isSafeInteger(Number(value))) {
+    throw new Error(`'${text}' is beyond 2^53 - 1, which a JavaScript number cannot hold exactly`);
+  }
   return Number(value);
 }
 

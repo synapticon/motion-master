@@ -21,7 +21,7 @@ async function main(): Promise<void> {
       'Write a raw SII image to the EEPROM of a device (PUT /api/devices/{slavePosition}/sii).',
     )
     .option('--slave <n>', 'the position of the device on the bus', integer, 1)
-    .requiredOption('--file <path>', 'the raw SII image, as read-sii.py --output saves it')
+    .requiredOption('--file <path>', 'the raw SII image, as read-sii.ts --output saves it')
     .parse()
     .opts<{ slave: number; file: string }>();
   const image = readFileSync(file);

@@ -20,6 +20,7 @@ otherwise. The header line shows which, as (pdo) or (sdo).
 """
 
 import argparse
+import json
 import logging
 import sys
 from datetime import datetime, timezone
@@ -68,7 +69,8 @@ def main():
         for rows in client.stream_monitoring(TOPIC):
             ts_us, *values = rows[-1]
             ts = datetime.fromtimestamp(ts_us / 1e6, timezone.utc).strftime("%H:%M:%S.%f")
-            print(f"  {ts}  {len(rows):4d} row(s)  latest={values}")
+            latest = ", ".join(json.dumps(v) for v in values)
+            print(f"  {ts}  {len(rows):4d} row(s)  latest=[{latest}]")
             batches += 1
             if args.count and batches >= args.count:
                 break

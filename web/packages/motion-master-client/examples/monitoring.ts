@@ -121,8 +121,12 @@ async function main(): Promise<void> {
         await client.setOperationMode(slave, OperationMode.CYCLIC_SYNC_VELOCITY);
         // A target left from an earlier run would turn the motor at the enable.
         await client.setTarget(slave, 'velocity', 0);
+        // The requests take no signal, so a Ctrl-C during one stops the move here, before the
+        // drive is enabled or gets its target.
+        signal.throwIfAborted();
         await client.enable(slave);
         console.log(`turning at ${velocity} for ${seconds} s`);
+        signal.throwIfAborted();
         await client.setTarget(slave, 'velocity', velocity);
         await sleep(seconds * 1000, undefined, { signal });
         await client.setTarget(slave, 'velocity', 0);
@@ -151,7 +155,7 @@ async function main(): Promise<void> {
   m.printTable({ everyMs: every });
   printSummary(m, slave, velocity);
 
-  const out = output ?? `${FILES_DIR}/monitoring-${fileStamp()}.csv`;
+  const out = output || `${FILES_DIR}/monitoring-${fileStamp()}.csv`;
   await m.writeCsv(out);
   console.log(`saved ${m.rows.length} row(s) -> ${out}`);
 }

@@ -23,8 +23,10 @@ import logging
 import sys
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from motion_master_client import AlState, MotionMasterClient, run  # noqa: E402
+from motion_master_client import AlState, MotionMasterClient, error_line, run  # noqa: E402
 
 
 def request_objects(objects):
@@ -70,13 +72,12 @@ def main():
     if not restart.json()["ok"]:
         sys.exit(f"slave {args.slave} did not reach PREOP through INIT")
 
-    r = client.call(
-        "writeDevicePdoMapping", path={"slavePosition": args.slave}, body=body, check=False
-    )
-    # A failed write is not undone, so the device stays in PREOP, where its mapping can be read and
-    # written again.
-    if r.status_code != 200:
-        sys.exit(f"{r.json().get('error', r.text)}\nslave {args.slave} stays in PREOP")
+    try:
+        r = client.call("writeDevicePdoMapping", path={"slavePosition": args.slave}, body=body)
+    except requests.HTTPError as error:
+        # A failed write is not undone, so the device stays in PREOP, where its mapping can be read
+        # and written again.
+        sys.exit(f"error: {error_line(error)}\nslave {args.slave} stays in PREOP")
     read_back = r.json()
 
     # A device that came from below PREOP stays in PREOP, which is where its mapping applies.

@@ -49,6 +49,7 @@ import functools
 import json
 import logging
 import os
+import signal
 import ssl
 import sys
 import threading
@@ -742,13 +743,33 @@ class MotionMasterClient:
         procedure refuses.
         """
         path = _path(position, procedureName=name)
-        r = self.call("startProcedure", path=path, body=params or {}, check=False)
+        # A Ctrl-C while the start is on the way would leave a run going that this generator never
+        # cancels, so it waits for the answer and is raised in the loop below, where the run is
+        # cancelled. A second Ctrl-C stops at once, for a server that never answers. Python takes a
+        # SIGINT handler only in the main thread.
+        interrupted = []
+
+        def on_sigint(*_):
+            if interrupted:
+                raise KeyboardInterrupt
+            interrupted.append(True)
+
+        previous = None
+        if threading.current_thread() is threading.main_thread():
+            previous = signal.signal(signal.SIGINT, on_sigint)
+        try:
+            r = self.call("startProcedure", path=path, body=params or {}, check=False)
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGINT, previous)
         if not r.ok:
             raise ProcedureError(
                 f"{name} on device {position}: {_reason(r)} (HTTP {r.status_code})"
             )
         snapshot = r.json()
         try:
+            if interrupted:
+                raise KeyboardInterrupt
             while True:
                 yield snapshot
                 if snapshot["status"] != "running":

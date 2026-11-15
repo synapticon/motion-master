@@ -88,6 +88,9 @@ def main():
             time.sleep(args.seconds)
             client.set_target(args.slave, "velocity", 0)
             time.sleep(AFTER_STOP_SECONDS)
+    except KeyboardInterrupt:
+        print("cancelled", file=sys.stderr)
+        sys.exit(1)
     finally:
         # Never leave the drive enabled, also when a step above failed or Ctrl-C stopped it.
         with contextlib.suppress(Exception):

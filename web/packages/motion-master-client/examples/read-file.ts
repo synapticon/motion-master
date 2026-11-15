@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   const response = await client.api.foeReadFile(slave, filename);
   const content = new Uint8Array(await response.arrayBuffer());
 
-  const out = output ?? `${FILES_DIR}/${basename(filename)}`;
+  const out = output || `${FILES_DIR}/${basename(filename)}`;
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, content);
   console.log(`read ${content.length} byte(s) from slave ${slave}:${filename} -> ${out}`);

@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
     AlState,
     MotionMasterClient,
-    ProcedureError,
     format_step,
     run,
     step_changes,
@@ -70,8 +69,6 @@ def main():
         for snapshot, changed in changes:
             for step in changed:
                 print(format_step(step))
-    except ProcedureError as e:
-        sys.exit(str(e))
     except KeyboardInterrupt:
         print("\ncancelled", file=sys.stderr)
         sys.exit(1)

@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   await client.ensureState(AlState.SAFEOP);
 
   const eni = await client.exportEni();
-  const out = output ?? `${FILES_DIR}/eni.xml`;
+  const out = output || `${FILES_DIR}/eni.xml`;
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, eni.xml, 'utf8');
   console.log(`saved ${eni.xml.length} character(s) -> ${out}`);

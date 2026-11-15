@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     if (!(e instanceof HttpError)) {
       throw e;
     }
-    console.log(`could not check the package against the device: ${e.reason}`);
+    console.log(`could not check the package against the device: ${e.message}`);
   }
 
   // The generated putUserCacheFile encodes its body as JSON, so the raw bytes go with fetch.

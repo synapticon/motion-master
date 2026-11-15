@@ -13,7 +13,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { AlState, MotionMasterClient, parseMmpd, run } from '@synapticon/motion-master-client';
+import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { FILES_DIR, fileStamp } from './files';
 import { cli } from './options';
 
@@ -34,10 +34,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const out = output ?? `${FILES_DIR}/process-data-${fileStamp()}.mmpd`;
+  const out = output || `${FILES_DIR}/process-data-${fileStamp()}.mmpd`;
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, content);
-  console.log(`saved ${content.length} byte(s), ${parseMmpd(content).rowCount} cycle(s) -> ${out}`);
+  console.log(`saved ${content.length} byte(s) -> ${out}`);
 }
 
 await run(main);

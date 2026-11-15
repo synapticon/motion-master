@@ -772,7 +772,7 @@ class MotionMasterClient:
                 yield msg["data"]
 
     def monitoring(self, parameters, interval_ms=50, topic=None, name=None):
-        """Return a Monitoring that records the rows of the parameters while a with block runs.
+        """Return a MonitoringRecording of the rows of the parameters while a with block runs.
 
         `parameters` is a list of (devicePosition, index, subindex). Create it after the devices
         are in SAFEOP or OP, because the server decides once, at creation, whether each object
@@ -783,7 +783,7 @@ class MotionMasterClient:
             velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE)
         """
         topic = topic or f"py-{uuid.uuid4().hex[:12]}"
-        return Monitoring(self, parameters, interval_ms, topic, name)
+        return MonitoringRecording(self, parameters, interval_ms, topic, name)
 
 
 @functools.cache
@@ -802,8 +802,8 @@ def _object_name(index, subindex):
     return _object_names().get((index, subindex), f"0x{index:04X}:{subindex:02X}")
 
 
-class Monitoring:
-    """A monitoring on the server, and every row it sent while the with block ran.
+class MonitoringRecording:
+    """The recording of a monitoring: the monitoring on the server, and every row of the with block.
 
     Entering the block creates the monitoring, subscribes to its topic, and returns when the first
     row arrives, so nothing the block does is missed. Leaving the block waits for the rows of the

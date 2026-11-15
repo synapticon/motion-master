@@ -35,6 +35,9 @@ the HTTP/WebSocket API may break between any two alphas.
   `setTarget`, `enable`, `disable` and `quickStop`.
 - The TypeScript client runs a procedure with `runProcedure`, `stepChanges` and `formatStep`, as
   the Python client does, and throws `ProcedureError` when the server refuses the start.
+- The TypeScript client records a monitoring for a span with `monitoring(parameters, span)`, as the
+  Python client does with a `with` block. The `MonitoringRecording` it returns has `column`,
+  `values`, `first`, `printTable` and `writeCsv`, which write the same output as in Python.
 
 ### Changed
 
@@ -42,6 +45,8 @@ the HTTP/WebSocket API may break between any two alphas.
   took `timeout` and `interval` in seconds.
 - The Python client's `run_procedure()` takes `poll_interval_ms`, in milliseconds. It took
   `poll_interval` in seconds.
+- The Python client's `monitoring()` returns a `MonitoringRecording`, which was named
+  `Monitoring`. A monitoring is the object on the server; the class holds the recording of one.
 - The Python client's `format_step()` writes a value with no space after `,` and `:`, as the
   TypeScript client's `formatStep()` does.
 - The Python client streams the batches of a monitoring with `stream_monitoring(topic)`, which was

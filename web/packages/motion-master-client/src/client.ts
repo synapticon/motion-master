@@ -14,7 +14,9 @@ import type { Cia402Status, ProcedureRequest, ProcedureSnapshot } from './genera
 import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
 import { fetchProcessDataDump, type MmpdFile } from './mmpd';
+import { MonitoringRecording } from './monitoring-recording';
 import type { ObjectAddress } from './objects';
+import { type DeviceParameterAddress, parameterTriple } from './parameter-address';
 import { listen } from './stream';
 import {
   type MonitoringBatch,
@@ -111,6 +113,15 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }, ms);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+// How long monitoring() waits for the first row, and for the last flush after the span.
+const FIRST_ROW_TIMEOUT_MS = 5000;
+const LAST_FLUSH_TIMEOUT_MS = 2000;
+
+/** Returns a topic that no other monitoring has, such as `ts-1f3a9c0b7e2d`. */
+function uniqueTopic(): string {
+  return `ts-${globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`;
 }
 
 /** Returns whether `error` is a response of the generated client with the HTTP status `status`. */
@@ -460,6 +471,7 @@ export class MotionMasterClient {
       const reason = typeof body?.error === 'string' ? body.error : error.statusText;
       throw new ProcedureError(
         `${name} on device ${slavePosition}: ${reason} (HTTP ${error.status})`,
+        { cause: error },
       );
     }
     try {
@@ -478,6 +490,118 @@ export class MotionMasterClient {
         await this.api.cancelProcedure(slavePosition, name).catch(() => {});
       }
     }
+  }
+
+  /**
+   * Records the rows of the parameters while `span` runs, and returns the recording.
+   *
+   * `parameters` is a list of `[devicePosition, index, subindex]` or `[devicePosition, address]`.
+   * Create it after the devices are in SAFEOP or OP, because the server decides once, at creation,
+   * whether each object comes from the process data or from SDO reads. Without `topic`, a unique one
+   * is chosen. `intervalMs` is the flush cadence, 50 when not given.
+   *
+   * It creates the monitoring and waits for the first row, so nothing `span` does is missed. After
+   * `span`, it waits for the rows of the last flush and deletes the monitoring, also when `span`
+   * throws. The rows stay readable in the recording.
+   *
+   *     const m = await client.monitoring([[1, Cia402.VELOCITY_ACTUAL_VALUE]], async () => {
+   *       // the move
+   *     });
+   *     const velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE);
+   *
+   * Throws when the server refuses the monitoring, when no row arrives within 5 s, and when the
+   * WebSocket closes during the recording. An error of `span` wins over them.
+   */
+  async monitoring(
+    parameters: readonly DeviceParameterAddress[],
+    span: () => unknown,
+    options: { intervalMs?: number; topic?: string; name?: string } = {},
+  ): Promise<MonitoringRecording> {
+    const { intervalMs = 50, topic = uniqueTopic(), name } = options;
+    const body = {
+      topic,
+      interval: intervalMs,
+      parameters: parameters.map(parameterTriple),
+      ...(name === undefined ? {} : { name }),
+    };
+    let created;
+    try {
+      created = (await this.api.createMonitoring(body)).data;
+    } catch (error) {
+      if (!(error instanceof Response)) {
+        throw error;
+      }
+      const body = (error as { error?: { error?: unknown } }).error;
+      const reason = typeof body?.error === 'string' ? body.error : error.statusText;
+      throw new Error(`cannot create monitoring ${topic}: ${reason} (HTTP ${error.status})`, {
+        cause: error,
+      });
+    }
+    const recording = new MonitoringRecording(topic, created.parameters);
+
+    // The WebSocket listener counts the batches and wakes the one wait that runs at a time.
+    let batches = 0;
+    let socketError: Error | null = null;
+    let wake = () => {};
+    const waitFor = (condition: () => boolean, timeoutMs: number) =>
+      new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(condition()), timeoutMs);
+        wake = () => {
+          if (condition()) {
+            clearTimeout(timer);
+            resolve(true);
+          }
+        };
+        wake();
+      });
+    const unsubscribe = this.ws.subscribe(topic, (rows) => {
+      recording.rows.push(...rows);
+      batches += 1;
+      wake();
+    });
+    const stopWatching = this.ws.onStateChange((state) => {
+      if (state === 'closed') {
+        socketError = new Error(`monitoring ${topic}: the WebSocket closed during the recording`);
+        wake();
+      }
+    });
+    const stop = async () => {
+      unsubscribe();
+      stopWatching();
+      await this.api.deleteMonitoring(topic).catch(() => {});
+    };
+
+    try {
+      const arrived = await waitFor(
+        () => recording.rows.length > 0 || socketError !== null,
+        FIRST_ROW_TIMEOUT_MS,
+      );
+      if (socketError !== null) {
+        throw socketError;
+      }
+      if (!arrived) {
+        throw new DOMException(
+          `monitoring ${topic}: no row after ${FIRST_ROW_TIMEOUT_MS} ms`,
+          'TimeoutError',
+        );
+      }
+    } catch (error) {
+      await stop();
+      throw error;
+    }
+
+    try {
+      await span();
+    } finally {
+      // A row is in a batch only after the next flush, so wait for two more batches.
+      const target = batches + 2;
+      await waitFor(() => batches >= target || socketError !== null, LAST_FLUSH_TIMEOUT_MS);
+      await stop();
+    }
+    if (socketError !== null) {
+      throw socketError;
+    }
+    return recording;
   }
 
   /**

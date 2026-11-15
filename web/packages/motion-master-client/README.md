@@ -103,6 +103,7 @@ An example imports the package by its name, as a program that installed it from 
 | `set-target.ts` | Sets the position, velocity or torque target of a drive. **A drive that is enabled moves.** |
 | `run-procedure.ts` | Lists the procedures of a device, describes one with `--describe`, or runs one by name with its parameters as `name=value`. Ctrl-C cancels the run. |
 | `device-locate.ts` | Blinks the LEDs of a device. Only SPoE offers the procedure. |
+| `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`, prints it as a table, and saves every cycle as CSV in `files/`. **The motor turns.** |
 
 Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another.
 
@@ -213,6 +214,17 @@ for await (const rows of client.streamMonitoring('my-axis')) {
 }
 await client.api.deleteMonitoring('my-axis')
 ```
+
+To record a monitoring for a span and read its rows afterwards, use `monitoring()`. It creates the monitoring, waits for the first row, runs the span, waits for the last flush, and deletes the monitoring, also when the span throws:
+
+```ts
+const m = await client.monitoring([[1, Cia402.VELOCITY_ACTUAL_VALUE]], async () => {
+  // the move
+});
+const velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE); // [timestampUs, value][]
+```
+
+The result is a `MonitoringRecording`. `column()` returns the values of one object with their timestamps, `values()` the values in a time window, and `first()` the time of the first value that meets a condition. `printTable()` prints one row every `everyMs`, with the CiA402 state beside a statusword, and `writeCsv(path)` writes every row to a CSV file in Node.js. Both name a column like `1:STATUSWORD`. A parameter is `[devicePosition, index, subindex]` or `[devicePosition, address]`.
 
 `streamMonitoring` yields the batches of a monitoring that exists already. To get each batch in a callback instead, use `client.ws.subscribe(topic, listener)`, which returns the function that unsubscribes.
 

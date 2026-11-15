@@ -10,6 +10,8 @@ export * from './generated/Api';
 export * from './api-error';
 export * from './errors';
 export * from './procedures';
+export { MonitoringRecording } from './monitoring-recording';
+export type { DeviceParameterAddress } from './parameter-address';
 export * from './constants';
 export * from './web-socket-connection';
 export * from './client';

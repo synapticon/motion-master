@@ -3,29 +3,10 @@
 // never calls it loads none of them. The index does not export this file.
 
 import type { Api } from './generated/Api';
-
-// The parts of the Node.js modules that this file uses. The package has no Node.js types, because
-// its other files run in a browser too.
-interface NodeModules {
-  fs: { existsSync(path: string): boolean; readFileSync(path: string, encoding: 'utf8'): string };
-  path: {
-    dirname(path: string): string;
-    join(...paths: string[]): string;
-    resolve(...paths: string[]): string;
-  };
-  url: { fileURLToPath(url: string): string };
-}
+import { importNode, type NodeModules } from './node-modules';
 
 interface NodeProcess {
   env: Record<string, string | undefined>;
-}
-
-/**
- * Imports a module by a name that a bundler cannot see, so that a browser build does not try to
- * resolve it.
- */
-function importNode<T>(name: string): Promise<T> {
-  return import(/* @vite-ignore */ name) as Promise<T>;
 }
 
 /** The body of `POST /api/init`, for example `{ driver: 'soem', adapter: 'eth0' }`. */

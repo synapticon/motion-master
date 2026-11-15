@@ -51,7 +51,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | Python | TypeScript | Status | Reason |
 | --- | --- | --- | --- |
 | `MotionMasterClient` | `MotionMasterClient` | | |
-| `Monitoring` | — | pending | |
+| `MonitoringRecording` | `MonitoringRecording` | | |
 | `AlState` | `AlState` | | |
 | `Cia402State` | `Cia402State` | | |
 | `OperationMode` | `OperationMode` | | |
@@ -124,7 +124,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `disable` | `disable` | | |
 | `quick_stop` | `quickStop` | | |
 | `run_procedure` | `runProcedure` | | |
-| `monitoring` | — | pending | |
+| `monitoring` | `monitoring` | | |
 | `stream_monitoring` | `streamMonitoring` | | |
 | `notifications` | — | pending | |
 | `start_capture` | — | pending | |
@@ -132,14 +132,14 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `process_data_mark` | `readProcessDataMark` | pending | |
 | `process_data_dump` | `fetchProcessDataDump` | pending | |
 
-## Monitoring
+## MonitoringRecording
 
 | Python | TypeScript | Status | Reason |
 | --- | --- | --- | --- |
-| `sources` | — | pending | |
-| `names` | — | pending | |
-| `column` | — | pending | |
-| `values` | — | pending | |
-| `first` | — | pending | |
-| `write_csv` | — | pending | |
-| `print_table` | — | pending | |
+| `sources` | `sources` | | |
+| `names` | `names` | | |
+| `column` | `column` | | |
+| `values` | `values` | | |
+| `first` | `first` | | |
+| `write_csv` | `writeCsv` | | |
+| `print_table` | `printTable` | | |

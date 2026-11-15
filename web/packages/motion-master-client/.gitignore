@@ -1,1 +1,3 @@
 config.jsonc
+# Output of the examples, such as the CSV of monitoring.ts.
+files/

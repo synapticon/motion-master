@@ -255,7 +255,7 @@ Other methods:
 - `run_procedure(position, name, params, poll_interval_ms=500)` runs a procedure to its end.
 - `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
   WebSocket.
-- `monitoring(parameters)` returns a `Monitoring` for a `with` block. It creates the monitoring,
+- `monitoring(parameters)` returns a `MonitoringRecording` for a `with` block. It creates the monitoring,
   keeps every row while the block runs, and deletes the monitoring at the end. Then `column()`
   returns the values of one object with their timestamps, `values()` returns the values in a time
   window, `first()` returns the time of the first value that meets a condition,

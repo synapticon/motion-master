@@ -13,7 +13,7 @@ In CSV the drive takes the target velocity of every cycle as it is, with no prof
 own, so the target steps from 0 to --velocity and back. The velocity is in the units of 0x60FF.
 
 client.monitoring() records every cycle while the with block runs, also the cycles between two
-flushes: an object in the process data gives one value per cycle. After the move, the Monitoring
+flushes: an object in the process data gives one value per cycle. After the move, the recording
 shows its rows: m.print_table() prints one row every --every ms, with the CiA402 state beside the
 statusword, and m.write_csv() writes every row to a CSV file. Both name a column after the device
 position and the object, such as 1:VELOCITY_ACTUAL_VALUE. The script also prints how fast the

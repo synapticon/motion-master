@@ -6,9 +6,11 @@
 
 import createDebug from 'debug';
 import { AlState, alStateName } from './al-state';
+import type { Cia402State, OperationMode } from './cia402';
 import { readConfig, type FieldbusSettings } from './config';
 import { StateError } from './errors';
 import { Api } from './generated/Api';
+import type { Cia402Status } from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
 import { fetchProcessDataDump, type MmpdFile } from './mmpd';
@@ -54,6 +56,9 @@ export type TargetAlState = Exclude<AlState, typeof AlState.UNKNOWN>;
 type Data<K extends keyof Api> = Api[K] extends (...args: never[]) => Promise<{ data: infer D }>
   ? D
   : never;
+
+/** The target that `setTarget` writes: 0x607A, 0x60FF or 0x6071. */
+export type Cia402TargetKind = Parameters<Api['setCia402Target']>[1]['target'];
 
 /** A scanned device, as `GET /api/devices` gives it. */
 export type DeviceInfo = Data<'getDevices'>[number];
@@ -370,6 +375,57 @@ export class MotionMasterClient {
     return listen((listener: (rows: MonitoringBatch) => void) =>
       this.ws.subscribe(topic, listener),
     );
+  }
+
+  /**
+   * Writes the CiA402 operation mode (0x6060) of a drive (`setCia402OperationMode`), such as
+   * `OperationMode.CYCLIC_SYNC_VELOCITY`.
+   *
+   * The server waits until 0x6061 shows the mode, so the drive runs in it when this returns.
+   * Returns the CiA402 status. Throws the response, 409, when the drive does not take the mode.
+   */
+  async setOperationMode(slavePosition: number, mode: OperationMode): Promise<Cia402Status> {
+    return (await this.api.setCia402OperationMode(slavePosition, { mode })).data;
+  }
+
+  /**
+   * Writes the target of one kind, `'position'`, `'velocity'` or `'torque'` (`setCia402Target`).
+   * The value is in the units of the object: 0x607A, 0x60FF or 0x6071.
+   */
+  async setTarget(slavePosition: number, kind: Cia402TargetKind, value: number): Promise<void> {
+    await this.api.setCia402Target(slavePosition, { target: kind, value });
+  }
+
+  /**
+   * Brings a drive to Operation Enabled, and returns its CiA402 status.
+   *
+   * The server walks the CiA402 state machine (`transitionToCia402State`), and it leaves a quick
+   * stop. The device must exchange process data.
+   */
+  async enable(slavePosition: number): Promise<Cia402Status> {
+    return this.toCia402State(slavePosition, 'OperationEnabled');
+  }
+
+  /** Brings a drive to Switch On Disabled, and returns its CiA402 status. */
+  async disable(slavePosition: number): Promise<Cia402Status> {
+    return this.toCia402State(slavePosition, 'SwitchOnDisabled');
+  }
+
+  /**
+   * Sends a quick stop to a drive (`runCia402Command`), and returns its CiA402 status.
+   *
+   * It returns at once. The drive stops on its quick stop ramp, and 0x605A says the state it ends
+   * in.
+   */
+  async quickStop(slavePosition: number): Promise<Cia402Status> {
+    return (await this.api.runCia402Command(slavePosition, { command: 'quickStop' })).data;
+  }
+
+  private async toCia402State(
+    slavePosition: number,
+    state: Extract<Cia402State, 'OperationEnabled' | 'SwitchOnDisabled'>,
+  ): Promise<Cia402Status> {
+    return (await this.api.transitionToCia402State(slavePosition, { state })).data;
   }
 
   /**

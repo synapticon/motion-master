@@ -99,6 +99,8 @@ An example imports the package by its name, as a program that installed it from 
 | `read-hardware-description.ts` | Prints what a device says it is: its name, build descriptor, serial number and components. |
 | `transition-state.ts` | Moves the devices to an AL state, for example `--state op`. |
 | `restart-devices.ts` | Restarts devices through INIT up to an AL state. |
+| `cia402-state.ts` | Prints the CiA 402 state of a drive, with its actual and target values. |
+| `set-target.ts` | Sets the position, velocity or torque target of a drive. **A drive that is enabled moves.** |
 
 Each program opens the fieldbus driver, scans and moves a device to the AL state it needs, so no program has to run before another.
 
@@ -117,6 +119,11 @@ The client has helpers for the steps that most programs begin with. They have th
 - `ensureScanned()` scans when the last scan is missing or wrong, and moves no device.
 - `ensureState(state, { positions, exact })` scans when needed and brings the devices to an AL state. A device above that state stays where it is, unless `exact` is true.
 - `restart(target, { positions })` restarts devices through INIT and walks them up to an AL state.
+- `setOperationMode(slavePosition, mode)` writes the CiA402 operation mode, such as `OperationMode.CYCLIC_SYNC_VELOCITY`, and returns when the drive shows it.
+- `setTarget(slavePosition, kind, value)` writes the `'position'`, `'velocity'` or `'torque'` target, in the units of its object.
+- `enable(slavePosition)` brings a drive to Operation Enabled. The device must exchange process data.
+- `disable(slavePosition)` brings a drive to Switch On Disabled.
+- `quickStop(slavePosition)` sends a quick stop. The drive stops on its quick stop ramp.
 
 `ensureScanned`, `ensureState` and `restart` throw a `StateError` when a device does not answer or does not reach its state. A failed HTTP request throws the response, and `apiErrorMessage(error)` gives its reason.
 

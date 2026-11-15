@@ -31,6 +31,8 @@ the HTTP/WebSocket API may break between any two alphas.
   `scan`, `devices`, `parameters`, `hardwareDescription`, `waitForValue`, `ensureScanned`,
   `ensureState` and `restart`, and `StateError`. They log each step through the `debug` package,
   off by default: set `DEBUG=motion-master-client` to see it.
+- The TypeScript client has the CiA402 helpers of the Python client: `setOperationMode`,
+  `setTarget`, `enable`, `disable` and `quickStop`.
 
 ### Changed
 

@@ -118,11 +118,11 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `ensure_scanned` | `ensureScanned` | | |
 | `ensure_state` | `ensureState` | | |
 | `restart` | `restart` | | |
-| `set_operation_mode` | — | pending | |
-| `set_target` | — | pending | |
-| `enable` | — | pending | |
-| `disable` | — | pending | |
-| `quick_stop` | — | pending | |
+| `set_operation_mode` | `setOperationMode` | | |
+| `set_target` | `setTarget` | | |
+| `enable` | `enable` | | |
+| `disable` | `disable` | | |
+| `quick_stop` | `quickStop` | | |
 | `run_procedure` | — | pending | |
 | `monitoring` | — | pending | |
 | `stream_monitoring` | `streamMonitoring` | | |

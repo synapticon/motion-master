@@ -1160,6 +1160,21 @@ ctest --test-dir build/x64-linux-debug -R VersionTest
 ./tools/tsan.sh                       # the concurrency tests under ThreadSanitizer
 ```
 
+The TypeScript client has its tests in `web/packages/motion-master-client/tests/`, run by Vitest
+from the workspace root. MSW (Mock Service Worker) answers in place of the server: it intercepts the
+real `fetch` and `WebSocket`, so the client runs unchanged. A request or a WebSocket connection that
+no handler of the test expects fails the test. `tests/fakes.ts` holds the fake server and the fake
+WebSocket that every test uses.
+
+```bash
+pnpm test                                                      # every TypeScript test
+pnpm --filter @synapticon/motion-master-client typecheck:tests
+```
+
+A new helper of the client gets its tests in the same change. **Vitest is the one test runner for
+TypeScript in this repository**, also for the Console when it gets tests, so that React Testing
+Library and the MSW handlers can be shared.
+
 **`libs/node/tests/concurrency_test.cc` is the only machine check on the locking design.** It drives
 one `DeviceManager` from several threads — one standing in for the RT loop, the others as HTTP
 workers, samplers and a procedure. Run it under `tools/tsan.sh` after any change to `DeviceManager`,

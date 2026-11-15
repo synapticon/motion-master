@@ -36,6 +36,13 @@ jobs:
       - name: Typecheck the examples
         run: pnpm --filter @synapticon/motion-master-client typecheck:examples
 
+      - name: Typecheck the tests
+        run: pnpm --filter @synapticon/motion-master-client typecheck:tests
+
+      # Vitest, with MSW in place of the server, so no Motion Master runs.
+      - name: Run the tests of the client
+        run: pnpm test
+
       - name: Build the client
         run: pnpm run build:client
 

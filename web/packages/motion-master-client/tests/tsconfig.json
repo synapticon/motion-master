@@ -1,0 +1,9 @@
+// The tests run in Node.js and import the source in src/.
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["."]
+}

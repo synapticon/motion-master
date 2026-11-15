@@ -30,7 +30,13 @@ export default defineConfig(
     languageOptions: {
       // The type information is for no-floating-promises: a promise that nobody awaits loses its
       // error.
-      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+      parserOptions: {
+        // The Vitest configs belong to no tsconfig, so the default project types them.
+        projectService: {
+          allowDefaultProject: ['vitest.config.ts', 'web/packages/*/vitest.config.ts'],
+        },
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',

@@ -26,6 +26,8 @@
     "build": "tsc -p tsconfig.build.json && node scripts/fix-esm-imports.mjs",
     "example": "tsx --tsconfig examples/tsconfig.json",
     "typecheck:examples": "tsc -p examples/tsconfig.json",
+    "test": "vitest run",
+    "typecheck:tests": "tsc -p tests/tsconfig.json",
     "prepublishOnly": "pnpm run generate && pnpm run build"
   },
   "publishConfig": {

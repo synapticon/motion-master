@@ -40,14 +40,11 @@ def main():
     client.init()
     client.ensure_scanned()
 
-    r = client.call(
+    client.call(
         "writeRegister",
         path={"slavePosition": args.slave, "address": args.address},
         body={"data": data},
-        check=False,
     )
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
     print(f"slave {args.slave} 0x{args.address:04X} <- {bytes(data).hex(' ')}")
 
 

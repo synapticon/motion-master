@@ -41,9 +41,7 @@ def main():
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
     path = {"slavePosition": args.slave, "index": args.index, "subindex": args.subindex}
-    r = client.call("sdoDownload", path=path, body={"data": data}, check=False)
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
+    client.call("sdoDownload", path=path, body={"data": data})
     print(f"slave {args.slave} 0x{args.index:04X}:{args.subindex:02X} <- {bytes(data).hex(' ')}")
 
 

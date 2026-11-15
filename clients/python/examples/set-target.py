@@ -35,14 +35,11 @@ def main():
     client.init()
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
-    r = client.call(
+    client.call(
         "setCia402Target",
         path={"slavePosition": args.slave},
         body={"target": args.target, "value": args.value},
-        check=False,
     )
-    if r.status_code != 204:
-        sys.exit(r.json().get("error", r.text))
     print(f"slave {args.slave} {args.target} target = {args.value}")
 
 

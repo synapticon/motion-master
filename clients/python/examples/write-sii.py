@@ -26,7 +26,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slave", type=int, default=1)
     ap.add_argument(
-        "--file", required=True, help="the raw SII image, as read-sii.py --output saves it"
+        "--file", required=True, help="the raw SII image, as read-sii.py --output saves it",
     )
     args = ap.parse_args()
     image = Path(args.file).read_bytes()
@@ -36,15 +36,12 @@ def main():
     client.init()
     client.ensure_scanned()
 
-    r = client.call(
+    client.call(
         "writeSii",
         path={"slavePosition": args.slave},
         data=image,
         headers={"Content-Type": "application/octet-stream"},
-        check=False,
     )
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
     print(f"wrote {len(image)} byte(s) of SII to slave {args.slave}. Power cycle it to apply.")
 
 

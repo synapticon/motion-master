@@ -41,10 +41,7 @@ def main():
         "releaseBrake",
         path={"slavePosition": args.slave},
         query={"settle": args.settle},
-        check=False,
     )
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
     print(json.dumps(r.json(), indent=2))
 
 

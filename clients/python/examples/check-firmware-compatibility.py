@@ -37,12 +37,7 @@ def main():
         "checkDeviceFirmwareCompatibility",
         path={"slavePosition": args.slave},
         query={"filename": Path(args.filename).name},
-        check=False,
     )
-    # A 4xx means that the server could not ask the question, for example because the filename is
-    # not a package name. Its error says why.
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
 
     result = r.json()
     print(f"{'compatible' if result['compatible'] else 'not compatible'}: {result['explanation']}")

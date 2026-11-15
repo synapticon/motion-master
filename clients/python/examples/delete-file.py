@@ -33,13 +33,10 @@ def main():
     client.init()
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
-    r = client.call(
+    client.call(
         "deleteDeviceFile",
         path={"slavePosition": args.slave, "filename": args.filename},
-        check=False,
     )
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
     print(f"slave {args.slave}:{args.filename} is gone")
 
 

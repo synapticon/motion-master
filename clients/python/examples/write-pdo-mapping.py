@@ -64,8 +64,9 @@ def main():
     # aborts with 0x08000000 after SAFEOP -> PREOP or OP -> PREOP, and passes after
     # INIT -> PREOP. The firmware source points at its application processor, which learns only
     # of a transition upwards and so checks the write against the rights of the state before.
-    body = {"positions": [args.slave], "target": AlState.PREOP}
-    restart = client.call("restartDevices", body=body)
+    restart = client.call(
+        "restartDevices", body={"positions": [args.slave], "target": AlState.PREOP}
+    )
     if not restart.json()["ok"]:
         sys.exit(f"slave {args.slave} did not reach PREOP through INIT")
 

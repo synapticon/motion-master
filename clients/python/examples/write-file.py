@@ -39,15 +39,12 @@ def main():
     client.init()
     client.ensure_state(AlState.PREOP, positions=[args.slave])
 
-    r = client.call(
+    client.call(
         "foeWriteFile",
         path={"slavePosition": args.slave, "filename": filename},
         data=content,
         headers={"Content-Type": "application/octet-stream"},
-        check=False,
     )
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
     print(f"wrote {len(content)} byte(s) from {local} -> slave {args.slave}:{filename}")
 
 

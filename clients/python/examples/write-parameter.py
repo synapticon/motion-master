@@ -63,13 +63,11 @@ def main():
     except ValueError as e:
         sys.exit(f"--value {args.value!r} does not fit {before['dataTypeName']}: {e}")
 
-    r = client.call("writeParameter", path=path, body={"value": value}, check=False)
-    if r.status_code != 200:
-        sys.exit(r.json().get("error", r.text))
+    r = client.call("writeParameter", path=path, body={"value": value})
     after = r.json()
     print(
         f"slave {args.slave} 0x{args.index:04X}:{args.subindex:02X} {after['name']} "
-        f"({after['dataTypeName']}): {before['value']!r} -> {after['value']!r}"
+        f"({after['dataTypeName']}): {before['value']!r} -> {after['value']!r}",
     )
 
 

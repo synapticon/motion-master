@@ -67,7 +67,7 @@ def main():
     except ProcedureError as e:
         sys.exit(str(e))
     except KeyboardInterrupt:
-        print("\ncancelled")
+        print("\ncancelled", file=sys.stderr)
         sys.exit(1)
     finally:
         # Closing the generator cancels a run that is still in progress.

@@ -13,6 +13,7 @@ mailbox is live from PREOP up. A device in SAFEOP or OP stays there.
 """
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -31,7 +32,11 @@ def decode_value(param):
     """
     value = param["value"]
     if not isinstance(value, list):
-        return repr(value)
+        # As the TypeScript example prints it: a string as JSON, "v5.6.11", and a whole float with
+        # no fraction, 0 and not 0.0.
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        return json.dumps(value, ensure_ascii=False)
 
     name = param["dataTypeName"]
     raw = bytes(value)
@@ -43,7 +48,7 @@ def decode_value(param):
         return f"{int.from_bytes(raw, 'little')}  (0x {hexs})"
     if name == "OCTET_STRING":
         text = raw.rstrip(b"\x00 ").decode("ascii", "replace")
-        return f"{text!r}  (0x {hexs})"
+        return f"{json.dumps(text, ensure_ascii=False)}  (0x {hexs})"
     return f"0x {hexs}" if raw else "(empty)"
 
 

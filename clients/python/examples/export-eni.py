@@ -34,11 +34,13 @@ def main():
     client.init()
     client.ensure_state(AlState.SAFEOP)
 
-    content = client.call("exportEni").content
+    eni = client.export_eni()
     out = Path(args.output) if args.output else FILES_DIR / "eni.xml"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(content)
-    print(f"saved {len(content)} byte(s) -> {out}")
+    out.write_text(eni["xml"], encoding="utf-8")
+    print(f"saved {len(eni['xml'])} character(s) -> {out}")
+    if eni["warnings"]:
+        print(f"{eni['warnings']} part(s) of the bus could not be read; the server log says which")
 
 
 if __name__ == "__main__":

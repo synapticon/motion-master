@@ -516,6 +516,30 @@ class MotionMasterClient:
             )
         return r.content
 
+    def export_eni(self):
+        """Export the bus as an ENI document (exportEni), with the parts the server could not read.
+
+        Returns {"xml": the document as text, "warnings": the number of parts that were asked for
+        and not answered}. A bus that has not reached SAFEOP or OP answers 409, because before that
+        there is no mapping to describe. Raises requests.HTTPError when the server refuses.
+        """
+        r = self.call("exportEni", headers={"Accept": "application/xml"})
+        try:
+            warnings = int(r.headers.get("X-Eni-Warnings", "0"))
+        except ValueError:
+            warnings = 0
+        return {"xml": r.text, "warnings": warnings}
+
+    def parse_eni(self, xml):
+        """Read an ENI document (parseEni) and return its network, with each datagram annotated.
+
+        Any ENI that follows ETG.2100 is read, not only one that export_eni() wrote. Raises
+        requests.HTTPError when the server refuses.
+        """
+        body = xml.encode("utf-8")
+        headers = {"Content-Type": "application/xml"}
+        return self.call("parseEni", data=body, headers=headers).json()
+
     def devices(self):
         """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).
 

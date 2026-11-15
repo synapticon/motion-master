@@ -8,6 +8,7 @@ import createDebug from 'debug';
 import { AlState, alStateName } from './al-state';
 import type { Cia402State, OperationMode } from './cia402';
 import { readConfig, type FieldbusSettings } from './config';
+import type { EniExport, EniParseResult } from './eni';
 import { CaptureError, ProcedureError, ProcessDataDumpError, StateError } from './errors';
 import { Api } from './generated/Api';
 import type { Cia402Status, ProcedureRequest, ProcedureSnapshot } from './generated/data-contracts';
@@ -148,6 +149,21 @@ async function fetchReasonOf(response: Response): Promise<string> {
     // Not JSON: the text itself is the reason.
   }
   return text || response.statusText;
+}
+
+/**
+ * Throws a refused response the way the generated client does: the response itself, with its parsed
+ * JSON body in `error`. So `apiErrorMessage` reads the reason of every refused request alike.
+ */
+async function throwRefused(response: Response): Promise<never> {
+  const text = await response.text();
+  let body: unknown = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // Not JSON: the text is the body.
+  }
+  throw Object.assign(response, { data: null, error: body });
 }
 
 /** Returns whether `error` is a response of the generated client with the HTTP status `status`. */
@@ -736,8 +752,7 @@ export class MotionMasterClient {
     }
     const search = query.size > 0 ? `?${query.toString()}` : '';
     // The generated client reads no error body of a binary request, so this one goes by fetch.
-    const doFetch = this.customFetch ?? fetch;
-    const response = await doFetch(`${this.httpBaseUrl}/api/process-data/dump${search}`, {
+    const response = await this.send(`/api/process-data/dump${search}`, {
       headers: { Accept: 'application/octet-stream' },
       signal,
     });
@@ -752,6 +767,50 @@ export class MotionMasterClient {
       );
     }
     return new Uint8Array(await response.arrayBuffer());
+  }
+
+  /**
+   * Exports the bus as an ENI document (`exportEni`), with the number of parts the server could not
+   * read.
+   *
+   * A bus that has not reached SAFEOP or OP answers 409, because before that there is no mapping to
+   * describe. A refused request throws the response, as the generated client does.
+   */
+  async exportEni(options: { signal?: AbortSignal } = {}): Promise<EniExport> {
+    // The generated client takes the document for a binary file, so this request goes by fetch.
+    const response = await this.send('/api/eni', {
+      headers: { Accept: 'application/xml' },
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      return throwRefused(response);
+    }
+    const warnings = Number.parseInt(response.headers.get('X-Eni-Warnings') ?? '0', 10);
+    return { xml: await response.text(), warnings: Number.isFinite(warnings) ? warnings : 0 };
+  }
+
+  /**
+   * Reads an ENI document (`parseEni`) and returns its network, with each datagram annotated. Any
+   * ENI that follows ETG.2100 is read, not only one that `exportEni()` wrote. A refused request
+   * throws the response, as the generated client does.
+   */
+  async parseEni(xml: string, options: { signal?: AbortSignal } = {}): Promise<EniParseResult> {
+    const response = await this.send('/api/eni/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/xml' },
+      body: xml,
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      return throwRefused(response);
+    }
+    return (await response.json()) as EniParseResult;
+  }
+
+  /** Sends a request that the generated client cannot send, with the `fetch` of the client. */
+  private send(path: string, init: RequestInit): Promise<Response> {
+    const doFetch = this.customFetch ?? fetch;
+    return doFetch(`${this.httpBaseUrl}${path}`, init);
   }
 
   /** Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown. */

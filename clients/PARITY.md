@@ -74,8 +74,6 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `decodeMmpdValue` | | Decodes one value of a `.mmpd` row. As `MmpdFile`. |
 | — | `extractBits` | | Takes the bits of one value out of a `.mmpd` row. As `MmpdFile`. |
 | — | `isPlottableDataType` | | Says whether the Console can plot a data type. As `MmpdFile`. |
-| — | `fetchEni` | pending | |
-| — | `parseEni` | pending | |
 | `NOTIFICATION_TOPIC` | `NOTIFICATION_TOPIC` | | |
 | — | `WebSocketConnection` | | The WebSocket connection behind `client.ws`. It reconnects and routes each message to its listeners. Python opens one WebSocket for each stream and closes it when the stream ends. |
 | — | `alStateName` | | Python reads the name from the enum: `AlState(2).name`. |
@@ -127,6 +125,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `stream_monitoring` | `streamMonitoring` | | |
 | `notifications` | `notifications` | | |
 | `start_capture` | `startCapture` | | |
+| `export_eni` | `exportEni` | | |
+| `parse_eni` | `parseEni` | | |
 | `stop_capture` | `stopCapture` | | |
 | `process_data_mark` | `processDataMark` | | |
 | `process_data_dump` | `processDataDump` | | |

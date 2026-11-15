@@ -52,6 +52,10 @@ the HTTP/WebSocket API may break between any two alphas.
   of the `.mmpd` file, which `parseMmpd()` decodes, or `null` when the server has no cycle to dump. It
   throws `ProcessDataDumpError` for any other refusal. The free function `fetchProcessDataDump()` is
   gone.
+- The TypeScript client exports and reads an ENI with `exportEni()` and `parseEni(xml)` on the
+  client, which replace the free functions `fetchEni(baseUrl)` and `parseEni(baseUrl, xml)`. A
+  refused request throws the response, as a call of `client.api` does. The Python client has the
+  same two as `export_eni()` and `parse_eni(xml)`.
 - The Python client's `wait_for_value()` takes `timeout_ms` and `interval_ms`, in milliseconds. It
   took `timeout` and `interval` in seconds.
 - The Python client's `run_procedure()` takes `poll_interval_ms`, in milliseconds. It took

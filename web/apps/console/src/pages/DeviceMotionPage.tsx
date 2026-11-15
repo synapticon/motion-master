@@ -121,7 +121,7 @@ export default function DeviceMotionPage() {
   const statusKey = cia402StatusKey(slavePosition)
   const statusQuery = useCia402Status(slavePosition)
   const status = statusQuery.data
-  const activeMode = status?.modeOfOperation ?? 0
+  const activeMode = status?.operationMode ?? 0
 
   // What the drive itself says it has, rather than a list written here. Split into the two groups
   // the dropdown shows: CiA402's modes, and the vendor's negative ones.
@@ -133,7 +133,7 @@ export default function DeviceMotionPage() {
   // user's to change until they press "Set mode".
   const [selectedMode, setSelectedMode] = useState<number | null>(null)
   useEffect(() => {
-    if (selectedMode === null && status) setSelectedMode(status.modeOfOperation)
+    if (selectedMode === null && status) setSelectedMode(status.operationMode)
   }, [status, selectedMode])
 
   const setModeMutation = useMutation({

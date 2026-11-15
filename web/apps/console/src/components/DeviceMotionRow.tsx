@@ -108,7 +108,7 @@ export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
   const { api } = useConnection()
   const queryClient = useQueryClient()
 
-  const control = status ? MODE_CONTROL[status.modeOfOperation] : undefined
+  const control = status ? MODE_CONTROL[status.operationMode] : undefined
   const show = isCia402 && status !== undefined && control !== undefined
   const quantity = control?.quantity ?? 'position'
   const limitObjects = LIMIT_OBJECTS[quantity]

@@ -19,6 +19,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- The CiA402 status names the active operation mode `operationMode`, which was `modeOfOperation`.
+  This changes the response of `GET /api/devices/{slavePosition}/cia402`, the responses of
+  `POST .../cia402/mode`, `.../cia402/state` and `.../cia402/command`, and the `Cia402Status` type
+  of the TypeScript client.
+
 ## [6.0.0-alpha.125] - 2026-11-14
 
 ### Added

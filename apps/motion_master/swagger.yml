@@ -1507,8 +1507,8 @@ paths:
         sent on the next cycle — otherwise written via an SDO download, otherwise held
         in the cache as pending until the device is back online.
 
-        This is the endpoint to set a target (e.g. target torque 0x6071) or the modes
-        of operation: it knows which objects are PDO-mapped and stages them into the
+        This is the endpoint to set a target (e.g. target torque 0x6071) or the operation
+        mode (0x6060): it knows which objects are PDO-mapped and stages them into the
         process data, falling back to SDO transparently. Returns the updated
         `DeviceParameter` (with the converted value and resulting sync state).
 
@@ -2032,7 +2032,7 @@ paths:
       description: >
         Writes the requested operation mode to 0x6060, waits until the drive shows it in 0x6061,
         and returns the control snapshot. A 200 means the drive runs in the mode: the
-        modeOfOperation of the response is the requested mode. A drive takes a new mode some
+        operationMode of the response is the requested mode. A drive takes a new mode some
         cycles after the write, so the server reads 0x6061 again until it shows the mode, for up to
         200 ms. A drive that does not take the mode in that time is answered with 409, which names
         the mode 0x6061 shows and the drive's error code from 0x603F when it has one. Mode 0 asks
@@ -5646,7 +5646,7 @@ components:
       type: object
       description: A CiA402 drive's control snapshot — its state machine, control words, and mode.
       required:
-        [state, statusword, controlword, modeOfOperation, modeName, targetPosition,
+        [state, statusword, controlword, operationMode, modeName, targetPosition,
          targetVelocity, targetTorque, actualPosition, actualVelocity, actualTorque,
          errorDescription]
       properties:
@@ -5665,7 +5665,7 @@ components:
           type: integer
           description: Last-commanded controlword (0x6040), 0–65535.
           example: 15
-        modeOfOperation:
+        operationMode:
           type: integer
           description: Active operation mode (display object 0x6061), as an INTEGER8 value.
           example: 9

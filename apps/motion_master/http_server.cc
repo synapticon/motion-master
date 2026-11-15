@@ -1476,7 +1476,7 @@ void HttpServer::run() {
                 // is the vendor's, so filtering to the standard modes here would make a SOMANET's
                 // diagnostics (-2) or system identification (-4) unrequestable — modes the device
                 // has and GET /api/devices/{n}/operation-modes lists. Which values a given drive
-                // accepts is the drive's answer, visible in the modeOfOperation of the response.
+                // accepts is the drive's answer, visible in the operationMode of the response.
                 const auto raw = body["mode"].get<int64_t>();
                 if (!body["mode"].is_number_integer() || raw < INT8_MIN || raw > INT8_MAX) {
                   return mm::api::badRequest(std::format(

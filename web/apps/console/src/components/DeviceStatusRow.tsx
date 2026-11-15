@@ -66,7 +66,7 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
   // only the standard modes — it is CiA402's view — so 0x6061 = -2 arrives as "Unknown" and is
   // resolved here to "Diagnostics".
   const modesQuery = useOperationModes(slavePosition, isCia402 && mailboxActive)
-  const activeMode = status ? findMode(modesQuery.data?.modes, status.modeOfOperation) : undefined
+  const activeMode = status ? findMode(modesQuery.data?.modes, status.operationMode) : undefined
   const modeName = activeMode?.name ?? status?.modeName
 
   const commandMutation = useMutation({
@@ -81,7 +81,7 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
   const [selectedMode, setSelectedMode] = useState<number | null>(null)
   const [selectedState, setSelectedState] = useState<Cia402TargetState | null>(null)
   useEffect(() => {
-    if (selectedMode === null && status) setSelectedMode(status.modeOfOperation)
+    if (selectedMode === null && status) setSelectedMode(status.operationMode)
   }, [status, selectedMode])
   useEffect(() => {
     if (selectedState !== null || !status) return
@@ -152,7 +152,7 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
                 <div className="flex items-baseline gap-1.5">
                   <span className={labelCls}>Mode</span>
                   <span className="text-xs" title={activeMode?.label}>
-                    {modeName} ({status.modeOfOperation})
+                    {modeName} ({status.operationMode})
                   </span>
                 </div>
                 <div className="flex items-baseline gap-1.5">
@@ -178,7 +178,7 @@ export default function DeviceStatusRow({ context }: DeviceStatusRowProps) {
               aria-label="Operation mode"
               className={barSelect}
               disabled={!canSetMode || setModeMutation.isPending}
-              value={selectedMode ?? status?.modeOfOperation ?? 0}
+              value={selectedMode ?? status?.operationMode ?? 0}
               onChange={(e) => setSelectedMode(Number(e.target.value))}
               title={
                 canSetMode

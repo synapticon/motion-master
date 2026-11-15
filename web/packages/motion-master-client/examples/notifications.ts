@@ -11,14 +11,14 @@
 //     pnpm example examples/notifications.ts
 //     pnpm example examples/notifications.ts --count 5
 
-import { parseArgs } from 'node:util';
 import { MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli, integer } from './options';
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({
-    options: { count: { type: 'string', default: '0' } },
-  });
-  const count = Number(args.count);
+  const { count } = cli()
+    .option('--count <n>', 'stop after N notifications (0 = until Ctrl-C)', integer, 0)
+    .parse()
+    .opts<{ count: number }>();
 
   const client = await MotionMasterClient.fromConfig();
   console.log("subscribed to 'notifications' -- Ctrl-C to stop");

@@ -1,5 +1,5 @@
-// Compares the public names of the Python and the TypeScript client with the parity table,
-// clients/PARITY.md, and exits with 1 when they differ.
+// Compares the public names and the example programs of the Python and the TypeScript client with
+// the parity table, clients/PARITY.md, and exits with 1 when they differ.
 //
 // The Python names come from tools/client_public_names.py, which reads the syntax tree of the
 // client. The TypeScript names come from the TypeScript compiler, which reads src/index.ts of the
@@ -8,7 +8,7 @@
 //   node tools/check-client-parity.mjs
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,12 @@ const ts = createRequire(join(packageDir, 'package.json'))('typescript');
 
 const NONE = '—';
 const MODULE = 'Module';
+const EXAMPLES = 'Examples';
+
+// The example programs of each client. A helper module that the examples import is no example.
+const pythonExamplesDir = join(root, 'clients', 'python', 'examples');
+const typescriptExamplesDir = join(packageDir, 'examples');
+const TYPESCRIPT_EXAMPLE_HELPERS = new Set(['files.ts', 'options.ts']);
 
 /** Parses the table into rows, each with its section: the module, or the name of a class. */
 function readTable() {
@@ -61,6 +67,25 @@ function camelCase(name) {
     return name;
   }
   return name.replace(/_([a-z0-9])/g, (_, letter) => letter.toUpperCase());
+}
+
+/** Returns the example programs of both clients, by file name. */
+function readExamples() {
+  const files = (dir, extension) =>
+    readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(extension))
+      .map((entry) => entry.name);
+  return {
+    python: files(pythonExamplesDir, '.py'),
+    typescript: files(typescriptExamplesDir, '.ts').filter(
+      (name) => !TYPESCRIPT_EXAMPLE_HELPERS.has(name),
+    ),
+  };
+}
+
+/** Returns the name of an example without its extension: scan.py and scan.ts are both scan. */
+function exampleName(file) {
+  return file.replace(/\.(py|ts)$/, '');
 }
 
 function readPythonNames() {
@@ -137,6 +162,13 @@ function check() {
         row,
         `${row.python ?? row.typescript} is in one client only, and the row gives no reason`,
       );
+    } else if (row.python && row.typescript && row.section === EXAMPLES) {
+      if (exampleName(row.python) !== exampleName(row.typescript)) {
+        fail(row, `${row.python} and ${row.typescript} must have the same name`);
+      }
+      if (row.reason) {
+        fail(row, `${row.python} is in both clients, so the row needs no reason`);
+      }
     } else if (row.python && row.typescript) {
       if (camelCase(row.python) !== row.typescript) {
         fail(
@@ -152,15 +184,19 @@ function check() {
 
   const python = readPythonNames();
   const typescript = readTypeScriptNames();
+  const examples = readExamples();
   const sections = [...new Set(rows.map((row) => row.section))];
   for (const section of sections) {
     const sectionRows = rows.filter((row) => row.section === section);
-    const inCode = {
-      python: new Set(section === MODULE ? python.module : (python.classes[section] ?? [])),
-      typescript: new Set(
-        section === MODULE ? typescript.values : (typescript.classes[section] ?? []),
-      ),
-    };
+    const inCode =
+      section === EXAMPLES
+        ? { python: new Set(examples.python), typescript: new Set(examples.typescript) }
+        : {
+            python: new Set(section === MODULE ? python.module : (python.classes[section] ?? [])),
+            typescript: new Set(
+              section === MODULE ? typescript.values : (typescript.classes[section] ?? []),
+            ),
+          };
     // The table must list every runtime export. A row may also name a type, such as Cia402State.
     const existing = {
       python: inCode.python,

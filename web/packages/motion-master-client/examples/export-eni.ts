@@ -13,19 +13,22 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { parseArgs } from 'node:util';
 import { AlState, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { FILES_DIR } from './files';
+import { cli } from './options';
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({ options: { output: { type: 'string' } } });
+  const { output } = cli()
+    .option('--output <path>', 'local path to save to (default: files/eni.xml)')
+    .parse()
+    .opts<{ output?: string }>();
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();
   await client.ensureState(AlState.SAFEOP);
 
   const eni = await client.exportEni();
-  const out = args.output ?? `${FILES_DIR}/eni.xml`;
+  const out = output ?? `${FILES_DIR}/eni.xml`;
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, eni.xml, 'utf8');
   console.log(`saved ${eni.xml.length} character(s) -> ${out}`);

@@ -95,27 +95,102 @@ The examples need Node.js 22 or later. Check with `node --version`. On Fedora, `
 sudo dnf install --allowerasing nodejs22-bin nodejs22-npm-bin
 ```
 
+Each program prints its options with `--help`. It reads them with [commander](https://www.npmjs.com/package/commander), a dependency of the examples only: the package that npm installs does not need it.
+
 An example imports the package by its name, as a program that installed it from npm does. `examples/tsconfig.json` points that name to the source in `src/`, so the examples need no build. `pnpm typecheck:examples` checks them.
 
-| Program | What it does |
-| --- | --- |
-| `server-info.ts` | Prints the server version, the host, the network adapters and the game loop health. It opens no fieldbus driver. |
-| `scan.ts` | Scans the bus and lists the devices with their AL state. |
-| `reset.ts` | Closes the fieldbus driver and clears the device list. |
-| `read-parameter.ts` | Reads one parameter with its name, data type and value. `--cache` touches no bus. |
-| `read-hardware-description.ts` | Prints what a device says it is: its name, build descriptor, serial number and components. |
-| `transition-state.ts` | Moves the devices to an AL state, for example `--state op`. |
-| `restart-devices.ts` | Restarts devices through INIT up to an AL state. |
-| `cia402-state.ts` | Prints the CiA402 state of a drive, with its actual and target values. |
-| `set-target.ts` | Sets the position, velocity or torque target of a drive. **A drive that is enabled moves.** |
-| `run-procedure.ts` | Lists the procedures of a device, describes one with `--describe`, or runs one by name with its parameters as `name=value`. Ctrl-C cancels the run. |
-| `device-locate.ts` | Blinks the LEDs of a device. Only SPoE offers the procedure. |
-| `dump-process-data.ts` | Saves the recorder of the server as a `.mmpd` file in `files/`. |
-| `export-eni.ts` | Saves the bus as an ENI (EtherCAT Network Information) file in `files/`, for another EtherCAT master. |
-| `capture.ts` | Records the EtherCAT frames on the bus adapter for `--seconds` and prints the summary of late frames. Linux and macOS servers only. |
-| `stream-monitoring.ts` | Creates a monitoring of four objects and prints each batch of rows as it arrives, until Ctrl-C or `--count` batches. Deletes the monitoring at the end. |
-| `notifications.ts` | Prints the notifications of the server until Ctrl-C, or `--count` of them. It opens no fieldbus driver. |
-| `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`, prints it as a table, and saves every cycle as CSV in `files/`. **The motor turns.** |
+**The running server is shared.** A Console session that is connected to the same server sees every change that a program makes. A program that opens the driver, scans, resets or moves a device to another AL state changes what the Console shows.
+
+The AL state (Application Layer state, the EtherCAT state machine of a device) column gives the lowest state the program needs. A program moves the device up to that state when the device is lower. A device that is already higher stays where it is. Three values in that column are not states:
+
+- "Scanned" means that the program needs the devices known. It opens the driver and scans when needed, but it moves no device.
+- "Driver open" means that the program opens the driver when none is open, and scans nothing.
+- "No bus" means that the program opens no driver and leaves the server as it is.
+
+The programs are the same as the Python examples, with the same names, options and output. `clients/PARITY.md` in the repository lists each pair.
+
+### Server and bus
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `server-info.ts` | Prints the server version, the host, the network adapters and the health of the game loop. | No bus |
+| `set-game-loop-period.ts` | Changes the cycle period of the real-time game loop until the server stops. | No bus |
+| `notifications.ts` | Prints the notifications that the server sends over the WebSocket. | No bus |
+| `scan.ts` | Scans the bus and lists the devices it finds. A scan leaves every device in INIT. | Scanned |
+| `transition-state.ts` | Moves the devices to the AL state you give with `--state`, through every state between. | The state you give |
+| `restart-devices.ts` | Restarts devices through INIT up to an AL state. An enabled drive is disabled. | Scanned |
+| `reset.ts` | Closes the fieldbus driver and clears the device list. | No bus |
+| `diagnostics.ts` | Prints the ESC (EtherCAT Slave Controller) error counters and the distributed clock sync of the devices. | Scanned |
+| `capture.ts` | Records the EtherCAT frames on the bus adapter for some seconds, and prints how late the frames came back. | Driver open |
+
+### Parameters
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `read-parameter.ts` | Reads one parameter with its name, data type and decoded value. `--cache` reads no bus. | PREOP |
+| `write-parameter.ts` | Writes one parameter. It converts the value to the data type, and prints the value before and after. | PREOP |
+| `read-all-parameters.ts` | Reads the whole object dictionary of the device with the value of every entry. | PREOP |
+| `read-sdo.ts` | Reads one object with an SDO upload (Service Data Object, a mailbox read of one object dictionary entry), and prints its raw bytes. | PREOP |
+| `write-sdo.ts` | Writes raw bytes to one object with an SDO download. | PREOP |
+| `store-parameters.ts` | Stores the current parameter values in the flash of the device. | PREOP |
+| `restore-default-parameters.ts` | Restores the default values of a parameter group. **Values not stored are gone.** | PREOP |
+
+### Files and firmware
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `list-files.ts` | Lists the files stored on the device with their sizes. | PREOP |
+| `read-file.ts` | Reads a file from the device over FoE (File access over EtherCAT), and saves it in `files/`. | PREOP |
+| `write-file.ts` | Writes a local file to the device over FoE. A file of the same name is replaced. | PREOP |
+| `delete-file.ts` | Deletes a file from the flash of a SOMANET device. | PREOP |
+| `read-hardware-description.ts` | Prints what a SOMANET device says it is: the device, the assembly and their components. | PREOP |
+| `check-firmware-compatibility.ts` | Says whether a firmware package belongs on the device, from the package filename alone. It installs nothing. | PREOP |
+| `firmware-installation.ts` | Uploads a firmware package to the server and installs it on the device. The device is not controlled while it is off OP. | Scanned |
+
+### ESC registers and SII
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `read-register.ts` | Reads bytes from an ESC register. | Scanned |
+| `write-register.ts` | Writes bytes to an ESC register. | Scanned |
+| `read-sii.ts` | Prints the SII (Slave Information Interface, the configuration in the EEPROM of the device), or saves the raw image with `--output`. | Scanned |
+| `write-sii.ts` | Writes a raw SII image to the EEPROM. **A wrong image can leave the device unidentifiable.** The device adopts it after a power cycle. | Scanned |
+
+### Process data
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `read-pdo-mapping.ts` | Prints the PDO (Process Data Object) mapping of the device, with the bit offset and the name of each entry. | PREOP |
+| `write-pdo-mapping.ts` | Writes the PDO mapping from a JSON file. It moves the device to PREOP for the write, and back to SAFEOP or OP. | PREOP for the write |
+| `stream-monitoring.ts` | Creates a monitoring and prints its batches of process data from the WebSocket. | OP |
+| `monitoring.ts` | Records a move in Cyclic Synchronous Velocity with `client.monitoring()`: 250 for 2 s, then 0. Prints the target, the actual velocity and the CiA402 state, and saves every cycle as a CSV file in `files/`. **The motor turns.** | OP |
+| `dump-process-data.ts` | Saves the recorder of the server, every recorded cycle of process data, as a `.mmpd` file in `files/`. | SAFEOP |
+
+### Drive
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `cia402-state.ts` | Prints the CiA402 state of the drive with its actual and target values. | PREOP |
+| `set-target.ts` | Sets the position, velocity or torque target. **An enabled drive moves to it at once.** | PREOP |
+| `release-brake.ts` | Releases the brake of a SOMANET drive. It releases only while the drive is in Operation Enabled, and stays released. | PREOP |
+| `engage-brake.ts` | Engages the brake of a SOMANET drive. | PREOP |
+| `device-locate.ts` | Blinks the LEDs of the device. Only SPoE offers it. | PREOP |
+
+### Procedures
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `run-procedure.ts` | Lists the procedures of a device. With a name, it runs that procedure with parameters given as `name=value`, and prints each step with its result. `--describe` prints the description, caveats and parameters instead. | PREOP, or `--state` |
+| `offset-detection.ts` | Runs the offset detection procedure on a SOMANET drive, and prints each step with its result. **It turns the motor and releases the brake.** Ctrl-C cancels the run. | OP |
+| `system-identification.ts` | Configures the system identification chirp, and arms it with `--start`. **Once armed, it turns the motor.** | PREOP |
+| `plant-identification.ts` | Identifies the plant model with a chirp, and writes `plant_model.csv`. **It turns the motor in both directions.** | OP |
+
+### ESI and ENI
+
+| Program | What it does | AL state |
+| --- | --- | --- |
+| `parse-esi.ts` | Parses an ESI (EtherCAT Slave Information) file and lists the devices it describes. | No bus |
+| `export-eni.ts` | Saves the bus as an ENI (EtherCAT Network Information) file in `files/`, for another master to replay. | SAFEOP |
 
 Each program brings the server to the state it needs, so no program has to run before another. Each one runs its `main()` through `run()`. An error a user can act on, such as a server that is not running, then ends the program with one line instead of a stack trace.
 

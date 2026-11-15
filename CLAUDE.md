@@ -1148,6 +1148,13 @@ the same commit. A helper that belongs to one language gets a row with the other
 the reason. A Console function that is not about the UI belongs in the TypeScript client, and then
 under this rule.
 
+**The examples follow the same rule.** Each task has one example program in each client, with the
+same file name, the same options and the same output: `clients/python/examples/scan.py` and
+`web/packages/motion-master-client/examples/scan.ts`. The section Examples of `clients/PARITY.md`
+lists every pair, and the same check reads both folders. An example added, renamed or removed in
+one client changes in the other in the same commit. The Python `production/` scripts are not
+examples and stay out of the table.
+
 ## Dependencies
 
 Managed by vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add one: edit

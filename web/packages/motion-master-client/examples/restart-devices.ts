@@ -11,7 +11,6 @@
 //     pnpm example examples/restart-devices.ts
 //     pnpm example examples/restart-devices.ts --state preop --slave 2
 
-import { parseArgs } from 'node:util';
 import {
   AlState,
   alStateName,
@@ -20,6 +19,8 @@ import {
   run,
   type TargetAlState,
 } from '@synapticon/motion-master-client';
+import { Option } from 'commander';
+import { cli, integer } from './options';
 
 // The states a device can be commanded to, by their names in lowercase: init, preop, boot, ...
 const STATES = Object.fromEntries(
@@ -29,22 +30,22 @@ const STATES = Object.fromEntries(
 ) as Record<string, TargetAlState>;
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({
-    options: {
-      state: { type: 'string', default: 'op' },
-      slave: { type: 'string' },
-    },
-  });
-  const target = STATES[args.state];
-  if (target === undefined) {
-    throw new Error(`--state must be one of ${Object.keys(STATES).join(', ')}`);
-  }
+  const { state, slave } = cli()
+    .addOption(
+      new Option('--state <state>', 'the AL state to restart to')
+        .choices(Object.keys(STATES))
+        .default('op'),
+    )
+    .option('--slave <n>', 'one device position (default: every device)', integer)
+    .parse()
+    .opts<{ state: string; slave?: number }>();
+  const target = STATES[state];
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();
   await client.ensureScanned();
 
-  const body = args.slave ? { target, positions: [Number(args.slave)] } : { target };
+  const body = slave ? { target, positions: [slave] } : { target };
   const result = (await client.api.restartDevices(body)).data;
   for (const d of result.devices) {
     const mark = d.reached ? '' : `  not reached, alStatusCode ${formatHex(d.alStatusCode)}`;

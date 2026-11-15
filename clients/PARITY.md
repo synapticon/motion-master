@@ -30,7 +30,7 @@ package under the name `motion-master-client`: set `DEBUG=motion-master-client` 
 `localStorage.debug = 'motion-master-client'` in a browser.
 
 This file is the parity table. `tools/check-client-parity.mjs` compares it with the public names
-of both clients and fails when they differ:
+and the example programs of both clients, and fails when they differ:
 
 ```bash
 node tools/check-client-parity.mjs
@@ -42,6 +42,7 @@ The check reads these names:
 | --- | --- | --- |
 | Module | The public classes, functions and `UPPER_CASE` constants of `motion_master_client.py`, and the names it imports from `motion_master_objects.py` | The exports of `src/index.ts`, except the generated `Api`, `HttpClient` and `ContentType` |
 | A class | The public methods, class methods and properties of the class | The public methods, static methods and getters of the class |
+| Examples | The programs in `clients/python/examples/` | The programs in `web/packages/motion-master-client/examples/`, except the helpers `files.ts` and `options.ts` |
 
 A row with a name in one column only belongs to that language. Its reason says why.
 
@@ -145,3 +146,55 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `first` | `first` | |
 | `write_csv` | `writeCsv` | |
 | `print_table` | `printTable` | |
+
+## Examples
+
+Each client has one example program per task, with the same name, the same options and the same
+output. A row names the two files. The scripts in `clients/python/examples/production/` are tools
+for one board each, not examples of the client, so the table leaves them out.
+
+| Python | TypeScript | Reason |
+| --- | --- | --- |
+| `capture.py` | `capture.ts` | |
+| `check-firmware-compatibility.py` | `check-firmware-compatibility.ts` | |
+| `cia402-state.py` | `cia402-state.ts` | |
+| `delete-file.py` | `delete-file.ts` | |
+| `device-locate.py` | `device-locate.ts` | |
+| `diagnostics.py` | `diagnostics.ts` | |
+| `dump-process-data.py` | `dump-process-data.ts` | |
+| `engage-brake.py` | `engage-brake.ts` | |
+| `export-eni.py` | `export-eni.ts` | |
+| `firmware-installation.py` | `firmware-installation.ts` | |
+| `list-files.py` | `list-files.ts` | |
+| `monitoring.py` | `monitoring.ts` | |
+| `notifications.py` | `notifications.ts` | |
+| `offset-detection.py` | `offset-detection.ts` | |
+| `parse-esi.py` | `parse-esi.ts` | |
+| `plant-identification.py` | `plant-identification.ts` | |
+| `read-all-parameters.py` | `read-all-parameters.ts` | |
+| `read-file.py` | `read-file.ts` | |
+| `read-hardware-description.py` | `read-hardware-description.ts` | |
+| `read-parameter.py` | `read-parameter.ts` | |
+| `read-pdo-mapping.py` | `read-pdo-mapping.ts` | |
+| `read-register.py` | `read-register.ts` | |
+| `read-sdo.py` | `read-sdo.ts` | |
+| `read-sii.py` | `read-sii.ts` | |
+| `release-brake.py` | `release-brake.ts` | |
+| `reset.py` | `reset.ts` | |
+| `restart-devices.py` | `restart-devices.ts` | |
+| `restore-default-parameters.py` | `restore-default-parameters.ts` | |
+| `run-procedure.py` | `run-procedure.ts` | |
+| `scan.py` | `scan.ts` | |
+| `server-info.py` | `server-info.ts` | |
+| `set-game-loop-period.py` | `set-game-loop-period.ts` | |
+| `set-target.py` | `set-target.ts` | |
+| `store-parameters.py` | `store-parameters.ts` | |
+| `stream-monitoring.py` | `stream-monitoring.ts` | |
+| `system-identification.py` | `system-identification.ts` | |
+| `transition-state.py` | `transition-state.ts` | |
+| `write-file.py` | `write-file.ts` | |
+| `write-parameter.py` | `write-parameter.ts` | |
+| `write-pdo-mapping.py` | `write-pdo-mapping.ts` | |
+| `write-register.py` | `write-register.ts` | |
+| `write-sdo.py` | `write-sdo.ts` | |
+| `write-sii.py` | `write-sii.ts` | |

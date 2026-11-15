@@ -10,7 +10,6 @@
 //     pnpm example examples/device-locate.ts
 //     pnpm example examples/device-locate.ts --duration 30 --slave 2
 
-import { parseArgs } from 'node:util';
 import {
   AlState,
   formatStep,
@@ -20,19 +19,17 @@ import {
   run,
   stepChanges,
 } from '@synapticon/motion-master-client';
+import { cli, integer } from './options';
 
 const PROCEDURE = 'device-locate';
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({
-    options: {
-      slave: { type: 'string', default: '1' },
-      duration: { type: 'string', default: '10' },
-    },
-  });
-  const slave = Number(args.slave);
-  // The duration in seconds, 1 to 3600, as the procedure defines it.
-  const params = { duration: Number(args.duration) } as ProcedureRequest;
+  const { slave, duration } = cli()
+    .option('--slave <n>', 'the position of the device on the bus', integer, 1)
+    .option('--duration <s>', 'seconds, 1 to 3600', integer, 10)
+    .parse()
+    .opts<{ slave: number; duration: number }>();
+  const params = { duration } as ProcedureRequest;
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();

@@ -12,30 +12,30 @@
 //     pnpm example examples/set-target.ts --target velocity --value 1000
 //     pnpm example examples/set-target.ts --target position --value 0 --slave 2
 
-import { parseArgs } from 'node:util';
 import {
   AlState,
   type Cia402TargetKind,
   MotionMasterClient,
   run,
 } from '@synapticon/motion-master-client';
+import { Option } from 'commander';
+import { cli, integer } from './options';
 
 const KINDS: Cia402TargetKind[] = ['position', 'velocity', 'torque'];
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({
-    options: {
-      slave: { type: 'string', default: '1' },
-      target: { type: 'string' },
-      value: { type: 'string' },
-    },
-  });
-  const kind = KINDS.find((k) => k === args.target);
-  if (kind === undefined || args.value === undefined) {
-    throw new Error(`--target must be one of ${KINDS.join(', ')}, and --value is required`);
-  }
-  const slave = Number(args.slave);
-  const value = Number(args.value);
+  const {
+    slave,
+    target: kind,
+    value,
+  } = cli()
+    .option('--slave <n>', 'the position of the device on the bus', integer, 1)
+    .addOption(
+      new Option('--target <kind>', 'the target to set').choices(KINDS).makeOptionMandatory(),
+    )
+    .requiredOption('--value <n>', 'signed, in the units of the object', integer)
+    .parse()
+    .opts<{ slave: number; target: Cia402TargetKind; value: number }>();
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();

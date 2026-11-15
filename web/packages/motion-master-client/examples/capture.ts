@@ -11,12 +11,14 @@
 //     pnpm example examples/capture.ts
 //     pnpm example examples/capture.ts --seconds 30
 
-import { parseArgs } from 'node:util';
 import { MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli, integer } from './options';
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({ options: { seconds: { type: 'string', default: '10' } } });
-  const seconds = Number(args.seconds);
+  const { seconds } = cli()
+    .option('--seconds <n>', 'capture length, 1 to 300', integer, 10)
+    .parse()
+    .opts<{ seconds: number }>();
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();

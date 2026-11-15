@@ -20,8 +20,8 @@
 //     pnpm example examples/stream-monitoring.ts --count 10
 //     pnpm example examples/stream-monitoring.ts --slave 2 --interval 500     # runs until Ctrl-C
 
-import { parseArgs } from 'node:util';
 import { AlState, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli, integer } from './options';
 
 const TOPIC = 'typescript-example';
 
@@ -32,15 +32,12 @@ function rowTime(timestampUs: number): string {
 }
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({
-    options: {
-      slave: { type: 'string', default: '1' },
-      interval: { type: 'string', default: '100' },
-      count: { type: 'string', default: '0' },
-    },
-  });
-  const slave = Number(args.slave);
-  const count = Number(args.count);
+  const { slave, interval, count } = cli()
+    .option('--slave <n>', 'the position of the device on the bus', integer, 1)
+    .option('--interval <ms>', 'flush cadence in ms (5-2000)', integer, 100)
+    .option('--count <n>', 'stop after N batches (0 = until Ctrl-C)', integer, 0)
+    .parse()
+    .opts<{ slave: number; interval: number; count: number }>();
 
   // Each parameter is [devicePosition, index, subindex].
   const parameters: [number, number, number][] = [
@@ -59,7 +56,7 @@ async function main(): Promise<void> {
   await client.api.deleteMonitoring(TOPIC).catch(() => {});
   await client.api.createMonitoring({
     topic: TOPIC,
-    interval: Number(args.interval),
+    interval,
     parameters,
   });
 

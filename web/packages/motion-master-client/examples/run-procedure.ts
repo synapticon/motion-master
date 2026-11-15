@@ -27,7 +27,6 @@
 //     pnpm example examples/run-procedure.ts offset-detection --state op --slave 2
 
 import { readFileSync } from 'node:fs';
-import { parseArgs } from 'node:util';
 import {
   AlState,
   formatStep,
@@ -38,6 +37,8 @@ import {
   stepChanges,
   type TargetAlState,
 } from '@synapticon/motion-master-client';
+import { Option } from 'commander';
+import { cli, integer } from './options';
 
 type Descriptor = Awaited<
   ReturnType<MotionMasterClient['api']['listProcedures']>
@@ -156,18 +157,24 @@ function describe(descriptor: Descriptor): void {
 }
 
 async function main(): Promise<void> {
-  const { values: args, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      slave: { type: 'string', default: '1' },
-      state: { type: 'string', default: 'preop' },
-      describe: { type: 'boolean', default: false },
-    },
-  });
-  const [name, ...assignments] = positionals;
-  const slave = Number(args.slave);
-  const state =
-    STATES[args.state] ?? fail(`--state must be one of ${Object.keys(STATES).join(', ')}`);
+  const command = cli()
+    .argument('[name]', 'the procedure to run (default: list them)')
+    .argument('[params...]', 'parameters as name=value')
+    .option('--slave <n>', 'the position of the device on the bus', integer, 1)
+    .addOption(
+      new Option('--state <state>', 'the state to move the device to first')
+        .choices(Object.keys(STATES))
+        .default('preop'),
+    )
+    .option('--describe', 'describe the procedure, do not run it', false)
+    .parse();
+  const [name, ...assignments] = command.args;
+  const {
+    slave,
+    state: stateName,
+    describe: describeOnly,
+  } = command.opts<{ slave: number; state: string; describe: boolean }>();
+  const state = STATES[stateName];
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();
@@ -184,7 +191,7 @@ async function main(): Promise<void> {
   }
 
   const descriptor = descriptors.get(name) ?? fail(`slave ${slave} has no procedure '${name}'`);
-  if (args.describe) {
+  if (describeOnly) {
     describe(descriptor);
     return;
   }

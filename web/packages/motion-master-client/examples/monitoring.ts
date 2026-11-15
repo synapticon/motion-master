@@ -26,7 +26,6 @@
 //     pnpm example examples/monitoring.ts --slave 2 --velocity 500 --seconds 3 --output /tmp/move.csv
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { parseArgs } from 'node:util';
 import {
   AlState,
   Cia402,
@@ -37,6 +36,7 @@ import {
   Somanet,
 } from '@synapticon/motion-master-client';
 import { FILES_DIR, fileStamp } from './files';
+import { cli, float, integer } from './options';
 
 // The monitored objects, in the order of the columns.
 const OBJECTS = [
@@ -92,17 +92,14 @@ function printSummary(m: MonitoringRecording, slave: number, velocity: number): 
 }
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({
-    options: {
-      slave: { type: 'string', default: '1' },
-      velocity: { type: 'string', default: '250' },
-      seconds: { type: 'string', default: '2' },
-      every: { type: 'string', default: '100' },
-      output: { type: 'string' },
-    },
-  });
-  const slave = Number(args.slave);
-  const velocity = Number(args.velocity);
+  const { slave, velocity, seconds, every, output } = cli()
+    .option('--slave <n>', 'the position of the device on the bus', integer, 1)
+    .option('--velocity <n>', 'target velocity, units of 0x60FF', integer, 250)
+    .option('--seconds <s>', 'how long to hold the velocity', float, 2)
+    .option('--every <ms>', 'print one line every N ms', integer, 100)
+    .option('--output <path>', 'CSV file (default: files/monitoring-<time>.csv)')
+    .parse()
+    .opts<{ slave: number; velocity: number; seconds: number; every: number; output?: string }>();
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();
@@ -124,9 +121,9 @@ async function main(): Promise<void> {
         // A target left from an earlier run would turn the motor at the enable.
         await client.setTarget(slave, 'velocity', 0);
         await client.enable(slave);
-        console.log(`turning at ${velocity} for ${args.seconds} s`);
+        console.log(`turning at ${velocity} for ${seconds} s`);
         await client.setTarget(slave, 'velocity', velocity);
-        await sleep(Number(args.seconds) * 1000, undefined, { signal });
+        await sleep(seconds * 1000, undefined, { signal });
         await client.setTarget(slave, 'velocity', 0);
         await sleep(AFTER_STOP_MS, undefined, { signal });
       },
@@ -150,10 +147,10 @@ async function main(): Promise<void> {
     }
   });
 
-  m.printTable({ everyMs: Number(args.every) });
+  m.printTable({ everyMs: every });
   printSummary(m, slave, velocity);
 
-  const out = args.output ?? `${FILES_DIR}/monitoring-${fileStamp()}.csv`;
+  const out = output ?? `${FILES_DIR}/monitoring-${fileStamp()}.csv`;
   await m.writeCsv(out);
   console.log(`saved ${m.rows.length} row(s) -> ${out}`);
 }

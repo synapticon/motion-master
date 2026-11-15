@@ -10,12 +10,14 @@
 //     pnpm example examples/cia402-state.ts
 //     pnpm example examples/cia402-state.ts --slave 2
 
-import { parseArgs } from 'node:util';
 import { AlState, formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { cli, integer } from './options';
 
 async function main(): Promise<void> {
-  const { values: args } = parseArgs({ options: { slave: { type: 'string', default: '1' } } });
-  const slave = Number(args.slave);
+  const { slave } = cli()
+    .option('--slave <n>', 'the position of the device on the bus', integer, 1)
+    .parse()
+    .opts<{ slave: number }>();
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();

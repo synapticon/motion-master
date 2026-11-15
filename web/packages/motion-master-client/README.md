@@ -7,9 +7,7 @@ The package contains four parts:
 - `client.api`: an HTTP client for every operation of the Motion Master API. It is generated from the OpenAPI specification of the server.
 - `client.ws`: a connection to the WebSocket of the server. It delivers monitoring data and notifications.
 - The helper methods of the client, for the steps that most programs take. [Helpers](#helpers) lists them.
-- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, and the host names for a server on another machine.
-
-The licence is GPL v3, the licence of the whole Motion Master repository.
+- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, `integerFromBytes`, hex text with `formatHex` and `formatHexBytes`, object names with `objectName` and `objectAddressText`, and the host names for a server on another machine.
 
 ## Version
 
@@ -82,7 +80,7 @@ Without `path`, `fromConfig({ path })` reads `config.jsonc` in the current direc
 
 ## Examples
 
-The folder `examples/` holds one program per task, as the Python client does. Each program is a TypeScript file that runs in Node.js 22 with `tsx`. Create `config.jsonc` first, then run a program from the folder of the package:
+The folder `examples/` holds one program per task, with the same name, options and output as the Python example of that task. Each program is a TypeScript file that runs with `tsx`. Create `config.jsonc` first, then run a program from the folder of the package:
 
 ```bash
 pnpm install
@@ -95,7 +93,7 @@ The examples need Node.js 22 or later. Check with `node --version`. On Fedora, `
 sudo dnf install --allowerasing nodejs22-bin nodejs22-npm-bin
 ```
 
-Each program prints its options with `--help`. It reads them with [commander](https://www.npmjs.com/package/commander), a dependency of the examples only: the package that npm installs does not need it.
+Each program prints what it does and its options with `--help`. It reads them with [commander](https://www.npmjs.com/package/commander), a dependency of the examples only: the package that npm installs does not need it. Three modules hold what the programs share, and are no examples of their own: `options.ts` (the command line), `procedures.ts` (`runToEnd`, which runs a procedure to its end and cancels it on Ctrl-C) and `files.ts` (the `files/` folder that the programs save into).
 
 An example imports the package by its name, as a program that installed it from npm does. `examples/tsconfig.json` points that name to the source in `src/`, so the examples need no build. `pnpm typecheck:examples` checks them.
 
@@ -196,7 +194,7 @@ Each program brings the server to the state it needs, so no program has to run b
 
 ## Helpers
 
-The client has helpers for the steps that most programs begin with. They have the same names and the same behaviour as the helpers of the Python client, in camelCase. A required argument is positional. An optional one goes into an options object, with the same name as in Python, in camelCase. `clients/PARITY.md` in the repository lists both sets.
+The client has helpers for the steps that most programs take. They have the same names and the same behaviour as the helpers of the Python client, in camelCase. A required argument is positional. An optional one goes into an options object, with the same name as in Python, in camelCase. `clients/PARITY.md` in the repository lists both sets.
 
 - `init({ fieldbus })` opens the fieldbus driver, unless one is open already. Without `fieldbus`, it sends the settings of the client.
 - `reset()` closes the fieldbus driver and forgets every device. The devices stay in their AL state.
@@ -204,7 +202,9 @@ The client has helpers for the steps that most programs begin with. They have th
 - `devices()` returns the scanned devices, in bus order.
 - `parameters(slavePosition)` returns every parameter of a device, with its value and metadata.
 - `hardwareDescription(slavePosition)` returns the parsed `.hardware_description` of a device.
-- `readValue(slavePosition, address)` reads one object and returns the value that the server decoded.
+- `readValue(slavePosition, address)` reads one object and returns the value that the server decoded. `writeValue(slavePosition, address, value)` writes one, converted by the server to its data type, and returns the value read back.
+- `readSdo(slavePosition, index, subindex)` returns the raw bytes of one object, read with an SDO upload, and `writeSdo(slavePosition, index, subindex, bytes)` writes raw bytes with an SDO download. `integerFromBytes(bytes, { byteOrder, signed })` turns bytes into an integer of any length, little-endian by default.
+- `listFiles(slavePosition)` returns the files on a device, each as `{ name, byteCount }`. `readFile(slavePosition, name, { format })` reads one over FoE as `'bytes'` (the default), `'text'` or `'json'`. `writeFile(slavePosition, name, content)` writes bytes, or a string as UTF-8, and `removeFile(slavePosition, name)` removes a file.
 - `waitForValue(slavePosition, address, predicate, { timeoutMs, intervalMs, signal })` reads one object until the predicate is true. It throws a `DOMException` named `TimeoutError` with the last value when the time runs out, 1000 ms by default.
 - `ensureScanned()` scans when the last scan is missing or wrong, and moves no device.
 - `ensureState(state, { positions, exact })` scans when needed and brings the devices to an AL state. A device above that state stays where it is, unless `exact` is true.

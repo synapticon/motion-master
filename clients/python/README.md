@@ -95,7 +95,12 @@ the drives are connected to. Give an interface name, such as `eth0`, or a MAC ad
 Any script can run first, because it brings the server to the state it needs. A script that
 needs a bus opens the fieldbus driver from `config.toml` when no driver is open. It scans when no
 devices are known. A script that addresses one device takes `--slave`, the position of the device
-on the bus. The default is 1. Each script prints its options with `--help`.
+on the bus. The default is 1. Each script prints what it does and its options with `--help`.
+
+Three modules in `examples/` hold what the scripts share, and are no scripts of their own:
+`options.py` (the command line), `procedures.py` (`run_to_end`, which runs a procedure to its end
+and cancels it on Ctrl-C) and `files.py` (the `files/` folder that the scripts save into). The
+TypeScript client has the same three, with the same functions.
 
 ```bash
 python examples/scan.py
@@ -249,6 +254,17 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
 - `parameters(position)` returns every parameter of a device, with its value and metadata.
 - `hardware_description(position)` returns the parsed `.hardware_description` of a device.
 - `read_value(position, obj)` reads one object and returns the value that the server decoded.
+  `write_value(position, obj, value)` writes one, converted by the server to its data type, and
+  returns the value read back.
+- `read_sdo(position, index, subindex)` returns the raw bytes of one object, read with an SDO
+  upload, and `write_sdo(position, index, subindex, data)` writes raw bytes with an SDO download.
+  `int.from_bytes(data, "little")` turns bytes into an integer.
+- `list_files(position)` returns the files on a device, each as `{"name": ..., "byteCount": ...}`.
+  `read_file(position, name, format="bytes")` reads one over FoE as `"bytes"`, `"text"` or
+  `"json"`. `write_file(position, name, content)` writes bytes, or a str as UTF-8, and
+  `remove_file(position, name)` removes a file.
+- `object_name(index, subindex)` returns the generated name of an object, such as `STATUSWORD`, and
+  `object_address_text(index, subindex)` its address, such as `0x6041:00`.
 - `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until
   the predicate is true. It raises `TimeoutError` with the last value when the time runs out.
 - `ensure_scanned()` scans when the last scan is missing or wrong, and moves no device.

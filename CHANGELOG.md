@@ -26,7 +26,18 @@ the HTTP/WebSocket API may break between any two alphas.
 - The TypeScript client builds a client from `config.jsonc`, JSON with comments, with
   `MotionMasterClient.fromConfig()`, in Node.js. The file has the keys of `config.toml` of the Python
   client, in camelCase.
-- The TypeScript client has example programs in `examples/`, which run with `tsx`.
+- The TypeScript client has an example program for every task that the Python client has one for,
+  in `examples/`, with the same name, options and output. They run with `tsx`, read their options
+  with commander, and print what they do with `--help`. `clients/PARITY.md` lists every pair, and
+  CI fails when a client has an example that its twin lacks.
+- Both clients read and write objects and files with `writeValue()`, `readSdo()`, `writeSdo()`,
+  `listFiles()`, `readFile()`, `writeFile()` and `removeFile()`, and the Python twins
+  `write_value()`, `read_sdo()` and so on. `readFile()` returns bytes, text or JSON. `writeFile()`
+  writes a string as UTF-8.
+- The TypeScript client exports `objectName()` and `objectAddressText()`, with the Python twins
+  `object_name()` and `object_address_text()`, and formats bytes as hex with `formatHexBytes()`.
+- The examples of both clients share their command line, the run of a procedure and their files
+  folder through `options`, `procedures` and `files` modules, the same in both languages.
 - The TypeScript client has the device and AL state helpers of the Python client: `init`, `reset`,
   `scan`, `devices`, `parameters`, `hardwareDescription`, `waitForValue`, `ensureScanned`,
   `ensureState` and `restart`, and `StateError`. They log each step through the `debug` package,

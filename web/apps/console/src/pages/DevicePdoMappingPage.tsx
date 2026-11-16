@@ -9,6 +9,7 @@ import {
   type PdoMapping,
   type PdoMappingRequest,
   type PdoMappingRequestObject,
+  parseInteger,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import DevicePageHeader from '../components/DevicePageHeader';
@@ -47,22 +48,9 @@ interface Draft {
 
 type Direction = keyof Draft;
 
-// Parses a hex ("0x...") or decimal string to a number, or NaN if it is neither.
-function parseNum(s: string): number {
-  const t = s.trim();
-  if (/^0x[0-9a-f]+$/i.test(t)) {
-    return parseInt(t.slice(2), 16);
-  }
-  if (/^[0-9]+$/.test(t)) {
-    return parseInt(t, 10);
-  }
-  return NaN;
-}
-
 // A valid integer parse, or null (so it can feed the picker's selected index/subindex).
 function parsedOrNull(s: string): number | null {
-  const n = parseNum(s);
-  return Number.isInteger(n) ? n : null;
+  return parseInteger(s, { min: 0 });
 }
 
 // Converts a device read-back into an editable draft (indices as hex, subindex/bitLength as decimal;
@@ -84,22 +72,22 @@ function fromResponse(m: PdoMapping): Draft {
 // out-of-range field (index/pdoIndex 16-bit, subindex/bitLength 8-bit).
 function toRequestObjects(objs: DraftObject[], dir: string): PdoMappingRequestObject[] {
   return objs.map((o, oi) => {
-    const pdoIndex = parseNum(o.pdoIndex);
-    if (!Number.isInteger(pdoIndex) || pdoIndex < 0 || pdoIndex > 0xffff) {
+    const pdoIndex = parseInteger(o.pdoIndex, { min: 0, max: 0xffff });
+    if (pdoIndex === null) {
       throw `${dir} object ${oi + 1}: pdoIndex must be 0…0xFFFF`;
     }
     const where = `${dir} ${formatHex(pdoIndex)}`;
     const entries = o.entries.map((e, ei) => {
-      const index = parseNum(e.index);
-      const subindex = parseNum(e.subindex);
-      const bitLength = parseNum(e.bitLength);
-      if (!Number.isInteger(index) || index < 0 || index > 0xffff) {
+      const index = parseInteger(e.index, { min: 0, max: 0xffff });
+      const subindex = parseInteger(e.subindex, { min: 0, max: 0xff });
+      const bitLength = parseInteger(e.bitLength, { min: 0, max: 0xff });
+      if (index === null) {
         throw `${where} entry ${ei + 1}: index must be 0…0xFFFF`;
       }
-      if (!Number.isInteger(subindex) || subindex < 0 || subindex > 0xff) {
+      if (subindex === null) {
         throw `${where} entry ${ei + 1}: subindex must be 0…255`;
       }
-      if (!Number.isInteger(bitLength) || bitLength < 0 || bitLength > 0xff) {
+      if (bitLength === null) {
         throw `${where} entry ${ei + 1}: bitLength must be 0…255`;
       }
       return { index, subindex, bitLength };
@@ -111,8 +99,7 @@ function toRequestObjects(objs: DraftObject[], dir: string): PdoMappingRequestOb
 // Sum of an object's mapped bit widths (invalid/blank entries count as 0), for the header badge.
 function objectBits(obj: DraftObject): number {
   return obj.entries.reduce((sum, e) => {
-    const n = parseNum(e.bitLength);
-    return sum + (Number.isInteger(n) && n > 0 ? n : 0);
+    return sum + (parseInteger(e.bitLength, { min: 1 }) ?? 0);
   }, 0);
 }
 
@@ -257,8 +244,7 @@ function DirectionEditor({
   const offsets = objects.map((o) =>
     o.entries.map((e) => {
       const at = runningBits;
-      const len = parseNum(e.bitLength);
-      runningBits += Number.isInteger(len) && len > 0 ? len : 0;
+      runningBits += parseInteger(e.bitLength, { min: 1 }) ?? 0;
       return at;
     }),
   );

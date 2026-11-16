@@ -6,6 +6,7 @@ import {
   type DeviceParameter,
   type ProcessImageObject,
   objectAddressText,
+  parseInteger,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import PageHeader from '../components/PageHeader';
@@ -26,17 +27,6 @@ const TOPIC = 'process-data';
 // Flush cadence for the live stream (ms). 100 ms ≈ 10 Hz — plenty for a values panel and far cheaper
 // than chart-grade rates; the stream stays lossless regardless (every cycle is delivered per batch).
 const FLUSH_MS = 100;
-
-function parseHexOrDec(s: string): number | null {
-  const t = s.trim();
-  if (/^[-+]?0[xX][0-9a-fA-F]+$/.test(t)) {
-    return parseInt(t.replace(/0[xX]/, ''), 16);
-  }
-  if (/^[-+]?[0-9]+$/.test(t)) {
-    return parseInt(t, 10);
-  }
-  return null;
-}
 
 function objKey(pos: number, index: number, subindex: number): string {
   return `${pos}:${index}:${subindex}`;
@@ -80,7 +70,7 @@ function parseValue(
     const n = Number(t);
     return Number.isFinite(n) ? { ok: true, value: n } : { ok: false, error: 'not a number' };
   }
-  const n = parseHexOrDec(t);
+  const n = parseInteger(t);
   return n === null
     ? { ok: false, error: 'not an integer (use decimal or 0x…)' }
     : { ok: true, value: n };

@@ -1,6 +1,7 @@
 // Encoding and decoding helpers for CoE SDO values: turning the raw little-endian
 // byte arrays exchanged over the wire into human-readable values and back.
 import { parseHexBytes } from './hex';
+import { parseBigInt } from './integer';
 
 // CoE data types the SDO download card can encode a value into. `raw` is an
 // escape hatch for entering bytes directly.
@@ -47,22 +48,6 @@ const INT_ENC: Partial<Record<SdoType, { size: number; signed: boolean }>> = {
   int64: { size: 8, signed: true },
 };
 
-// Accepts decimal (with optional leading '-') or 0x-prefixed hex; returns null on anything else.
-// Signed hex is signed-magnitude ("-0x1"), not two's-complement — so a value round-trips through
-// the range check in encodeSdoValue regardless of the base it was entered in.
-export function parseIntegerFlexible(s: string): bigint | null {
-  if (/^-?[0-9]+$/.test(s)) {
-    return BigInt(s);
-  }
-  if (/^0[xX][0-9a-fA-F]+$/.test(s)) {
-    return BigInt(s);
-  }
-  if (/^-0[xX][0-9a-fA-F]+$/.test(s)) {
-    return -BigInt(s.slice(1));
-  }
-  return null;
-}
-
 // True for the fixed-width integer types — the ones a value can meaningfully be shown and edited
 // in hexadecimal (floats and strings have no base; `raw` is already entered as hex bytes).
 export function isIntegerSdoType(type: SdoType): boolean {
@@ -78,7 +63,7 @@ export function encodeSdoValue(
 
   const meta = INT_ENC[type];
   if (meta) {
-    const n = parseIntegerFlexible(s);
+    const n = parseBigInt(s);
     if (n === null) {
       return { error: 'Not a valid integer' };
     }

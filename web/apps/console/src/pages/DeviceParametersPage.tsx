@@ -26,6 +26,7 @@ import {
   formatHex,
   formatHexBytes,
   objectAddressText,
+  parseInteger,
 } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
@@ -34,17 +35,6 @@ const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 const btnGhostCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
-
-function parseHexOrDec(s: string): number | null {
-  const t = s.trim();
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) {
-    return parseInt(t.slice(2), 16);
-  }
-  if (/^[0-9]+$/.test(t)) {
-    return parseInt(t, 10);
-  }
-  return null;
-}
 
 function formatValue(v: number | string | number[] | undefined): string {
   if (v === undefined) {
@@ -252,8 +242,8 @@ const ReadSdoCard = memo(function ReadSdoCard({
   const [readSdoElapsedMs, setReadSdoElapsedMs] = useState<number | null>(null);
   const [readSdoWireMs, setReadSdoWireMs] = useState<number | null>(null);
 
-  const indexNum = parseHexOrDec(index);
-  const subindexNum = parseHexOrDec(subindex);
+  const indexNum = parseInteger(index, { min: 0 });
+  const subindexNum = parseInteger(subindex, { min: 0 });
   const indexValid = indexNum !== null && indexNum >= 0 && indexNum <= 0xffff;
   const subindexValid = subindexNum !== null && subindexNum >= 0 && subindexNum <= 0xff;
   const canUpload = indexValid && subindexValid && !uploading;
@@ -393,8 +383,8 @@ const WriteSdoCard = memo(function WriteSdoCard({
   const [writeSdoElapsedMs, setWriteSdoElapsedMs] = useState<number | null>(null);
   const [writeSdoWireMs, setWriteSdoWireMs] = useState<number | null>(null);
 
-  const dlIndexNum = parseHexOrDec(dlIndex);
-  const dlSubindexNum = parseHexOrDec(dlSubindex);
+  const dlIndexNum = parseInteger(dlIndex, { min: 0 });
+  const dlSubindexNum = parseInteger(dlSubindex, { min: 0 });
   const dlIndexValid = dlIndexNum !== null && dlIndexNum >= 0 && dlIndexNum <= 0xffff;
   const dlSubindexValid = dlSubindexNum !== null && dlSubindexNum >= 0 && dlSubindexNum <= 0xff;
 

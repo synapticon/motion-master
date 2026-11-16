@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ProcedureParameter } from '@synapticon/motion-master-client';
+import { type ProcedureParameter, parseInteger } from '@synapticon/motion-master-client';
 import FilePickerButton from './FilePickerButton';
 
 // One shared control height for every interactive control, matching the device pages: this theme's
@@ -65,17 +65,6 @@ export function initialParameterValues(parameters: ProcedureParameter[]): Parame
 }
 
 /** A decimal or `0x`-prefixed hex integer, or null when the text is not one. */
-function parseInteger(text: string): number | null {
-  const token = text.trim();
-  if (token === '') {
-    return null;
-  }
-  const value = /^0[xX][0-9a-fA-F]+$/.test(token)
-    ? Number.parseInt(token.slice(2), 16)
-    : Number(token);
-  return Number.isInteger(value) ? value : null;
-}
-
 /**
  * Turns the fields into a request body, or says what is wrong with them.
  *
@@ -133,8 +122,8 @@ export function parseParameterValues(
       }
       const bytes: number[] = [];
       for (const token of tokens) {
-        const value = parseInteger(token);
-        if (value === null || value < 0 || value > 255) {
+        const value = parseInteger(token, { min: 0, max: 255 });
+        if (value === null) {
           errors[parameter.name] = `"${token}" is not a byte value (0-255, or 0x00-0xFF).`;
           break;
         }

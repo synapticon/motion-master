@@ -96,6 +96,15 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- The TypeScript client parses an integer with `parseInteger(text, { min, max })`, as Python's
+  `int(text, 0)` does: decimal, or `0x`, `0o` or `0b`, with an optional sign. It returns a number,
+  or null for other text, for an integer beyond 2^53 - 1 and for one outside the range.
+  `parseIntegerFlexible()` is now `parseBigInt()`, follows the same rule, and returns a `bigint`.
+  It accepted no `+`, `0o` or `0b`, and it read a decimal with a leading zero, such as `010`, which
+  it now refuses. The Console
+  and the examples use the two in place of 7 parsers of their own. So the Console's number fields
+  accept octal, binary and a `+` sign, refuse `010`, and refuse a fraction or an exponent, such as
+  `1e3`, which the procedure parameters took.
 - The Console writes a vendor ID, a product code and a revision with 8 hex digits on every page,
   such as `0x000022D2`. The Control and Parameter Cache pages wrote them without leading zeros. Its
   hex numbers, byte lists and object addresses come from `formatHex()`, `formatHexBytes()` and

@@ -96,7 +96,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `formatHex` | The hex input fields of the Console. Python formats and parses hex with `f"{value:#x}"` and `int(text, 16)`. |
 | — | `formatHexBytes` | Python writes the same with `data.hex(" ").upper()`. |
 | — | `parseHexBytes` | As `formatHex`. |
-| — | `parseIntegerFlexible` | As `formatHex`. |
+| — | `parseInteger` | The number inputs of the Console and the options of the examples. Python parses the same integers with `int(text, 0)`. |
+| — | `parseBigInt` | As `parseInteger`, for a 64-bit value as a `bigint`. Python's `int` holds any integer. |
 | — | `integerFromBytes` | Python has `int.from_bytes(data, "little", signed=...)` built in. |
 | — | `SDO_TYPES` | The SDO page of the Console encodes and decodes raw SDO bytes. A Python script reads and writes a value with `read_value` and the server decodes it. |
 | — | `SDO_TYPE_HINT` | As `SDO_TYPES`. |

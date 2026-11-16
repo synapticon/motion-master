@@ -2,7 +2,12 @@
 // options and a fixed list of values, as a Python example has with argparse. options.py is the
 // Python twin. The index of the client does not export this file.
 
-import { AlState, type TargetAlState } from '@synapticon/motion-master-client';
+import {
+  AlState,
+  parseInteger,
+  parseBigInt,
+  type TargetAlState,
+} from '@synapticon/motion-master-client';
 import { Command, InvalidArgumentError } from 'commander';
 
 /**
@@ -21,17 +26,14 @@ export function cli(): Command {
  * so is an integer that a JavaScript number cannot hold exactly.
  */
 export function integer(text: string): number {
-  const match = /^([+-]?)(0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|[1-9][0-9]*|0+)$/.exec(
-    text.trim(),
-  );
-  if (match === null) {
+  const value = parseInteger(text);
+  if (value !== null) {
+    return value;
+  }
+  if (parseBigInt(text) === null) {
     throw new InvalidArgumentError('Not an integer.');
   }
-  const value = Number(BigInt(match[2])) * (match[1] === '-' ? -1 : 1);
-  if (!Number.isSafeInteger(value)) {
-    throw new InvalidArgumentError('Beyond 2^53 - 1, which a JavaScript number cannot hold.');
-  }
-  return value;
+  throw new InvalidArgumentError('Beyond 2^53 - 1, which a JavaScript number cannot hold.');
 }
 
 /** Parses a number option that can have a fraction, as Python's float(text). */
@@ -46,8 +48,8 @@ export function float(text: string): number {
 /** Parses a list of bytes, such as 0x10,0x27 or 16,39: integers from 0 to 255, comma-separated. */
 export function byteList(text: string): number[] {
   return text.split(',').map((part) => {
-    const value = integer(part);
-    if (value < 0 || value > 255) {
+    const value = parseInteger(part, { min: 0, max: 255 });
+    if (value === null) {
       throw new InvalidArgumentError(`${part.trim()} is not a byte, 0 to 255.`);
     }
     return value;

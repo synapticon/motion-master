@@ -37,5 +37,6 @@ export * from './lan';
 export * from './eni';
 export * from './hex';
 export * from './sdo';
+export * from './integer';
 export * from './mmpd';
 export * from './wire-time';

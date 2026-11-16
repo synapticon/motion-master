@@ -8,6 +8,7 @@ import {
   type Monitoring,
   objectAddressText,
   deviceParameterText,
+  parseInteger,
 } from '@synapticon/motion-master-client';
 import CycleStatsBar from '../components/CycleStatsBar';
 import MonitoringChart from '../components/MonitoringChart';
@@ -26,17 +27,6 @@ const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 const btnGhostCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
-
-function parseHexOrDec(s: string): number | null {
-  const t = s.trim();
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) {
-    return parseInt(t.slice(2), 16);
-  }
-  if (/^[0-9]+$/.test(t)) {
-    return parseInt(t, 10);
-  }
-  return null;
-}
 
 function paramKey(pos: number, index: number, subindex: number): string {
   return `${pos}:${index}:${subindex}`;
@@ -525,9 +515,9 @@ function CreateMonitoringForm({
     }
     const parameters: number[][] = [];
     for (const [i, r] of rows.entries()) {
-      const pos = parseHexOrDec(r.devicePosition);
-      const index = parseHexOrDec(r.index);
-      const subindex = parseHexOrDec(r.subindex);
+      const pos = parseInteger(r.devicePosition, { min: 0 });
+      const index = parseInteger(r.index, { min: 0 });
+      const subindex = parseInteger(r.subindex, { min: 0 });
       if (pos === null || index === null || subindex === null) {
         setError(`Parameter ${i + 1}: device, index and subindex are required`);
         return;
@@ -681,7 +671,7 @@ function ParamRow({
   onChange: (patch: Partial<ParamRowState>) => void;
   onRemove?: () => void;
 }) {
-  const pos = parseHexOrDec(row.devicePosition);
+  const pos = parseInteger(row.devicePosition, { min: 0 });
   const deviceParams = pos !== null ? (paramsByDevice.get(pos) ?? []) : [];
 
   return (
@@ -708,8 +698,8 @@ function ParamRow({
           <ParameterPicker
             className="w-[32rem]"
             params={deviceParams}
-            selectedIndex={parseHexOrDec(row.index)}
-            selectedSubindex={parseHexOrDec(row.subindex)}
+            selectedIndex={parseInteger(row.index, { min: 0 })}
+            selectedSubindex={parseInteger(row.subindex, { min: 0 })}
             onSelect={(p) => onChange({ index: String(p.index), subindex: String(p.subindex) })}
             isDisabled={isPdoMappingObject}
             disabledHint="PDO mapping"

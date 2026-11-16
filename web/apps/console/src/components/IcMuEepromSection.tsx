@@ -9,6 +9,7 @@ import {
   type ProcedureSnapshot,
   formatHex,
   formatHexBytes,
+  parseInteger,
 } from '@synapticon/motion-master-client';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadText } from '../utils/download';
@@ -36,13 +37,7 @@ function failure(snapshot: ProcedureSnapshot | undefined): string | undefined {
 
 // A byte typed as decimal or with a 0x prefix, or nothing for anything else.
 function parseByte(text: string): number | undefined {
-  const trimmed = text.trim();
-  const value = /^0x[0-9a-f]{1,2}$/i.test(trimmed)
-    ? parseInt(trimmed.slice(2), 16)
-    : /^\d{1,3}$/.test(trimmed)
-      ? Number(trimmed)
-      : NaN;
-  return Number.isInteger(value) && value >= 0 && value <= 255 ? value : undefined;
+  return parseInteger(text, { min: 0, max: 255 }) ?? undefined;
 }
 
 function eepromCsv(bytes: IcMuEepromByte[]): string {

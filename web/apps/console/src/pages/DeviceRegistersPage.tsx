@@ -9,6 +9,7 @@ import {
   parseHexBytes,
   formatHex,
   formatHexBytes,
+  parseInteger,
 } from '@synapticon/motion-master-client';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
@@ -62,15 +63,15 @@ export default function DeviceRegistersPage() {
   const [writeError, setWriteError] = useState<string | null>(null);
   const writeTiming = useWireTiming();
 
-  const addrNum = parseInt(address, 10);
-  const addrHex = isNaN(addrNum) ? '—' : formatHex(addrNum, 4);
-  const lenNum = parseInt(length, 10);
-  const canRead = !isNaN(addrNum) && addrNum >= 0 && !isNaN(lenNum) && lenNum >= 1 && !reading;
+  const addrNum = parseInteger(address, { min: 0, max: 0xffff });
+  const addrHex = addrNum === null ? '—' : formatHex(addrNum, 4);
+  const lenNum = parseInteger(length, { min: 1 });
+  const canRead = addrNum !== null && lenNum !== null && !reading;
 
-  const writeAddrNum = parseInt(writeAddress, 10);
-  const writeAddrHex = isNaN(writeAddrNum) ? '—' : formatHex(writeAddrNum, 4);
+  const writeAddrNum = parseInteger(writeAddress, { min: 0, max: 0xffff });
+  const writeAddrHex = writeAddrNum === null ? '—' : formatHex(writeAddrNum, 4);
   const writeBytes = parseHexBytes(writeValue);
-  const canWrite = !isNaN(writeAddrNum) && writeAddrNum >= 0 && writeBytes !== null && !writing;
+  const canWrite = writeAddrNum !== null && writeBytes !== null && !writing;
 
   function selectFromCatalogue(addr: number) {
     const reg = catalogue.find((r) => r.address === addr);
@@ -96,7 +97,7 @@ export default function DeviceRegistersPage() {
   }
 
   async function handleRead() {
-    if (!canRead) {
+    if (!canRead || addrNum === null || lenNum === null) {
       return;
     }
     setReading(true);
@@ -127,7 +128,7 @@ export default function DeviceRegistersPage() {
   }
 
   async function handleWrite() {
-    if (!canWrite || writeBytes === null) {
+    if (!canWrite || writeAddrNum === null || writeBytes === null) {
       return;
     }
     const ok = window.confirm(
@@ -152,9 +153,8 @@ export default function DeviceRegistersPage() {
     }
   }
 
-  const selectedInCatalogue = isNaN(addrNum)
-    ? undefined
-    : catalogue.find((r) => r.address === addrNum);
+  const selectedInCatalogue =
+    addrNum === null ? undefined : catalogue.find((r) => r.address === addrNum);
 
   if (!supportsEsc) {
     return (

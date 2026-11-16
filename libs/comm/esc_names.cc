@@ -1,7 +1,10 @@
 #include "comm/esc_names.h"
 
+#include <algorithm>
 #include <array>
+#include <iterator>
 #include <string>
+#include <vector>
 
 namespace mm::comm {
 
@@ -112,9 +115,8 @@ nlohmann::json nameJson(std::optional<std::string_view> name) {
 
 nlohmann::json namesJson(const std::vector<std::string_view>& names) {
   nlohmann::json array = nlohmann::json::array();
-  for (const auto name : names) {
-    array.push_back(std::string(name));
-  }
+  std::transform(names.begin(), names.end(), std::back_inserter(array),
+                 [](std::string_view name) { return std::string(name); });
   return array;
 }
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <format>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -372,9 +373,8 @@ namespace {
 // What each FMMU of category 40 is used for, by position, null for a reserved value.
 nlohmann::json fmmuUsageNamesJson(const std::vector<uint8_t>& usages) {
   nlohmann::json names = nlohmann::json::array();
-  for (const auto usage : usages) {
-    names.push_back(nameJson(fmmuUsageName(usage)));
-  }
+  std::transform(usages.begin(), usages.end(), std::back_inserter(names),
+                 [](uint8_t usage) { return nameJson(fmmuUsageName(usage)); });
   return names;
 }
 

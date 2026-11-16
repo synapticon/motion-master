@@ -3155,7 +3155,7 @@ paths:
           required: true
           schema:
             type: string
-          description: FoE filename as recognised by the slave firmware
+          description: FoE filename as recognised by the slave firmware. Percent-encode it in the path, as `a%20b.txt` for `a b.txt`; the server decodes it.
           example: "firmware.bin"
       responses:
         "200":
@@ -3201,7 +3201,7 @@ paths:
           required: true
           schema:
             type: string
-          description: FoE filename as recognised by the slave firmware
+          description: FoE filename as recognised by the slave firmware. Percent-encode it in the path, as `a%20b.txt` for `a b.txt`; the server decodes it.
           example: "config.csv"
       requestBody:
         required: true
@@ -3266,7 +3266,7 @@ paths:
           required: true
           schema:
             type: string
-          description: Name as the device lists it, with no prefix
+          description: Name as the device lists it, with no prefix. Percent-encode it in the path, as `a%20b.txt` for `a b.txt`; the server decodes it.
           example: "config.csv"
       responses:
         "200":

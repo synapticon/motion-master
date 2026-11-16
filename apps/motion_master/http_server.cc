@@ -1832,9 +1832,13 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
+               // A client percent-encodes the name in the path, and a path segment arrives
+               // encoded, so a name with a space or a slash names the file it means only once
+               // decoded. The two routes below decode it the same way.
+               const std::string filename = mm::api::percentDecode(req.parameter("filename"));
                return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
                  const auto t0 = std::chrono::steady_clock::now();
-                 auto contents = device.readFile(std::string(req.parameter("filename")));
+                 auto contents = device.readFile(filename);
                  const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                      std::chrono::steady_clock::now() - t0);
                  if (!contents) {
@@ -1862,7 +1866,7 @@ void HttpServer::run() {
                }
                std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(req.body().data()),
                                              req.body().size()};
-               const std::string filename(req.parameter("filename"));
+               const std::string filename = mm::api::percentDecode(req.parameter("filename"));
                return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
                  return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
                    if (auto r = device.writeFile(filename, data); !r) {
@@ -1885,7 +1889,7 @@ void HttpServer::run() {
                if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
-               const std::string filename(req.parameter("filename"));
+               const std::string filename = mm::api::percentDecode(req.parameter("filename"));
                return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
                  if (auto removed = mm::node::removeFile(deviceManager_, *position, filename);
                      !removed) {

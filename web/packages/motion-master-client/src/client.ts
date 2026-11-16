@@ -377,7 +377,8 @@ export class MotionMasterClient {
   }
 
   /**
-   * Reads a file from a device over FoE (`foeReadFile`). `format` says what to return: `'bytes'`, a
+   * Reads a file from a device over FoE (`foeReadFile`). The name is percent-encoded in the path,
+   * so any name works, a space included. `format` says what to return: `'bytes'`, a
    * `Uint8Array` (the default), `'text'`, the file decoded as UTF-8, such as a CSV, or `'json'`, the
    * file parsed as JSON. The names are those of the methods of a `fetch` response.
    */
@@ -403,7 +404,9 @@ export class MotionMasterClient {
   ): Promise<unknown> {
     const { format = 'bytes', signal } = options;
     // No response format: the generated client returns the answer with its body unread.
-    const response = await this.api.foeReadFile(slavePosition, name, { signal });
+    const response = await this.api.foeReadFile(slavePosition, encodeURIComponent(name), {
+      signal,
+    });
     if (format === 'text') {
       return response.text();
     }
@@ -426,7 +429,8 @@ export class MotionMasterClient {
     // The generated foeWriteFile sends a body it has no formatter for as JSON, so the bytes go with
     // the fetch of this client.
     const body = typeof content === 'string' ? new TextEncoder().encode(content) : content;
-    await this.fetch(`${this.httpBaseUrl}/api/devices/${slavePosition}/files/${name}`, {
+    const path = `/api/devices/${slavePosition}/files/${encodeURIComponent(name)}`;
+    await this.fetch(`${this.httpBaseUrl}${path}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: body.slice(),
@@ -436,7 +440,7 @@ export class MotionMasterClient {
 
   /** Removes a file from the flash of a device (`deleteDeviceFile`). */
   async removeFile(slavePosition: number, name: string): Promise<void> {
-    await this.api.deleteDeviceFile(slavePosition, name);
+    await this.api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
   }
 
   /**

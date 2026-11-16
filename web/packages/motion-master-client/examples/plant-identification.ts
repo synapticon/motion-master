@@ -49,16 +49,15 @@ async function main(): Promise<void> {
       targetFrequency: number;
       amplitude: number;
       time: number;
-      signal: string;
+      signal: NonNullable<ProcedureRequest['signalType']>;
     }>();
-  // The swagger.yml schema of a procedure request does not list the chirp parameters.
-  const params = {
+  const params: ProcedureRequest = {
     startFrequencyMilliHz: startFrequency,
     targetFrequencyMilliHz: targetFrequency,
     targetAmplitudePermil: amplitude,
     transitionTimeMs: time,
     signalType: signal,
-  } as ProcedureRequest;
+  };
 
   const client = await MotionMasterClient.fromConfig();
   await client.init();

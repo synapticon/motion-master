@@ -1794,6 +1794,46 @@ export interface ProcedureRequest {
    * @example 5000
    */
   bandwidthMilliHz?: number;
+  /**
+   * `system-identification` and `plant-identification` only, and required for them: where the chirp begins, in mHz. It must not be above `targetFrequencyMilliHz`, because the sweep runs upwards.
+   * @min 100
+   * @max 1000000
+   * @example 1000
+   */
+  startFrequencyMilliHz?: number;
+  /**
+   * `system-identification` and `plant-identification` only, and required for them: where the chirp ends, in mHz.
+   * @min 100
+   * @max 1000000
+   * @example 100000
+   */
+  targetFrequencyMilliHz?: number;
+  /**
+   * `system-identification` and `plant-identification` only, and required for them: the peak excitation, in per mille of the rated torque. The logarithmic chirp starts at half of it and rises to it, and the linear chirp holds it. Neither the server nor the drive checks it, because it is a torque command, so choose it for the machine.
+   * @min 0
+   * @max 4294967295
+   * @example 100
+   */
+  targetAmplitudePermil?: number;
+  /**
+   * `system-identification` and `plant-identification` only, and required for them: how long the sweep takes. `plant-identification` has a lower maximum, because the recording adds time around the sweep. Its descriptor gives the maximum.
+   * @min 1000
+   * @max 20000
+   * @example 5000
+   */
+  transitionTimeMs?: number;
+  /**
+   * `system-identification` and `plant-identification` only: logarithmic sweeps the frequency logarithmically and raises the amplitude with it, and linear sweeps the frequency linearly at a constant amplitude.
+   * @default "logarithmic"
+   * @example "logarithmic"
+   */
+  signalType?: "logarithmic" | "linear";
+  /**
+   * `system-identification` only: whether the run arms the chirp, and on what trigger. `none` configures the drive and excites nothing. `plant-identification` arms the chirp itself.
+   * @default "none"
+   * @example "none"
+   */
+  start?: "none" | "immediately" | "after-hrd-stream-start";
   [key: string]: any;
 }
 

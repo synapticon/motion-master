@@ -244,6 +244,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+- The schema of a procedure request in `swagger.yml` lists the six chirp fields that
+  `system-identification` and `plant-identification` take: `startFrequencyMilliHz`,
+  `targetFrequencyMilliHz`, `targetAmplitudePermil`, `transitionTimeMs`, `signalType` and `start`.
+  The generated `ProcedureRequest` has them, so the two TypeScript examples build their request
+  without a cast.
+
 - The Console pages that list the user cache kept two shapes under one shared query: the listing,
   and the response that holds it. A page that read the shape of the other found no files until its
   own request returned. Every page now keeps the listing.

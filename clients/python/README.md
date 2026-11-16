@@ -266,6 +266,12 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   str as UTF-8, and returns the response. `remove_file(position, name)` removes a file.
 - `read_sii(position, format="json")` returns the parsed SII of a device, or its raw EEPROM image
   with `format="bytes"`. `write_sii(position, image)` writes a raw image.
+- `list_user_cache_files()` returns the files in the user cache of the server, a folder that keeps
+  files across restarts: its `root`, and each file with its `path` relative to the root, its `size`
+  and its `modifiedMs`. `read_user_cache_file(path, format="bytes")`,
+  `write_user_cache_file(path, content)` and `remove_user_cache_file(path)` read, write and remove
+  one file, as `read_file`, `write_file` and `remove_file` do on a device. The path has `/` between
+  its folders.
 - `parse_sii(image)`, `parse_integro_variant(data)` and `parse_ic_mu_restore_file(data)` decode a
   file on the server, with no device involved. `parse_esi(xml, modules=None, format="json")` reads
   an ESI document and returns every device it describes, or the `"response"`.

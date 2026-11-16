@@ -1151,10 +1151,10 @@ under this rule.
 **A helper returns the decoded result, not the response.** A caller that needs the response, for a
 header such as the wire time in `Server-Timing`, calls the generated `client.api.<operationId>`,
 which returns the response, and reads a refusal's headers from `HttpError.response`.
-`wireTimeMs()` reads the wire time from either. A helper returns the response only where no
-generated call can send its request and the Console shows its wire time: `writeFile`, and `readFile`
-and `parseEsi` with `format: 'response'`. The Python twins return the `requests.Response` in the
-same places.
+`wireTimeMs()` reads the wire time from either. A helper returns the response only where the
+Console shows the wire time of the request that the helper sends: `writeFile` and
+`writeUserCacheFile` return it, and `readFile`, `readUserCacheFile` and `parseEsi` offer it as
+`format: 'response'`. The Python twins return the `requests.Response` in the same places.
 
 **The examples follow the same rule.** Each task has one example program in each client, with the
 same file name, the same options and the same output: `clients/python/examples/scan.py` and

@@ -28,6 +28,7 @@ import type {
   ProcedureRequest,
   ProcedureSnapshot,
   SlaveInformationInterface,
+  UserCacheListing,
 } from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
@@ -40,6 +41,7 @@ import {
   parameterTriple,
 } from './parameter-address';
 import { listen } from './stream';
+import { encodeUserCachePath } from './user-cache';
 import {
   type MonitoringBatch,
   type NotificationData,
@@ -188,6 +190,22 @@ function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {
  * @param customFetch The `fetch` to wrap. Without it, the global `fetch` is read at each request, so
  *   a tool that replaces it later, such as MSW in the tests, still gets the requests.
  */
+/** What a read of a file returns: its bytes, its text, its JSON, or the response itself. */
+type BodyFormat = 'bytes' | 'text' | 'json' | 'response';
+
+async function decodeBody(response: Response, format: BodyFormat): Promise<unknown> {
+  if (format === 'response') {
+    return response;
+  }
+  if (format === 'text') {
+    return response.text();
+  }
+  if (format === 'json') {
+    return response.json();
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 function throwingFetch(customFetch?: typeof fetch): typeof fetch {
   return async (input, init) => {
     const doFetch = customFetch ?? globalThis.fetch;
@@ -410,23 +428,14 @@ export class MotionMasterClient {
   async readFile(
     slavePosition: number,
     name: string,
-    options: { format?: 'bytes' | 'text' | 'json' | 'response'; signal?: AbortSignal } = {},
+    options: { format?: BodyFormat; signal?: AbortSignal } = {},
   ): Promise<unknown> {
     const { format = 'bytes', signal } = options;
     // No response format: the generated client returns the answer with its body unread.
     const response = await this.api.foeReadFile(slavePosition, encodeURIComponent(name), {
       signal,
     });
-    if (format === 'response') {
-      return response;
-    }
-    if (format === 'text') {
-      return response.text();
-    }
-    if (format === 'json') {
-      return response.json();
-    }
-    return new Uint8Array(await response.arrayBuffer());
+    return decodeBody(response, format);
   }
 
   /**
@@ -1104,6 +1113,74 @@ export class MotionMasterClient {
   ): Promise<IcMuRestoreFile> {
     const response = await this.postBytes('/api/ic-mu-restore-file/parse', bytes, options.signal);
     return (await response.json()) as IcMuRestoreFile;
+  }
+
+  /**
+   * Returns the files in the user cache of the server (`listUserCacheFiles`): its `root` folder on
+   * the computer of the server, and each file with its `path` relative to the root, its `size` and
+   * its `modifiedMs`.
+   */
+  async listUserCacheFiles(options: { signal?: AbortSignal } = {}): Promise<UserCacheListing> {
+    return (await this.api.listUserCacheFiles({ signal: options.signal })).data;
+  }
+
+  /**
+   * Reads a file of the user cache (`getUserCacheFile`). `path` is relative to the root, with `/`
+   * between the folders, such as `'dumps/recorder-1.mmpd'`. `format` says what to return, as for
+   * `readFile()`: `'bytes'` (the default), `'text'`, `'json'`, or `'response'`, the answer of the
+   * server with its body unread, for its headers, such as the time the server spent, which
+   * `wireTimeMs()` reads.
+   */
+  readUserCacheFile(
+    path: string,
+    options?: { format?: 'bytes'; signal?: AbortSignal },
+  ): Promise<Uint8Array>;
+  readUserCacheFile(
+    path: string,
+    options: { format: 'text'; signal?: AbortSignal },
+  ): Promise<string>;
+  readUserCacheFile(
+    path: string,
+    options: { format: 'json'; signal?: AbortSignal },
+  ): Promise<unknown>;
+  readUserCacheFile(
+    path: string,
+    options: { format: 'response'; signal?: AbortSignal },
+  ): Promise<Response>;
+  async readUserCacheFile(
+    path: string,
+    options: { format?: BodyFormat; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const { format = 'bytes', signal } = options;
+    // No response format: the generated client returns the answer with its body unread.
+    const response = await this.api.getUserCacheFile(encodeUserCachePath(path), { signal });
+    return decodeBody(response, format);
+  }
+
+  /**
+   * Writes a file into the user cache (`putUserCacheFile`), and replaces a file of the same path.
+   * The server creates the folders of the path. A string is written as UTF-8. Returns the answer of
+   * the server, for its headers, such as the time the server spent, which `wireTimeMs()` reads.
+   */
+  async writeUserCacheFile(
+    path: string,
+    content: Uint8Array | string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Response> {
+    // The generated putUserCacheFile sends a body it has no formatter for as JSON, so the bytes go
+    // with the fetch of this client.
+    const body = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+    return this.fetch(`${this.httpBaseUrl}/api/user-cache/${encodeUserCachePath(path)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: body.slice(),
+      signal: options.signal,
+    });
+  }
+
+  /** Removes a file from the user cache (`deleteUserCacheFile`). */
+  async removeUserCacheFile(path: string, options: { signal?: AbortSignal } = {}): Promise<void> {
+    await this.api.deleteUserCacheFile(encodeUserCachePath(path), { signal: options.signal });
   }
 
   /**

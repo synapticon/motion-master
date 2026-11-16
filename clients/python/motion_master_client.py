@@ -180,6 +180,33 @@ def _file_path(position, name):
     return _path(position, filename=urllib.parse.quote(name, safe=""))
 
 
+def _user_cache_path(path):
+    """Return the path parameters of a file of the user cache, with each segment percent-encoded.
+
+    The "/" between the folders stays, because the server reads a nested path from the segments.
+    """
+    return {"path": urllib.parse.quote(path, safe="/")}
+
+
+_FORMATS = ("bytes", "text", "json", "response")
+
+
+def _check_format(format):
+    if format not in _FORMATS:
+        raise ValueError(f"format must be bytes, text, json or response, not {format!r}")
+
+
+def _decode(response, format):
+    """Return the body of a file read in `format`: bytes, text, JSON, or the response itself."""
+    if format == "response":
+        return response
+    if format == "text":
+        return response.content.decode("utf-8")
+    if format == "json":
+        return json.loads(response.content)
+    return response.content
+
+
 _CONFIG_TEMPLATE_URL = (
     "https://github.com/synapticon/motion-master/blob/main/clients/python/config.example.toml"
 )
@@ -621,6 +648,43 @@ class MotionMasterClient:
         """
         return self._post_bytes("parseIcMuRestoreFile", data).json()
 
+    def list_user_cache_files(self):
+        """Return the files in the user cache of the server (listUserCacheFiles).
+
+        The result is {"root": the folder on the computer of the server, "files": [...]}, and each
+        file is {"path": relative to the root, "size": ..., "modifiedMs": ...}.
+        """
+        return self.call("listUserCacheFiles").json()
+
+    def read_user_cache_file(self, path, format="bytes"):
+        """Read a file of the user cache (getUserCacheFile).
+
+        `path` is relative to the root, with "/" between the folders, such as
+        "dumps/recorder-1.mmpd". `format` says what to return, as for read_file(): "bytes" (the
+        default), "text", "json", or "response", the requests.Response, for its headers, such as
+        the time the server spent, which wire_time_ms() reads.
+        """
+        _check_format(format)
+        return _decode(self.call("getUserCacheFile", path=_user_cache_path(path)), format)
+
+    def write_user_cache_file(self, path, content):
+        """Write a file into the user cache (putUserCacheFile), and replace a file of the same path.
+
+        The server creates the folders of the path. `content` is bytes, or a str, which is written as
+        UTF-8. Returns the requests.Response, for its headers.
+        """
+        data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+        return self.call(
+            "putUserCacheFile",
+            path=_user_cache_path(path),
+            data=data,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    def remove_user_cache_file(self, path):
+        """Remove a file from the user cache (deleteUserCacheFile)."""
+        self.call("deleteUserCacheFile", path=_user_cache_path(path))
+
     def _post_bytes(self, operation_id, data, content_type="application/octet-stream", query=None):
         headers = {"Content-Type": content_type}
         return self.call(operation_id, data=bytes(data), headers=headers, query=query)
@@ -695,16 +759,8 @@ class MotionMasterClient:
         as a CSV, "json", the file parsed as JSON, or "response", the requests.Response, for its
         headers, such as the wire time that wire_time_ms() reads.
         """
-        if format not in ("bytes", "text", "json", "response"):
-            raise ValueError(f"format must be bytes, text, json or response, not {format!r}")
-        response = self.call("foeReadFile", path=_file_path(position, name))
-        if format == "response":
-            return response
-        if format == "text":
-            return response.content.decode("utf-8")
-        if format == "json":
-            return json.loads(response.content)
-        return response.content
+        _check_format(format)
+        return _decode(self.call("foeReadFile", path=_file_path(position, name)), format)
 
     def write_file(self, position, name, content):
         """Write a file to a device over FoE (foeWriteFile), and replace a file of the same name.

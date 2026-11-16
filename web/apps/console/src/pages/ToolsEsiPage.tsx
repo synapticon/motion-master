@@ -15,7 +15,7 @@ import PageHeader from '../components/PageHeader';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
-import { ESIS_FOLDER, userCacheBasename, userCacheUrl } from '../utils/userCache';
+import { ESIS_FOLDER, userCacheBasename } from '../utils/userCache';
 
 const inputCls = 'h-[38px] border border-grey-300 px-3 text-sm w-full bg-white';
 
@@ -405,7 +405,7 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
 }
 
 export default function ToolsEsiPage() {
-  const { api, client } = useConnection();
+  const { client } = useConnection();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<EsiParseResult | null>(null);
   // Which modules the user has ticked, and which selection the loaded `result` was built with.
@@ -423,11 +423,11 @@ export default function ToolsEsiPage() {
   // refreshes this list.
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => api.listUserCacheFiles(),
+    queryFn: () => client.listUserCacheFiles(),
   });
   const cachedEsis = useMemo(
     () =>
-      (cacheQuery.data?.data?.files ?? [])
+      (cacheQuery.data?.files ?? [])
         .filter((f) => f.path.startsWith(`${ESIS_FOLDER}/`) && f.path.endsWith('.xml'))
         .sort((a, b) => a.path.localeCompare(b.path)),
     [cacheQuery.data],
@@ -484,15 +484,13 @@ export default function ToolsEsiPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(userCacheUrl(api.baseUrl, path));
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
+      const bytes = await client.readUserCacheFile(path);
       setCachedPath(path);
-      await loadFile(new File([blob], userCacheBasename(path), { type: 'application/xml' }));
+      await loadFile(
+        new File([bytes as BlobPart], userCacheBasename(path), { type: 'application/xml' }),
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read the cached ESI.');
+      setError(apiErrorMessage(err, 'Failed to read the cached ESI.'));
       setBusy(false);
     }
   }

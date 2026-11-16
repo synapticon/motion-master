@@ -128,6 +128,10 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `read_sii` | `readSii` | |
 | `write_sii` | `writeSii` | |
 | `parse_sii` | `parseSii` | |
+| `list_user_cache_files` | `listUserCacheFiles` | |
+| `read_user_cache_file` | `readUserCacheFile` | |
+| `write_user_cache_file` | `writeUserCacheFile` | |
+| `remove_user_cache_file` | `removeUserCacheFile` | |
 | `wait_for_value` | `waitForValue` | |
 | `ensure_scanned` | `ensureScanned` | |
 | `ensure_state` | `ensureState` | |

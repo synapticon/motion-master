@@ -514,12 +514,7 @@ def install_firmware(s):
         if confirm == "n":
             raise Exit("the user chose not to install a package that does not fit")
 
-    s.client.call(
-        "putUserCacheFile",
-        path={"path": f"firmwares/{package.name}"},
-        data=package.read_bytes(),
-        headers={"Content-Type": "application/octet-stream"},
-    )
+    s.client.write_user_cache_file(f"firmwares/{package.name}", package.read_bytes())
     log.info("uploaded %s", package.name)
     params = {"packageFilename": package.name, "finalState": AlState.PREOP}
     run_procedure(s, "firmware-installation", params)

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UserCacheFile } from '@synapticon/motion-master-client';
+import { apiErrorMessage, type UserCacheFile } from '@synapticon/motion-master-client';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
 import UserCacheExplainer from '../components/UserCacheExplainer';
@@ -8,7 +8,7 @@ import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import { formatBytes } from '../utils/format';
-import { encodeUserCachePath, userCacheBasename, userCacheUrl } from '../utils/userCache';
+import { userCacheBasename } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 
 // The `Server-Timing` figure on these endpoints is server-side file I/O, not a fieldbus transaction —
@@ -33,7 +33,7 @@ function normalizeFolder(folder: string): string {
 }
 
 export default function StorageUserCachePage() {
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const queryClient = useQueryClient();
   const [folder, setFolder] = useState('');
   const [busyPath, setBusyPath] = useState<string | null>(null);
@@ -48,10 +48,11 @@ export default function StorageUserCachePage() {
   // Motion Master itself is unreachable, surfaced as the error state below.
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => fileTiming.measure(() => api.listUserCacheFiles()),
+    // The listing itself goes into the cache, as on the other pages that share this key.
+    queryFn: async () => (await fileTiming.measure(() => api.listUserCacheFiles())).data,
   });
-  const root = cacheQuery.data?.data?.root ?? '';
-  const files = cacheQuery.data?.data?.files ?? [];
+  const root = cacheQuery.data?.root ?? '';
+  const files = cacheQuery.data?.files ?? [];
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['user-cache'] });
@@ -60,51 +61,40 @@ export default function StorageUserCachePage() {
     mutationFn: async (file: File) => {
       const prefix = normalizeFolder(folder);
       const path = prefix ? `${prefix}/${file.name}` : file.name;
-      // The generated client JSON-encodes request bodies, so upload the raw bytes with fetch —
-      // the same reason the FoE and SII pages talk to their binary endpoints directly.
-      const res = await uploadTiming.measure(() =>
-        fetch(userCacheUrl(api.baseUrl, path), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: file,
-        }),
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await uploadTiming.measure(() => client.writeUserCacheFile(path, bytes));
     },
     onSuccess: () => {
       setError(null);
       void invalidate();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => setError(apiErrorMessage(err)),
   });
 
+  // The refresh after a delete measures the listing, and its time replaces the time of the delete
+  // at once, so the delete itself is not measured.
   const deleteMutation = useMutation({
-    mutationFn: (path: string) =>
-      fileTiming.measure(() => api.deleteUserCacheFile(encodeUserCachePath(path))),
+    mutationFn: (path: string) => client.removeUserCacheFile(path),
     onSuccess: () => {
       setError(null);
       void invalidate();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => setError(apiErrorMessage(err)),
   });
 
   async function handleDownload(file: UserCacheFile) {
     setBusyPath(file.path);
     setError(null);
     try {
-      const res = await fileTiming.measure(() => fetch(userCacheUrl(api.baseUrl, file.path)));
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      const res = await fileTiming.measure(() =>
+        client.readUserCacheFile(file.path, { format: 'response' }),
+      );
       const bytes = new Uint8Array(await res.arrayBuffer());
       // Save under the file's own name, not its full path — a browser download cannot create
       // directories, and a slash in the suggested name is stripped anyway.
       downloadBytes(bytes, userCacheBasename(file.path));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Download failed.');
+      setError(apiErrorMessage(err, 'Download failed.'));
     } finally {
       setBusyPath(null);
     }

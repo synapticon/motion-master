@@ -18,22 +18,6 @@ export const DUMPS_FOLDER = 'dumps';
 export const ESIS_FOLDER = 'esis';
 
 /**
- * Encodes a cache-relative path for use in a `/api/user-cache/...` URL.
- *
- * Each segment is encoded on its own: the backend takes the path after the prefix verbatim (then
- * percent-decodes it), so encoding the whole string would turn its `/` separators into `%2F` and
- * the server would see one long filename instead of a nested path.
- */
-export function encodeUserCachePath(path: string): string {
-  return path.split('/').map(encodeURIComponent).join('/');
-}
-
-/** Absolute URL of one file in the user cache. */
-export function userCacheUrl(baseUrl: string, path: string): string {
-  return `${baseUrl}/api/user-cache/${encodeUserCachePath(path)}`;
-}
-
-/**
  * The file's own name, without its folders — what a browser download should be called (a download
  * cannot create directories, and a `/` in the suggested name is stripped anyway).
  */

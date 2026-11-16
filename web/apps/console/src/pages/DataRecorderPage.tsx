@@ -19,12 +19,7 @@ import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection } from '../contexts/ConnectionContext';
 import { cycleStats } from '../utils/cycleStats';
 import { formatBytes } from '../utils/format';
-import {
-  DUMPS_FOLDER,
-  encodeUserCachePath,
-  userCacheBasename,
-  userCacheUrl,
-} from '../utils/userCache';
+import { DUMPS_FOLDER, userCacheBasename } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 
 // One PDO object flattened across devices, for the series picker.
@@ -96,11 +91,11 @@ export default function DataRecorderPage() {
   // the Storage → User Cache page uses — one shared key, so a delete on either page refreshes both.
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => api.listUserCacheFiles(),
+    queryFn: () => client.listUserCacheFiles(),
   });
   const dumps = useMemo(
     () =>
-      (cacheQuery.data?.data?.files ?? [])
+      (cacheQuery.data?.files ?? [])
         .filter((f) => f.path.startsWith(`${DUMPS_FOLDER}/`))
         // Newest first: the dump you just took is the one you want to open.
         .sort((a, b) => b.modifiedMs - a.modifiedMs),
@@ -114,7 +109,7 @@ export default function DataRecorderPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (path: string) => api.deleteUserCacheFile(encodeUserCachePath(path)),
+    mutationFn: (path: string) => client.removeUserCacheFile(path),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['user-cache'] }),
   });
 
@@ -150,11 +145,7 @@ export default function DataRecorderPage() {
     setBusyPath(path);
     setViewError(null);
     try {
-      const res = await fetch(userCacheUrl(api.baseUrl, path));
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const parsed = parseMmpd(await res.arrayBuffer());
+      const parsed = parseMmpd(await client.readUserCacheFile(path));
       load(parsed, `${userCacheBasename(path)} — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
       setViewError(errorText(e));

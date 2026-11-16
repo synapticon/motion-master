@@ -73,12 +73,7 @@ def main():
     except requests.HTTPError as error:
         print(f"could not check the package against the device: {error_line(error)}")
 
-    client.call(
-        "putUserCacheFile",
-        path={"path": f"firmwares/{package.name}"},
-        data=package.read_bytes(),
-        headers={"Content-Type": "application/octet-stream"},
-    )
+    client.write_user_cache_file(f"firmwares/{package.name}", package.read_bytes())
     print(f"uploaded {package.name}")
     body = {"packageFilename": package.name, "finalState": AL_STATES[args.final_state]}
 

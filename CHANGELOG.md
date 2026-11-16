@@ -40,6 +40,13 @@ the HTTP/WebSocket API may break between any two alphas.
   raw bytes, which the generated calls send as JSON. `parseEsi()` takes the modules to merge, and
   returns the response with `format: 'response'`, for its headers. The Console and the `parse-esi`
   examples use them in place of their own requests.
+- Both clients read and write the user cache of the server with `listUserCacheFiles()`,
+  `readUserCacheFile()`, `writeUserCacheFile()` and `removeUserCacheFile()`, and the Python twins
+  `list_user_cache_files()` and so on. A path is relative to the root of the user cache, and each
+  folder and the name are percent-encoded, so any name works. `readUserCacheFile()` returns bytes,
+  text, JSON or the response, as `readFile()` does, and `writeUserCacheFile()` writes a string as
+  UTF-8 and returns the response. The Console, the `firmware-installation` examples, the
+  production scripts and the bench tests use them in place of their own requests.
 - Both clients read the wire time of an operation from a response with `wireTimeMs()` and
   `wire_time_ms()`, in milliseconds, or `null` and `None` when the response has none. The
   TypeScript twin also reads it from a `PerformanceResourceTiming` entry of the browser.
@@ -152,6 +159,9 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+- The Console pages that list the user cache kept two shapes under one shared query: the listing,
+  and the response that holds it. A page that read the shape of the other found no files until its
+  own request returned. Every page now keeps the listing.
 - The file routes of a device, `GET`, `PUT` and `DELETE /api/devices/{slavePosition}/files/{filename}`,
   decode the file name. A name that a client percent-encoded reached the drive encoded, so
   `a b.txt` was written as `a%20b.txt`. Both clients encode the name in `readFile`, `writeFile` and

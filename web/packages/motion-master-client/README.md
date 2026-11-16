@@ -7,7 +7,7 @@ The package contains four parts:
 - `client.api`: an HTTP client for every operation of the Motion Master API. It is generated from the OpenAPI specification of the server.
 - `client.ws`: a connection to the WebSocket of the server. It delivers monitoring data and notifications.
 - The helper methods of the client, for the steps that most programs take. [Helpers](#helpers) lists them.
-- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, `integerFromBytes`, `parseInteger` (the rule of Python's `int(text, 0)`), hex text with `formatHex` and `formatHexBytes`, object names with `objectName` and `objectAddressText`, the parameters of a device with `deviceParameterText` (`1:0x6041:00`) and `deviceParameterName` (`1:STATUSWORD`), and the host names for a server on another machine.
+- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, `integerFromBytes`, `parseInteger` (the rule of Python's `int(text, 0)`), hex text with `formatHex` and `formatHexBytes`, object names with `objectName` and `objectAddressText`, the parameters of a device with `deviceParameterText` (`1:0x6041:00`) and `deviceParameterName` (`1:STATUSWORD`), the access word of an object with `objectAccess`, and the host names for a server on another machine.
 
 ## Version
 

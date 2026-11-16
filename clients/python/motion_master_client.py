@@ -425,6 +425,36 @@ def procedure_parameter_value(parameter, text):
     return trimmed
 
 
+def object_access(access):
+    """Decode the access word (ObjAccess) of an object, as ETG.1000.6 defines it.
+
+    Bits 0-2 read in PREOP, SAFEOP and OP, bits 3-5 write in those states, bit 6 RxPDO mappable,
+    bit 7 TxPDO mappable, bit 8 backup and bit 9 settings. Returns a dict with readable, writable,
+    rxPdoMappable, txPdoMappable, backup and settings, and text: "RW", "RO", "WO", or "—" for an
+    object that is neither readable nor writable. The parameter routes of the server send these
+    decoded already; this is for a raw word from elsewhere, such as a parameter cache file.
+    """
+    readable = bool(access & 0x07)
+    writable = bool(access & 0x38)
+    if readable and writable:
+        text = "RW"
+    elif readable:
+        text = "RO"
+    elif writable:
+        text = "WO"
+    else:
+        text = "—"
+    return {
+        "readable": readable,
+        "writable": writable,
+        "rxPdoMappable": bool(access & 0x40),
+        "txPdoMappable": bool(access & 0x80),
+        "backup": bool(access & 0x100),
+        "settings": bool(access & 0x200),
+        "text": text,
+    }
+
+
 def wire_time_ms(response):
     """Return the wire time of a request in milliseconds, or None when the server reported none.
 

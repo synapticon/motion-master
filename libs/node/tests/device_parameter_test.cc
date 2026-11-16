@@ -453,4 +453,33 @@ TEST(DeviceParameterJson, CarriesTheEsiFieldsOnlyWhenTheyAreSet) {
   }
 }
 
+// The access word goes out raw and decoded, so a client keeps no table of its bits.
+TEST(DeviceParameterJson, DecodesTheAccessWordAndThePdoMappingRange) {
+  DeviceParameter p;
+  p.index = 0x6040;
+  p.access = 0x007F;  // read and write in every state, RxPDO mappable
+  nlohmann::json j = p;
+  EXPECT_EQ(j.at("access"), 0x7F);
+  EXPECT_TRUE(j.at("readable"));
+  EXPECT_TRUE(j.at("writable"));
+  EXPECT_TRUE(j.at("rxPdoMappable"));
+  EXPECT_FALSE(j.at("txPdoMappable"));
+  EXPECT_FALSE(j.at("pdoMappingObject"));
+
+  p.index = 0x1A00;
+  p.access = 0x0087;  // read only, TxPDO mappable
+  j = p;
+  EXPECT_TRUE(j.at("readable"));
+  EXPECT_FALSE(j.at("writable"));
+  EXPECT_TRUE(j.at("txPdoMappable"));
+  EXPECT_TRUE(j.at("pdoMappingObject"));
+
+  p.index = 0x1C12;
+  p.access = 0x0038;  // write only
+  j = p;
+  EXPECT_FALSE(j.at("readable"));
+  EXPECT_TRUE(j.at("writable"));
+  EXPECT_FALSE(j.at("pdoMappingObject"));
+}
+
 }  // namespace

@@ -6,6 +6,7 @@ import {
   deviceParameterText,
   formatHexBytes,
   MotionMasterClient,
+  objectAccess,
   objectAddressText,
   wireTimeMs,
 } from '../src/index';
@@ -180,5 +181,27 @@ describe('text of bytes and addresses', () => {
     expect(deviceParameterText(1, 0x6041, 0)).toBe('1:0x6041:00');
     expect(deviceParameterName(2, 0x6041, 0)).toBe('2:STATUSWORD');
     expect(deviceParameterName(1, 0x2fff, 0x0b)).toBe('1:0x2FFF:0B');
+  });
+});
+
+describe('objectAccess', () => {
+  it('decodes the access word of ETG.1000.6', () => {
+    expect(objectAccess(0x007f)).toEqual({
+      readable: true,
+      writable: true,
+      rxPdoMappable: true,
+      txPdoMappable: false,
+      backup: false,
+      settings: false,
+      text: 'RW',
+    });
+    expect(objectAccess(0x0387)).toMatchObject({
+      text: 'RO',
+      txPdoMappable: true,
+      backup: true,
+      settings: true,
+    });
+    expect(objectAccess(0x0038).text).toBe('WO');
+    expect(objectAccess(0).text).toBe('—');
   });
 });

@@ -440,6 +440,11 @@ void to_json(nlohmann::json& j, const DeviceParameter& p) {
       {"dataTypeName", mm::comm::objectDataTypeName(p.dataType)},
       {"bitLength", p.bitLength},
       {"access", p.access},
+      {"readable", p.isReadable()},
+      {"writable", p.isWritable()},
+      {"rxPdoMappable", p.isRxPdoMappable()},
+      {"txPdoMappable", p.isTxPdoMappable()},
+      {"pdoMappingObject", p.isPdoMappingObject()},
       {"origin", parameterOriginName(p.origin)},
       {"syncState", syncStateName(p.syncState)},
   };

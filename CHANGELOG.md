@@ -21,6 +21,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- Each parameter of a device, as `GET /api/devices/{slavePosition}/parameters` and the other
+  parameter routes send it, has `readable`, `writable`, `rxPdoMappable` and `txPdoMappable` beside
+  its raw `access` word (ETG.1000.6), and `pdoMappingObject`, which is true for a PDO mapping object
+  of CiA 301, 0x1600 to 0x17FF or 0x1A00 to 0x1BFF. The Console reads them in place of its own
+  copies of the bits and the ranges. For a raw word from elsewhere, such as a parameter cache file,
+  both clients decode it with `objectAccess(access)` and `object_access(access)`, which also give
+  the backup and settings bits and the text `RW`, `RO`, `WO` or `—`.
 - `GET /api/bus-config` and the parsed SII name the bits and codes they send. The bus config has
   `protocolNames` and `coeDetailNames` beside `protocols` and `coeDetails`, and a `typeName` for
   each sync manager and FMMU. The SII has `mailboxProtocolNames`, `coeDetailNames`,

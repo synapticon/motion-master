@@ -2410,10 +2410,35 @@ export interface DeviceParameter {
    */
   bitLength: number;
   /**
-   * ObjAccess bitfield (read/write per AL state)
+   * ObjAccess bitfield (ETG.1000.6): bits 0-2 read in PREOP, SAFEOP and OP, bits 3-5 write in those states, bit 6 RxPDO mappable, bit 7 TxPDO mappable, bit 8 backup, bit 9 settings
    * @example 7
    */
   access: number;
+  /**
+   * Readable in some AL state (`access` bits 0-2).
+   * @example true
+   */
+  readable: boolean;
+  /**
+   * Writable in some AL state (`access` bits 3-5).
+   * @example false
+   */
+  writable: boolean;
+  /**
+   * Can be mapped into an RxPDO, the outputs (`access` bit 6).
+   * @example false
+   */
+  rxPdoMappable: boolean;
+  /**
+   * Can be mapped into a TxPDO, the inputs (`access` bit 7).
+   * @example true
+   */
+  txPdoMappable: boolean;
+  /**
+   * A PDO mapping object of CiA 301, 0x1600-0x17FF or 0x1A00-0x1BFF. Its entries describe the layout of the process image, not a value of the drive.
+   * @example false
+   */
+  pdoMappingObject: boolean;
   /**
    * Where this parameter's definition came from. `objectDictionary` — enumerated over the CoE object dictionary (SDO-Info). `sii` — derived from the SII EEPROM PDO categories, for a mailbox-less slave (an EtherCAT coupler / simple I/O terminal) that has no CoE object dictionary; such a parameter has no live SDO access, so its value comes only from the process image.
    * @example "objectDictionary"

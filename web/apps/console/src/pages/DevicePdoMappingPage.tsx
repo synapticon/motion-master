@@ -19,10 +19,9 @@ import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline, btnPrimary } from '../utils/styles';
 
-// ETG.1000.6 object-access (ObjAccess) mapping bits: an object is PDO-mappable in a direction only
-// when the corresponding bit is set. Used to constrain the parameter picker per direction.
-const RXPDO_MAPPABLE = 0x40; // master→slave (outputs / 0x1C12)
-const TXPDO_MAPPABLE = 0x80; // slave→master (inputs / 0x1C13)
+// Which field of a parameter says it can be mapped in a direction: outputs (0x1C12) or inputs
+// (0x1C13). Used to constrain the parameter picker per direction.
+type MappableField = 'rxPdoMappable' | 'txPdoMappable';
 
 const inputCls = 'border border-grey-300 px-2 py-1 text-xs font-mono bg-white';
 const iconBtn =
@@ -123,7 +122,7 @@ interface EntryRowProps {
   entry: DraftEntry;
   offset: number;
   params: DeviceParameter[];
-  mappableBit: number;
+  mappable: MappableField;
   mappableHint: string;
   first: boolean;
   last: boolean;
@@ -136,7 +135,7 @@ function EntryRow({
   entry,
   offset,
   params,
-  mappableBit,
+  mappable,
   mappableHint,
   first,
   last,
@@ -152,7 +151,7 @@ function EntryRow({
         selectedIndex={parsedOrNull(entry.index)}
         selectedSubindex={parsedOrNull(entry.subindex)}
         placeholder="Pick a mappable object…"
-        isDisabled={(p) => (p.access & mappableBit) === 0}
+        isDisabled={(p) => !p[mappable]}
         disabledHint={mappableHint}
         onSelect={(p) =>
           onChange({
@@ -221,7 +220,7 @@ interface DirectionEditorProps {
   defaultPdoIndex: string;
   objects: DraftObject[];
   params: DeviceParameter[];
-  mappableBit: number;
+  mappable: MappableField;
   mappableHint: string;
   onChange: (objs: DraftObject[]) => void;
 }
@@ -235,7 +234,7 @@ function DirectionEditor({
   defaultPdoIndex,
   objects,
   params,
-  mappableBit,
+  mappable,
   mappableHint,
   onChange,
 }: DirectionEditorProps) {
@@ -331,7 +330,7 @@ function DirectionEditor({
                 entry={entry}
                 offset={offsets[oi][ei]}
                 params={params}
-                mappableBit={mappableBit}
+                mappable={mappable}
                 mappableHint={mappableHint}
                 first={ei === 0}
                 last={ei === obj.entries.length - 1}
@@ -537,7 +536,7 @@ export default function DevicePdoMappingPage() {
               defaultPdoIndex="0x1600"
               objects={draft.outputs}
               params={params}
-              mappableBit={RXPDO_MAPPABLE}
+              mappable="rxPdoMappable"
               mappableHint="not RxPDO-mappable"
               onChange={(objs) => setDirection('outputs', objs)}
             />
@@ -547,7 +546,7 @@ export default function DevicePdoMappingPage() {
               defaultPdoIndex="0x1A00"
               objects={draft.inputs}
               params={params}
-              mappableBit={TXPDO_MAPPABLE}
+              mappable="txPdoMappable"
               mappableHint="not TxPDO-mappable"
               onChange={(objs) => setDirection('inputs', objs)}
             />

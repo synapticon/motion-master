@@ -69,6 +69,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `step_changes` | `stepChanges` | |
 | `object_name` | `objectName` | |
 | `object_address_text` | `objectAddressText` | |
+| `object_access` | `objectAccess` | |
 | `device_parameter_text` | `deviceParameterText` | |
 | `device_parameter_name` | `deviceParameterName` | |
 | `format_step` | `formatStep` | |

@@ -8463,7 +8463,9 @@ components:
       example: 12345
     DeviceParameter:
       type: object
-      required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, origin, value, syncState]
+      required:
+        [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, readable,
+         writable, rxPdoMappable, txPdoMappable, pdoMappingObject, origin, value, syncState]
       properties:
         index:
           type: integer
@@ -8495,8 +8497,32 @@ components:
           example: 32
         access:
           type: integer
-          description: ObjAccess bitfield (read/write per AL state)
+          description: >-
+            ObjAccess bitfield (ETG.1000.6): bits 0-2 read in PREOP, SAFEOP and OP, bits 3-5 write in
+            those states, bit 6 RxPDO mappable, bit 7 TxPDO mappable, bit 8 backup, bit 9 settings
           example: 7
+        readable:
+          type: boolean
+          description: Readable in some AL state (`access` bits 0-2).
+          example: true
+        writable:
+          type: boolean
+          description: Writable in some AL state (`access` bits 3-5).
+          example: false
+        rxPdoMappable:
+          type: boolean
+          description: Can be mapped into an RxPDO, the outputs (`access` bit 6).
+          example: false
+        txPdoMappable:
+          type: boolean
+          description: Can be mapped into a TxPDO, the inputs (`access` bit 7).
+          example: true
+        pdoMappingObject:
+          type: boolean
+          description: >-
+            A PDO mapping object of CiA 301, 0x1600-0x17FF or 0x1A00-0x1BFF. Its entries describe
+            the layout of the process image, not a value of the drive.
+          example: false
         origin:
           type: string
           enum: [objectDictionary, sii]

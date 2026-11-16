@@ -292,7 +292,9 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `object_address_text(index, subindex)` its address, such as `0x6041:00`.
   `device_parameter_text(position, index, subindex)` and
   `device_parameter_name(position, index, subindex)` add the position of the device, such as
-  `1:0x6041:00` and `1:STATUSWORD`.
+  `1:0x6041:00` and `1:STATUSWORD`. `object_access(access)` decodes the access word of an object
+  into `readable`, `writable`, `rxPdoMappable`, `txPdoMappable`, `backup`, `settings` and `text`,
+  such as `RW`.
 - `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until
   the predicate is true. It raises `TimeoutError` with the last value when the time runs out.
 - `ensure_scanned()` scans when the last scan is missing or wrong, and moves no device.

@@ -27,6 +27,7 @@ import {
   formatHexBytes,
   objectAddressText,
   parseInteger,
+  objectAccess,
 } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
@@ -100,15 +101,6 @@ function outsideRange(p: DeviceParameter, raw: string): boolean {
   return false;
 }
 
-function isWritable(access: number): boolean {
-  return (access & 0x38) !== 0;
-}
-
-// ETG.1000.6 ObjAccess: read bits 0-2 (Rd PREOP/SAFEOP/OP). Readable iff any is set.
-function isReadable(access: number): boolean {
-  return (access & 0x07) !== 0;
-}
-
 // Compares two decoded parameter values. Both come through decodeSdoBytes, so a
 // written/read-back pair with identical wire bytes compares equal even for floats
 // (same bytes → same decoded number); strings ignore NUL padding (already stripped).
@@ -120,22 +112,6 @@ function valuesEqual(
     return a.length === b.length && a.every((x, i) => x === b[i]);
   }
   return a === b;
-}
-
-function formatAccess(a: number): string {
-  // ETG.1000.6: bit 0=Rd PREOP, 1=Rd SAFEOP, 2=Rd OP, 3=Wr PREOP, 4=Wr SAFEOP, 5=Wr OP
-  const r = (a & 0x07) !== 0;
-  const w = isWritable(a);
-  if (r && w) {
-    return 'RW';
-  }
-  if (r) {
-    return 'RO';
-  }
-  if (w) {
-    return 'WO';
-  }
-  return '—';
 }
 
 function formatElapsed(ms: number): string {
@@ -694,7 +670,7 @@ export default function DeviceParametersPage() {
       // device may still clamp, coerce, or ignore the value — so for readable objects read it back
       // (PDO-aware) rather than trusting what we sent. Write-only objects keep the sent value.
       const written = await api.writeParameter(slavePosition, p.index, p.subindex, { value: sent });
-      const readBack = isReadable(p.access);
+      const readBack = p.readable;
       const value = readBack
         ? (await api.readParameter(slavePosition, p.index, p.subindex)).data.value
         : written.data.value;
@@ -935,7 +911,7 @@ export default function DeviceParametersPage() {
                         const refreshing = refreshingKeys.has(key);
                         const setting = settingKeys.has(key);
                         const busy = refreshing || setting;
-                        const writable = isWritable(p.access);
+                        const writable = p.writable;
                         const editValue = editValues[key] ?? valueToInputString(p.value);
                         const cellMsg = rowMsg?.key === key ? rowMsg : null;
                         const description =
@@ -997,7 +973,7 @@ export default function DeviceParametersPage() {
                               </td>
                               <td className="px-3 py-1.5 font-mono text-grey-700">{p.bitLength}</td>
                               <td className="px-3 py-1.5 font-mono text-grey-700">
-                                {formatAccess(p.access)}
+                                {objectAccess(p.access).text}
                               </td>
                               {/* The controls here edit the value, so a click on them must not open or close the row. */}
                               <td

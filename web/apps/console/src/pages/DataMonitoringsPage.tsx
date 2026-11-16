@@ -32,14 +32,6 @@ function paramKey(pos: number, index: number, subindex: number): string {
   return `${pos}:${index}:${subindex}`;
 }
 
-// CiA301 PDO mapping objects: RxPDO 0x1600–0x17FF, TxPDO 0x1A00–0x1BFF. Their sub-entries encode
-// the process-image layout (which object is mapped where), not a measurable value — monitoring
-// them is meaningless, and in a long list they're easily mistaken for real parameters. The picker
-// shows them greyed-out and unselectable rather than offering them as a pick.
-function isPdoMappingObject(p: DeviceParameter): boolean {
-  return (p.index >= 0x1600 && p.index <= 0x17ff) || (p.index >= 0x1a00 && p.index <= 0x1bff);
-}
-
 // A memorable, URL-safe identifier + Title-cased label for a new monitoring, e.g. topic
 // "swift-amber-otter", name "Swift Amber Otter". adjectives × colors × animals is tens of
 // thousands of combos, so a re-roll comfortably resolves the rare clash with an existing topic.
@@ -701,7 +693,9 @@ function ParamRow({
             selectedIndex={parseInteger(row.index, { min: 0 })}
             selectedSubindex={parseInteger(row.subindex, { min: 0 })}
             onSelect={(p) => onChange({ index: String(p.index), subindex: String(p.subindex) })}
-            isDisabled={isPdoMappingObject}
+            // A PDO mapping object describes the layout of the process image, not a measurable
+            // value, so monitoring it is meaningless. It shows greyed out rather than as a pick.
+            isDisabled={(p) => p.pdoMappingObject}
             disabledHint="PDO mapping"
           />
         </div>

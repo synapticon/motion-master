@@ -1148,6 +1148,13 @@ the same commit. A helper that belongs to one language gets a row with the other
 the reason. A Console function that is not about the UI belongs in the TypeScript client, and then
 under this rule.
 
+**A helper returns the decoded result, not the response.** A caller that needs the response, for a
+header such as the wire time in `X-Wire-Us`, calls the generated `client.api.<operationId>`, which
+returns the response, and reads a refusal's headers from `HttpError.response`. A helper returns the
+response only where no generated call can send its request, such as `writeFile` with raw bytes, or
+offers it as `format: 'response'`, as `readFile` does. The Python twin returns the
+`requests.Response` in the same places.
+
 **The examples follow the same rule.** Each task has one example program in each client, with the
 same file name, the same options and the same output: `clients/python/examples/scan.py` and
 `web/packages/motion-master-client/examples/scan.ts`. The section Examples of `clients/PARITY.md`

@@ -10,6 +10,7 @@ import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import {
   apiErrorMessage,
+  HttpError,
   formatHex,
   wireTimeMs,
   type DeviceFile,
@@ -141,7 +142,7 @@ function SomanetFileLinks({
 
 export default function DeviceFoePage() {
   const { deviceId } = useParams();
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const slavePosition = Number(deviceId);
 
   const devicesQuery = useQuery({
@@ -181,23 +182,23 @@ export default function DeviceFoePage() {
   const [unlockOk, setUnlockOk] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
-  // Read raw bytes for an arbitrary FoE filename, throwing on a non-OK response. `wireMs` is the
-  // server-measured FoE transfer time (from the `X-Wire-Us` header), null if the header is absent.
-  // A failed transfer still consumed wire time and the backend attaches the header to the error, so
-  // the thrown Error carries `wireMs` for the caller to surface the same timing as on success.
+  // Read raw bytes for an arbitrary FoE filename. `wireMs` is the server-measured FoE transfer time
+  // (from the `X-Wire-Us` header), null if the header is absent. A failed transfer still consumed
+  // wire time and the backend attaches the header to the error, so the thrown Error carries
+  // `wireMs` for the caller to surface the same timing as on success.
   async function readRaw(name: string): Promise<{ bytes: Uint8Array; wireMs: number | null }> {
-    const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeURIComponent(name)}`;
-    const response = await fetch(url);
-    const wireMs = wireTimeMs(response);
-    if (!response.ok) {
-      const json = await response.json().catch(() => null);
-      const e = new Error(json?.error ?? `HTTP ${response.status}`) as Error & {
-        wireMs: number | null;
-      };
-      e.wireMs = wireMs;
+    let response: Response;
+    try {
+      response = await client.readFile(slavePosition, name, { format: 'response' });
+    } catch (err) {
+      if (!(err instanceof HttpError)) {
+        throw err;
+      }
+      const e = new Error(err.reason) as Error & { wireMs: number | null };
+      e.wireMs = wireTimeMs(err.response);
       throw e;
     }
-    return { bytes: new Uint8Array(await response.arrayBuffer()), wireMs };
+    return { bytes: new Uint8Array(await response.arrayBuffer()), wireMs: wireTimeMs(response) };
   }
 
   async function handleRead(name: string = filename) {
@@ -316,25 +317,26 @@ export default function DeviceFoePage() {
     setWriteWireMs(null);
     const start = performance.now();
     try {
-      const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeURIComponent(writeFilename)}`;
-      const response = await fetch(url, {
-        method: 'PUT',
-        body: new Blob([writeBytes as BlobPart]),
-      });
-      // Record timing as soon as the fetch resolves, before the ok-check, so a failed write shows
-      // the same wire time as a successful one (the backend attaches X-Wire-Us to the error too).
+      let response: Response;
+      try {
+        response = await client.writeFile(slavePosition, writeFilename, writeBytes);
+      } catch (err) {
+        // A failed write shows the same timing as a successful one: the backend attaches
+        // X-Wire-Us to the error too.
+        setWriteMs(performance.now() - start);
+        if (err instanceof HttpError) {
+          setWriteWireMs(wireTimeMs(err.response));
+        }
+        throw err;
+      }
       setWriteMs(performance.now() - start);
       setWriteWireMs(wireTimeMs(response));
-      if (!response.ok) {
-        const json = await response.json().catch(() => null);
-        throw new Error(json?.error ?? `HTTP ${response.status}`);
-      }
       setWriteOk(true);
       if (isSomanet && files) {
         void handleList();
       }
     } catch (err) {
-      setWriteError(err instanceof Error ? err.message : 'Unknown error');
+      setWriteError(apiErrorMessage(err));
     } finally {
       setWriting(false);
       // The write consumes the unlock — the drive re-locks afterwards.
@@ -355,7 +357,7 @@ export default function DeviceFoePage() {
     setRemoving(name);
     setListError(null);
     try {
-      await api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
+      await client.removeFile(slavePosition, name);
       await handleList();
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Unknown error');

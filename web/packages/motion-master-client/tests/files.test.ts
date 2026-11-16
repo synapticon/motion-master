@@ -87,6 +87,26 @@ describe('files', () => {
   });
 });
 
+describe('the answer of a file request', () => {
+  it('gives the response of a read, a write and a removal, for its headers', async () => {
+    server.use(
+      http.all(`${FILES}/*`, ({ request }) => {
+        const headers = { 'X-Wire-Us': '1500' };
+        return request.method === 'GET'
+          ? new HttpResponse(new Uint8Array([7, 8]), { headers })
+          : HttpResponse.json({ ok: true }, { headers });
+      }),
+    );
+    const client = new MotionMasterClient({ baseUrl: HTTP_URL });
+    const read = await client.readFile(1, 'config.csv', { format: 'response' });
+    expect(read.bodyUsed).toBe(false);
+    expect(read.headers.get('X-Wire-Us')).toBe('1500');
+    expect(new Uint8Array(await read.arrayBuffer())).toEqual(new Uint8Array([7, 8]));
+    expect((await client.writeFile(1, 'note.txt', 'x')).headers.get('X-Wire-Us')).toBe('1500');
+    expect((await client.removeFile(1, 'note.txt')).headers.get('X-Wire-Us')).toBe('1500');
+  });
+});
+
 describe('file names in the path', () => {
   it('percent-encodes the name in every file request', async () => {
     const paths: string[] = [];

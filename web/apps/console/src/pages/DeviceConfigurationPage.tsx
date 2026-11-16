@@ -93,7 +93,7 @@ function valueText(value: unknown): string {
 export default function DeviceConfigurationPage() {
   const { deviceId } = useParams();
   const slavePosition = Number(deviceId);
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const queryClient = useQueryClient();
 
   const [showFile, setShowFile] = useState(false);
@@ -154,12 +154,8 @@ export default function DeviceConfigurationPage() {
   });
   const download = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`${api.baseUrl}/api/devices/${slavePosition}/files/config.csv`);
-      if (!response.ok) {
-        const json = await response.json().catch(() => null);
-        throw new Error(json?.error ?? `HTTP ${response.status}`);
-      }
-      downloadBytes(new Uint8Array(await response.arrayBuffer()), `config-${slavePosition}.csv`);
+      const bytes = await client.readFile(slavePosition, 'config.csv');
+      downloadBytes(bytes, `config-${slavePosition}.csv`);
     },
   });
 

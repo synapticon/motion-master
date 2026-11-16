@@ -32,8 +32,9 @@ the HTTP/WebSocket API may break between any two alphas.
   CI fails when a client has an example that its twin lacks.
 - Both clients read and write objects and files with `writeValue()`, `readSdo()`, `writeSdo()`,
   `listFiles()`, `readFile()`, `writeFile()` and `removeFile()`, and the Python twins
-  `write_value()`, `read_sdo()` and so on. `readFile()` returns bytes, text or JSON. `writeFile()`
-  writes a string as UTF-8.
+  `write_value()`, `read_sdo()` and so on. `readFile()` returns bytes, text, JSON or the response,
+  for its headers. `writeFile()` writes a string as UTF-8. `writeFile()` and `removeFile()` return
+  the response.
 - The TypeScript client exports `objectName()` and `objectAddressText()`, with the Python twins
   `object_name()` and `object_address_text()`, and formats bytes as hex with `formatHexBytes()`.
 - The examples of both clients share their command line, the run of a procedure and their files

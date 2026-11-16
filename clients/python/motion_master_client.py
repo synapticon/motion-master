@@ -636,24 +636,28 @@ class MotionMasterClient:
         """Read a file from a device over FoE (foeReadFile).
 
         `format` says what to return: "bytes" (the default), "text", the file decoded as UTF-8, such
-        as a CSV, or "json", the file parsed as JSON.
+        as a CSV, "json", the file parsed as JSON, or "response", the requests.Response, for its
+        headers, such as the wire time in X-Wire-Us.
         """
-        if format not in ("bytes", "text", "json"):
-            raise ValueError(f"format must be bytes, text or json, not {format!r}")
-        content = self.call("foeReadFile", path=_file_path(position, name)).content
+        if format not in ("bytes", "text", "json", "response"):
+            raise ValueError(f"format must be bytes, text, json or response, not {format!r}")
+        response = self.call("foeReadFile", path=_file_path(position, name))
+        if format == "response":
+            return response
         if format == "text":
-            return content.decode("utf-8")
+            return response.content.decode("utf-8")
         if format == "json":
-            return json.loads(content)
-        return content
+            return json.loads(response.content)
+        return response.content
 
     def write_file(self, position, name, content):
         """Write a file to a device over FoE (foeWriteFile), and replace a file of the same name.
 
-        `content` is bytes, or a str, which is written as UTF-8.
+        `content` is bytes, or a str, which is written as UTF-8. Returns the requests.Response, for its
+        headers.
         """
         data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
-        self.call(
+        return self.call(
             "foeWriteFile",
             path=_file_path(position, name),
             data=data,
@@ -661,8 +665,8 @@ class MotionMasterClient:
         )
 
     def remove_file(self, position, name):
-        """Remove a file from the flash of a device (deleteDeviceFile)."""
-        self.call("deleteDeviceFile", path=_file_path(position, name))
+        """Remove a file from the flash of a device (deleteDeviceFile), and return the response."""
+        return self.call("deleteDeviceFile", path=_file_path(position, name))
 
     def wait_for_value(
         self,

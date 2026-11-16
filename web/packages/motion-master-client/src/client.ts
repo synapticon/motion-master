@@ -378,9 +378,10 @@ export class MotionMasterClient {
 
   /**
    * Reads a file from a device over FoE (`foeReadFile`). The name is percent-encoded in the path,
-   * so any name works, a space included. `format` says what to return: `'bytes'`, a
-   * `Uint8Array` (the default), `'text'`, the file decoded as UTF-8, such as a CSV, or `'json'`, the
-   * file parsed as JSON. The names are those of the methods of a `fetch` response.
+   * so any name works, a space included. `format` says what to return: `'bytes'`, a `Uint8Array`
+   * (the default), `'text'`, the file decoded as UTF-8, such as a CSV, `'json'`, the file parsed as
+   * JSON, or `'response'`, the answer of the server with its body unread, for its headers, such as
+   * the wire time in `X-Wire-Us`. The names are those of the methods of a `fetch` response.
    */
   readFile(
     slavePosition: number,
@@ -397,16 +398,24 @@ export class MotionMasterClient {
     name: string,
     options: { format: 'json'; signal?: AbortSignal },
   ): Promise<unknown>;
+  readFile(
+    slavePosition: number,
+    name: string,
+    options: { format: 'response'; signal?: AbortSignal },
+  ): Promise<Response>;
   async readFile(
     slavePosition: number,
     name: string,
-    options: { format?: 'bytes' | 'text' | 'json'; signal?: AbortSignal } = {},
+    options: { format?: 'bytes' | 'text' | 'json' | 'response'; signal?: AbortSignal } = {},
   ): Promise<unknown> {
     const { format = 'bytes', signal } = options;
     // No response format: the generated client returns the answer with its body unread.
     const response = await this.api.foeReadFile(slavePosition, encodeURIComponent(name), {
       signal,
     });
+    if (format === 'response') {
+      return response;
+    }
     if (format === 'text') {
       return response.text();
     }
@@ -418,19 +427,20 @@ export class MotionMasterClient {
 
   /**
    * Writes a file to a device over FoE (`foeWriteFile`), and replaces a file of the same name. A
-   * string is written as UTF-8.
+   * string is written as UTF-8. Returns the answer of the server, for its headers, such as the wire
+   * time in `X-Wire-Us`.
    */
   async writeFile(
     slavePosition: number,
     name: string,
     content: Uint8Array | string,
     options: { signal?: AbortSignal } = {},
-  ): Promise<void> {
+  ): Promise<Response> {
     // The generated foeWriteFile sends a body it has no formatter for as JSON, so the bytes go with
     // the fetch of this client.
     const body = typeof content === 'string' ? new TextEncoder().encode(content) : content;
     const path = `/api/devices/${slavePosition}/files/${encodeURIComponent(name)}`;
-    await this.fetch(`${this.httpBaseUrl}${path}`, {
+    return this.fetch(`${this.httpBaseUrl}${path}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: body.slice(),
@@ -438,9 +448,12 @@ export class MotionMasterClient {
     });
   }
 
-  /** Removes a file from the flash of a device (`deleteDeviceFile`). */
-  async removeFile(slavePosition: number, name: string): Promise<void> {
-    await this.api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
+  /**
+   * Removes a file from the flash of a device (`deleteDeviceFile`). Returns the answer of the
+   * server, for its headers.
+   */
+  async removeFile(slavePosition: number, name: string): Promise<Response> {
+    return this.api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
   }
 
   /**

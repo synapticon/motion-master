@@ -5,7 +5,13 @@ import ControlExplainer from '../components/ControlExplainer';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection, type SpoeMode } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
-import { apiErrorMessage, formatHex } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  formatHex,
+  AlState,
+  alStateName,
+  type TargetAlState,
+} from '@synapticon/motion-master-client';
 
 // AL state transition targets, in the order the buttons are rendered. BOOT leads
 // (it is the odd one out — file-transfer only) and is styled distinctly; the rest
@@ -13,48 +19,42 @@ import { apiErrorMessage, formatHex } from '@synapticon/motion-master-client';
 // what communication each state enables, since that is what users actually reason
 // about when choosing a target.
 type TransitionTarget = {
-  value: 1 | 2 | 3 | 4 | 8;
-  label: string;
+  value: TargetAlState;
   cls: string;
   hint: string;
 };
 // The targets of a restart, the end state first. A restart always starts at INIT.
-const RESTART_TARGETS: { value: 1 | 2 | 3 | 4 | 8; label: string }[] = [
-  { value: 8, label: 'OP' },
-  { value: 4, label: 'SAFEOP' },
-  { value: 2, label: 'PREOP' },
-  { value: 3, label: 'BOOT' },
-  { value: 1, label: 'INIT' },
+const RESTART_TARGETS: TargetAlState[] = [
+  AlState.OP,
+  AlState.SAFEOP,
+  AlState.PREOP,
+  AlState.BOOT,
+  AlState.INIT,
 ];
 
 const TRANSITION_TARGETS: TransitionTarget[] = [
   {
-    value: 3,
-    label: 'BOOT',
+    value: AlState.BOOT,
     cls: 'bg-status-warn text-grey-900 hover:brightness-95',
     hint: 'Firmware-download state, reachable only from INIT (and only returns to INIT). Just the FoE mailbox is available — no CoE/SDO, no process data. Its mailbox uses larger SyncManagers sized for firmware payloads.',
   },
   {
-    value: 1,
-    label: 'INIT',
+    value: AlState.INIT,
     cls: 'bg-grey-700 text-white hover:bg-grey-800',
     hint: 'No mailbox and no process data. Reachable directly from any state.',
   },
   {
-    value: 2,
-    label: 'PREOP',
+    value: AlState.PREOP,
     cls: 'bg-ocean text-white hover:bg-ocean-dark',
     hint: 'Mailbox communication (CoE/SDO) is available. No process data yet.',
   },
   {
-    value: 4,
-    label: 'SAFEOP',
+    value: AlState.SAFEOP,
     cls: 'bg-status-info text-white hover:brightness-110',
     hint: 'Inputs (TxPDO) are exchanged and the mailbox stays active; outputs are held in their safe state, not applied.',
   },
   {
-    value: 8,
-    label: 'OP',
+    value: AlState.OP,
     cls: 'bg-green-600 text-white hover:brightness-110',
     hint: 'Everything active: inputs, outputs, and mailbox. The drive enters it only once valid outputs are already being sent.',
   },
@@ -114,14 +114,6 @@ export default function FieldbusControlPage() {
     alreadyInitialized,
     setAlreadyInitialized,
   } = useConnection();
-  const AL_STATE_LABEL: Record<number, string> = {
-    1: 'INIT',
-    2: 'PREOP',
-    3: 'BOOT',
-    4: 'SAFEOP',
-    8: 'OP',
-  };
-
   const alStatusCodesQuery = useQuery({
     queryKey: ['alStatusCodes'],
     queryFn: () => api.getAlStatusCodes(),
@@ -235,7 +227,7 @@ export default function FieldbusControlPage() {
     // Time just the transition request — the server blocks until devices settle (or time out),
     // so this is the real wall-clock the state change took. Measured here, not around onSuccess,
     // so the follow-up refresh below is excluded.
-    mutationFn: async (state: 1 | 2 | 3 | 4 | 8) => {
+    mutationFn: async (state: TargetAlState) => {
       const start = performance.now();
       const res = await api.transitionToState({ state });
       return { res, elapsedMs: performance.now() - start };
@@ -250,7 +242,7 @@ export default function FieldbusControlPage() {
   // every state and we surface where the slave ended up.
   // Last result is kept per slave position for the inline row feedback.
   type DeviceTransitionResult = {
-    target: 1 | 2 | 3 | 4 | 8;
+    target: TargetAlState;
     alState: number;
     error: boolean;
     alStatusCode: number;
@@ -262,7 +254,7 @@ export default function FieldbusControlPage() {
   >({});
 
   const deviceTransitionMutation = useMutation({
-    mutationFn: async ({ position, state }: { position: number; state: 1 | 2 | 3 | 4 | 8 }) => {
+    mutationFn: async ({ position, state }: { position: number; state: TargetAlState }) => {
       const start = performance.now();
       const res = await api.transitionToState({ state, positions: [position] });
       return { position, target: state, res, elapsedMs: performance.now() - start };
@@ -298,7 +290,7 @@ export default function FieldbusControlPage() {
         ...prev,
         [position]: {
           target: state,
-          alState: 0,
+          alState: AlState.UNKNOWN,
           error: true,
           alStatusCode: 0,
           elapsedMs: 0,
@@ -310,9 +302,9 @@ export default function FieldbusControlPage() {
 
   // Restart: INIT, then one AL state at a time up to the chosen target. The server walks the
   // steps and stops at the first one a device does not reach, so the result names that step.
-  const [restartTarget, setRestartTarget] = useState<1 | 2 | 3 | 4 | 8>(8);
+  const [restartTarget, setRestartTarget] = useState<TargetAlState>(8);
   const restartMutation = useMutation({
-    mutationFn: async (target: 1 | 2 | 3 | 4 | 8) => {
+    mutationFn: async (target: TargetAlState) => {
       const start = performance.now();
       const res = await api.restartDevices({ target });
       return { target, res, elapsedMs: performance.now() - start };
@@ -557,14 +549,14 @@ export default function FieldbusControlPage() {
                         value={restartTarget}
                         disabled={anyTransitionPending}
                         onChange={(e) =>
-                          setRestartTarget(Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8)
+                          setRestartTarget(Number(e.currentTarget.value) as TargetAlState)
                         }
                         title="The AL state the restart ends in."
                         className="border border-grey-300 px-2 h-[30px] text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                       >
-                        {RESTART_TARGETS.map((t) => (
-                          <option key={t.value} value={t.value}>
-                            {t.label} ({t.value})
+                        {RESTART_TARGETS.map((target) => (
+                          <option key={target} value={target}>
+                            {alStateName(target)} ({target})
                           </option>
                         ))}
                       </select>
@@ -594,16 +586,14 @@ export default function FieldbusControlPage() {
                       if (body.ok) {
                         return (
                           <p className="text-status-good text-xs">
-                            Restarted to {AL_STATE_LABEL[target]} ({target}){elapsed}
+                            Restarted to {alStateName(target)} ({target}){elapsed}
                           </p>
                         );
                       }
                       const failed = body.devices.filter((d) => !d.reached);
                       const detail = failed
                         .map((d) => {
-                          const stateLabel =
-                            AL_STATE_LABEL[d.alState] ??
-                            `0x${d.alState.toString(16).toUpperCase()}`;
+                          const stateLabel = alStateName(d.alState) ?? formatHex(d.alState, 2);
                           const codeEntry = d.error
                             ? (alStatusCodeMap[d.alStatusCode] ?? null)
                             : null;
@@ -615,8 +605,8 @@ export default function FieldbusControlPage() {
                         .join('; ');
                       return (
                         <p className="text-status-bad text-xs">
-                          Restart to {AL_STATE_LABEL[target]} ({target}) stopped at{' '}
-                          {AL_STATE_LABEL[body.step]} ({body.step}){elapsed}. {detail}
+                          Restart to {alStateName(target)} ({target}) stopped at{' '}
+                          {alStateName(body.step)} ({body.step}){elapsed}. {detail}
                         </p>
                       );
                     })()}
@@ -697,12 +687,11 @@ export default function FieldbusControlPage() {
                                   <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                                   <td className="px-4 py-2">
                                     {deviceStates[d.slavePosition] !== undefined &&
-                                    deviceStates[d.slavePosition].alState !== 0
+                                    deviceStates[d.slavePosition].alState !== AlState.UNKNOWN
                                       ? (() => {
                                           const ds = deviceStates[d.slavePosition];
                                           const stateLabel =
-                                            AL_STATE_LABEL[ds.alState] ??
-                                            `0x${ds.alState.toString(16).toUpperCase()}`;
+                                            alStateName(ds.alState) ?? formatHex(ds.alState, 2);
                                           const errorEntry = ds.error
                                             ? (alStatusCodeMap[ds.alStatusCode] ?? null)
                                             : null;
@@ -742,8 +731,9 @@ export default function FieldbusControlPage() {
                                       value=""
                                       disabled={busy}
                                       onChange={(e) => {
-                                        const state = Number(e.currentTarget.value) as
-                                          1 | 2 | 3 | 4 | 8;
+                                        const state = Number(
+                                          e.currentTarget.value,
+                                        ) as TargetAlState;
                                         // Reset to the placeholder so re-selecting the same target re-fires.
                                         e.currentTarget.value = '';
                                         if (state) {
@@ -758,7 +748,7 @@ export default function FieldbusControlPage() {
                                       </option>
                                       {TRANSITION_TARGETS.map((t) => (
                                         <option key={t.value} value={t.value}>
-                                          {t.label} ({t.value})
+                                          {alStateName(t.value)} ({t.value})
                                         </option>
                                       ))}
                                     </select>
@@ -784,14 +774,14 @@ export default function FieldbusControlPage() {
                                         if (reached) {
                                           return (
                                             <span className="text-status-good">
-                                              → {AL_STATE_LABEL[result.target]} ({result.target}) in{' '}
+                                              → {alStateName(result.target)} ({result.target}) in{' '}
                                               {formatDuration(result.elapsedMs)}
                                             </span>
                                           );
                                         }
                                         const stateLabel =
-                                          AL_STATE_LABEL[result.alState] ??
-                                          `0x${result.alState.toString(16).toUpperCase()}`;
+                                          alStateName(result.alState) ??
+                                          formatHex(result.alState, 2);
                                         const codeEntry = result.error
                                           ? (alStatusCodeMap[result.alStatusCode] ?? null)
                                           : null;
@@ -802,7 +792,7 @@ export default function FieldbusControlPage() {
                                         // another master that needs a power-cycle (same case the bus-wide panel explains).
                                         const silentInit =
                                           result.target !== 1 &&
-                                          result.alState === 1 &&
+                                          result.alState === AlState.INIT &&
                                           !result.error &&
                                           result.alStatusCode === 0;
                                         return (
@@ -845,7 +835,7 @@ export default function FieldbusControlPage() {
                 step a slave does not reach, and its AL status code says why.
               </p>
               <div className="space-y-4">
-                {TRANSITION_TARGETS.map(({ value, label, cls, hint }) => {
+                {TRANSITION_TARGETS.map(({ value, cls, hint }) => {
                   const isThisPending =
                     transitionMutation.isPending && transitionMutation.variables === value;
                   return (
@@ -855,7 +845,7 @@ export default function FieldbusControlPage() {
                         disabled={anyTransitionPending}
                         className={`${cls} px-4 py-2 text-xs w-full font-display uppercase tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer`}
                       >
-                        {isThisPending ? 'Transitioning…' : `${label} (${value})`}
+                        {isThisPending ? 'Transitioning…' : `${alStateName(value)} (${value})`}
                       </button>
                       <p className="text-xs text-grey-600">{hint}</p>
                     </div>
@@ -876,15 +866,14 @@ export default function FieldbusControlPage() {
                   if (body.ok) {
                     return (
                       <p className="text-status-good text-xs">
-                        Transitioned to {AL_STATE_LABEL[target]} ({target}){elapsed}
+                        Transitioned to {alStateName(target)} ({target}){elapsed}
                       </p>
                     );
                   }
                   const failed = body.devices.filter((d) => !d.reached);
                   const detail = failed
                     .map((d) => {
-                      const stateLabel =
-                        AL_STATE_LABEL[d.alState] ?? `0x${d.alState.toString(16).toUpperCase()}`;
+                      const stateLabel = alStateName(d.alState) ?? formatHex(d.alState, 2);
                       const codeEntry = d.error ? (alStatusCodeMap[d.alStatusCode] ?? null) : null;
                       const code = codeEntry
                         ? ` — ${formatHex(d.alStatusCode)} ${codeEntry.name}`
@@ -900,11 +889,13 @@ export default function FieldbusControlPage() {
                   // silent no-error failure is otherwise baffling.
                   const silentlyStuckInInit =
                     target !== 1 &&
-                    failed.some((d) => d.alState === 1 && !d.error && d.alStatusCode === 0);
+                    failed.some(
+                      (d) => d.alState === AlState.INIT && !d.error && d.alStatusCode === 0,
+                    );
                   return (
                     <>
                       <p className="text-status-bad text-xs">
-                        Failed to reach {AL_STATE_LABEL[target]} ({target}){elapsed}. {detail}
+                        Failed to reach {alStateName(target)} ({target}){elapsed}. {detail}
                       </p>
                       {silentlyStuckInInit && (
                         <p className="text-grey-600 text-xs">

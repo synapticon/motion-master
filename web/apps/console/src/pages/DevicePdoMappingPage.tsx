@@ -10,6 +10,7 @@ import {
   type PdoMappingRequest,
   type PdoMappingRequestObject,
   parseInteger,
+  AlState,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import DevicePageHeader from '../components/DevicePageHeader';
@@ -17,8 +18,6 @@ import ParameterPicker from '../components/ParameterPicker';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline, btnPrimary } from '../utils/styles';
-
-const AL_PREOP = 2;
 
 // ETG.1000.6 object-access (ObjAccess) mapping bits: an object is PDO-mappable in a direction only
 // when the corresponding bit is set. Used to constrain the parameter picker per direction.
@@ -403,7 +402,7 @@ export default function DevicePdoMappingPage() {
     refetchInterval: 2000,
   });
   const state = statesQuery.data?.data.find((s) => s.slavePosition === slavePosition);
-  const inPreOp = state?.alState === AL_PREOP;
+  const inPreOp = state?.alState === AlState.PREOP;
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);

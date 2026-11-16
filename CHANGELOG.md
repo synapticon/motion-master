@@ -21,6 +21,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- Both clients say whether a device in an AL state answers mailbox requests with
+  `mailboxActive(alState)` and `mailbox_active(al_state)`: in PREOP, SAFEOP and OP, as the server
+  decides. The Console uses it, `alStateName()` and `AlState` in place of its two label tables, two
+  copies of the mailbox states and the bare numbers of the AL states. The Control page names an
+  unknown state `UNKNOWN`, where it wrote `0x0`.
 - The TypeScript client streams the batches of a monitoring with `streamMonitoring(topic)`, which a
   program reads with `for await`.
 - The TypeScript client builds a client from `config.jsonc`, JSON with comments, with

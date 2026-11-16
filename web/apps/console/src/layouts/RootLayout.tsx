@@ -6,7 +6,7 @@ import PwaUpdatePrompt from '../components/PwaUpdatePrompt';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection } from '../contexts/ConnectionContext';
 import { isIcMuEncoder } from '../utils/icMuEncoder';
-import { formatHex } from '@synapticon/motion-master-client';
+import { formatHex, AlState, alStateName, mailboxActive } from '@synapticon/motion-master-client';
 
 const deviceLinks = [
   { to: 'foe', label: 'FoE' },
@@ -18,25 +18,16 @@ const deviceLinks = [
   { to: 'sii', label: 'SII' },
 ];
 
-const AL_STATE_LABEL: Record<number, string> = {
-  0: 'UNKNOWN', // The device does not answer: lost or powered off. The server reports state 0.
-  1: 'INIT',
-  2: 'PREOP',
-  3: 'BOOT',
-  4: 'SAFEOP',
-  8: 'OP',
-};
-
 // Per-state badge colors (bg + text), matching the Transition-to-State buttons on
 // the Control page so a state reads the same here as where it's commanded. BOOT is
 // the odd one out (amber); the rest grade from neutral grey (no comms) up to green
 // (fully operational). An error overrides these with red — see the badge below.
 const AL_STATE_BADGE: Record<number, string> = {
-  1: 'bg-grey-700 text-white',
-  2: 'bg-ocean text-white',
-  3: 'bg-status-warn text-grey-900',
-  4: 'bg-status-info text-white',
-  8: 'bg-green-600 text-white',
+  [AlState.INIT]: 'bg-grey-700 text-white',
+  [AlState.PREOP]: 'bg-ocean text-white',
+  [AlState.BOOT]: 'bg-status-warn text-grey-900',
+  [AlState.SAFEOP]: 'bg-status-info text-white',
+  [AlState.OP]: 'bg-green-600 text-white',
 };
 
 interface DeviceState {
@@ -70,20 +61,16 @@ function alStateLabel(state?: DeviceState): string | null {
   if (isUnreachable(state)) {
     return REACHABILITY_LABEL[state.reachability];
   }
-  return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`;
+  // The server reports UNKNOWN (0) for a device that does not answer: lost or powered off.
+  return alStateName(state.alState) ?? formatHex(state.alState, 2);
 }
 
-// Mailbox (CoE/SDO) communication is live in PREOP, SAFEOP and OP — independent of the
-// AL error flag (a device in SAFEOP+error still answers). INIT has no mailbox and BOOT's
-// is FoE-only, so both count as inactive. Mirrors Device::mailboxActive() on the backend, so
-// it can be derived from the batched device-state poll instead of a per-device request.
-const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8]);
-
+// Derived from the batched device-state poll instead of a request per device.
 function mailboxActiveFor(state?: DeviceState): boolean | null {
   if (!state) {
     return null;
   }
-  return MAILBOX_ACTIVE_STATES.has(state.alState);
+  return mailboxActive(state.alState);
 }
 
 interface ScanStatus {
@@ -267,25 +254,25 @@ function DeviceSection({
   // batched device-state poll rather than issuing a per-device request (which would be one
   // request per device every few seconds — N requests for N devices). `null` while no state
   // has arrived yet.
-  const mailboxActive: boolean | null = mailboxActiveFor(state);
+  const hasMailbox: boolean | null = mailboxActiveFor(state);
   // BOOT replaces the standard CoE/SDO mailbox with a FoE-only one (firmware transfer is the
   // only thing the device can do there), so we swap the mail glyph for a "FoE" tag and a tooltip
   // that says so, rather than showing the mailbox as plainly inactive.
-  const isBoot = state?.alState === 3;
+  const isBoot = state?.alState === AlState.BOOT;
   const statusLabel =
-    mailboxActive === null
+    hasMailbox === null
       ? 'Checking…'
       : isBoot
         ? 'FoE only'
-        : mailboxActive
+        : hasMailbox
           ? 'Mailbox active'
           : 'Mailbox inactive';
   const statusTitle =
-    mailboxActive === null
+    hasMailbox === null
       ? 'Checking… — reading the device’s AL state on the bus'
       : isBoot
         ? 'FoE only — the device is in BOOT, so its mailbox carries only File-over-EtherCAT (firmware transfer); CoE/SDO is unavailable until it leaves BOOT'
-        : mailboxActive
+        : hasMailbox
           ? 'Mailbox active — the device is in PREOP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
           : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT, or is not responding (powered off, unplugged, or left the bus)';
 
@@ -337,7 +324,7 @@ function DeviceSection({
   // Motion is CiA402-only AND requires OP: you can only drive the state machine and setpoints while
   // the device is in the operational EtherCAT state (process data actually exchanging) — in any
   // other AL state a motion command has no effect. All device links are sorted by name.
-  const isOp = state?.alState === 8;
+  const isOp = state?.alState === AlState.OP;
   const links = [
     ...(isCia402 && isOp ? [{ to: 'motion', label: 'Motion' }] : []),
     ...(hasIcMuEncoder ? [{ to: 'ic-mu-encoders', label: 'iC-MU Encoders' }] : []),
@@ -405,11 +392,11 @@ function DeviceSection({
             title={statusTitle}
             aria-label={statusLabel}
             className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${
-              mailboxActive === null
+              hasMailbox === null
                 ? 'bg-white/15 animate-pulse'
                 : isBoot
                   ? 'bg-status-warn text-grey-900'
-                  : mailboxActive
+                  : hasMailbox
                     ? 'bg-ocean'
                     : 'bg-white/15'
             }`}

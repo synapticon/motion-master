@@ -376,7 +376,8 @@ The module names objects and states with classes:
 - `AlState` names the AL states, `INIT`, `PREOP`, `BOOT`, `SAFEOP` and `OP`. It is an `IntEnum`, so
   a member goes into a request body as a number, and `AlState(value)` converts an `alState` from a
   response. The name of a member is its label. The server reports `UNKNOWN`, 0, for a device that
-  does not answer.
+  does not answer. `mailbox_active(al_state)` says whether a device in that state answers mailbox
+  requests, such as an SDO: in PREOP, SAFEOP and OP.
 - `Cia402State` names the CiA402 states. It is a `StrEnum` whose members equal the names that the
   API uses: `Cia402State.OPERATION_ENABLED == "OperationEnabled"`. `Cia402.state(statusword)`
   returns the state that a statusword reports. It is meant for recorded rows, where the server

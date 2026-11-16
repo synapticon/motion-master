@@ -93,6 +93,15 @@ class AlState(enum.IntEnum):
     OP = 8
 
 
+def mailbox_active(al_state):
+    """Return whether a device in this AL state answers mailbox requests, such as an SDO.
+
+    True in PREOP, SAFEOP and OP, also with the error bit set. INIT has no mailbox, and the mailbox
+    of BOOT carries FoE only. The server decides the same way.
+    """
+    return al_state in (AlState.PREOP, AlState.SAFEOP, AlState.OP)
+
+
 class Cia402State(enum.StrEnum):
     """A CiA402 state, by the name the API uses. A member equals its name: OPERATION_ENABLED ==
     "OperationEnabled"."""

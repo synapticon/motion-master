@@ -296,7 +296,7 @@ await client.api.transitionToState({ state: AlState.PREOP });
 
 The list holds every object of every device in the ESI, so an address can name an object that the drive does not have. A read of it then fails. A 64-bit value is exact only up to 2^53, because JavaScript reads a JSON integer as a `number`.
 
-`AlState` names the AL states, `INIT`, `PREOP`, `BOOT`, `SAFEOP` and `OP`, with the numbers that the API uses. The server reports `UNKNOWN`, 0, for a device that does not answer. `Cia402State` is the type of a CiA402 state name. `Cia402.state()` returns the state that a statusword reports, which is useful for a recorded row, where the server sends the raw statusword.
+`AlState` names the AL states, `INIT`, `PREOP`, `BOOT`, `SAFEOP` and `OP`, with the numbers that the API uses. The server reports `UNKNOWN`, 0, for a device that does not answer. `alStateName(2)` returns `PREOP`, and `mailboxActive(alState)` says whether a device in that state answers mailbox requests, such as an SDO: in PREOP, SAFEOP and OP. `Cia402State` is the type of a CiA402 state name. `Cia402.state()` returns the state that a statusword reports, which is useful for a recorded row, where the server sends the raw statusword.
 
 ## Monitoring
 

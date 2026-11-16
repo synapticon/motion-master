@@ -21,6 +21,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- The CiA402 status, `GET /api/devices/{slavePosition}/cia402`, has `activeTarget`: the kind of the
+  target that the active operation mode acts on, as `POST …/cia402/target` takes it, and the index
+  and subindex of its object, such as `{"kind": "velocity", "index": 24831, "subindex": 0}`. It is
+  null in a mode with no linear target. The server decides it, so a client keeps no table of the
+  modes. The Console's motion row reads it in place of its own table, and the Console names the
+  objects of the Tuning, Motion, Firmware and iC-MU pages with `Cia402`, `Somanet` and `Profile`.
 - Both clients say whether a device in an AL state answers mailbox requests with
   `mailboxActive(alState)` and `mailbox_active(al_state)`: in PREOP, SAFEOP and OP, as the server
   decides. The Console uses it, `alStateName()` and `AlState` in place of its two label tables, two

@@ -8,6 +8,7 @@ import {
   type ProcedureRequest,
   type ProcedureSnapshot,
   type ProgressStep,
+  Profile,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import DevicePageHeader from '../components/DevicePageHeader';
@@ -72,7 +73,8 @@ export default function DeviceFirmwarePage() {
 
   const versionQuery = useQuery({
     queryKey: ['firmware-version', slavePosition],
-    queryFn: () => api.readParameter(slavePosition, 0x100a, 0).then((r) => String(r.data.value)),
+    queryFn: () =>
+      client.readValue(slavePosition, Profile.MANUFACTURER_SOFTWARE_VERSION).then((v) => String(v)),
     retry: false,
   });
   const hardwareQuery = useQuery({

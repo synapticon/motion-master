@@ -9,6 +9,7 @@ import {
   type ProgressStep,
   formatHex,
   objectAddressText,
+  Somanet,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -331,8 +332,11 @@ function EncoderStatusBits({
   latched: number | undefined;
 }) {
   const { api } = useConnection();
-  const index = encoderOrdinal === 1 ? 0x2111 : 0x2113;
-  const object = objectAddressText(index, 4);
+  const statusObject =
+    encoderOrdinal === 1
+      ? Somanet.ENCODER_1_FEEDBACK_ENCODER_STATUS
+      : Somanet.ENCODER_2_FEEDBACK_ENCODER_STATUS;
+  const object = objectAddressText(statusObject.index, statusObject.subindex);
   const [text, setText] = useState('');
   const [typed, setTyped] = useState(false);
 
@@ -344,7 +348,10 @@ function EncoderStatusBits({
   }, [latched]);
 
   const read = useMutation({
-    mutationFn: () => api.readParameter(slavePosition, index, 4).then((r) => r.data),
+    mutationFn: () =>
+      api
+        .readParameter(slavePosition, statusObject.index, statusObject.subindex)
+        .then((r) => r.data),
     onSuccess: (parameter) => {
       setText(formatHex(Number(parameter.value), 6));
       setTyped(false);

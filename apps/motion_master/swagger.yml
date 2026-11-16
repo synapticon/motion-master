@@ -5648,7 +5648,7 @@ components:
       required:
         [state, statusword, controlword, operationMode, modeName, targetPosition,
          targetVelocity, targetTorque, actualPosition, actualVelocity, actualTorque,
-         errorDescription]
+         errorDescription, activeTarget]
       properties:
         state:
           type: string
@@ -5732,6 +5732,28 @@ components:
             holds one. A SOMANET drive keeps it in 0x203F:01 and reports an empty string while
             there is no fault. `null` when the drive has no such object or the read failed.
           example: CyclicHb
+        activeTarget:
+          type: object
+          nullable: true
+          description: >-
+            The target that the active operation mode acts on: its kind, which
+            `POST /api/devices/{slavePosition}/cia402/target` takes, and its object. Position,
+            0x607A, in profile position and cyclic synchronous position; velocity, 0x60FF, in
+            profile velocity and cyclic synchronous velocity; torque, 0x6071, in profile torque and
+            the cyclic synchronous torque modes. `null` in a mode with no linear target: no mode,
+            homing, velocity (vl) and interpolated position.
+          required: [kind, index, subindex]
+          properties:
+            kind:
+              type: string
+              enum: [position, velocity, torque]
+              example: velocity
+            index:
+              type: integer
+              example: 24831
+            subindex:
+              type: integer
+              example: 0
     OperationModes:
       type: object
       description: >-

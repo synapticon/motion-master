@@ -8,6 +8,7 @@ import {
   type ProcedureSnapshot,
   type ProgressStep,
   objectAddressText,
+  Somanet,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -39,25 +40,28 @@ interface GainObject {
 // The objects the tuning writes, in the order it writes them.
 const GAINS: Record<Controller, GainObject[]> = {
   position: [
-    { index: 0x2012, subindex: 0x01, label: 'Position loop Kp' },
-    { index: 0x2012, subindex: 0x02, label: 'Position loop Ki' },
-    { index: 0x2012, subindex: 0x03, label: 'Position loop Kd' },
-    { index: 0x2012, subindex: 0x05, label: 'Velocity loop Kp' },
-    { index: 0x2012, subindex: 0x06, label: 'Velocity loop Ki' },
-    { index: 0x2012, subindex: 0x07, label: 'Velocity loop Kd' },
+    { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_KP, label: 'Position loop Kp' },
+    { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_KI, label: 'Position loop Ki' },
+    { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_KD, label: 'Position loop Kd' },
+    { ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_KP, label: 'Velocity loop Kp' },
+    { ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_KI, label: 'Velocity loop Ki' },
+    { ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_KD, label: 'Velocity loop Kd' },
   ],
   velocity: [
-    { index: 0x2011, subindex: 0x01, label: 'Kp' },
-    { index: 0x2011, subindex: 0x02, label: 'Ki' },
-    { index: 0x2011, subindex: 0x03, label: 'Kd' },
+    { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_KP, label: 'Kp' },
+    { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_KI, label: 'Ki' },
+    { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_KD, label: 'Kd' },
   ],
 };
 
 // The limits set-integral-limits writes, in the order it writes them.
 const LIMITS: GainObject[] = [
-  { index: 0x2011, subindex: 0x04, label: 'Velocity controller' },
-  { index: 0x2012, subindex: 0x04, label: 'Position loop' },
-  { index: 0x2012, subindex: 0x08, label: 'Velocity loop of the position controller' },
+  { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_INTEGRAL_LIMIT, label: 'Velocity controller' },
+  { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_INTEGRAL_LIMIT, label: 'Position loop' },
+  {
+    ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_INTEGRAL_LIMIT,
+    label: 'Velocity loop of the position controller',
+  },
 ];
 
 interface LimitsWrite {

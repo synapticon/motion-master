@@ -1142,6 +1142,23 @@ TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
   EXPECT_EQ(j.at("actualVelocity"), 249000);
   EXPECT_TRUE(j.at("actualTorque").is_null());
   EXPECT_TRUE(j.at("errorDescription").is_null());
+  EXPECT_EQ(j.at("activeTarget"),
+            (nlohmann::json{{"kind", "velocity"}, {"index", 0x60FF}, {"subindex", 0}}));
+}
+
+TEST(Cia402Status, JsonEmitsTheActiveTargetOfEachMode) {
+  mm::node::Cia402Status s;
+  const auto target = [&](OperationMode mode) {
+    s.operationMode = mode;
+    return nlohmann::json(s).at("activeTarget");
+  };
+  EXPECT_EQ(target(OperationMode::kProfilePosition).at("index"), 0x607A);
+  EXPECT_EQ(target(OperationMode::kCyclicSyncPosition).at("kind"), "position");
+  EXPECT_EQ(target(OperationMode::kProfileVelocity).at("index"), 0x60FF);
+  EXPECT_EQ(target(OperationMode::kCyclicSyncTorque).at("kind"), "torque");
+  EXPECT_EQ(target(OperationMode::kCyclicSyncTorque).at("index"), 0x6071);
+  EXPECT_TRUE(target(OperationMode::kNoMode).is_null());
+  EXPECT_TRUE(target(OperationMode::kHoming).is_null());
 }
 
 TEST(Cia402Status, JsonEmitsErrorDescriptionWhenPresent) {

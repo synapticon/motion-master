@@ -82,6 +82,15 @@ export interface Cia402Status {
    * @example "CyclicHb"
    */
   errorDescription: string | null;
+  /** The target that the active operation mode acts on: its kind, which `POST /api/devices/{slavePosition}/cia402/target` takes, and its object. Position, 0x607A, in profile position and cyclic synchronous position; velocity, 0x60FF, in profile velocity and cyclic synchronous velocity; torque, 0x6071, in profile torque and the cyclic synchronous torque modes. `null` in a mode with no linear target: no mode, homing, velocity (vl) and interpolated position. */
+  activeTarget: {
+    /** @example "velocity" */
+    kind: "position" | "velocity" | "torque";
+    /** @example 24831 */
+    index: number;
+    /** @example 0 */
+    subindex: number;
+  } | null;
 }
 
 /** Every operation mode a device has, with what its "Supported drive modes" field (0x6502) says about each. */

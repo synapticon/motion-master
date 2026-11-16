@@ -40,7 +40,8 @@ struct Cia402Status {
 };
 
 /// @brief Serialises a @c Cia402Status. Emits `state`/`modeName` as human-readable strings
-///        alongside the numeric `statusword`, `controlword`, and `operationMode`.
+///        alongside the numeric `statusword`, `controlword`, and `operationMode`, and
+///        `activeTarget`, the kind and the object of the target the mode acts on, or null.
 void to_json(nlohmann::json& j, const Cia402Status& s);
 
 /// @brief Position range limit (0x607B) — the range position values wrap around in.

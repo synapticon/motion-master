@@ -84,10 +84,12 @@ using RegisterRoutesFn = std::function<void(Router& router, const RouteContext& 
 /// live in exactly one place. Order-independent among headers; call before end().
 template <typename Res>
 Res* setCorsOrigin(Res* res, std::string_view corsOrigin) {
-  return res->writeHeader("Access-Control-Allow-Origin", corsOrigin);
+  return res->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+      ->writeHeader("Timing-Allow-Origin", corsOrigin);
 }
 
-/// @brief Attaches the server-measured wire-time header (`X-Wire-Us`, microseconds) to a response.
+/// @brief Attaches the server-measured wire time to a response, as the standard `Server-Timing`
+/// header with the metric `wire`, in milliseconds: `Server-Timing: wire;dur=1.500`.
 ///
 /// @p wireUs is the server-measured time spent on the device-side operation itself — control-plane
 /// lock acquire plus the mailbox/ESC wire transaction(s) — *not* the end-to-end HTTP round-trip,
@@ -98,7 +100,9 @@ Res* setCorsOrigin(Res* res, std::string_view corsOrigin) {
 /// enumeration, PDO-mapping read/write) it is the total across all of the operation's transactions.
 /// Because the value rides a header rather than the body, it is the one uniform timing channel that
 /// works for any response shape (JSON or raw octet-stream) without touching each endpoint's body
-/// schema. The header is CORS-exposed so the PWA can read it cross-origin. Emitted on **both**
+/// schema. A browser records it per request in its Performance API, which `Timing-Allow-Origin`
+/// opens to the allowed origin, and the header is CORS-exposed too, so a client that holds the
+/// response reads it from there. Emitted on **both**
 /// success and failure — a failed operation still consumed device time (e.g. an SDO read that waits
 /// out the mailbox timeout), and the client shows it the same way; failures route through
 /// sendError()'s @c wireUs parameter so the header lands after writeStatus(). Call **before** the
@@ -106,8 +110,8 @@ Res* setCorsOrigin(Res* res, std::string_view corsOrigin) {
 /// mirroring setCorsOrigin.
 template <typename Res>
 Res* setWireTime(Res* res, std::chrono::microseconds wireUs) {
-  return res->writeHeader("Access-Control-Expose-Headers", "X-Wire-Us")
-      ->writeHeader("X-Wire-Us", std::to_string(wireUs.count()));
+  return res->writeHeader("Access-Control-Expose-Headers", "Server-Timing")
+      ->writeHeader("Server-Timing", serverTimingWire(wireUs));
 }
 
 /// @brief Writes @p body as a 200 application/json response with the CORS header.
@@ -139,7 +143,7 @@ void sendBytes(Res* res, std::string_view corsOrigin, std::string_view contentTy
 /// @brief Writes a @p status response carrying a `{"error": message}` JSON body and the CORS
 /// header.
 ///
-/// Pass @p wireUs to attach the `X-Wire-Us` timing header to the failure the same way a success
+/// Pass @p wireUs to attach the `Server-Timing` timing header to the failure the same way a success
 /// carries it — a failed device transaction still consumed wire time (an SDO read that waits out
 /// the mailbox timeout, a partial FoE transfer), and the client renders it identically. The header
 /// is written after writeStatus() so uWS keeps the non-200 status (headers-before-status would

@@ -1149,8 +1149,8 @@ void HttpServer::run() {
   // datagram gets the name of the register its address selects, and a register block gets its
   // fields. Offline, like the SII and ESI parsers beside it — no bus is touched and none is needed.
   router.post("/api/eni/parse", [](const mm::api::Request& req) -> mm::api::Response {
-    // Timed through the same X-Wire-Us channel as a device operation. The figure is CPU rather than
-    // wire time here, as it is for the ESI parse.
+    // Timed through the same Server-Timing channel as a device operation. The figure is CPU rather
+    // than wire time here, as it is for the ESI parse.
     return mm::api::timed([&] { return mm::node::buildEniResponse(req.body()); },
                           "400 Bad Request");
   });
@@ -1164,9 +1164,9 @@ void HttpServer::run() {
       }
       request.moduleIdents = std::move(*idents);
     }
-    // Timed through the same X-Wire-Us channel as a device operation. The figure is CPU rather than
-    // wire time here (parse + assemble every device's dictionary), which for a megabyte-scale ESI
-    // is the part worth watching. JSON serialisation stays outside it, as everywhere else.
+    // Timed through the same Server-Timing channel as a device operation. The figure is CPU rather
+    // than wire time here (parse + assemble every device's dictionary), which for a megabyte-scale
+    // ESI is the part worth watching. JSON serialisation stays outside it, as everywhere else.
     return mm::api::timed([&] { return mm::etg::buildEsiResponse(req.body(), request); },
                           "400 Bad Request");
   });
@@ -1226,7 +1226,7 @@ void HttpServer::run() {
   // Content negotiation: the raw EEPROM image only when the client asks via
   // `Accept: application/octet-stream`, otherwise the parsed structure, which is the default. Only
   // the EEPROM read touches the wire (parseSii is local CPU), so the read is what is timed and
-  // X-Wire-Us rides every outcome.
+  // Server-Timing rides every outcome.
   router.get(
       "/api/devices/:slavePosition/sii", [this](const mm::api::Request& req) -> mm::api::Response {
         if (auto refused = escUnavailable(deviceManager_); refused) {
@@ -1759,7 +1759,7 @@ void HttpServer::run() {
 
   // ── SDO access and File over EtherCAT ───────────────────────────────────────────────────────
   // Both are single mailbox transactions whose wire cost is worth separating from the browser-side
-  // round trip, which is much larger — hence X-Wire-Us on every outcome, success or failure. A
+  // round trip, which is much larger — hence Server-Timing on every outcome, success or failure. A
   // failed SDO is the clearest case: it can spend the full 700 ms mailbox timeout getting no
   // answer.
   router.get("/api/devices/:slavePosition/sdo/:index/:subindex",
@@ -2477,7 +2477,7 @@ void HttpServer::run() {
   // prunes whatever it empties. Every path goes through UserCache::resolve, which is what confines
   // this unauthenticated endpoint to the cache directory.
   //
-  // Each route reports its server-side cost through the same X-Wire-Us header the fieldbus
+  // Each route reports its server-side cost through the same Server-Timing header the fieldbus
   // endpoints use. There is no device here — the figure is the filesystem operation — but the split
   // it enables is just as useful: a 40 MB dump taking 2 s to download is a transfer cost, not a
   // slow server, and the two figures side by side say so.

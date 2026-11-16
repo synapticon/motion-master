@@ -180,7 +180,7 @@ struct Response {
   std::string contentType = "application/json";
   std::string body;
   /// Extra headers beyond content type and CORS — @c Content-Disposition for a download, the
-  /// hardening set on a user-supplied file, @c X-Wire-Us for a timed device operation.
+  /// hardening set on a user-supplied file, @c Server-Timing for a timed device operation.
   std::vector<std::pair<std::string, std::string>> headers;
 };
 
@@ -242,7 +242,12 @@ Response notFound(std::string_view message);
 /// name the neighbouring send* helpers already use for a status line.
 Response statusOnly(std::string status);
 
-/// @brief Attaches the server-measured device time (`X-Wire-Us`) to @p response and returns it.
+/// @brief The value of the `Server-Timing` header for a device time: `wire;dur=` and the time in
+/// milliseconds, such as `wire;dur=1.500`.
+std::string serverTimingWire(std::chrono::microseconds wireUs);
+
+/// @brief Attaches the server-measured device time (`Server-Timing`, metric `wire`) to @p response
+/// and returns it.
 ///
 /// The uniform timing channel: it rides a header rather than the body, so it works for any response
 /// shape, and it is emitted on failure as well as success because a failed device operation still
@@ -252,8 +257,8 @@ Response withWireTime(Response response, std::chrono::microseconds wireUs);
 /// @brief Runs a device operation, times it, and turns its @c std::expected into a timed response.
 ///
 /// The shape of nearly every device endpoint, in one place: time the call, send the value as JSON
-/// with @c X-Wire-Us on success, or @p errorStatus with the same header on failure. Only @p op is
-/// timed, so body serialisation stays out of the figure.
+/// with @c Server-Timing on success, or @p errorStatus with the same header on failure. Only @p op
+/// is timed, so body serialisation stays out of the figure.
 template <typename Op>
 Response timed(Op&& op, std::string errorStatus = "500 Internal Server Error") {
   const auto t0 = std::chrono::steady_clock::now();

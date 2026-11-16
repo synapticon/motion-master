@@ -214,12 +214,13 @@ TEST(ResponseTest, ErrorHelpersCarryStatusAndMessage) {
 }
 
 TEST(ResponseTest, WireTimeIsExposedForCrossOriginReads) {
-  const auto response = withWireTime(json(nlohmann::json::object()), std::chrono::microseconds(42));
+  const auto response =
+      withWireTime(json(nlohmann::json::object()), std::chrono::microseconds(1500));
   bool exposed = false;
   bool value = false;
   for (const auto& [name, header] : response.headers) {
-    exposed = exposed || (name == "Access-Control-Expose-Headers" && header == "X-Wire-Us");
-    value = value || (name == "X-Wire-Us" && header == "42");
+    exposed = exposed || (name == "Access-Control-Expose-Headers" && header == "Server-Timing");
+    value = value || (name == "Server-Timing" && header == "wire;dur=1.500");
   }
   EXPECT_TRUE(exposed) << "a browser cannot read the header cross-origin without this";
   EXPECT_TRUE(value);

@@ -42,6 +42,9 @@ void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin, Re
   res->cork([res, corsOrigin, &response, &body, &pending]() {
     auto* r = res->writeStatus(response.status)
                   ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+                  // Lets the allowed origin read the Server-Timing of a response in its Performance
+                  // API, as well as from the response.
+                  ->writeHeader("Timing-Allow-Origin", corsOrigin)
                   ->writeHeader("Content-Type", response.contentType);
     for (const auto& [name, value] : response.headers) {
       r = r->writeHeader(name, value);
@@ -169,9 +172,13 @@ Response statusOnly(std::string status) {
       .status = std::move(status), .contentType = "application/json", .body = {}, .headers = {}};
 }
 
+std::string serverTimingWire(std::chrono::microseconds wireUs) {
+  return std::format("wire;dur={:.3f}", static_cast<double>(wireUs.count()) / 1000.0);
+}
+
 Response withWireTime(Response response, std::chrono::microseconds wireUs) {
-  response.headers.emplace_back("Access-Control-Expose-Headers", "X-Wire-Us");
-  response.headers.emplace_back("X-Wire-Us", std::to_string(wireUs.count()));
+  response.headers.emplace_back("Access-Control-Expose-Headers", "Server-Timing");
+  response.headers.emplace_back("Server-Timing", serverTimingWire(wireUs));
   return response;
 }
 

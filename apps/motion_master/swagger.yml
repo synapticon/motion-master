@@ -778,7 +778,7 @@ paths:
           description: Whether a scan is required, and the facts it is decided from
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1336,7 +1336,7 @@ paths:
           description: Parameter list ordered by (index, subindex)
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1378,7 +1378,7 @@ paths:
           description: Refreshed parameter list ordered by (index, subindex)
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1480,7 +1480,7 @@ paths:
           description: The parameter (value plus metadata)
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1569,7 +1569,7 @@ paths:
           description: The updated parameter (value plus metadata)
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1623,7 +1623,7 @@ paths:
           description: Raw register bytes
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1702,7 +1702,7 @@ paths:
           description: Write completed successfully
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1755,7 +1755,7 @@ paths:
           description: Decoded watchdog configuration
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1816,7 +1816,7 @@ paths:
           description: Watchdog configuration actually programmed (timeout rounded to the tick base)
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1870,7 +1870,7 @@ paths:
           description: The device's grouped PDO mapping
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1883,7 +1883,7 @@ paths:
           description: The device's mailbox is not active (it is in INIT or BOOT)
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
         "500":
           $ref: "#/components/responses/DriverError"
     put:
@@ -1931,7 +1931,7 @@ paths:
           description: The device's grouped read-back mapping, verified equal to the request
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1946,7 +1946,7 @@ paths:
             malformed mapping the device aborted, or a read-back that did not match the request
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/cia402:
@@ -1971,7 +1971,7 @@ paths:
           description: The device's CiA402 control snapshot
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1984,7 +1984,7 @@ paths:
           description: The device is not a CiA402 drive, or its object dictionary is not enumerated
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
   /api/devices/{slavePosition}/operation-modes:
     get:
       summary: List a device's operation modes
@@ -2012,7 +2012,7 @@ paths:
           description: The device's operation modes
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2025,7 +2025,7 @@ paths:
           description: The device is not a CiA402 drive, or its object dictionary is not enumerated
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
   /api/devices/{slavePosition}/cia402/mode:
     post:
       summary: Set a device's CiA402 operation mode
@@ -2598,7 +2598,7 @@ paths:
           description: The decoded recording
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HrdRecording" }
@@ -2663,7 +2663,7 @@ paths:
           description: The brake state read back after the command
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BrakeState" }
@@ -2703,7 +2703,7 @@ paths:
           description: The brake state read back after the command
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BrakeState" }
@@ -2754,7 +2754,7 @@ paths:
           description: Raw object bytes from the device
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2832,7 +2832,7 @@ paths:
           description: Download completed successfully
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2876,7 +2876,7 @@ paths:
           description: The files the device reported, in the order it reported them
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2918,7 +2918,7 @@ paths:
           description: The decoded file
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3057,7 +3057,7 @@ paths:
           description: The descriptors
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3104,7 +3104,7 @@ paths:
           description: The verdict, compatible or not
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3162,7 +3162,7 @@ paths:
           description: Raw file bytes from the device
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/octet-stream:
               schema:
@@ -3215,7 +3215,7 @@ paths:
           description: File written successfully
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3273,7 +3273,7 @@ paths:
           description: The file is gone
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3332,7 +3332,7 @@ paths:
           description: Parsed SII structure, or the raw EEPROM image
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3391,7 +3391,7 @@ paths:
           description: SII image written successfully
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3708,7 +3708,7 @@ paths:
           description: The parsed ENI
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3789,7 +3789,7 @@ paths:
           description: The parsed ESI — every device with its assembled entry table
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3824,7 +3824,7 @@ paths:
           description: Decoded ESC diagnostics for each queried device
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3880,7 +3880,7 @@ paths:
           description: Decoded DC sync status for each queried device
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -5527,7 +5527,7 @@ paths:
           description: The cache root and its files.
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -5571,7 +5571,7 @@ paths:
           description: The file's contents.
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/octet-stream:
               schema:
@@ -5599,7 +5599,7 @@ paths:
           description: The file was written.
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -5630,7 +5630,7 @@ paths:
           description: The file or directory was removed.
           headers:
             Server-Timing:
-              $ref: "#/components/headers/WireTime"
+              $ref: "#/components/headers/ServerTiming"
         "400":
           description: The path is invalid, or the removal failed.
         "404":
@@ -9436,7 +9436,7 @@ components:
           type: number
           format: double
   headers:
-    WireTime:
+    ServerTiming:
       description: >
         The server-measured duration of the on-device operation, as the standard `Server-Timing`
         header with the metric `wire`, in milliseconds with three decimals: `wire;dur=1.500` is
@@ -9489,7 +9489,7 @@ components:
         transaction — the failure still consumed wire time.
       headers:
         Server-Timing:
-          $ref: "#/components/headers/WireTime"
+          $ref: "#/components/headers/ServerTiming"
       content:
         application/json:
           schema:

@@ -23,8 +23,10 @@ import type {
   Cia402Status,
   DeviceFile,
   EsiParseResult,
+  HrdRecording,
   IcMuRestoreFile,
   IntegroVariant,
+  ParameterCacheEntry,
   ProcedureRequest,
   ProcedureSnapshot,
   SlaveInformationInterface,
@@ -88,6 +90,9 @@ type Data<K extends keyof Api> = Api[K] extends (...args: never[]) => Promise<{ 
 
 /** The target that `setTarget` writes: 0x607A, 0x60FF or 0x6071. */
 export type Cia402TargetKind = Parameters<Api['setCia402Target']>[1]['target'];
+
+/** The layout of a high resolution data recording: the selection the recording was made with. */
+export type HrdData = Parameters<Api['readHrdRecording']>[1]['data'];
 
 /** A scanned device, as `GET /api/devices` gives it. */
 export type DeviceInfo = Data<'getDevices'>[number];
@@ -525,6 +530,41 @@ export class MotionMasterClient {
   ): Promise<SlaveInformationInterface> {
     const response = await this.postBytes('/api/sii/parse', image, options.signal);
     return (await response.json()) as SlaveInformationInterface;
+  }
+
+  /**
+   * Reads the high resolution data recording of a device (`readHrdRecording`): the files that the
+   * `hrd-streaming` procedure left on the drive, decoded as `data` says. `format` says what to
+   * return: `'json'`, the decoded recording (the default), or `'csv'`, the recording as CSV text,
+   * a header row of column names and then one row per sample.
+   */
+  readHrdRecording(
+    slavePosition: number,
+    data: HrdData,
+    options?: { format?: 'json'; signal?: AbortSignal },
+  ): Promise<HrdRecording>;
+  readHrdRecording(
+    slavePosition: number,
+    data: HrdData,
+    options: { format: 'csv'; signal?: AbortSignal },
+  ): Promise<string>;
+  async readHrdRecording(
+    slavePosition: number,
+    data: HrdData,
+    options: { format?: 'json' | 'csv'; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const { format = 'json', signal } = options;
+    if (format === 'json') {
+      return (await this.api.readHrdRecording(slavePosition, { data }, { signal })).data;
+    }
+    // The Accept header selects the CSV. With no response format, the generated client returns the
+    // answer with its body unread.
+    const response = await this.api.readHrdRecording(
+      slavePosition,
+      { data },
+      { format: undefined, headers: { Accept: 'text/csv' }, signal },
+    );
+    return response.text();
   }
 
   /**
@@ -1181,6 +1221,60 @@ export class MotionMasterClient {
   /** Removes a file from the user cache (`deleteUserCacheFile`). */
   async removeUserCacheFile(path: string, options: { signal?: AbortSignal } = {}): Promise<void> {
     await this.api.deleteUserCacheFile(encodeUserCachePath(path), { signal: options.signal });
+  }
+
+  /**
+   * Returns the entries of the parameter cache (`listParameterCacheEntries`): one object
+   * dictionary per vendor, product and firmware version, which a scan of such a device reads from
+   * the cache instead of from the device.
+   */
+  async listParameterCacheEntries(
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ParameterCacheEntry[]> {
+    return (await this.api.listParameterCacheEntries({ signal: options.signal })).data;
+  }
+
+  /**
+   * Reads one entry of the parameter cache (`getParameterCache`), by the `id` that
+   * `listParameterCacheEntries()` gives. `format` says what to return: `'json'`, the parsed file
+   * (the default), or `'bytes'`, the file as the server keeps it.
+   */
+  readParameterCacheEntry(
+    id: string,
+    options?: { format?: 'json'; signal?: AbortSignal },
+  ): Promise<unknown>;
+  readParameterCacheEntry(
+    id: string,
+    options: { format: 'bytes'; signal?: AbortSignal },
+  ): Promise<Uint8Array>;
+  async readParameterCacheEntry(
+    id: string,
+    options: { format?: 'json' | 'bytes'; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const { format = 'json', signal } = options;
+    // No response format: the generated client returns the answer with its body unread.
+    const response = await this.api.getParameterCache(id, { format: undefined, signal });
+    return decodeBody(response, format);
+  }
+
+  /**
+   * Removes one entry of the parameter cache (`deleteParameterCache`). The next scan of such a
+   * device reads its object dictionary from the device again.
+   */
+  async removeParameterCacheEntry(
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await this.api.deleteParameterCache(id, { signal: options.signal });
+  }
+
+  /**
+   * Returns the log of the server (`getLog`), the entries it keeps in memory, one per line, oldest
+   * first.
+   */
+  async serverLog(options: { signal?: AbortSignal } = {}): Promise<string> {
+    // No response format: the generated client returns the answer with its body unread.
+    return (await this.api.getLog({ signal: options.signal })).text();
   }
 
   /**

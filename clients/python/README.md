@@ -272,6 +272,13 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `write_user_cache_file(path, content)` and `remove_user_cache_file(path)` read, write and remove
   one file, as `read_file`, `write_file` and `remove_file` do on a device. The path has `/` between
   its folders.
+- `read_hrd_recording(position, data, format="json")` reads the high resolution data recording that
+  the `hrd-streaming` procedure left on a drive, decoded as `data` says (`"encoder-raw"` or
+  `"system-identification"`). It returns the recording, or CSV text with `format="csv"`.
+- `list_parameter_cache_entries()`, `read_parameter_cache_entry(id, format="json")` and
+  `remove_parameter_cache_entry(id)` manage the parameter cache, the object dictionaries that a scan
+  reads from the cache instead of from a device. `server_log()` returns the log of the server as
+  text.
 - `parse_sii(image)`, `parse_integro_variant(data)` and `parse_ic_mu_restore_file(data)` decode a
   file on the server, with no device involved. `parse_esi(xml, modules=None, format="json")` reads
   an ESI document and returns every device it describes, or the `"response"`.

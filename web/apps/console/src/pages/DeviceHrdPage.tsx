@@ -8,7 +8,7 @@ import HrdExplainer from '../components/HrdExplainer';
 import MonitoringChart, { SAMPLE_INDEX } from '../components/MonitoringChart';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
-import { downloadBytes } from '../utils/download';
+import { downloadText } from '../utils/download';
 import { formatBytes } from '../utils/format';
 import { btnOutline, btnPrimary } from '../utils/styles';
 import { apiErrorMessage } from '@synapticon/motion-master-client';
@@ -33,7 +33,7 @@ const HIDDEN_BY_DEFAULT = ['raw'];
 export default function DeviceHrdPage() {
   const { deviceId } = useParams();
   const slavePosition = Number(deviceId);
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const { timing, measure } = useWireTiming();
 
   const [data, setData] = useState<HrdData>('encoder-raw');
@@ -72,14 +72,8 @@ export default function DeviceHrdPage() {
     setDownloading(true);
     setError(null);
     try {
-      const url = `${api.baseUrl}/api/devices/${slavePosition}/hrd?data=${data}`;
-      const response = await fetch(url, { headers: { Accept: 'text/csv' } });
-      if (!response.ok) {
-        const json = await response.json().catch(() => null);
-        throw new Error(json?.error ?? `HTTP ${response.status}`);
-      }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      downloadBytes(bytes, `hrd-slave-${slavePosition}-${data}.csv`);
+      const csv = await client.readHrdRecording(slavePosition, data, { format: 'csv' });
+      downloadText(csv, `hrd-slave-${slavePosition}-${data}.csv`, 'text/csv');
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {

@@ -43,7 +43,7 @@ const COLUMNS: { label: string; help?: string }[] = [
 ];
 
 export default function StorageParameterCachePage() {
-  const { api } = useConnection();
+  const { client } = useConnection();
   const queryClient = useQueryClient();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
@@ -51,23 +51,19 @@ export default function StorageParameterCachePage() {
   // Motion Master is unreachable, surfaced as the error state below.
   const cachesQuery = useQuery({
     queryKey: ['parameter-cache'],
-    queryFn: () => api.listParameterCacheEntries(),
+    queryFn: () => client.listParameterCacheEntries(),
   });
-  const caches = cachesQuery.data?.data ?? [];
+  const caches = cachesQuery.data ?? [];
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteParameterCache(id),
+    mutationFn: (id: string) => client.removeParameterCacheEntry(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['parameter-cache'] }),
   });
 
   async function handleDownload(entry: ParameterCacheEntry) {
     setDownloadingId(entry.id);
     try {
-      const res = await fetch(`${api.baseUrl}/api/parameter-cache/${entry.id}`);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      const bytes = await client.readParameterCacheEntry(entry.id, { format: 'bytes' });
       downloadBytes(bytes, `parameters-${entry.id}.json`);
     } finally {
       setDownloadingId(null);

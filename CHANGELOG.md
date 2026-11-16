@@ -47,6 +47,11 @@ the HTTP/WebSocket API may break between any two alphas.
   text, JSON or the response, as `readFile()` does, and `writeUserCacheFile()` writes a string as
   UTF-8 and returns the response. The Console, the `firmware-installation` examples, the
   production scripts and the bench tests use them in place of their own requests.
+- Both clients read the high resolution data recording of a device with `readHrdRecording()`, as
+  JSON or, with `format: 'csv'`, as CSV text. They list, read and remove the entries of the
+  parameter cache with `listParameterCacheEntries()`, `readParameterCacheEntry()` and
+  `removeParameterCacheEntry()`, and return the log of the server with `serverLog()`. The Python
+  twins are `read_hrd_recording()` and so on. The Console uses them in place of its own requests.
 - Both clients read the wire time of an operation from a response with `wireTimeMs()` and
   `wire_time_ms()`, in milliseconds, or `null` and `None` when the response has none. The
   TypeScript twin also reads it from a `PerformanceResourceTiming` entry of the browser.

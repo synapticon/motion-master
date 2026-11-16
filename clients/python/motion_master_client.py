@@ -685,6 +685,35 @@ class MotionMasterClient:
         """Remove a file from the user cache (deleteUserCacheFile)."""
         self.call("deleteUserCacheFile", path=_user_cache_path(path))
 
+    def list_parameter_cache_entries(self):
+        """Return the entries of the parameter cache (listParameterCacheEntries).
+
+        Each entry is one object dictionary per vendor, product and firmware version, which a scan
+        of such a device reads from the cache instead of from the device.
+        """
+        return self.call("listParameterCacheEntries").json()
+
+    def read_parameter_cache_entry(self, id, format="json"):
+        """Read one entry of the parameter cache (getParameterCache).
+
+        `id` is the one that list_parameter_cache_entries() gives. `format` says what to return:
+        "json", the parsed file (the default), or "bytes", the file as the server keeps it.
+        """
+        if format not in ("json", "bytes"):
+            raise ValueError(f"format must be json or bytes, not {format!r}")
+        return _decode(self.call("getParameterCache", path={"id": id}), format)
+
+    def remove_parameter_cache_entry(self, id):
+        """Remove one entry of the parameter cache (deleteParameterCache).
+
+        The next scan of such a device reads its object dictionary from the device again.
+        """
+        self.call("deleteParameterCache", path={"id": id})
+
+    def server_log(self):
+        """Return the log of the server (getLog), the entries it keeps in memory, oldest first."""
+        return self.call("getLog").content.decode("utf-8")
+
     def _post_bytes(self, operation_id, data, content_type="application/octet-stream", query=None):
         headers = {"Content-Type": content_type}
         return self.call(operation_id, data=bytes(data), headers=headers, query=query)
@@ -813,6 +842,24 @@ class MotionMasterClient:
         Returns the parsed SII. No device is involved.
         """
         return self._post_bytes("parseSii", image).json()
+
+    def read_hrd_recording(self, position, data, format="json"):
+        """Read the high resolution data recording of a device (readHrdRecording).
+
+        The recording is the files that the hrd-streaming procedure left on the drive, decoded as
+        `data` says: "encoder-raw" or "system-identification". `format` says what to return:
+        "json", the decoded recording (the default), or "csv", the recording as CSV text, a header
+        row of column names and then one row per sample.
+        """
+        if format not in ("json", "csv"):
+            raise ValueError(f"format must be json or csv, not {format!r}")
+        query = {"data": data}
+        if format == "json":
+            return self.call("readHrdRecording", path=_path(position), query=query).json()
+        # The Accept header selects the CSV over the JSON.
+        headers = {"Accept": "text/csv"}
+        r = self.call("readHrdRecording", path=_path(position), query=query, headers=headers)
+        return r.content.decode("utf-8")
 
     def wait_for_value(
         self,

@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiErrorMessage, type ProcedureSnapshot } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  type ProcedureSnapshot,
+  formatHex,
+} from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
 import DevicePageHeader from '../components/DevicePageHeader';
@@ -68,9 +72,6 @@ const OUTCOME_TEXT: Record<Outcome, string> = {
 };
 
 const DRIVE_FILE = "the drive's config.csv";
-
-const hex = (value: number, digits: number) =>
-  `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
 
 function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
   return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
@@ -329,8 +330,8 @@ export default function DeviceConfigurationPage() {
                     highlight: row.differs,
                     cells: [
                       <NameCell name={row.name} outcome={row.outcome as Outcome} />,
-                      hex(row.index, 4),
-                      hex(row.subindex, 2),
+                      formatHex(row.index, 4),
+                      formatHex(row.subindex, 2),
                       row.value,
                       ...(withValues ? [valueText(row.live)] : []),
                     ],
@@ -533,8 +534,8 @@ export default function DeviceConfigurationPage() {
                         ''
                       ),
                       <NameCell name={row.name} outcome={row.outcome} />,
-                      hex(row.index, 4),
-                      hex(row.subindex, 2),
+                      formatHex(row.index, 4),
+                      formatHex(row.subindex, 2),
                       valueText(row.first),
                       valueText(row.second),
                       valueText(row.live),
@@ -632,7 +633,7 @@ function Differences({
   secondName: string;
 }) {
   const name = (row: CompareRow) => <NameCell name={row.name} outcome={row.outcome} />;
-  const address = (row: CompareRow) => [hex(row.index, 4), hex(row.subindex, 2)];
+  const address = (row: CompareRow) => [formatHex(row.index, 4), formatHex(row.subindex, 2)];
   const different = result.rows.filter((row) => row.differsBetween);
   const onlyFirst = result.rows.filter((row) => row.first !== null && row.second === null);
   const onlySecond = result.rows.filter((row) => row.second !== null && row.first === null);

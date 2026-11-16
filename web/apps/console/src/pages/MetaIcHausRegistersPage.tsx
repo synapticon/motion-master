@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
+import { formatHex } from '@synapticon/motion-master-client';
 
 // One column set for all five tables. Widths are explicit so the tables line up with each other
 // rather than each sizing itself to its own longest field name; Description takes what is left.
@@ -15,13 +16,11 @@ const COLUMNS = [
   { label: 'Reach', width: '7rem' },
 ];
 
-function hex(value: number) {
-  return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
-}
-
 // One address, or the range the datasheet prints as a single row.
 function addressLabel(address: number, lastAddress: number) {
-  return address === lastAddress ? hex(address) : `${hex(address)}–${hex(lastAddress)}`;
+  return address === lastAddress
+    ? formatHex(address, 2)
+    : `${formatHex(address, 2)}–${formatHex(lastAddress, 2)}`;
 }
 
 export default function MetaIcHausRegistersPage() {

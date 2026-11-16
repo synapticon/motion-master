@@ -7,6 +7,7 @@ import {
   type ControllerTuningWrite,
   type ProcedureSnapshot,
   type ProgressStep,
+  objectAddressText,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -64,10 +65,6 @@ interface LimitsWrite {
   skipped: string[];
 }
 
-function objectName(index: number, subindex: number): string {
-  return `0x${index.toString(16).toUpperCase()}:${subindex.toString(16).toUpperCase().padStart(2, '0')}`;
-}
-
 function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
   return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
 }
@@ -117,7 +114,7 @@ export default function DeviceTuningPage() {
       );
       const values = new Map<string, number | 'missing' | string>();
       results.forEach((result, i) => {
-        const key = objectName(objects[i].index, objects[i].subindex);
+        const key = objectAddressText(objects[i].index, objects[i].subindex);
         if (result.status === 'fulfilled') {
           values.set(key, result.value.value as number);
         } else {
@@ -447,7 +444,7 @@ function GainsCard({
             </thead>
             <tbody>
               {GAINS[controller].map((gain) => {
-                const name = objectName(gain.index, gain.subindex);
+                const name = objectAddressText(gain.index, gain.subindex);
                 const value = values?.get(name);
                 return (
                   <tr key={name} className="border-t border-grey-100">
@@ -515,7 +512,7 @@ function LimitsCard({
           </thead>
           <tbody>
             {LIMITS.map((limit) => {
-              const name = objectName(limit.index, limit.subindex);
+              const name = objectAddressText(limit.index, limit.subindex);
               const value = values?.get(name);
               return (
                 <tr key={name} className="border-t border-grey-100">

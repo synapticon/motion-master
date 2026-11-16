@@ -12,7 +12,13 @@ export * from './errors';
 export { errorLine, run } from './error-line';
 export * from './procedures';
 export { MonitoringRecording } from './monitoring-recording';
-export { type DeviceParameterAddress, objectAddressText, objectName } from './parameter-address';
+export {
+  type DeviceParameterAddress,
+  deviceParameterName,
+  deviceParameterText,
+  objectAddressText,
+  objectName,
+} from './parameter-address';
 export * from './constants';
 export * from './web-socket-connection';
 export * from './client';

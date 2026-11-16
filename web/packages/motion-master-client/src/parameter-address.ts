@@ -46,3 +46,24 @@ export function objectName(index: number, subindex: number): string {
 export function objectAddressText(index: number, subindex: number): string {
   return `${formatHex(index)}:${formatHex(subindex, 2, false)}`;
 }
+
+/** Returns a parameter of a device as its position and its address, such as `1:0x6041:00`. */
+export function deviceParameterText(
+  devicePosition: number,
+  index: number,
+  subindex: number,
+): string {
+  return `${devicePosition}:${objectAddressText(index, subindex)}`;
+}
+
+/**
+ * Returns a parameter of a device as its position and the generated name of its object, such as
+ * `1:STATUSWORD`, or its address, such as `1:0x2110:03`, when the object has no generated name.
+ */
+export function deviceParameterName(
+  devicePosition: number,
+  index: number,
+  subindex: number,
+): string {
+  return `${devicePosition}:${objectName(index, subindex)}`;
+}

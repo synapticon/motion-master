@@ -61,6 +61,10 @@ the HTTP/WebSocket API may break between any two alphas.
   TypeScript twin also reads it from a `PerformanceResourceTiming` entry of the browser.
 - The TypeScript client exports `objectName()` and `objectAddressText()`, with the Python twins
   `object_name()` and `object_address_text()`, and formats bytes as hex with `formatHexBytes()`.
+- Both clients name a parameter of a device with `deviceParameterText()`, such as `1:0x6041:00`, and
+  `deviceParameterName()`, such as `1:STATUSWORD`, and the Python twins `device_parameter_text()` and
+  `device_parameter_name()`. The columns of a `MonitoringRecording` take their names from
+  `deviceParameterName()`.
 - The examples of both clients share their command line, the run of a procedure and their files
   folder through `options`, `procedures` and `files` modules, the same in both languages.
 - The TypeScript client has the device and AL state helpers of the Python client: `init`, `reset`,
@@ -92,6 +96,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- The Console writes a vendor ID, a product code and a revision with 8 hex digits on every page,
+  such as `0x000022D2`. The Control and Parameter Cache pages wrote them without leading zeros. Its
+  hex numbers, byte lists and object addresses come from `formatHex()`, `formatHexBytes()` and
+  `objectAddressText()` of the client, in place of 14 local copies. The Monitorings and Recorder
+  pages label a parameter `1:0x6041:00` with `deviceParameterText()`. They wrote `1·0x6041:00`.
 - The server sends the wire time of an operation in the standard `Server-Timing` header, as the
   metric `wire` in milliseconds: `Server-Timing: wire;dur=1.500` is 1.5 ms. It sent `X-Wire-Us` in
   microseconds, which is gone. Every response also has `Timing-Allow-Origin`, so the developer

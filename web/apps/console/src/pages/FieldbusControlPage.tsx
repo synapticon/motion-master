@@ -5,7 +5,7 @@ import ControlExplainer from '../components/ControlExplainer';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection, type SpoeMode } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
-import { apiErrorMessage } from '@synapticon/motion-master-client';
+import { apiErrorMessage, formatHex } from '@synapticon/motion-master-client';
 
 // AL state transition targets, in the order the buttons are rendered. BOOT leads
 // (it is the odd one out — file-transfer only) and is styled distinctly; the rest
@@ -608,7 +608,7 @@ export default function FieldbusControlPage() {
                             ? (alStatusCodeMap[d.alStatusCode] ?? null)
                             : null;
                           const code = codeEntry
-                            ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
+                            ? ` — ${formatHex(d.alStatusCode)} ${codeEntry.name}`
                             : '';
                           return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`;
                         })
@@ -684,15 +684,15 @@ export default function FieldbusControlPage() {
                                   </td>
                                   <td className="px-4 py-2">{d.name}</td>
                                   <td className="px-4 py-2 font-mono">
-                                    0x{d.vendorId.toString(16).toUpperCase()}
+                                    {formatHex(d.vendorId, 8)}
                                   </td>
                                   <td className="px-4 py-2 font-mono">
                                     <span className="cursor-help" title={d.productName}>
-                                      0x{d.productCode.toString(16).toUpperCase()}
+                                      {formatHex(d.productCode, 8)}
                                     </span>
                                   </td>
                                   <td className="px-4 py-2 font-mono">
-                                    0x{d.revisionNumber.toString(16).toUpperCase()}
+                                    {formatHex(d.revisionNumber, 8)}
                                   </td>
                                   <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                                   <td className="px-4 py-2">
@@ -714,12 +714,8 @@ export default function FieldbusControlPage() {
                                                   className="cursor-help"
                                                   title={errorEntry.description}
                                                 >
-                                                  {' — '}0x
-                                                  {ds.alStatusCode
-                                                    .toString(16)
-                                                    .toUpperCase()
-                                                    .padStart(4, '0')}{' '}
-                                                  {errorEntry.name}
+                                                  {' — '}
+                                                  {formatHex(ds.alStatusCode)} {errorEntry.name}
                                                   {errorEntry.terminal && (
                                                     <span
                                                       className="ml-1 cursor-help text-grey-600"
@@ -732,11 +728,8 @@ export default function FieldbusControlPage() {
                                               )}
                                               {ds.error && !errorEntry && (
                                                 <span>
-                                                  {' — '}0x
-                                                  {ds.alStatusCode
-                                                    .toString(16)
-                                                    .toUpperCase()
-                                                    .padStart(4, '0')}
+                                                  {' — '}
+                                                  {formatHex(ds.alStatusCode)}
                                                 </span>
                                               )}
                                             </span>
@@ -803,7 +796,7 @@ export default function FieldbusControlPage() {
                                           ? (alStatusCodeMap[result.alStatusCode] ?? null)
                                           : null;
                                         const code = result.error
-                                          ? ` — 0x${result.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}${codeEntry ? ` ${codeEntry.name}` : ''}`
+                                          ? ` — ${formatHex(result.alStatusCode)}${codeEntry ? ` ${codeEntry.name}` : ''}`
                                           : '';
                                         // Stuck in INIT with no error reported: usually a drive carried over from
                                         // another master that needs a power-cycle (same case the bus-wide panel explains).
@@ -894,7 +887,7 @@ export default function FieldbusControlPage() {
                         AL_STATE_LABEL[d.alState] ?? `0x${d.alState.toString(16).toUpperCase()}`;
                       const codeEntry = d.error ? (alStatusCodeMap[d.alStatusCode] ?? null) : null;
                       const code = codeEntry
-                        ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
+                        ? ` — ${formatHex(d.alStatusCode)} ${codeEntry.name}`
                         : '';
                       return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`;
                     })

@@ -23,6 +23,9 @@ import {
   sdoTypeForDataTypeName,
   isIntegerSdoType,
   wireTimeMs,
+  formatHex,
+  formatHexBytes,
+  objectAddressText,
 } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
@@ -43,10 +46,6 @@ function parseHexOrDec(s: string): number | null {
   return null;
 }
 
-function toHex(n: number, pad: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(pad, '0')}`;
-}
-
 function formatValue(v: number | string | number[] | undefined): string {
   if (v === undefined) {
     return '—';
@@ -61,10 +60,7 @@ function formatValue(v: number | string | number[] | undefined): string {
   if (v.length === 0) {
     return '[]';
   }
-  const head = v
-    .slice(0, 16)
-    .map((b) => b.toString(16).toUpperCase().padStart(2, '0'))
-    .join(' ');
+  const head = formatHexBytes(v.slice(0, 16));
   return v.length > 16 ? `${head} …(${v.length}B)` : head;
 }
 
@@ -80,7 +76,7 @@ function valueToInputString(v: number | string | number[] | undefined): string {
   if (typeof v === 'string') {
     return v;
   }
-  return v.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+  return formatHexBytes(v);
 }
 
 // ETG.1000.6 ObjAccess: write bits 3-5 (Wr PREOP/SAFEOP/OP). Writable iff any is set.
@@ -326,7 +322,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {indexValid ? toHex(indexNum!, 4) : '—'}
+              {indexValid ? formatHex(indexNum!, 4) : '—'}
             </p>
           </div>
           <div>
@@ -339,7 +335,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {subindexValid ? toHex(subindexNum!, 2) : '—'}
+              {subindexValid ? formatHex(subindexNum!, 2) : '—'}
             </p>
           </div>
         </div>
@@ -360,7 +356,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
             <p className="text-xs text-grey-600 uppercase tracking-wide mb-2">Result</p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Hex:&nbsp;</span>
-              {result.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+              {formatHexBytes(result)}
             </p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Dec:&nbsp;</span>[{result.join(', ')}]
@@ -467,7 +463,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {dlIndexValid ? toHex(dlIndexNum!, 4) : '—'}
+              {dlIndexValid ? formatHex(dlIndexNum!, 4) : '—'}
             </p>
           </div>
           <div>
@@ -483,7 +479,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {dlSubindexValid ? toHex(dlSubindexNum!, 2) : '—'}
+              {dlSubindexValid ? formatHex(dlSubindexNum!, 2) : '—'}
             </p>
           </div>
         </div>
@@ -525,7 +521,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
               ) : (
                 <span className="text-grey-500">
                   {encodedBytes
-                    ? `${encodedBytes.length} B · ${encodedBytes.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`
+                    ? `${encodedBytes.length} B · ${formatHexBytes(encodedBytes)}`
                     : '—'}
                 </span>
               )}
@@ -551,7 +547,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
             </p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Hex:&nbsp;</span>
-              {dlOk.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+              {formatHexBytes(dlOk)}
             </p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Dec:&nbsp;</span>[{dlOk.join(', ')}]
@@ -783,7 +779,7 @@ export default function DeviceParametersPage() {
     ? params.filter(
         (p) =>
           p.name.toLowerCase().includes(filterLower) ||
-          toHex(p.index, 4).toLowerCase().includes(filterLower) ||
+          formatHex(p.index, 4).toLowerCase().includes(filterLower) ||
           p.dataTypeName.toLowerCase().includes(filterLower),
       )
     : params;
@@ -981,8 +977,7 @@ export default function DeviceParametersPage() {
                                 )}
                               </td>
                               <td className="px-3 py-1.5 font-mono whitespace-nowrap">
-                                {toHex(p.index, 4)}:
-                                {p.subindex.toString(16).toUpperCase().padStart(2, '0')}
+                                {objectAddressText(p.index, p.subindex)}
                               </td>
                               <td className="px-3 py-1.5 text-grey-800">
                                 <span className="inline-flex items-center gap-1.5">
@@ -1118,9 +1113,9 @@ export default function DeviceParametersPage() {
                               </td>
                               <td
                                 className="px-3 py-1.5 font-mono text-grey-600"
-                                title={p.unit !== undefined ? toHex(p.unit, 8) : undefined}
+                                title={p.unit !== undefined ? formatHex(p.unit, 8) : undefined}
                               >
-                                {p.unit === undefined ? '—' : p.unitSymbol || toHex(p.unit, 8)}
+                                {p.unit === undefined ? '—' : p.unitSymbol || formatHex(p.unit, 8)}
                               </td>
                             </tr>
                             {descriptionOpen && (

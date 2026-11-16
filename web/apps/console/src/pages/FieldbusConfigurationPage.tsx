@@ -55,10 +55,6 @@ const MBX_PROTOCOLS: [number, string, string][] = [
 
 const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit);
 
-function hex32(n: number) {
-  return `0x${n.toString(16).toUpperCase().padStart(8, '0')}`;
-}
-
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
     <div>
@@ -217,17 +213,17 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Field
             label="Vendor ID"
-            value={hex32(slave.vendorId)}
+            value={formatHex(slave.vendorId, 8)}
             hint="Manufacturer ID from EEPROM (0x22D2 = Synapticon)"
           />
           <Field
             label="Product code"
-            value={hex32(slave.productCode)}
+            value={formatHex(slave.productCode, 8)}
             hint="Product code from EEPROM"
           />
           <Field
             label="Revision"
-            value={hex32(slave.revisionNumber)}
+            value={formatHex(slave.revisionNumber, 8)}
             hint="Revision number from EEPROM"
           />
           <Field

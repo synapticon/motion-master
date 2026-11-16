@@ -7,6 +7,8 @@ import {
   type IcMuEncoderStatus,
   type ProcedureSnapshot,
   type ProgressStep,
+  formatHex,
+  objectAddressText,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -35,10 +37,6 @@ const STATE_BADGE: Record<NonNullable<IcMuEncoderStatus['state']>, string> = {
   invalid: 'bg-status-warn text-grey-900',
   'not-configured': 'bg-grey-700 text-white',
 };
-
-function hex(n: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(2, '0')}`;
-}
 
 function stepValue(snapshot: ProcedureSnapshot | undefined, id: string): unknown {
   return snapshot?.steps.find((step) => step.id === id)?.value;
@@ -246,11 +244,15 @@ function EncoderCard({
           label="Part"
           value={status ? `${status.part ?? 'unknown part'} · rev ${status.revision}` : '—'}
         />
-        <Field label="HARD_REV (0x74)" value={status ? hex(status.hardRev) : '—'} />
-        <Field label="0x11 read" value={status ? hex(status.outputRegister) : '—'} />
+        <Field label="HARD_REV (0x74)" value={status ? formatHex(status.hardRev, 2) : '—'} />
+        <Field label="0x11 read" value={status ? formatHex(status.outputRegister, 2) : '—'} />
         <Field
           label="0x11 expected"
-          value={status?.expectedOutputRegister != null ? hex(status.expectedOutputRegister) : '—'}
+          value={
+            status?.expectedOutputRegister != null
+              ? formatHex(status.expectedOutputRegister, 2)
+              : '—'
+          }
         />
       </dl>
       {status?.reason && <p className="px-5 pb-3 text-xs text-status-bad">{status.reason}</p>}
@@ -316,10 +318,6 @@ function EncoderCard({
   );
 }
 
-function statusHex(value: number): string {
-  return `0x${value.toString(16).toUpperCase().padStart(6, '0')}`;
-}
-
 // The encoder status word in an input. Read fills it from the drive; a person can also type a value,
 // for example one from a support log. The server decodes whatever the input holds.
 function EncoderStatusBits({
@@ -334,13 +332,13 @@ function EncoderStatusBits({
 }) {
   const { api } = useConnection();
   const index = encoderOrdinal === 1 ? 0x2111 : 0x2113;
-  const object = `0x${index.toString(16)}:04`;
+  const object = objectAddressText(index, 4);
   const [text, setText] = useState('');
   const [typed, setTyped] = useState(false);
 
   useEffect(() => {
     if (latched !== undefined) {
-      setText(statusHex(latched));
+      setText(formatHex(latched, 6));
       setTyped(false);
     }
   }, [latched]);
@@ -348,7 +346,7 @@ function EncoderStatusBits({
   const read = useMutation({
     mutationFn: () => api.readParameter(slavePosition, index, 4).then((r) => r.data),
     onSuccess: (parameter) => {
-      setText(statusHex(Number(parameter.value)));
+      setText(formatHex(Number(parameter.value), 6));
       setTyped(false);
     },
   });

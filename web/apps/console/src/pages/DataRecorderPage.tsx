@@ -6,9 +6,10 @@ import {
   apiErrorMessage,
   parseMmpd,
   isPlottableDataType,
-  formatHex,
   type MmpdFile,
   type MmpdPdoEntry,
+  objectAddressText,
+  deviceParameterText,
 } from '@synapticon/motion-master-client';
 import Checkbox from '../components/Checkbox';
 import PageHeader from '../components/PageHeader';
@@ -67,9 +68,7 @@ function EntryCheckbox({
       title={item.plottable ? item.entry.name : 'Not a plottable numeric type'}
     >
       <Checkbox disabled={!item.plottable} checked={checked} onChange={onToggle} />
-      <span className="font-mono">
-        {formatHex(item.entry.index, 4)}:{formatHex(item.entry.subindex, 2, false)}
-      </span>
+      <span className="font-mono">{objectAddressText(item.entry.index, item.entry.subindex)}</span>
       <span className="truncate">{item.entry.name}</span>
     </label>
   );
@@ -201,9 +200,8 @@ export default function DataRecorderPage() {
     const ys = chosen.map((e) => file.decodeSeries(e.entry));
     return {
       data: [xs, ...ys] as uPlot.AlignedData,
-      labels: chosen.map(
-        (e) =>
-          `${e.devicePosition}·${formatHex(e.entry.index, 4)}:${formatHex(e.entry.subindex, 2, false)}`,
+      labels: chosen.map((e) =>
+        deviceParameterText(e.devicePosition, e.entry.index, e.entry.subindex),
       ),
       titles: chosen.map((e) => e.entry.name || ''),
     };

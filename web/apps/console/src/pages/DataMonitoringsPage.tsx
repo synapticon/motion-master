@@ -3,7 +3,12 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-generator';
 import { Download, Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react';
 import type uPlot from 'uplot';
-import type { DeviceParameter, Monitoring } from '@synapticon/motion-master-client';
+import {
+  type DeviceParameter,
+  type Monitoring,
+  objectAddressText,
+  deviceParameterText,
+} from '@synapticon/motion-master-client';
 import CycleStatsBar from '../components/CycleStatsBar';
 import MonitoringChart from '../components/MonitoringChart';
 import PageHeader from '../components/PageHeader';
@@ -31,10 +36,6 @@ function parseHexOrDec(s: string): number | null {
     return parseInt(t, 10);
   }
   return null;
-}
-
-function toHex(n: number, pad: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(pad, '0')}`;
 }
 
 function paramKey(pos: number, index: number, subindex: number): string {
@@ -224,10 +225,7 @@ function MonitoringCard({
     [params],
   );
   const labels = useMemo(
-    () =>
-      params.map(
-        (p) => `${p.devicePosition}·${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`,
-      ),
+    () => params.map((p) => deviceParameterText(p.devicePosition, p.index, p.subindex)),
     // The memo is keyed on sig, the content of params, so a refetch that returns equal params keeps
     // the chart.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -308,10 +306,7 @@ function MonitoringCard({
     if (rowCount === 0) {
       return;
     }
-    const header = [
-      't_us',
-      ...params.map((p) => `${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`),
-    ];
+    const header = ['t_us', ...params.map((p) => objectAddressText(p.index, p.subindex))];
     const lines = [header.join(',')];
     for (let r = 0; r < rowCount; r++) {
       const values = ys.map((series) => (series[r] == null ? '' : String(series[r])));
@@ -368,7 +363,7 @@ function MonitoringCard({
                   <SlavePositionBadge position={p.devicePosition} />
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">
-                  {toHex(p.index, 4)}:{toHex(p.subindex, 2).slice(2)}
+                  {objectAddressText(p.index, p.subindex)}
                 </td>
                 <td className="px-3 py-2 text-grey-700">{name ?? '—'}</td>
                 <td className="px-3 py-2">

@@ -2,6 +2,8 @@ import { HttpResponse, http } from 'msw/http';
 import { describe, expect, it } from 'vitest';
 import {
   Cia402,
+  deviceParameterName,
+  deviceParameterText,
   formatHexBytes,
   MotionMasterClient,
   objectAddressText,
@@ -172,5 +174,11 @@ describe('text of bytes and addresses', () => {
   it('writes an object address in hex', () => {
     expect(objectAddressText(0x6041, 0)).toBe('0x6041:00');
     expect(objectAddressText(0x2030, 0x1a)).toBe('0x2030:1A');
+  });
+
+  it('writes a parameter of a device as its position and its address or name', () => {
+    expect(deviceParameterText(1, 0x6041, 0)).toBe('1:0x6041:00');
+    expect(deviceParameterName(2, 0x6041, 0)).toBe('2:STATUSWORD');
+    expect(deviceParameterName(1, 0x2fff, 0x0b)).toBe('1:0x2FFF:0B');
   });
 });

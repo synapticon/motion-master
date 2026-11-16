@@ -5,7 +5,7 @@ import {
   apiErrorMessage,
   type DeviceParameter,
   type ProcessImageObject,
-  formatHex,
+  objectAddressText,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import PageHeader from '../components/PageHeader';
@@ -344,7 +344,7 @@ function ProcessDataPanels({
       const kind = valueKind(paramByKey.get(key)?.dataTypeName);
       const parsed = parseValue(text, kind);
       if (!parsed.ok) {
-        setFormError(`${formatHex(o.index)}:${formatHex(o.subindex, 2, false)} — ${parsed.error}`);
+        setFormError(`${objectAddressText(o.index, o.subindex)} — ${parsed.error}`);
         return;
       }
       rows.push([o.slavePosition, o.index, o.subindex, parsed.value]);
@@ -455,7 +455,7 @@ function ProcessDataPanels({
                         <SlavePositionBadge position={o.slavePosition} />
                       </td>
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
-                        {formatHex(o.index)}:{formatHex(o.subindex, 2, false)}
+                        {objectAddressText(o.index, o.subindex)}
                       </td>
                       <td className="px-3 py-2 text-grey-700 truncate max-w-[12rem]" title={o.name}>
                         {o.name || <span className="text-grey-400">—</span>}
@@ -521,7 +521,7 @@ function ProcessDataPanels({
                         <SlavePositionBadge position={o.slavePosition} />
                       </td>
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
-                        {formatHex(o.index)}:{formatHex(o.subindex, 2, false)}
+                        {objectAddressText(o.index, o.subindex)}
                       </td>
                       <td className="px-3 py-2 text-grey-700 truncate max-w-[12rem]" title={o.name}>
                         {o.name || <span className="text-grey-400">—</span>}

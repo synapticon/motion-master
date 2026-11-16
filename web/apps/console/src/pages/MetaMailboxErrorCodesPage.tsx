@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
+import { formatHex } from '@synapticon/motion-master-client';
 
 export default function MetaMailboxErrorCodesPage() {
   const { api } = useConnection();
@@ -61,9 +62,7 @@ export default function MetaMailboxErrorCodesPage() {
                 {codes.map((c) => (
                   <tr key={c.code} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{c.code}</td>
-                    <td className="px-4 py-2 font-mono">
-                      0x{c.code.toString(16).toUpperCase().padStart(4, '0')}
-                    </td>
+                    <td className="px-4 py-2 font-mono">{formatHex(c.code, 4)}</td>
                     <td className="px-4 py-2 font-mono">{c.name}</td>
                     <td className="px-4 py-2 text-grey-600">{c.description}</td>
                   </tr>

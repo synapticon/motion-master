@@ -4,7 +4,12 @@ import { useQuery } from '@tanstack/react-query';
 import DevicePageHeader from '../components/DevicePageHeader';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
-import { apiErrorMessage, parseHexBytes } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  parseHexBytes,
+  formatHex,
+  formatHexBytes,
+} from '@synapticon/motion-master-client';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
 
@@ -58,14 +63,12 @@ export default function DeviceRegistersPage() {
   const writeTiming = useWireTiming();
 
   const addrNum = parseInt(address, 10);
-  const addrHex = isNaN(addrNum) ? '—' : `0x${addrNum.toString(16).toUpperCase().padStart(4, '0')}`;
+  const addrHex = isNaN(addrNum) ? '—' : formatHex(addrNum, 4);
   const lenNum = parseInt(length, 10);
   const canRead = !isNaN(addrNum) && addrNum >= 0 && !isNaN(lenNum) && lenNum >= 1 && !reading;
 
   const writeAddrNum = parseInt(writeAddress, 10);
-  const writeAddrHex = isNaN(writeAddrNum)
-    ? '—'
-    : `0x${writeAddrNum.toString(16).toUpperCase().padStart(4, '0')}`;
+  const writeAddrHex = isNaN(writeAddrNum) ? '—' : formatHex(writeAddrNum, 4);
   const writeBytes = parseHexBytes(writeValue);
   const canWrite = !isNaN(writeAddrNum) && writeAddrNum >= 0 && writeBytes !== null && !writing;
 
@@ -201,7 +204,7 @@ export default function DeviceRegistersPage() {
                   {catalogue.map((r) => (
                     <option key={r.address} value={r.address}>
                       {r.name} · {r.address} / 0x
-                      {r.address.toString(16).toUpperCase().padStart(4, '0')} · {r.length}B
+                      {formatHex(r.address, 4, false)} · {r.length}B
                     </option>
                   ))}
                 </select>
@@ -249,7 +252,7 @@ export default function DeviceRegistersPage() {
                   <p className="text-xs text-grey-600 uppercase tracking-wide mb-2">Result</p>
                   <p className="text-xs font-mono">
                     <span className="text-grey-600">Hex:&nbsp;</span>
-                    {readResult.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+                    {formatHexBytes(readResult)}
                   </p>
                   <p className="text-xs font-mono">
                     <span className="text-grey-600">Dec:&nbsp;</span>[{readResult.join(', ')}]
@@ -281,7 +284,7 @@ export default function DeviceRegistersPage() {
                   {catalogue.map((r) => (
                     <option key={r.address} value={r.address}>
                       {r.name} · {r.address} / 0x
-                      {r.address.toString(16).toUpperCase().padStart(4, '0')} · {r.length}B
+                      {formatHex(r.address, 4, false)} · {r.length}B
                     </option>
                   ))}
                 </select>
@@ -372,9 +375,7 @@ export default function DeviceRegistersPage() {
                         className={`border-b border-grey-100 last:border-0 cursor-pointer transition-colors ${isSelected ? 'bg-grey-100' : 'hover:bg-grey-50'}`}
                       >
                         <td className="px-4 py-2 font-mono">{r.address}</td>
-                        <td className="px-4 py-2 font-mono">
-                          0x{r.address.toString(16).toUpperCase().padStart(4, '0')}
-                        </td>
+                        <td className="px-4 py-2 font-mono">{formatHex(r.address, 4)}</td>
                         <td className="px-4 py-2 font-mono">{r.length}</td>
                         <td className={`px-4 py-2 font-mono ${isSelected ? 'text-syn-red' : ''}`}>
                           {r.name}

@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ParameterCacheEntry } from '@synapticon/motion-master-client';
+import { type ParameterCacheEntry, formatHex } from '@synapticon/motion-master-client';
 import PageHeader from '../components/PageHeader';
 import ParameterCacheExplainer from '../components/ParameterCacheExplainer';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import { formatBytes } from '../utils/format';
 import { btnOutline } from '../utils/styles';
-
-const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`;
 
 // One entry per table column. `help` is the header's tooltip: what the value is and where Motion
 // Master got it.
@@ -72,7 +70,7 @@ export default function StorageParameterCachePage() {
 
   function handleDelete(entry: ParameterCacheEntry) {
     const confirmed = window.confirm(
-      `Delete the cached object dictionary for ${hex(entry.vendorId)} / ${hex(entry.productCode)} / ` +
+      `Delete the cached object dictionary for ${formatHex(entry.vendorId, 8)} / ${formatHex(entry.productCode, 8)} / ` +
         `${entry.firmwareVersion}?\n\nThis only removes Motion Master's saved copy — the device ` +
         `is untouched. The next scan of this hardware will re-enumerate it over SDO.`,
     );
@@ -158,8 +156,8 @@ export default function StorageParameterCachePage() {
               <tbody>
                 {caches.map((entry) => (
                   <tr key={entry.id} className="border-b border-grey-100 last:border-0">
-                    <td className="px-4 py-2 font-mono">{hex(entry.vendorId)}</td>
-                    <td className="px-4 py-2 font-mono">{hex(entry.productCode)}</td>
+                    <td className="px-4 py-2 font-mono">{formatHex(entry.vendorId, 8)}</td>
+                    <td className="px-4 py-2 font-mono">{formatHex(entry.productCode, 8)}</td>
                     <td className="px-4 py-2 font-mono">{entry.firmwareVersion}</td>
                     <td className="px-4 py-2">{entry.parameterCount}</td>
                     <td className="px-4 py-2">{formatBytes(entry.sizeBytes)}</td>

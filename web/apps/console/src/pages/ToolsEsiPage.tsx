@@ -6,6 +6,8 @@ import {
   type EsiDeviceSummary,
   type EsiEntry,
   type EsiParseResult,
+  formatHex,
+  objectAddressText,
 } from '@synapticon/motion-master-client';
 import { ChevronRight } from 'lucide-react';
 import Checkbox, { selectAllState } from '../components/Checkbox';
@@ -19,13 +21,9 @@ import { ESIS_FOLDER, userCacheBasename } from '../utils/userCache';
 
 const inputCls = 'h-[38px] border border-grey-300 px-3 text-sm w-full bg-white';
 
-function toHex(value: number, digits: number): string {
-  return `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
-}
-
 // An entry's address, the way the CoE world writes it: 0x6040:00.
 function address(entry: EsiEntry): string {
-  return `${toHex(entry.index, 4)}:${entry.subindex.toString(16).toUpperCase().padStart(2, '0')}`;
+  return objectAddressText(entry.index, entry.subindex);
 }
 
 // Access as a config tool spells it: the mode, plus any AL-state restriction the ESI attaches.
@@ -96,10 +94,10 @@ function SourceCell({ entry, moduleNames }: { entry: EsiEntry; moduleNames: Map<
   const name = moduleNames.get(ident);
   return (
     <span
-      title={`${name ? `${name} — ` : ''}module ${toHex(ident, 8)}, slot ${slot}`}
+      title={`${name ? `${name} — ` : ''}module ${formatHex(ident, 8)}, slot ${slot}`}
       className="cursor-help"
     >
-      {toHex(ident, 8)} · {slot}
+      {formatHex(ident, 8)} · {slot}
     </span>
   );
 }
@@ -157,8 +155,8 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
               keeps it — but this span is data: uppercased it renders 0X00000201 and "506 ENTRIES",
               contradicting the same values shown as 0x00000201 in the tables below. */}
           <span className="ml-3 text-xs text-grey-500 font-mono normal-case">
-            {device.productCode !== undefined && toHex(device.productCode, 8)}
-            {device.revisionNo !== undefined && ` rev ${toHex(device.revisionNo, 8)}`}
+            {device.productCode !== undefined && formatHex(device.productCode, 8)}
+            {device.revisionNo !== undefined && ` rev ${formatHex(device.revisionNo, 8)}`}
             {` · ${entries.length} entries`}
             {device.warnings &&
               device.warnings.length > 0 &&
@@ -311,8 +309,8 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
                                 // onto every member, so point there instead of leaving a blank.
                                 <p className="text-xs text-grey-500">
                                   No description of its own — see{' '}
-                                  <span className="font-mono">{toHex(e.index, 4)}:00</span> for the
-                                  object's.
+                                  <span className="font-mono">{objectAddressText(e.index, 0)}</span>{' '}
+                                  for the object's.
                                 </p>
                               ) : (
                                 // Every row expands, so one with nothing but the metadata below
@@ -367,9 +365,10 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
                               </div>
                             )}
                             <p className="text-[11px] text-grey-500 font-mono">
-                              ETG.1020 type {toHex(e.dataType, 4)} · bit offset {e.bitOffset} ·
-                              ObjAccess {toHex(e.objAccess, 4)}
-                              {e.rawIndex !== undefined && ` · declared at ${toHex(e.rawIndex, 4)}`}
+                              ETG.1020 type {formatHex(e.dataType, 4)} · bit offset {e.bitOffset} ·
+                              ObjAccess {formatHex(e.objAccess, 4)}
+                              {e.rawIndex !== undefined &&
+                                ` · declared at ${formatHex(e.rawIndex, 4)}`}
                             </p>
                           </td>
                         </tr>
@@ -610,7 +609,7 @@ export default function ToolsEsiPage() {
                   <dl className="px-4 py-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">
                     <dt className="text-grey-600">Vendor</dt>
                     <dd className="font-mono">
-                      {result.vendor.name} · {toHex(result.vendor.id, 8)}
+                      {result.vendor.name} · {formatHex(result.vendor.id, 8)}
                     </dd>
                     <dt className="text-grey-600">Devices</dt>
                     <dd className="font-mono">{result.devices.length}</dd>
@@ -715,7 +714,9 @@ export default function ToolsEsiPage() {
                                     aria-label={`Merge ${m.type}`}
                                   />
                                 </td>
-                                <td className="px-3 py-1.5 font-mono">{toHex(m.moduleIdent, 8)}</td>
+                                <td className="px-3 py-1.5 font-mono">
+                                  {formatHex(m.moduleIdent, 8)}
+                                </td>
                                 <td className="px-3 py-1.5 text-grey-800">{m.type}</td>
                                 <td className="px-3 py-1.5 text-grey-700">{m.name}</td>
                                 <td className="px-3 py-1.5 font-mono">{m.objectCount ?? '—'}</td>

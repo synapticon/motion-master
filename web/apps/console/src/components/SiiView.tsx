@@ -3,6 +3,7 @@ import {
   type SlaveInformationInterface,
   type SiiPdo,
   formatHex,
+  objectAddressText,
 } from '@synapticon/motion-master-client';
 import MailboxCapabilities from './MailboxCapabilities';
 
@@ -136,7 +137,7 @@ function PdoTable({ pdos, strings }: { pdos: SiiPdo[]; strings: string[] }) {
                 {pdo.entries!.map((e, j) => (
                   <tr key={j} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">
-                      {formatHex(e.entryIndex ?? 0)}:{formatHex(e.subindex ?? 0, 2, false)}
+                      {objectAddressText(e.entryIndex ?? 0, e.subindex ?? 0)}
                     </td>
                     <td className="px-4 py-2 text-grey-700">
                       <StringRef idx={e.entryNameIdx ?? 0} strings={strings} />

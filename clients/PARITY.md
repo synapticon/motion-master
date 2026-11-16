@@ -69,6 +69,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `step_changes` | `stepChanges` | |
 | `object_name` | `objectName` | |
 | `object_address_text` | `objectAddressText` | |
+| `device_parameter_text` | `deviceParameterText` | |
+| `device_parameter_name` | `deviceParameterName` | |
 | `format_step` | `formatStep` | |
 | `error_line` | `errorLine` | |
 | — | `apiErrorMessage` | Returns a message for any error, with a fallback, for a page to show. `errorLine` returns `null` for a bug, so that a program shows its stack trace. |

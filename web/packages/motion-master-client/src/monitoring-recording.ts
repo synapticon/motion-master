@@ -7,7 +7,7 @@ import { formatHex } from './hex';
 import type { Monitoring } from './generated/data-contracts';
 import { importNode, type NodeModules } from './node-modules';
 import type { ObjectAddress } from './objects';
-import { objectAddressText, objectName } from './parameter-address';
+import { deviceParameterName, objectAddressText } from './parameter-address';
 import type { MonitoringRow } from './web-socket-connection';
 
 /**
@@ -40,7 +40,7 @@ export class MonitoringRecording {
    * generated name. `writeCsv()` and `printTable()` name their columns with these.
    */
   get names(): string[] {
-    return this.parameters.map((p) => `${p.devicePosition}:${objectName(p.index, p.subindex)}`);
+    return this.parameters.map((p) => deviceParameterName(p.devicePosition, p.index, p.subindex));
   }
 
   /** Returns `[timestampUs, value]` of one object for every row, in the order the cycles ran. */

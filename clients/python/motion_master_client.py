@@ -1165,6 +1165,20 @@ def object_address_text(index, subindex):
     return f"0x{index:04X}:{subindex:02X}"
 
 
+def device_parameter_text(position, index, subindex):
+    """Return a parameter of a device as its position and its address, such as 1:0x6041:00."""
+    return f"{position}:{object_address_text(index, subindex)}"
+
+
+def device_parameter_name(position, index, subindex):
+    """Return a parameter of a device as its position and the generated name of its object.
+
+    Such as 1:STATUSWORD, or its address, such as 1:0x2110:03, when the object has no generated
+    name.
+    """
+    return f"{position}:{object_name(index, subindex)}"
+
+
 class MonitoringRecording:
     """The recording of a monitoring: the monitoring on the server, and every row of the with block.
 
@@ -1252,7 +1266,7 @@ class MonitoringRecording:
         generated name. write_csv() and print_table() name their columns with these.
         """
         return [
-            f"{p['devicePosition']}:{object_name(p['index'], p['subindex'])}"
+            device_parameter_name(p["devicePosition"], p["index"], p["subindex"])
             for p in self.parameters
         ]
 

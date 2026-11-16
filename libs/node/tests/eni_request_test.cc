@@ -168,3 +168,45 @@ TEST(EniRequestTest, SpellsOutEveryEnumerationBesideItsValue) {
 
 }  // namespace
 }  // namespace mm::node
+
+namespace mm::node {
+namespace {
+
+TEST(EniRequestTest, SaysWhichDeviceAndObjectEachValueOfTheImageIs) {
+  const auto response = buildEniResponse(referenceDocument());
+  ASSERT_TRUE(response.has_value()) << response.error();
+  const nlohmann::json& image = (*response)["network"]["processImage"];
+
+  const nlohmann::json& statusword = image["inputs"]["variables"][0];
+  EXPECT_EQ(statusword["devicePosition"], 1);
+  EXPECT_EQ(statusword["object"], (nlohmann::json{{"index", 0x6041}, {"subindex", 0}}));
+  EXPECT_EQ(statusword["scope"], "Drive 1");
+  EXPECT_EQ(statusword["signal"], "Statusword");
+  EXPECT_EQ(image["inputs"]["variables"][1]["object"]["index"], 0x6064);
+
+  const nlohmann::json& controlword = image["outputs"]["variables"][0];
+  EXPECT_EQ(controlword["devicePosition"], 1);
+  EXPECT_EQ(controlword["object"], (nlohmann::json{{"index", 0x6040}, {"subindex", 0}}));
+  EXPECT_EQ(image["outputs"]["variables"][1]["object"]["index"], 0x607A);
+}
+
+TEST(EniRequestTest, LeavesWhatTheDocumentDoesNotSayNull) {
+  auto network = mm::etg::testing::referenceNetwork();
+  for (auto& slave : network.slaves) {
+    slave.processData.reset();
+  }
+  network.processImage->inputs->variables[0].name = "Statusword";
+  const auto written = mm::etg::writeEni(network);
+  ASSERT_TRUE(written.has_value()) << written.error();
+  const auto response = buildEniResponse(*written);
+  ASSERT_TRUE(response.has_value()) << response.error();
+
+  const nlohmann::json& variable = (*response)["network"]["processImage"]["inputs"]["variables"][0];
+  EXPECT_TRUE(variable["devicePosition"].is_null());
+  EXPECT_TRUE(variable["object"].is_null());
+  EXPECT_TRUE(variable["scope"].is_null());
+  EXPECT_EQ(variable["signal"], "Statusword");
+}
+
+}  // namespace
+}  // namespace mm::node

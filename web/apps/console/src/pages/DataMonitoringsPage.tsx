@@ -8,6 +8,7 @@ import {
   type Monitoring,
   objectAddressText,
   deviceParameterText,
+  MonitoringRecording,
   parseInteger,
 } from '@synapticon/motion-master-client';
 import CycleStatsBar from '../components/CycleStatsBar';
@@ -271,12 +272,11 @@ function MonitoringCard({
     statsAtRef.current = 0;
   }
 
-  // Export the retained buffer as CSV. First column is the cycle time in microseconds elapsed since
-  // the first sample; the rest are one per parameter, headed by the object address in hex
-  // (index:subindex, e.g. 0x6040:00), one row per collected cycle in capture order. A value is blank
-  // while its device was not exchanging (null on the wire).
+  // Export the retained buffer as CSV, in the layout of MonitoringRecording.toCsv(): the seconds from
+  // the first retained sample, the timestamp of the cycle in epoch microseconds, then one column per
+  // parameter. A value is blank while its device was not exchanging (null on the wire).
   //
-  // The time column is what makes the file diagnostic rather than merely a list of values. These
+  // The time columns are what make the file diagnostic rather than merely a list of values. These
   // timestamps come from the cycle the sample was recorded in, and the stream is lossless — so a
   // stall in the *live* stream still exports as an unbroken series, and a reader with only the values
   // cannot tell a smooth capture from one that froze and caught up. Gaps and duplicated timestamps
@@ -284,17 +284,13 @@ function MonitoringCard({
   function downloadCsv() {
     const xs = xsRef.current;
     const ys = ysRef.current;
-    const rowCount = xs.length;
-    if (rowCount === 0) {
+    const t0 = t0Ref.current;
+    if (xs.length === 0 || t0 === null) {
       return;
     }
-    const header = ['t_us', ...params.map((p) => objectAddressText(p.index, p.subindex))];
-    const lines = [header.join(',')];
-    for (let r = 0; r < rowCount; r++) {
-      const values = ys.map((series) => (series[r] == null ? '' : String(series[r])));
-      lines.push([String(xs[r]), ...values].join(','));
-    }
-    downloadText(lines.join('\n'), `${monitoring.topic}.csv`, 'text/csv');
+    const rows = xs.map((x, r) => [t0 + x, ...ys.map((series) => series[r])]);
+    const recording = new MonitoringRecording(monitoring.topic, params, rows);
+    downloadText(recording.toCsv(), `${monitoring.topic}.csv`, 'text/csv');
   }
 
   return (
@@ -394,7 +390,7 @@ function MonitoringCard({
             className={`${btnGhostCls} inline-flex items-center gap-1.5`}
             onClick={downloadCsv}
             disabled={count === 0}
-            title="Download the retained samples as CSV — first column is the cycle time in microseconds since the first sample, then one column per parameter (header is the object address in hex, e.g. 0x6040:00), one row per collected cycle."
+            title="Download the retained samples as CSV: the seconds since the first sample, the cycle timestamp in epoch microseconds, then one column per parameter, named by its device and its object, such as 1:STATUSWORD. One row per collected cycle."
           >
             <Download className="h-4 w-4" />
             CSV

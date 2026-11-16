@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import { type ProcedureParameter, procedureParameterValue } from '@synapticon/motion-master-client';
+import {
+  formatBytes,
+  type ProcedureParameter,
+  procedureParameterValue,
+} from '@synapticon/motion-master-client';
 import FilePickerButton from './FilePickerButton';
 
 // One shared control height for every interactive control, matching the device pages: this theme's
@@ -26,16 +30,6 @@ export function readAsBase64(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function formatBytes(count: number): string {
-  if (count < 1024) {
-    return `${count} B`;
-  }
-  if (count < 1024 * 1024) {
-    return `${(count / 1024).toFixed(0)} KB`;
-  }
-  return `${(count / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**

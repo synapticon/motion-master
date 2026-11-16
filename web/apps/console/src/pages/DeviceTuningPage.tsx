@@ -10,6 +10,7 @@ import {
   objectAddressText,
   Somanet,
   stepValue,
+  HttpError,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -70,12 +71,6 @@ interface LimitsWrite {
   skipped: string[];
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
-  );
-}
-
 function formatNumber(value: unknown): string {
   if (typeof value !== 'number') {
     return value == null ? '—' : String(value);
@@ -119,7 +114,12 @@ export default function DeviceTuningPage() {
         if (result.status === 'fulfilled') {
           values.set(key, result.value.value as number);
         } else {
-          values.set(key, isNotFound(result.reason) ? 'missing' : apiErrorMessage(result.reason));
+          values.set(
+            key,
+            result.reason instanceof HttpError && result.reason.status === 404
+              ? 'missing'
+              : apiErrorMessage(result.reason),
+          );
         }
       });
       return values;
@@ -181,7 +181,8 @@ export default function DeviceTuningPage() {
     }
   }, [finishedAt, limitsFinishedAt, queryClient, slavePosition]);
 
-  const noPlantModel = isNotFound(plantModelQuery.error);
+  const noPlantModel =
+    plantModelQuery.error instanceof HttpError && plantModelQuery.error.status === 404;
   const elapsedSeconds =
     snapshot?.startedAt && snapshot.finishedAt
       ? ((snapshot.finishedAt - snapshot.startedAt) / 1000).toFixed(1)

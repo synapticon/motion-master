@@ -295,6 +295,8 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `1:0x6041:00` and `1:STATUSWORD`. `object_access(access)` decodes the access word of an object
   into `readable`, `writable`, `rxPdoMappable`, `txPdoMappable`, `backup`, `settings` and `text`,
   such as `RW`.
+- `format_duration(ms)` formats a duration, such as `4.2 ms` or `2.75 s`, and `format_bytes(count)`
+  a byte count, such as `87.0 KiB`. They write the same digits as the TypeScript client.
 - `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until
   the predicate is true. It raises `TimeoutError` with the last value when the time runs out.
 - `ensure_scanned()` scans when the last scan is missing or wrong, and moves no device.
@@ -338,7 +340,7 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   - `values()` returns the values in a time window.
   - `first()` returns the time of the first value that meets a condition.
   - `print_table()` prints one row every `every_ms`, with the CiA402 state beside a statusword.
-  - `write_csv(path)` writes every row to a CSV file.
+  - `to_csv()` returns every row as CSV text, and `write_csv(path)` writes it to a file.
   - `names` gives the name of each column, such as `1:STATUSWORD`, which `print_table()` and
     `write_csv()` use. `sources` gives where each value comes from, `pdo` or `sdo`.
 - `notifications()` streams the notifications from the WebSocket.

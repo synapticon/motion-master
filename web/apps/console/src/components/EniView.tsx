@@ -7,7 +7,6 @@ import {
   type EniCoeCmd,
   type EniInitCmd,
   type EniParseResult,
-  type EniPdo,
   type EniSlave,
 } from '@synapticon/motion-master-client';
 
@@ -104,73 +103,6 @@ function meaning(cmd: EniInitCmd): ReactNode {
     );
   }
   return <span className="text-grey-400">{cmd.comment ?? '—'}</span>;
-}
-
-/**
- * Splits a process-image variable name into the scope its writer prefixed and the signal itself.
- *
- * The ENI gives a variable one name and no structure, and every tool builds it the same way: the
- * device label, a dot, then the signal — `Device 1.Controlword`, `Term 4 (EL5001).Kanal 1.Value`.
- * Splitting at the first dot separates the two, and a name with no dot is all signal.
- */
-function splitVariableName(name: string): { scope: string | null; signal: string } {
-  const dot = name.indexOf('.');
-  if (dot < 0) {
-    return { scope: null, signal: name };
-  }
-  return { scope: name.slice(0, dot), signal: name.slice(dot + 1) };
-}
-
-/**
- * Locates the object a process-image value belongs to.
- *
- * The image itself has no object address — the ENI gives a variable a name, a size and an offset,
- * and nothing more. The PDO declarations have the address, so walking a device's PDOs in order and
- * accumulating bit lengths from the start of its window says which object sits at a given offset.
- * A document that declares no PDOs, as a device with fixed PDOs may well produce, yields nothing,
- * and the column says so rather than guessing.
- */
-function objectAt(
-  slaves: EniSlave[],
-  half: 'outputs' | 'inputs',
-  bitOffs: number,
-): { index: number; subindex: number } | null {
-  for (const slave of slaves) {
-    const window = half === 'outputs' ? slave.processData?.send : slave.processData?.recv;
-    const pdos: EniPdo[] | undefined =
-      half === 'outputs' ? slave.processData?.rxPdos : slave.processData?.txPdos;
-    if (!window || !pdos) {
-      continue;
-    }
-    let at = window.bitStart;
-    for (const pdo of pdos) {
-      for (const entry of pdo.entries) {
-        if (at === bitOffs && entry.index !== 0) {
-          return { index: entry.index, subindex: entry.subindex };
-        }
-        at += entry.bitLen;
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Finds which device owns a bit offset in one half of the process image.
- *
- * The name's prefix says which device a tool *called* it; this says which device's window the
- * value actually lands in, which is the document's own answer and does not depend on a naming
- * convention. Outputs are matched against each device's `send` window and inputs against `recv`,
- * both named from the master's side.
- */
-function deviceAt(slaves: EniSlave[], half: 'outputs' | 'inputs', bitOffs: number): number | null {
-  for (let i = 0; i < slaves.length; i += 1) {
-    const window = half === 'outputs' ? slaves[i].processData?.send : slaves[i].processData?.recv;
-    if (window && bitOffs >= window.bitStart && bitOffs < window.bitStart + window.bitLength) {
-      return i + 1;
-    }
-  }
-  return null;
 }
 
 function InitCmdTable({ cmds }: { cmds: EniInitCmd[] }) {
@@ -556,9 +488,7 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                       </thead>
                       <tbody>
                         {area.variables.map((variable, j) => {
-                          const { scope, signal } = splitVariableName(variable.name);
-                          const device = deviceAt(network.slaves, half, variable.bitOffs);
-                          const object = objectAt(network.slaves, half, variable.bitOffs);
+                          const { devicePosition: device, object, scope, signal } = variable;
                           return (
                             <tr key={j} className="border-b border-grey-100 last:border-0">
                               <td className="px-3 py-2 font-mono">

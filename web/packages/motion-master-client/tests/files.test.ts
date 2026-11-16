@@ -4,6 +4,8 @@ import {
   Cia402,
   deviceParameterName,
   deviceParameterText,
+  formatBytes,
+  formatDuration,
   formatHexBytes,
   MotionMasterClient,
   objectAccess,
@@ -203,5 +205,29 @@ describe('objectAccess', () => {
     });
     expect(objectAccess(0x0038).text).toBe('WO');
     expect(objectAccess(0).text).toBe('—');
+  });
+});
+
+describe('formatDuration', () => {
+  it('keeps one decimal below 10 ms, whole ms below 1 s, and seconds above', () => {
+    expect(formatDuration(0.25)).toBe('0.3 ms');
+    expect(formatDuration(4.21)).toBe('4.2 ms');
+    expect(formatDuration(10)).toBe('10 ms');
+    expect(formatDuration(309.5)).toBe('310 ms');
+    expect(formatDuration(999.4)).toBe('999 ms');
+    expect(formatDuration(1000)).toBe('1.00 s');
+    expect(formatDuration(2745)).toBe('2.75 s');
+    expect(formatDuration(125300)).toBe('125.30 s');
+  });
+});
+
+describe('formatBytes', () => {
+  it('uses binary prefixes, with one decimal above bytes', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(1023)).toBe('1023 B');
+    expect(formatBytes(1024)).toBe('1.0 KiB');
+    expect(formatBytes(1280)).toBe('1.3 KiB');
+    expect(formatBytes(89088)).toBe('87.0 KiB');
+    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MiB');
   });
 });

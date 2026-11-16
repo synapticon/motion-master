@@ -1,22 +1,10 @@
 import { useCallback, useState } from 'react';
-import { HttpError, wireTimeMs } from '@synapticon/motion-master-client';
+import { formatDuration, HttpError, wireTimeMs } from '@synapticon/motion-master-client';
 
 // Shared readout for the server-measured device wire time next to the browser-observed HTTP
 // round-trip, used by every page that performs a fieldbus operation. The gap between the two is
 // cross-origin/TLS and transport overhead, not device time. Mirrors the SDO/FoE readouts on the
 // Parameters and FoE pages, generalised over a `label` (the operation name shown to the user).
-
-// Formats a millisecond duration: sub-10 ms keeps one decimal so a fast wire transaction does not
-// round to "0 ms"; larger values round to whole ms / two-decimal seconds.
-export function formatWireMs(ms: number): string {
-  if (ms < 10) {
-    return `${ms.toFixed(1)} ms`;
-  }
-  if (ms < 1000) {
-    return `${Math.round(ms)} ms`;
-  }
-  return `${(ms / 1000).toFixed(2)} s`;
-}
 
 export interface WireTimingValue {
   // Server-measured device time in ms, or null if the response carried no Server-Timing header.
@@ -55,7 +43,7 @@ export function WireTiming({
             `${label} — server-measured duration of the on-device operation itself (control-plane lock acquire + the mailbox/ESC wire transaction(s)), reported by the backend. This is the true cost of talking to the device.`
           }
         >
-          {label} {formatWireMs(timing.wireMs)}
+          {label} {formatDuration(timing.wireMs)}
         </span>
       )}
       <span
@@ -63,7 +51,7 @@ export function WireTiming({
         title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the server-measured figure plus request upload, response download, and cross-origin/TLS overhead, so it is normally much larger and is not itself a measure of the operation."
       >
         {timing.wireMs !== null ? ' · round-trip ' : 'round-trip '}
-        {formatWireMs(timing.roundTripMs)}
+        {formatDuration(timing.roundTripMs)}
       </span>
     </span>
   );

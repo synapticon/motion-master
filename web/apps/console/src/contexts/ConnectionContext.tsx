@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { MotionMasterClient, type Api } from '@synapticon/motion-master-client';
+import {
+  DEFAULT_HOST,
+  DEFAULT_HTTP_PORT,
+  DEFAULT_WS_PORT,
+  MotionMasterClient,
+  type Api,
+} from '@synapticon/motion-master-client';
 import { useApiHealth } from '../hooks/useApiHealth';
 
 const ENDPOINT_KEY = 'mm:endpoint';
-
-const DEFAULT_HOST = 'local.motion-master.synapticon.com';
-const DEFAULT_HTTP_PORT = '61447';
-const DEFAULT_WS_PORT = '62281';
 
 type Driver = 'soem' | 'spoe';
 export type SpoeMode = 'monitor' | 'control';
@@ -30,8 +32,8 @@ interface Endpoint {
 function readEndpoint(): Endpoint {
   const fallback: Endpoint = {
     host: DEFAULT_HOST,
-    httpPort: DEFAULT_HTTP_PORT,
-    wsPort: DEFAULT_WS_PORT,
+    httpPort: String(DEFAULT_HTTP_PORT),
+    wsPort: String(DEFAULT_WS_PORT),
     driver: 'soem',
     adapter: '',
     ipAddresses: '',
@@ -134,8 +136,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   const resetEndpoint = useCallback(() => {
     setHost(DEFAULT_HOST);
-    setHttpPort(DEFAULT_HTTP_PORT);
-    setWsPort(DEFAULT_WS_PORT);
+    setHttpPort(String(DEFAULT_HTTP_PORT));
+    setWsPort(String(DEFAULT_WS_PORT));
   }, []);
 
   const client = useMemo(

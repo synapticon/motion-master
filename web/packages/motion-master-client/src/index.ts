@@ -35,6 +35,7 @@ export * from './al-state';
 // server on another machine under a name the bundled certificate covers.
 export * from './lan';
 export * from './eni';
+export * from './format';
 export * from './hex';
 export * from './sdo';
 export * from './integer';

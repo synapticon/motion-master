@@ -16,7 +16,7 @@ import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
-import { apiErrorMessage } from '@synapticon/motion-master-client';
+import { apiErrorMessage, HttpError } from '@synapticon/motion-master-client';
 
 // Trims the float milliseconds (ticks × base, e.g. 100.0) to a tidy string.
 const formatMs = (ms: number): string => Number(ms.toFixed(3)).toString();
@@ -425,11 +425,6 @@ function SummaryTable({ summary }: { summary: CaptureSummary }) {
   );
 }
 
-// A server that cannot stop a capture early answers 501 to a start: Windows, where a program
-// without a console gets no signal. The page then records for a fixed time instead.
-const isNotImplemented = (err: unknown) =>
-  !!err && typeof err === 'object' && (err as { status?: number }).status === 501;
-
 // The longest a capture of a fixed length may run, the limit of POST /api/captures.
 const TIMED_CAPTURE_MAX_SECONDS = 300;
 
@@ -469,7 +464,9 @@ function CaptureSection() {
       setNow(Date.now());
     },
     onError: (err, n) => {
-      if (isNotImplemented(err)) {
+      // A server that cannot stop a capture early answers 501 to a start: Windows, where a program
+      // without a console gets no signal. The page then records for a fixed time instead.
+      if (err instanceof HttpError && err.status === 501) {
         run.mutate(Math.min(n, TIMED_CAPTURE_MAX_SECONDS));
       } else {
         setError(apiErrorMessage(err));

@@ -9,6 +9,7 @@ import {
   type ProcedureSnapshot,
   type ProgressStep,
   Profile,
+  HttpError,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import DevicePageHeader from '../components/DevicePageHeader';
@@ -50,12 +51,6 @@ const STEP_TITLE: Record<string, string> = {
   'activate-firmware': 'Activate the firmware',
   'final-state': 'Leave the device in the final state',
 };
-
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
-  );
-}
 
 function stepValueText(value: unknown): string {
   if (value === undefined || value === null) {
@@ -242,9 +237,10 @@ export default function DeviceFirmwarePage() {
             )}
             {hardwareQuery.data && <HardwareDescriptionView description={hardwareQuery.data} />}
             {variantQuery.data && <IntegroVariantView variant={variantQuery.data} />}
-            {variantQuery.isError && !isNotFound(variantQuery.error) && (
-              <Callout variant="error">{apiErrorMessage(variantQuery.error)}</Callout>
-            )}
+            {variantQuery.isError &&
+              !(variantQuery.error instanceof HttpError && variantQuery.error.status === 404) && (
+                <Callout variant="error">{apiErrorMessage(variantQuery.error)}</Callout>
+              )}
           </div>
         </section>
 

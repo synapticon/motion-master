@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -184,6 +185,81 @@ void annotateAll(nlohmann::json& commands) {
   }
 }
 
+// The ENI gives a variable one name and no structure, and every tool builds it the same way: the
+// device label, a dot, then the signal, such as `Device 1.Controlword` or
+// `Term 4 (EL5001).Kanal 1.Value`. The first dot separates the two, and a name with no dot is all
+// signal.
+void addNameParts(nlohmann::json& variable, std::string_view name) {
+  const auto dot = name.find('.');
+  if (dot == std::string_view::npos) {
+    variable["scope"] = nullptr;
+    variable["signal"] = name;
+    return;
+  }
+  variable["scope"] = name.substr(0, dot);
+  variable["signal"] = name.substr(dot + 1);
+}
+
+// The window of a device in one half of the image: `send` holds the outputs and `recv` the inputs,
+// both named from the side of the master.
+const mm::etg::EniProcessDataWindow* windowOf(const mm::etg::EniSlave& slave, bool outputs) {
+  if (!slave.processData.has_value()) {
+    return nullptr;
+  }
+  const auto& window = outputs ? slave.processData->send : slave.processData->recv;
+  return window.has_value() ? &*window : nullptr;
+}
+
+// The position of the device whose window holds the bit, counted from 1 in bus order. The prefix
+// of a name says which device a tool called it; this is the answer of the document itself.
+nlohmann::json devicePositionAt(const mm::etg::EniNetwork& network, bool outputs,
+                                std::uint32_t bitOffs) {
+  for (std::size_t i = 0; i < network.slaves.size(); ++i) {
+    const auto* window = windowOf(network.slaves[i], outputs);
+    if (window != nullptr && bitOffs >= window->bitStart &&
+        bitOffs < window->bitStart + window->bitLength) {
+      return i + 1;
+    }
+  }
+  return nullptr;
+}
+
+// The object a value of the image belongs to. The image has no object address, only a name, a size
+// and an offset, so this walks the PDOs of each device in order and adds up the bit lengths from
+// the start of its window. A document that declares no PDOs gives null.
+nlohmann::json objectAt(const mm::etg::EniNetwork& network, bool outputs, std::uint32_t bitOffs) {
+  for (const mm::etg::EniSlave& slave : network.slaves) {
+    const auto* window = windowOf(slave, outputs);
+    if (window == nullptr) {
+      continue;
+    }
+    std::uint32_t at = window->bitStart;
+    for (const mm::etg::EniPdo& pdo :
+         outputs ? slave.processData->rxPdos : slave.processData->txPdos) {
+      for (const mm::etg::EniPdoEntry& entry : pdo.entries) {
+        if (at == bitOffs && entry.index != 0) {
+          return nlohmann::json{{"index", entry.index}, {"subindex", entry.subindex}};
+        }
+        at += entry.bitLen;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Adds to each variable of one half of the image its device, its object and the two parts of its
+// name. The JSON holds the variables in the order of the model.
+void annotateArea(nlohmann::json& area, const mm::etg::EniNetwork& network,
+                  const mm::etg::EniProcessImageArea& model, bool outputs) {
+  auto& variables = area["variables"];
+  for (std::size_t i = 0; i < model.variables.size() && i < variables.size(); ++i) {
+    const mm::etg::EniVariable& variable = model.variables[i];
+    variables[i]["devicePosition"] = devicePositionAt(network, outputs, variable.bitOffs);
+    variables[i]["object"] = objectAt(network, outputs, variable.bitOffs);
+    addNameParts(variables[i], variable.name);
+  }
+}
+
 }  // namespace
 
 std::expected<nlohmann::json, std::string> buildEniResponse(std::string_view xml) {
@@ -201,6 +277,15 @@ std::expected<nlohmann::json, std::string> buildEniResponse(std::string_view xml
     datagrams += slave["initCmds"].size();
     if (slave.contains("mailbox")) {
       coeTransfers += slave["mailbox"]["coeInitCmds"].size();
+    }
+  }
+
+  if (const auto& image = read->network.processImage; image.has_value()) {
+    if (image->inputs.has_value()) {
+      annotateArea(network["processImage"]["inputs"], read->network, *image->inputs, false);
+    }
+    if (image->outputs.has_value()) {
+      annotateArea(network["processImage"]["outputs"], read->network, *image->outputs, true);
     }
   }
 

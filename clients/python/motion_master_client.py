@@ -44,8 +44,10 @@ a server that is not running, into one line on stderr.
 from __future__ import annotations
 
 import csv
+import decimal
 import enum
 import functools
+import io
 import json
 import logging
 import os
@@ -1310,6 +1312,41 @@ def device_parameter_name(position, index, subindex):
     return f"{position}:{object_name(index, subindex)}"
 
 
+def _fixed(value, digits):
+    # Rounds half up, as toFixed() and Math.round() of the TypeScript client do, so that both
+    # clients write the same digits. format() and round() round half to even.
+    quantum = decimal.Decimal(1).scaleb(-digits)
+    return str(decimal.Decimal(value).quantize(quantum, rounding=decimal.ROUND_HALF_UP))
+
+
+def format_duration(ms):
+    """Format a duration in milliseconds, such as 4.2 ms, 310 ms or 2.75 s.
+
+    Below 10 ms it keeps one decimal, so that a fast transaction does not show as 0 ms. From 1000 ms
+    it gives seconds with two decimals.
+    """
+    if ms < 10:
+        return f"{_fixed(ms, 1)} ms"
+    if ms < 1000:
+        return f"{_fixed(ms, 0)} ms"
+    return f"{_fixed(ms / 1000, 2)} s"
+
+
+def format_bytes(count):
+    """Format a byte count with binary prefixes, such as 512 B or 87.0 KiB.
+
+    Each step divides by 1024, so the prefixes are KiB, MiB, GiB and TiB, not KB. Bytes have no
+    decimal, and every larger unit has one.
+    """
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    value = count
+    unit = 0
+    while value >= 1024 and unit < len(units) - 1:
+        value /= 1024
+        unit += 1
+    return f"{_fixed(value, 0 if unit == 0 else 1)} {units[unit]}"
+
+
 class MonitoringRecording:
     """The recording of a monitoring: the monitoring on the server, and every row of the with block.
 
@@ -1394,31 +1431,36 @@ class MonitoringRecording:
         """The name of each parameter's column, in order: its device position and its object.
 
         The object is its generated name, 1:STATUSWORD, or 1:0x2110:03 for an object with no
-        generated name. write_csv() and print_table() name their columns with these.
+        generated name. to_csv(), write_csv() and print_table() name their columns with these.
         """
         return [
             device_parameter_name(p["devicePosition"], p["index"], p["subindex"])
             for p in self.parameters
         ]
 
-    def write_csv(self, path):
-        """Write every row to a CSV file at `path`, and create its folder when it is missing.
+    def to_csv(self):
+        """Return every row as CSV text.
 
         The columns are time_s, the seconds from the first row; timestamp_us, the time on the
         server when the cycle ran, in epoch microseconds; then one column per parameter, named as
         in `names`. A value is empty in a cycle where its device did not exchange process data.
         """
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             rows = list(self.rows)
         start = rows[0][0] if rows else 0
-        with path.open("w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["time_s", "timestamp_us", *self.names])
-            for timestamp_us, *values in rows:
-                times = [f"{(timestamp_us - start) / 1e6:.6f}", timestamp_us]
-                writer.writerow(times + ["" if v is None else v for v in values])
+        text = io.StringIO()
+        writer = csv.writer(text)
+        writer.writerow(["time_s", "timestamp_us", *self.names])
+        for timestamp_us, *values in rows:
+            times = [f"{(timestamp_us - start) / 1e6:.6f}", timestamp_us]
+            writer.writerow(times + ["" if v is None else v for v in values])
+        return text.getvalue()
+
+    def write_csv(self, path):
+        """Write to_csv() to a file at `path`, and create its folder when it is missing."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.to_csv(), newline="")
 
     def print_table(self, every_ms=100, file=None):
         """Print the rows as a table: the first row, then one row every `every_ms`.

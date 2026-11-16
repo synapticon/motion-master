@@ -4,12 +4,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type uPlot from 'uplot';
 import {
   apiErrorMessage,
-  parseMmpd,
+  deviceParameterText,
+  formatBytes,
   isPlottableDataType,
   type MmpdFile,
   type MmpdPdoEntry,
   objectAddressText,
-  deviceParameterText,
+  parseMmpd,
 } from '@synapticon/motion-master-client';
 import Checkbox from '../components/Checkbox';
 import PageHeader from '../components/PageHeader';
@@ -19,7 +20,6 @@ import CycleStatsBar from '../components/CycleStatsBar';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection } from '../contexts/ConnectionContext';
 import { cycleStats } from '../utils/cycleStats';
-import { formatBytes } from '../utils/format';
 import { DUMPS_FOLDER, userCacheBasename } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 
@@ -47,8 +47,6 @@ function flatten(file: MmpdFile): FlatEntry[] {
   }
   return out;
 }
-
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 // One object's checkbox row in the series picker (direction is conveyed by the column it sits in).
 function EntryCheckbox({
@@ -132,7 +130,7 @@ export default function DataRecorderPage() {
       const parsed = parseMmpd(bytes);
       load(parsed, `Recorder ring — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
-      setViewError(errorText(e));
+      setViewError(apiErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -147,7 +145,7 @@ export default function DataRecorderPage() {
       const parsed = parseMmpd(await client.readUserCacheFile(path));
       load(parsed, `${userCacheBasename(path)} — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
-      setViewError(errorText(e));
+      setViewError(apiErrorMessage(e));
     } finally {
       setBusyPath(null);
     }
@@ -171,7 +169,7 @@ export default function DataRecorderPage() {
       const parsed = parseMmpd(await picked.arrayBuffer());
       load(parsed, `${picked.name} — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
-      setViewError(errorText(e));
+      setViewError(apiErrorMessage(e));
     } finally {
       setLoading(false);
     }

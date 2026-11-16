@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type ParameterCacheEntry, formatHex } from '@synapticon/motion-master-client';
+import { formatBytes, formatHex, type ParameterCacheEntry } from '@synapticon/motion-master-client';
 import PageHeader from '../components/PageHeader';
 import ParameterCacheExplainer from '../components/ParameterCacheExplainer';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
-import { formatBytes } from '../utils/format';
 import { btnOutline } from '../utils/styles';
 
 // One entry per table column. `help` is the header's tooltip: what the value is and where Motion

@@ -10,13 +10,14 @@ import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import {
   apiErrorMessage,
-  HttpError,
-  formatHex,
-  wireTimeMs,
   type DeviceFile,
+  formatDuration,
+  formatHex,
   type HardwareDescription,
+  HttpError,
   type IcMuRestoreFile,
   type IntegroVariant,
+  wireTimeMs,
 } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
@@ -55,15 +56,6 @@ const SOMANET_FILES: { name: string; write: boolean }[] = [
 
 const SOMANET_READ_FILES = SOMANET_FILES.map((f) => f.name);
 const SOMANET_WRITE_FILES = SOMANET_FILES.filter((f) => f.write).map((f) => f.name);
-
-// Human-readable elapsed time for a FoE transfer — sub-second in ms, otherwise seconds.
-function formatDuration(ms: number): string {
-  // Sub-10 ms (a fast FoE wire transaction) keeps one decimal so it doesn't round to "0 ms".
-  if (ms < 10) {
-    return `${ms.toFixed(1)} ms`;
-  }
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
-}
 
 // Timing readout for a FoE transfer: the server-measured wire transaction (from the response's
 // `Server-Timing` header) and the browser-observed HTTP round-trip. The gap between them is

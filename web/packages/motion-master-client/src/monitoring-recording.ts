@@ -37,7 +37,7 @@ export class MonitoringRecording {
    * The name of each parameter's column, in order: its device position and its object.
    *
    * The object is its generated name, `1:STATUSWORD`, or `1:0x2110:03` for an object with no
-   * generated name. `writeCsv()` and `printTable()` name their columns with these.
+   * generated name. `toCsv()`, `writeCsv()` and `printTable()` name their columns with these.
    */
   get names(): string[] {
     return this.parameters.map((p) => deviceParameterName(p.devicePosition, p.index, p.subindex));
@@ -94,24 +94,30 @@ export class MonitoringRecording {
   }
 
   /**
-   * Writes every row to a CSV file at `path`, and creates its folder when it is missing. Node.js
-   * only.
+   * Returns every row as CSV text, such as for a download in a browser.
    *
    * The columns are time_s, the seconds from the first row; timestamp_us, the time on the server
    * when the cycle ran, in epoch microseconds; then one column per parameter, named as in `names`.
    * A value is empty in a cycle where its device did not exchange process data.
    */
-  async writeCsv(path: string): Promise<void> {
-    const { mkdirSync, writeFileSync } = await importNode<NodeModules['fs']>('node:fs');
-    const { dirname } = await importNode<NodeModules['path']>('node:path');
-    mkdirSync(dirname(path), { recursive: true });
+  toCsv(): string {
     const start = (this.rows[0]?.[0] as number | undefined) ?? 0;
     const lines = [csvLine(['time_s', 'timestamp_us', ...this.names])];
     for (const [timestampUs, ...values] of this.rows) {
       const t = timestampUs as number;
       lines.push(csvLine([((t - start) / 1e6).toFixed(6), t, ...values]));
     }
-    writeFileSync(path, lines.join(''));
+    return lines.join('');
+  }
+
+  /**
+   * Writes `toCsv()` to a file at `path`, and creates its folder when it is missing. Node.js only.
+   */
+  async writeCsv(path: string): Promise<void> {
+    const { mkdirSync, writeFileSync } = await importNode<NodeModules['fs']>('node:fs');
+    const { dirname } = await importNode<NodeModules['path']>('node:path');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, this.toCsv());
   }
 
   /**

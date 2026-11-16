@@ -21,6 +21,19 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- Each variable of the process image that `POST /api/eni/parse` returns has `devicePosition`, the
+  device whose window holds it, `object`, the index and subindex of its object from the PDOs of
+  that device, and its name split at the first dot into `scope` and `signal`. The Console's ENI
+  page reads them in place of its own copies.
+- Both clients format a duration with `formatDuration(ms)` and `format_duration(ms)`, such as
+  `4.2 ms` or `2.75 s`, and a byte count with `formatBytes(bytes)` and `format_bytes(count)`, such as
+  `87.0 KiB`. Both round half up, so they write the same digits. The Console uses them in place of
+  five copies of a duration formatter and two of a byte formatter, one of which wrote KB.
+- `MonitoringRecording.toCsv()` and `to_csv()` return the CSV text that `writeCsv()` and
+  `write_csv()` write, such as for a download in a browser.
+- The TypeScript client exports `DEFAULT_HOST`, `DEFAULT_HTTP_PORT` and `DEFAULT_WS_PORT`, from
+  which it builds `API_BASE_URL` and `WS_URL`. The Console's Connection page uses them.
+
 - Each parameter of a device, as `GET /api/devices/{slavePosition}/parameters` and the other
   parameter routes send it, has `readable`, `writable`, `rxPdoMappable` and `txPdoMappable` beside
   its raw `access` word (ETG.1000.6), and `pdoMappingObject`, which is true for a PDO mapping object
@@ -129,6 +142,11 @@ the HTTP/WebSocket API may break between any two alphas.
   little-endian when no byte order is given, because EtherCAT is little-endian.
 
 ### Changed
+
+- The Console downloads a monitoring as CSV in the layout of `MonitoringRecording.toCsv()`: the
+  columns `time_s` and `timestamp_us`, then one column per parameter named by its device and its
+  object, such as `1:STATUSWORD`; a field is quoted where it must be, and each line ends with `\r\n`.
+  It wrote `t_us`, the microseconds from the first sample, and the object addresses.
 
 - The TypeScript client parses an integer with `parseInteger(text, { min, max })`, as Python's
   `int(text, 0)` does: decimal, or `0x`, `0o` or `0b`, with an optional sign. It returns a number,

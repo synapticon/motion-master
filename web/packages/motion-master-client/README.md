@@ -7,7 +7,7 @@ The package contains four parts:
 - `client.api`: an HTTP client for every operation of the Motion Master API. It is generated from the OpenAPI specification of the server.
 - `client.ws`: a connection to the WebSocket of the server. It delivers monitoring data and notifications.
 - The helper methods of the client, for the steps that most programs take. [Helpers](#helpers) lists them.
-- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, `integerFromBytes`, `parseInteger` (the rule of Python's `int(text, 0)`), hex text with `formatHex` and `formatHexBytes`, object names with `objectName` and `objectAddressText`, the parameters of a device with `deviceParameterText` (`1:0x6041:00`) and `deviceParameterName` (`1:STATUSWORD`), the access word of an object with `objectAccess`, and the host names for a server on another machine.
+- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, `integerFromBytes`, `parseInteger` (the rule of Python's `int(text, 0)`), hex text with `formatHex` and `formatHexBytes`, object names with `objectName` and `objectAddressText`, the parameters of a device with `deviceParameterText` (`1:0x6041:00`) and `deviceParameterName` (`1:STATUSWORD`), the access word of an object with `objectAccess`, durations and byte counts with `formatDuration` and `formatBytes`, the default host and ports with `DEFAULT_HOST`, `DEFAULT_HTTP_PORT` and `DEFAULT_WS_PORT`, and the host names for a server on another machine.
 
 ## Version
 
@@ -341,7 +341,7 @@ const velocity = m.column(1, Cia402.VELOCITY_ACTUAL_VALUE); // [timestampUs, val
 - `values()` returns the values in a time window.
 - `first()` returns the time of the first value that meets a condition.
 - `printTable()` prints one row every `everyMs`, with the CiA402 state beside a statusword.
-- `writeCsv(path)` writes every row to a CSV file, in Node.js.
+- `toCsv()` returns every row as CSV text, such as for a download in a browser. `writeCsv(path)` writes it to a file, in Node.js.
 - `names` gives the name of each column, such as `1:STATUSWORD`, which `printTable()` and `writeCsv()` use. `sources` gives where each value comes from, `pdo` or `sdo`.
 
 A parameter is `[devicePosition, index, subindex]` or `[devicePosition, address]`.

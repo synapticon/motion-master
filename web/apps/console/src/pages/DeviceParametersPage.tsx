@@ -23,6 +23,7 @@ import {
   sdoTypeForDataTypeName,
   isIntegerSdoType,
   wireTimeMs,
+  formatDuration,
   formatHex,
   formatHexBytes,
   objectAddressText,
@@ -114,18 +115,6 @@ function valuesEqual(
   return a === b;
 }
 
-function formatElapsed(ms: number): string {
-  // Sub-10 ms ops (a single fast SDO) keep one decimal so they don't round to "0 ms";
-  // larger ops (the list rebuilds) round to whole ms / two-decimal seconds.
-  if (ms < 10) {
-    return `${ms.toFixed(1)} ms`;
-  }
-  if (ms < 1000) {
-    return `${Math.round(ms)} ms`;
-  }
-  return `${(ms / 1000).toFixed(2)} s`;
-}
-
 function paramKey(index: number, subindex: number): string {
   return `${index}-${subindex}`;
 }
@@ -140,14 +129,14 @@ function SdoTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: numbe
         className="cursor-help"
         title="SDO — server-measured duration of the SDO transaction itself (control-plane lock acquire + CoE mailbox wire round-trip), reported by the backend. This is the true cost of talking to the device."
       >
-        SDO {formatElapsed(wireMs)}
+        SDO {formatDuration(wireMs)}
       </span>
       <span
         className="text-grey-400 cursor-help"
         title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the SDO time plus cross-origin/TLS and transport overhead, so it is normally much larger than the SDO figure and is not device time."
       >
         {' · round-trip '}
-        {formatElapsed(roundTripMs)}
+        {formatDuration(roundTripMs)}
       </span>
     </span>
   );
@@ -855,7 +844,7 @@ export default function DeviceParametersPage() {
                       className="text-xs text-grey-500 font-mono whitespace-nowrap cursor-help"
                       title="Round-trip for the cached list re-fetch — no bus traffic, so there is no device wire time to report."
                     >
-                      took {formatElapsed(reloadElapsedMs)}
+                      took {formatDuration(reloadElapsedMs)}
                     </span>
                   )
                 )}

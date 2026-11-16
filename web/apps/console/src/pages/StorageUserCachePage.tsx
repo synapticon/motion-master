@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiErrorMessage, type UserCacheFile } from '@synapticon/motion-master-client';
+import { apiErrorMessage, formatBytes, type UserCacheFile } from '@synapticon/motion-master-client';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
 import UserCacheExplainer from '../components/UserCacheExplainer';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
-import { formatBytes } from '../utils/format';
 import { userCacheBasename } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 

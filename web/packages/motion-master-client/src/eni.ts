@@ -188,6 +188,14 @@ export interface EniVariable {
   bitOffs: number;
   comment?: string;
   dataType?: string;
+  /** The device whose window holds the value, counted from 1 in bus order. */
+  devicePosition: number | null;
+  /** The object the value belongs to, from the PDOs of that device. */
+  object: { index: number; subindex: number } | null;
+  /** The part of the name before the first dot, which a tool sets to the device's label. */
+  scope: string | null;
+  /** The part of the name after the first dot, or the whole name when it has no dot. */
+  signal: string;
 }
 
 export interface EniNetwork {

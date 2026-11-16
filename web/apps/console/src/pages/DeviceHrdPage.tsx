@@ -9,9 +9,8 @@ import MonitoringChart, { SAMPLE_INDEX } from '../components/MonitoringChart';
 import { WireTiming, useWireTiming } from '../components/WireTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadText } from '../utils/download';
-import { formatBytes } from '../utils/format';
 import { btnOutline, btnPrimary } from '../utils/styles';
-import { apiErrorMessage } from '@synapticon/motion-master-client';
+import { apiErrorMessage, formatBytes } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';

@@ -91,6 +91,9 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `alStateName` | Python reads the name from the enum: `AlState(2).name`. |
 | `mailbox_active` | `mailboxActive` | |
 | — | `operationModeName` | Python reads the name from the enum: `OperationMode(9).name`. |
+| — | `DEFAULT_HOST` | The host name of a server on this computer, for a web app. Python reads the host from `config.toml`. |
+| — | `DEFAULT_HTTP_PORT` | The port of the HTTP API, for a web app. Python reads the ports from `config.toml`. |
+| — | `DEFAULT_WS_PORT` | The port of the WebSocket, for a web app. Python reads the ports from `config.toml`. |
 | — | `API_BASE_URL` | The default address of the HTTP API for a web app. Python reads the host and the ports from `config.toml`. |
 | — | `WS_URL` | The default address of the WebSocket for a web app. Python reads the host and the ports from `config.toml`. |
 | — | `LAN_DOMAIN` | A program reaches a server on another computer under a name that the bundled certificate covers. Python takes the host from `config.toml`, so a script writes that name there. |
@@ -98,6 +101,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `lanHostname` | As `LAN_DOMAIN`. |
 | — | `isIpv4` | As `LAN_DOMAIN`. |
 | `wire_time_ms` | `wireTimeMs` | |
+| `format_bytes` | `formatBytes` | |
+| `format_duration` | `formatDuration` | |
 | — | `formatHex` | The hex input fields of the Console. Python formats and parses hex with `f"{value:#x}"` and `int(text, 16)`. |
 | — | `formatHexBytes` | Python writes the same with `data.hex(" ").upper()`. |
 | — | `parseHexBytes` | As `formatHex`. |
@@ -178,6 +183,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `column` | `column` | |
 | `values` | `values` | |
 | `first` | `first` | |
+| `to_csv` | `toCsv` | |
 | `write_csv` | `writeCsv` | |
 | `print_table` | `printTable` | |
 

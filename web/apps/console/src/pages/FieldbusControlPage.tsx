@@ -6,10 +6,12 @@ import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection, type SpoeMode } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
 import {
-  apiErrorMessage,
-  formatHex,
   AlState,
   alStateName,
+  apiErrorMessage,
+  formatDuration,
+  formatHex,
+  HttpError,
   type TargetAlState,
 } from '@synapticon/motion-master-client';
 
@@ -59,19 +61,6 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
     hint: 'Everything active: inputs, outputs, and mailbox. The drive enters it only once valid outputs are already being sent.',
   },
 ];
-
-// Human-readable elapsed time for transition feedback: sub-second as whole ms,
-// otherwise seconds with one decimal (transitions can run up to the server timeout).
-function formatDuration(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
-}
-
-function apiStatus(err: unknown): number | undefined {
-  if (err && typeof err === 'object' && 'status' in err) {
-    return (err as { status?: number }).status;
-  }
-  return undefined;
-}
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
@@ -183,7 +172,7 @@ export default function FieldbusControlPage() {
     },
     onError: (err) => {
       // 409 = already initialized on the server; surface it as info, not an error.
-      if (apiStatus(err) === 409) {
+      if (err instanceof HttpError && err.status === 409) {
         setAlreadyInitialized(true);
         setIsInitialized(true);
       }
@@ -475,9 +464,10 @@ export default function FieldbusControlPage() {
                 </p>
               )}
               {initMutation.isSuccess && <p className="text-status-good text-xs">Initialized</p>}
-              {initMutation.isError && apiStatus(initMutation.error) !== 409 && (
-                <p className="text-status-bad text-xs">{apiErrorMessage(initMutation.error)}</p>
-              )}
+              {initMutation.isError &&
+                !(initMutation.error instanceof HttpError && initMutation.error.status === 409) && (
+                  <p className="text-status-bad text-xs">{apiErrorMessage(initMutation.error)}</p>
+                )}
               {alreadyInitialized && !initMutation.isSuccess && (
                 <div className="border-l-2 border-status-info bg-status-info/10 px-3 py-2">
                   <p className="text-xs font-display font-medium uppercase tracking-wide text-status-info">

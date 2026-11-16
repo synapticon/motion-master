@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
+import { formatHex } from '@synapticon/motion-master-client';
 
 const FORMAT_LABEL: Record<string, string> = {
   unsigned: 'Unsigned',
@@ -89,7 +90,7 @@ export default function MetaKueblerRegistersPage() {
                     className={`border-b border-grey-100 last:border-0 ${r.implemented ? '' : 'text-grey-500'}`}
                   >
                     <td className="px-4 py-2 font-mono whitespace-nowrap">
-                      0x{r.address.toString(16).toUpperCase().padStart(2, '0')}
+                      {formatHex(r.address, 2)}
                     </td>
                     <td className="px-4 py-2 font-mono whitespace-nowrap">
                       {r.bits} bit

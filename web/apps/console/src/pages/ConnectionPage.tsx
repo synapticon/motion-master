@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiErrorMessage, isIpv4, lanAddress, lanHostname } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  DEFAULT_HOST,
+  DEFAULT_HTTP_PORT,
+  DEFAULT_WS_PORT,
+  formatBytes,
+  isIpv4,
+  lanAddress,
+  lanHostname,
+} from '@synapticon/motion-master-client';
 import { version as uiVersion } from 'virtual:swagger-spec';
 import Callout from '../components/Callout';
 import ConnectionExplainer from '../components/ConnectionExplainer';
 import PageHeader from '../components/PageHeader';
 import { useConnection } from '../contexts/ConnectionContext';
-import { formatBytes } from '../utils/format';
 import { btnOutline, btnPrimary } from '../utils/styles';
 
 const RELEASES_URL = 'https://github.com/synapticon/motion-master/releases';
@@ -263,7 +271,7 @@ export default function ConnectionPage() {
                 <code>
                   https://{host}:{httpPort}
                 </code>
-                {host === 'local.motion-master.synapticon.com' && (
+                {host === DEFAULT_HOST && (
                   <>
                     {' '}
                     (which resolves to <code>127.0.0.1</code>, your own computer)
@@ -295,7 +303,7 @@ export default function ConnectionPage() {
                   type="text"
                   value={draftHost}
                   onChange={(e) => setDraftHost(e.target.value)}
-                  placeholder="local.motion-master.synapticon.com or 192.168.1.50"
+                  placeholder={`${DEFAULT_HOST} or 192.168.1.50`}
                   className={inputCls}
                 />
                 {lanSuggestion && (
@@ -334,7 +342,7 @@ export default function ConnectionPage() {
                   type="text"
                   value={draftHttpPort}
                   onChange={(e) => setDraftHttpPort(e.target.value)}
-                  placeholder="61447"
+                  placeholder={String(DEFAULT_HTTP_PORT)}
                   className={inputCls}
                   aria-invalid={!httpPortValid}
                 />
@@ -348,7 +356,7 @@ export default function ConnectionPage() {
                   type="text"
                   value={draftWsPort}
                   onChange={(e) => setDraftWsPort(e.target.value)}
-                  placeholder="62281"
+                  placeholder={String(DEFAULT_WS_PORT)}
                   className={inputCls}
                   aria-invalid={!wsPortValid}
                 />
@@ -362,7 +370,7 @@ export default function ConnectionPage() {
                 type="button"
                 onClick={resetEndpoint}
                 className={btnOutline}
-                title="Reset the host and ports to their built-in defaults (local.motion-master.synapticon.com, 61447, 62281) and save them to this browser's local storage, so they persist across reloads."
+                title={`Reset the host and ports to their built-in defaults (${DEFAULT_HOST}, ${DEFAULT_HTTP_PORT}, ${DEFAULT_WS_PORT}) and save them to this browser's local storage, so they persist across reloads.`}
               >
                 Load defaults
               </button>

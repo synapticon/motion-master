@@ -1,6 +1,18 @@
 import { HttpResponse, http } from 'msw/http';
 import { describe, expect, it } from 'vitest';
-import { Cia402, formatHexBytes, MotionMasterClient, objectAddressText } from '../src/index';
+import {
+  Cia402,
+  deviceParameterName,
+  deviceParameterText,
+  formatBytes,
+  formatDuration,
+  formatTimes,
+  formatHexBytes,
+  MotionMasterClient,
+  objectAccess,
+  objectAddressText,
+  fieldbusTimeMs,
+} from '../src/index';
 import { fakeServer, HTTP_URL, server } from './fakes';
 
 const FILES = `${HTTP_URL}/api/devices/1/files`;
@@ -87,6 +99,64 @@ describe('files', () => {
   });
 });
 
+describe('the generated calls of a file request', () => {
+  it('send the bytes as they are, and give the response with its headers', async () => {
+    const received: { method: string; type: string | null; body: number[] }[] = [];
+    server.use(
+      http.all(`${FILES}/*`, async ({ request }) => {
+        received.push({
+          method: request.method,
+          type: request.headers.get('Content-Type'),
+          body: [...new Uint8Array(await request.arrayBuffer())],
+        });
+        const headers = { 'Server-Timing': 'server;dur=1.700, fieldbus;dur=1.500' };
+        return request.method === 'GET'
+          ? new HttpResponse(new Uint8Array([7, 8]), { headers })
+          : HttpResponse.json({ ok: true }, { headers });
+      }),
+    );
+    const client = new MotionMasterClient({ baseUrl: HTTP_URL });
+    const read = await client.api.foeReadFile(1, 'config.csv');
+    expect(read.bodyUsed).toBe(false);
+    expect(fieldbusTimeMs(read)).toBe(1.5);
+    expect(new Uint8Array(await read.arrayBuffer())).toEqual(new Uint8Array([7, 8]));
+    const write = await client.api.foeWriteFile(1, 'image.bin', new Uint8Array([0, 255]));
+    expect(fieldbusTimeMs(write)).toBe(1.5);
+    // A call without a body sends no Content-Type, so that a browser sends no CORS preflight.
+    expect(received).toEqual([
+      { method: 'GET', type: null, body: [] },
+      { method: 'PUT', type: 'application/octet-stream', body: [0, 255] },
+    ]);
+  });
+});
+
+describe('SII', () => {
+  it('reads the parsed SII, or the raw image, and writes a raw image', async () => {
+    const received: { accept: string | null; type: string | null; body: number[] }[] = [];
+    server.use(
+      http.all(`${HTTP_URL}/api/devices/1/sii`, async ({ request }) => {
+        received.push({
+          accept: request.headers.get('Accept'),
+          type: request.headers.get('Content-Type'),
+          body: [...new Uint8Array(await request.arrayBuffer())],
+        });
+        if (request.method === 'PUT') {
+          return HttpResponse.json({ ok: true });
+        }
+        return request.headers.get('Accept') === 'application/octet-stream'
+          ? new HttpResponse(new Uint8Array([0x01, 0x02]))
+          : HttpResponse.json({ general: { nameIdx: 1 } });
+      }),
+    );
+    const client = new MotionMasterClient({ baseUrl: HTTP_URL });
+    expect(await client.readSii(1)).toEqual({ general: { nameIdx: 1 } });
+    expect(await client.readSii(1, { format: 'bytes' })).toEqual(new Uint8Array([1, 2]));
+    await client.writeSii(1, new Uint8Array([9, 8]));
+    expect(received.at(-1)).toMatchObject({ type: 'application/octet-stream', body: [9, 8] });
+    expect(received[1].accept).toBe('application/octet-stream');
+  });
+});
+
 describe('file names in the path', () => {
   it('percent-encodes the name in every file request', async () => {
     const paths: string[] = [];
@@ -120,5 +190,69 @@ describe('text of bytes and addresses', () => {
   it('writes an object address in hex', () => {
     expect(objectAddressText(0x6041, 0)).toBe('0x6041:00');
     expect(objectAddressText(0x2030, 0x1a)).toBe('0x2030:1A');
+  });
+
+  it('writes a parameter of a device as its position and its address or name', () => {
+    expect(deviceParameterText(1, 0x6041, 0)).toBe('1:0x6041:00');
+    expect(deviceParameterName(2, 0x6041, 0)).toBe('2:STATUSWORD');
+    expect(deviceParameterName(1, 0x2fff, 0x0b)).toBe('1:0x2FFF:0B');
+  });
+});
+
+describe('objectAccess', () => {
+  it('decodes the access word of ETG.1000.6', () => {
+    expect(objectAccess(0x007f)).toEqual({
+      readable: true,
+      writable: true,
+      rxPdoMappable: true,
+      txPdoMappable: false,
+      backup: false,
+      settings: false,
+      text: 'RW',
+    });
+    expect(objectAccess(0x0387)).toMatchObject({
+      text: 'RO',
+      txPdoMappable: true,
+      backup: true,
+      settings: true,
+    });
+    expect(objectAccess(0x0038).text).toBe('WO');
+    expect(objectAccess(0).text).toBe('—');
+  });
+});
+
+describe('formatDuration', () => {
+  it('keeps three decimals, in ms below 1 s and in s from 1 s', () => {
+    expect(formatDuration(0.087)).toBe('0.087 ms');
+    expect(formatDuration(0.0005)).toBe('0.001 ms');
+    expect(formatDuration(4.21)).toBe('4.210 ms');
+    expect(formatDuration(874.0104)).toBe('874.010 ms');
+    expect(formatDuration(999.9996)).toBe('1.000 s');
+    expect(formatDuration(1000)).toBe('1.000 s');
+    expect(formatDuration(2745)).toBe('2.745 s');
+    expect(formatDuration(125300)).toBe('125.300 s');
+  });
+});
+
+describe('formatBytes', () => {
+  it('uses binary prefixes, with one decimal above bytes', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(1023)).toBe('1023 B');
+    expect(formatBytes(1024)).toBe('1.0 KiB');
+    expect(formatBytes(1280)).toBe('1.3 KiB');
+    expect(formatBytes(89088)).toBe('87.0 KiB');
+    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MiB');
+  });
+});
+
+describe('formatTimes', () => {
+  it('writes the round trip, then the server and fieldbus times that it has', () => {
+    expect(formatTimes(3.5571, { serverMs: 1.416, fieldbusMs: 1.356 })).toBe(
+      'round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms',
+    );
+    expect(formatTimes(0.912, { serverMs: 0.087, fieldbusMs: null })).toBe(
+      'round-trip 0.912 ms, server 0.087 ms',
+    );
+    expect(formatTimes(1500)).toBe('round-trip 1.500 s');
   });
 });

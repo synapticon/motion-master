@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <format>
@@ -33,18 +34,42 @@ namespace {
 /// only in the path uWS uses for its own synchronous handlers. Corking is what puts a deferred
 /// write back on equal footing with an inline one; it is safe unconditionally, since uWS runs the
 /// callback uncorked when the loop's single cork slot is taken.
-void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin, Response response) {
+///
+/// Every response carries `Server-Timing` with the metric `server`, the time from @p received to
+/// now: the wait for a free worker, the handler, and the wait for the loop thread. A metric that
+/// the route set itself, such as `fieldbus`, joins it in the same header.
+void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin, Response response,
+                   std::chrono::steady_clock::time_point received) {
+  const auto serverTime = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now() - received);
+  const std::string timing = serverTimingHeader(serverTime, response.headers);
+  // A route that sends a header of its own for a browser to read names it in its own
+  // Access-Control-Expose-Headers, which joins Server-Timing here.
+  std::string exposed = "Server-Timing";
+  for (const auto& [name, value] : response.headers) {
+    if (name == "Access-Control-Expose-Headers") {
+      exposed += ", ";
+      exposed += value;
+    }
+  }
   // Kept alive for the resumed writes: onWritable can fire long after this returns. Moved rather
   // than copied — a recorder dump is tens of megabytes, and taking the response by value here is
   // what makes the move possible all the way from the handler that produced it.
   auto body = std::make_shared<std::string>(std::move(response.body));
   bool pending = false;
-  res->cork([res, corsOrigin, &response, &body, &pending]() {
+  res->cork([res, corsOrigin, &response, &body, &pending, &timing, &exposed]() {
     auto* r = res->writeStatus(response.status)
                   ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+                  // Lets the allowed origin read the Server-Timing of a response in its Performance
+                  // API, and from the response itself.
+                  ->writeHeader("Timing-Allow-Origin", corsOrigin)
+                  ->writeHeader("Access-Control-Expose-Headers", exposed)
+                  ->writeHeader("Server-Timing", timing)
                   ->writeHeader("Content-Type", response.contentType);
     for (const auto& [name, value] : response.headers) {
-      r = r->writeHeader(name, value);
+      if (name != "Server-Timing" && name != "Access-Control-Expose-Headers") {
+        r = r->writeHeader(name, value);
+      }
     }
     auto [ok, done] = res->tryEnd(*body, body->size());
     pending = !done && !ok;
@@ -169,9 +194,24 @@ Response statusOnly(std::string status) {
       .status = std::move(status), .contentType = "application/json", .body = {}, .headers = {}};
 }
 
-Response withWireTime(Response response, std::chrono::microseconds wireUs) {
-  response.headers.emplace_back("Access-Control-Expose-Headers", "X-Wire-Us");
-  response.headers.emplace_back("X-Wire-Us", std::to_string(wireUs.count()));
+std::string serverTimingMetric(std::string_view name, std::chrono::microseconds time) {
+  return std::format("{};dur={:.3f}", name, static_cast<double>(time.count()) / 1000.0);
+}
+
+std::string serverTimingHeader(std::chrono::microseconds serverTime,
+                               const std::vector<std::pair<std::string, std::string>>& headers) {
+  std::string value = serverTimingMetric("server", serverTime);
+  for (const auto& [name, metrics] : headers) {
+    if (name == "Server-Timing") {
+      value += ", ";
+      value += metrics;
+    }
+  }
+  return value;
+}
+
+Response withFieldbusTime(Response response, std::chrono::microseconds fieldbusTime) {
+  response.headers.emplace_back("Server-Timing", serverTimingMetric("fieldbus", fieldbusTime));
   return response;
 }
 
@@ -204,7 +244,8 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
     // legal (and better than dropping the request) precisely because this runs on the loop thread,
     // which is the one thread allowed to touch a response.
     if (stopping->load(std::memory_order_relaxed)) {
-      writeResponse(res, corsOrigin, error("503 Service Unavailable", "server is shutting down"));
+      writeResponse(res, corsOrigin, error("503 Service Unavailable", "server is shutting down"),
+                    std::chrono::steady_clock::now());
       return;
     }
 
@@ -237,17 +278,20 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
                         std::string queryString,
                         std::vector<std::pair<std::string, std::string>> headers,
                         std::string body) {
-      pool->detach_task([shared, loop, corsOrigin, res, aborted, url = std::move(url),
+      // The metric `server` starts when the request is complete, so it covers the wait for a free
+      // worker but not the upload of the body.
+      const auto received = std::chrono::steady_clock::now();
+      pool->detach_task([shared, loop, corsOrigin, res, aborted, received, url = std::move(url),
                          parameters = std::move(parameters), queryString = std::move(queryString),
                          headers = std::move(headers), body = std::move(body)]() mutable {
         const Request request(std::move(url), std::move(parameters), std::move(queryString),
                               std::move(headers), std::move(body));
         Response response = invokeHandler(*shared, request);
-        loop->defer([corsOrigin, res, aborted, response = std::move(response)]() mutable {
+        loop->defer([corsOrigin, res, aborted, received, response = std::move(response)]() mutable {
           if (aborted->load()) {
             return;  // The connection is gone and res with it.
           }
-          writeResponse(res, corsOrigin, std::move(response));
+          writeResponse(res, corsOrigin, std::move(response), received);
         });
       });
       // After the push, so the request being dispatched counts itself.

@@ -44,11 +44,14 @@ a server that is not running, into one line on stderr.
 from __future__ import annotations
 
 import csv
+import decimal
 import enum
 import functools
+import io
 import json
 import logging
 import os
+import re
 import signal
 import ssl
 import sys
@@ -77,6 +80,13 @@ _HTTP_METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "tr
 
 log = logging.getLogger("motion_master_client")
 
+# One line for each request: the method, the path, the status, the round trip that the client
+# measured, and the times that the server reported in Server-Timing: server, and fieldbus for a
+# request that ran a fieldbus operation. Off by default, as for any logger of a library. A program
+# turns it on with logging.getLogger("motion_master_client.http").setLevel(logging.DEBUG) and a
+# handler, and the examples with -v/--verbose.
+http_log = logging.getLogger("motion_master_client.http")
+
 class AlState(enum.IntEnum):
     """An AL state, in the encoding of the AL control register that the API uses.
 
@@ -91,6 +101,15 @@ class AlState(enum.IntEnum):
     BOOT = 3
     SAFEOP = 4
     OP = 8
+
+
+def mailbox_active(al_state):
+    """Return whether a device in this AL state answers mailbox requests, such as an SDO.
+
+    True in PREOP, SAFEOP and OP, also with the error bit set. INIT has no mailbox, and the mailbox
+    of BOOT carries FoE only. The server decides the same way.
+    """
+    return al_state in (AlState.PREOP, AlState.SAFEOP, AlState.OP)
 
 
 class Cia402State(enum.StrEnum):
@@ -178,6 +197,50 @@ def _file_path(position, name):
     The server decodes the name, so a name with a space or a slash names the file it means.
     """
     return _path(position, filename=urllib.parse.quote(name, safe=""))
+
+
+def _user_cache_path(path):
+    """Return the path parameters of a file of the user cache, with each segment percent-encoded.
+
+    The "/" between the folders stays, because the server reads a nested path from the segments.
+    """
+    return {"path": urllib.parse.quote(path, safe="/")}
+
+
+def _log_response(response, *args, **kwargs):
+    """Write the line of one request to the motion_master_client.http log."""
+    if not http_log.isEnabledFor(logging.DEBUG):
+        return
+    url = urllib.parse.urlsplit(response.url)
+    times = format_times(
+        response.elapsed.total_seconds() * 1000,
+        server_ms=server_time_ms(response),
+        fieldbus_ms=fieldbus_time_ms(response),
+    )
+    http_log.debug(
+        "%s %s %d %s",
+        response.request.method,
+        url.path + (f"?{url.query}" if url.query else ""),
+        response.status_code,
+        times,
+    )
+
+
+_FORMATS = ("bytes", "text", "json")
+
+
+def _check_format(format):
+    if format not in _FORMATS:
+        raise ValueError(f"format must be bytes, text or json, not {format!r}")
+
+
+def _decode(response, format):
+    """Return the body of a file read in `format`: bytes, text or JSON."""
+    if format == "text":
+        return response.content.decode("utf-8")
+    if format == "json":
+        return json.loads(response.content)
+    return response.content
 
 
 _CONFIG_TEMPLATE_URL = (
@@ -297,6 +360,166 @@ def format_step(step):
     return line
 
 
+def step_value(snapshot, step_id):
+    """Return the value that one step of a run produced, such as step_value(snapshot, "compute").
+
+    The shape depends on the procedure and the step, as the API documents it. Returns None when the
+    run has no step with this id, and when the step has produced nothing so far.
+    """
+    for step in snapshot["steps"]:
+        if step["id"] == step_id:
+            return step.get("value")
+    return None
+
+
+def procedure_failure(snapshot):
+    """Return why a run failed or was cancelled, or None while it goes on and after it succeeded.
+
+    The reason is the error of the run, else the error of a step, else the status itself.
+    """
+    if snapshot["status"] not in ("failed", "cancelled"):
+        return None
+    if snapshot.get("error"):
+        return snapshot["error"]
+    for step in snapshot["steps"]:
+        if step.get("error"):
+            return step["error"]
+    return snapshot["status"]
+
+
+_INTEGER = re.compile(r"[+-]?(0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|[1-9][0-9]*|0+)")
+
+
+def procedure_parameter_value(parameter, text):
+    """Convert the text of one parameter of a procedure to the value its request takes.
+
+    The type that the descriptor of the procedure declares decides:
+
+    - integer: decimal, or hex, octal or binary with 0x, 0o or 0b, within minValue and maxValue.
+    - boolean: true or false, in any case.
+    - enum: the value of one of the options, as text.
+    - byteArray: bytes from 0 to 255, separated by commas or white space, exactly `length` of them
+      when the descriptor gives a length.
+    - stringArray: the items, separated by commas or line breaks. An item can hold neither.
+    - string and file: the text as it is. A file goes as its content in base64, which the caller
+      reads.
+
+    Returns None for empty text, which leaves the parameter out of the request so that the server
+    uses its default. An empty stringArray is [], an empty list. Raises ValueError, which says what
+    is wrong with the text.
+    """
+    kind = parameter["type"]
+    if kind == "stringArray":
+        return [item.strip() for item in re.split(r"[,\n]", text) if item.strip()]
+    if kind in ("string", "file"):
+        return text if text != "" else None
+    trimmed = text.strip()
+    if trimmed == "":
+        return None
+    if kind == "integer":
+        if not _INTEGER.fullmatch(trimmed):
+            raise ValueError("Not a whole number. Write it in decimal, or in hex with 0x.")
+        value = int(trimmed, 0)
+        low, high = parameter.get("minValue"), parameter.get("maxValue")
+        if (low is not None and value < low) or (high is not None and value > high):
+            low_text = "-∞" if low is None else low
+            high_text = "∞" if high is None else high
+            raise ValueError(f"Not between {low_text} and {high_text}.")
+        return value
+    if kind == "boolean":
+        if trimmed.lower() not in ("true", "false"):
+            raise ValueError("Expected true or false.")
+        return trimmed.lower() == "true"
+    if kind == "enum":
+        options = parameter.get("options") or []
+        for option in options:
+            if str(option["value"]) == trimmed:
+                return option["value"]
+        values = ", ".join(str(o["value"]) for o in options)
+        raise ValueError(f"Expected one of {values}.")
+    if kind == "byteArray":
+        tokens = [t for t in re.split(r"[\s,]+", trimmed) if t]
+        length = parameter.get("length")
+        if length is not None and len(tokens) != length:
+            raise ValueError(f"Expected {length} bytes, got {len(tokens)}.")
+        data = []
+        for token in tokens:
+            if not _INTEGER.fullmatch(token) or not 0 <= int(token, 0) <= 255:
+                raise ValueError(f"{token} is not a byte, 0 to 255.")
+            data.append(int(token, 0))
+        return data
+    return trimmed
+
+
+def object_access(access):
+    """Decode the access word (ObjAccess) of an object, as ETG.1000.6 defines it.
+
+    Bits 0-2 read in PREOP, SAFEOP and OP, bits 3-5 write in those states, bit 6 RxPDO mappable,
+    bit 7 TxPDO mappable, bit 8 backup and bit 9 settings. Returns a dict with readable, writable,
+    rxPdoMappable, txPdoMappable, backup and settings, and text: "RW", "RO", "WO", or "—" for an
+    object that is neither readable nor writable. The parameter routes of the server send these
+    decoded already; this is for a raw word from elsewhere, such as a parameter cache file.
+    """
+    readable = bool(access & 0x07)
+    writable = bool(access & 0x38)
+    if readable and writable:
+        text = "RW"
+    elif readable:
+        text = "RO"
+    elif writable:
+        text = "WO"
+    else:
+        text = "—"
+    return {
+        "readable": readable,
+        "writable": writable,
+        "rxPdoMappable": bool(access & 0x40),
+        "txPdoMappable": bool(access & 0x80),
+        "backup": bool(access & 0x100),
+        "settings": bool(access & 0x200),
+        "text": text,
+    }
+
+
+def server_time_ms(response):
+    """Return the time that the server spent on a request in milliseconds, or None.
+
+    Every response carries it in the standard Server-Timing header, as the metric server: the time
+    from the complete request to the response. "Server-Timing: server;dur=7.100" is 7.1 ms.
+    """
+    return _server_timing_ms(response, "server")
+
+
+def fieldbus_time_ms(response):
+    """Return the time of the fieldbus operation of a request in milliseconds, or None.
+
+    A response of an endpoint that runs a fieldbus operation carries it in the Server-Timing
+    header, as the metric fieldbus: the wait for the control-plane lock and every mailbox or ESC
+    transaction. "Server-Timing: server;dur=7.100, fieldbus;dur=6.200" gives 6.2 ms. None means
+    the request ran no fieldbus operation.
+    """
+    return _server_timing_ms(response, "fieldbus")
+
+
+def _server_timing_ms(response, name):
+    header = response.headers.get("Server-Timing")
+    if header is None:
+        return None
+    for entry in header.split(","):
+        metric, *parameters = (part.strip() for part in entry.split(";"))
+        if metric != name:
+            continue
+        for parameter in parameters:
+            key, _, value = (part.strip() for part in parameter.partition("="))
+            if key == "dur":
+                try:
+                    return float(value)
+                except ValueError:
+                    return None
+        return None
+    return None
+
+
 def error_line(error):
     """Return one line that names an error a user can act on, or None for any other error."""
     if isinstance(error, requests.ConnectionError):
@@ -362,6 +585,7 @@ class MotionMasterClient:
         self.ws_url = ws_url
         self._verify = verify
         self._session = requests.Session()
+        self._session.hooks["response"].append(_log_response)
 
         # A self-signed dev cert (verify=False) would otherwise spam a warning
         # on every request and drown the example output.
@@ -569,6 +793,107 @@ class MotionMasterClient:
         headers = {"Content-Type": "application/xml"}
         return self.call("parseEni", data=body, headers=headers).json()
 
+    def parse_esi(self, xml, modules=None):
+        """Read an ESI document (parseEsi) and return every device it describes.
+
+        Each device comes with its own object table. No device is involved. `xml` is a str, or
+        bytes, because an ESI may declare an encoding other than UTF-8. `modules` limits the merge
+        to these ModuleIdent values, where a slot offers a choice; without it, every module that a
+        slot references is merged.
+        """
+        data = xml.encode("utf-8") if isinstance(xml, str) else xml
+        query = {"modules": ",".join(str(m) for m in modules)} if modules else None
+        return self._post_bytes("parseEsi", data, "application/xml", query=query).json()
+
+    def parse_integro_variant(self, data):
+        """Decode the .variant file of an Integro (parseIntegroVariant). No device is involved."""
+        return self._post_bytes("parseIntegroVariant", data).json()
+
+    def parse_ic_mu_restore_file(self, data):
+        """Decode an iC-MU restore file (parseIcMuRestoreFile). No device is involved.
+
+        The file is the circulo_integrated_encoder_<port>_config.bin that a configuration writes.
+        """
+        return self._post_bytes("parseIcMuRestoreFile", data).json()
+
+    def list_user_cache_files(self):
+        """Return the files in the user cache of the server (listUserCacheFiles).
+
+        The result is {"root": the folder on the computer of the server, "files": [...]}, and each
+        file is {"path": relative to the root, "size": ..., "modifiedMs": ...}.
+        """
+        return self.call("listUserCacheFiles").json()
+
+    def read_user_cache_file(self, path, format="bytes"):
+        """Read a file of the user cache (getUserCacheFile).
+
+        `path` is relative to the root, with "/" between the folders, such as
+        "dumps/recorder-1.mmpd". `format` says what to return, as for read_file(): "bytes" (the
+        default), "text" or "json".
+        """
+        _check_format(format)
+        return _decode(self.call("getUserCacheFile", path=_user_cache_path(path)), format)
+
+    def write_user_cache_file(self, path, content):
+        """Write a file into the user cache (putUserCacheFile), and replace a file of the same path.
+
+        The server creates the folders of the path. `content` is bytes, or a str, which is written as
+        UTF-8.
+        """
+        data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+        self.call(
+            "putUserCacheFile",
+            path=_user_cache_path(path),
+            data=data,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    def remove_user_cache_file(self, path):
+        """Remove a file from the user cache (deleteUserCacheFile)."""
+        self.call("deleteUserCacheFile", path=_user_cache_path(path))
+
+    def list_parameter_cache_entries(self):
+        """Return the entries of the parameter cache (listParameterCacheEntries).
+
+        Each entry is one object dictionary per vendor, product and firmware version, which a scan
+        of such a device reads from the cache instead of from the device.
+        """
+        return self.call("listParameterCacheEntries").json()
+
+    def read_parameter_cache_entry(self, id, format="json"):
+        """Read one entry of the parameter cache (getParameterCache).
+
+        `id` is the one that list_parameter_cache_entries() gives. `format` says what to return:
+        "json", the parsed file (the default), or "bytes", the file as the server keeps it.
+        """
+        if format not in ("json", "bytes"):
+            raise ValueError(f"format must be json or bytes, not {format!r}")
+        return _decode(self.call("getParameterCache", path={"id": id}), format)
+
+    def remove_parameter_cache_entry(self, id):
+        """Remove one entry of the parameter cache (deleteParameterCache).
+
+        The next scan of such a device reads its object dictionary from the device again.
+        """
+        self.call("deleteParameterCache", path={"id": id})
+
+    def run_auto_tuning(self, request):
+        """Run one function of the auto-tuning program of the server (runAutoTuning).
+
+        `request` is a dict such as {"run": "auto_tune_velocity_controller", "data": {...}}. Returns
+        the result. The program answers an input that it refuses with an "error" key in the result,
+        not with an error status, so a caller checks the result for one.
+        """
+        return self.call("runAutoTuning", body=request).json()
+
+    def server_log(self):
+        """Return the log of the server (getLog), the entries it keeps in memory, oldest first."""
+        return self.call("getLog").content.decode("utf-8")
+
+    def _post_bytes(self, operation_id, data, content_type="application/octet-stream", query=None):
+        headers = {"Content-Type": content_type}
+        return self.call(operation_id, data=bytes(data), headers=headers, query=query)
+
     def devices(self):
         """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).
 
@@ -638,14 +963,8 @@ class MotionMasterClient:
         `format` says what to return: "bytes" (the default), "text", the file decoded as UTF-8, such
         as a CSV, or "json", the file parsed as JSON.
         """
-        if format not in ("bytes", "text", "json"):
-            raise ValueError(f"format must be bytes, text or json, not {format!r}")
-        content = self.call("foeReadFile", path=_file_path(position, name)).content
-        if format == "text":
-            return content.decode("utf-8")
-        if format == "json":
-            return json.loads(content)
-        return content
+        _check_format(format)
+        return _decode(self.call("foeReadFile", path=_file_path(position, name)), format)
 
     def write_file(self, position, name, content):
         """Write a file to a device over FoE (foeWriteFile), and replace a file of the same name.
@@ -663,6 +982,58 @@ class MotionMasterClient:
     def remove_file(self, position, name):
         """Remove a file from the flash of a device (deleteDeviceFile)."""
         self.call("deleteDeviceFile", path=_file_path(position, name))
+
+    def read_sii(self, position, format="json"):
+        """Read the SII of a device, the configuration in its EEPROM (readSii).
+
+        `format` says what to return: "json", the parsed SII (the default), or "bytes", the raw
+        EEPROM image.
+        """
+        if format not in ("json", "bytes"):
+            raise ValueError(f"format must be json or bytes, not {format!r}")
+        if format == "json":
+            return self.call("readSii", path=_path(position)).json()
+        # The Accept header selects the raw image over the parsed JSON.
+        headers = {"Accept": "application/octet-stream"}
+        return self.call("readSii", path=_path(position), headers=headers).content
+
+    def write_sii(self, position, image):
+        """Write a raw SII image to the EEPROM of a device (writeSii).
+
+        A wrong image can leave the device unidentifiable, and the device takes the new image only
+        after a power cycle.
+        """
+        self.call(
+            "writeSii",
+            path=_path(position),
+            data=bytes(image),
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    def parse_sii(self, image):
+        """Decode a raw SII image (parseSii), such as a file that read_sii() saved.
+
+        Returns the parsed SII. No device is involved.
+        """
+        return self._post_bytes("parseSii", image).json()
+
+    def read_hrd_recording(self, position, data, format="json"):
+        """Read the high resolution data recording of a device (readHrdRecording).
+
+        The recording is the files that the hrd-streaming procedure left on the drive, decoded as
+        `data` says: "encoder-raw" or "system-identification". `format` says what to return:
+        "json", the decoded recording (the default), or "csv", the recording as CSV text, a header
+        row of column names and then one row per sample.
+        """
+        if format not in ("json", "csv"):
+            raise ValueError(f"format must be json or csv, not {format!r}")
+        query = {"data": data}
+        if format == "json":
+            return self.call("readHrdRecording", path=_path(position), query=query).json()
+        # The Accept header selects the CSV over the JSON.
+        headers = {"Accept": "text/csv"}
+        r = self.call("readHrdRecording", path=_path(position), query=query, headers=headers)
+        return r.content.decode("utf-8")
 
     def wait_for_value(
         self,
@@ -959,6 +1330,70 @@ def object_address_text(index, subindex):
     return f"0x{index:04X}:{subindex:02X}"
 
 
+def device_parameter_text(position, index, subindex):
+    """Return a parameter of a device as its position and its address, such as 1:0x6041:00."""
+    return f"{position}:{object_address_text(index, subindex)}"
+
+
+def device_parameter_name(position, index, subindex):
+    """Return a parameter of a device as its position and the generated name of its object.
+
+    Such as 1:STATUSWORD, or its address, such as 1:0x2110:03, when the object has no generated
+    name.
+    """
+    return f"{position}:{object_name(index, subindex)}"
+
+
+def _fixed(value, digits):
+    # Rounds half up, as toFixed() and Math.round() of the TypeScript client do, so that both
+    # clients write the same digits. format() and round() round half to even.
+    quantum = decimal.Decimal(1).scaleb(-digits)
+    return str(decimal.Decimal(value).quantize(quantum, rounding=decimal.ROUND_HALF_UP))
+
+
+def format_duration(ms):
+    """Format a duration in milliseconds with three decimals, such as 0.087 ms or 2.745 s.
+
+    Milliseconds below one second, and seconds from one second. Three decimals of a millisecond are
+    the microseconds that the server measures. The debug log formats every time with it, as the
+    Console and the TypeScript client do.
+    """
+    rounded = _fixed(ms, 3)
+    if float(rounded) < 1000:
+        return f"{rounded} ms"
+    return f"{_fixed(ms / 1000, 3)} s"
+
+
+def format_times(round_trip_ms, server_ms=None, fieldbus_ms=None):
+    """Format the times of one request, such as "round-trip 3.557 ms, server 1.416 ms".
+
+    The round trip that the client measured, then the metrics server and fieldbus that the server
+    reported in Server-Timing. A time that is None is left out. The debug log writes the times of a
+    request with it, as the Console and the TypeScript client do.
+    """
+    parts = [f"round-trip {format_duration(round_trip_ms)}"]
+    if server_ms is not None:
+        parts.append(f"server {format_duration(server_ms)}")
+    if fieldbus_ms is not None:
+        parts.append(f"fieldbus {format_duration(fieldbus_ms)}")
+    return ", ".join(parts)
+
+
+def format_bytes(count):
+    """Format a byte count with binary prefixes, such as 512 B or 87.0 KiB.
+
+    Each step divides by 1024, so the prefixes are KiB, MiB, GiB and TiB, not KB. Bytes have no
+    decimal, and every larger unit has one.
+    """
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    value = count
+    unit = 0
+    while value >= 1024 and unit < len(units) - 1:
+        value /= 1024
+        unit += 1
+    return f"{_fixed(value, 0 if unit == 0 else 1)} {units[unit]}"
+
+
 class MonitoringRecording:
     """The recording of a monitoring: the monitoring on the server, and every row of the with block.
 
@@ -1043,31 +1478,36 @@ class MonitoringRecording:
         """The name of each parameter's column, in order: its device position and its object.
 
         The object is its generated name, 1:STATUSWORD, or 1:0x2110:03 for an object with no
-        generated name. write_csv() and print_table() name their columns with these.
+        generated name. to_csv(), write_csv() and print_table() name their columns with these.
         """
         return [
-            f"{p['devicePosition']}:{object_name(p['index'], p['subindex'])}"
+            device_parameter_name(p["devicePosition"], p["index"], p["subindex"])
             for p in self.parameters
         ]
 
-    def write_csv(self, path):
-        """Write every row to a CSV file at `path`, and create its folder when it is missing.
+    def to_csv(self):
+        """Return every row as CSV text.
 
         The columns are time_s, the seconds from the first row; timestamp_us, the time on the
         server when the cycle ran, in epoch microseconds; then one column per parameter, named as
         in `names`. A value is empty in a cycle where its device did not exchange process data.
         """
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             rows = list(self.rows)
         start = rows[0][0] if rows else 0
-        with path.open("w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["time_s", "timestamp_us", *self.names])
-            for timestamp_us, *values in rows:
-                times = [f"{(timestamp_us - start) / 1e6:.6f}", timestamp_us]
-                writer.writerow(times + ["" if v is None else v for v in values])
+        text = io.StringIO()
+        writer = csv.writer(text)
+        writer.writerow(["time_s", "timestamp_us", *self.names])
+        for timestamp_us, *values in rows:
+            times = [f"{(timestamp_us - start) / 1e6:.6f}", timestamp_us]
+            writer.writerow(times + ["" if v is None else v for v in values])
+        return text.getvalue()
+
+    def write_csv(self, path):
+        """Write to_csv() to a file at `path`, and create its folder when it is missing."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.to_csv(), newline="")
 
     def print_table(self, every_ms=100, file=None):
         """Print the rows as a table: the first row, then one row every `every_ms`.

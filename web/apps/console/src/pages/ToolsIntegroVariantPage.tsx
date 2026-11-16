@@ -131,7 +131,7 @@ function CatalogueTable({
  * keep in step with a drive.
  */
 export default function ToolsIntegroVariantPage() {
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const [filename, setFilename] = useState<string | null>(null);
   const [byteCount, setByteCount] = useState<number | null>(null);
   const [variant, setVariant] = useState<IntegroVariant | null>(null);
@@ -168,17 +168,7 @@ export default function ToolsIntegroVariantPage() {
       const raw = new Uint8Array(await file.arrayBuffer());
       setFilename(file.name);
       setByteCount(raw.length);
-      // Posted as raw bytes rather than through the generated client, which JSON-encodes its body.
-      const res = await fetch(`${api.baseUrl}/api/integro-variant/parse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: raw,
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
-      setVariant((await res.json()) as IntegroVariant);
+      setVariant(await client.parseIntegroVariant(raw));
     } catch (err) {
       setError(apiErrorMessage(err, 'Failed to parse the variant file.'));
     } finally {

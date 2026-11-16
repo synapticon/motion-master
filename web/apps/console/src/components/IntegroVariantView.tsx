@@ -1,5 +1,9 @@
 import { useMemo } from 'react';
-import type { IntegroVariant, IntegroVariantFileOption } from '@synapticon/motion-master-client';
+import {
+  type IntegroVariant,
+  type IntegroVariantFileOption,
+  formatHex,
+} from '@synapticon/motion-master-client';
 import Callout from './Callout';
 import FieldRow from './FieldRow';
 
@@ -101,7 +105,7 @@ export default function IntegroVariantView({ variant }: { variant: IntegroVarian
           hint={
             variant.operationModeName === 'passive'
               ? 'the drive falls back to this when the file is missing, unsigned, or issued for another chip'
-              : `0x${variant.operationMode.toString(16).toUpperCase()}`
+              : formatHex(variant.operationMode, 1)
           }
         />
         <FieldRow

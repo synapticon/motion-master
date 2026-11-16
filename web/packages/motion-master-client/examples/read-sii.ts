@@ -29,20 +29,14 @@ async function main(): Promise<void> {
   await client.ensureScanned();
 
   if (output) {
-    // The Accept header selects the raw image over the parsed JSON. With no response format, the
-    // generated client returns the answer with its body unread.
-    const response = await client.api.readSii(slave, {
-      format: undefined,
-      headers: { Accept: 'application/octet-stream' },
-    });
-    const content = new Uint8Array(await response.arrayBuffer());
+    const content = await client.readSii(slave, { format: 'bytes' });
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, content);
     console.log(`read ${content.length} byte(s) of SII from slave ${slave} -> ${output}`);
     return;
   }
 
-  console.log(JSON.stringify((await client.api.readSii(slave)).data, null, 2));
+  console.log(JSON.stringify(await client.readSii(slave), null, 2));
 }
 
 await run(main);

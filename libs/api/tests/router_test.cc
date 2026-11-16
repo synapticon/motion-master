@@ -213,25 +213,31 @@ TEST(ResponseTest, ErrorHelpersCarryStatusAndMessage) {
   EXPECT_TRUE(statusOnly("202 Accepted").body.empty());
 }
 
-TEST(ResponseTest, WireTimeIsExposedForCrossOriginReads) {
-  const auto response = withWireTime(json(nlohmann::json::object()), std::chrono::microseconds(42));
-  bool exposed = false;
-  bool value = false;
-  for (const auto& [name, header] : response.headers) {
-    exposed = exposed || (name == "Access-Control-Expose-Headers" && header == "X-Wire-Us");
-    value = value || (name == "X-Wire-Us" && header == "42");
-  }
-  EXPECT_TRUE(exposed) << "a browser cannot read the header cross-origin without this";
-  EXPECT_TRUE(value);
+TEST(ResponseTest, FieldbusTimeIsAMetricOfServerTiming) {
+  const auto response =
+      withFieldbusTime(json(nlohmann::json::object()), std::chrono::microseconds(1500));
+  ASSERT_EQ(response.headers.size(), 1u);
+  EXPECT_EQ(response.headers[0].first, "Server-Timing");
+  EXPECT_EQ(response.headers[0].second, "fieldbus;dur=1.500");
 }
 
-// The shape nearly every device endpoint uses. Both outcomes carry the timing header, because a
-// failed device operation still consumed wire time.
+// Every response carries the metric server first, and a metric that the route set joins it in the
+// same header, so a client reads one header.
+TEST(ResponseTest, ServerTimingHeaderPutsServerFirstAndKeepsTheRouteMetrics) {
+  EXPECT_EQ(serverTimingHeader(std::chrono::microseconds(250), {}), "server;dur=0.250");
+  const std::vector<std::pair<std::string, std::string>> headers{
+      {"Content-Disposition", "attachment"}, {"Server-Timing", "fieldbus;dur=6.200"}};
+  EXPECT_EQ(serverTimingHeader(std::chrono::microseconds(7100), headers),
+            "server;dur=7.100, fieldbus;dur=6.200");
+}
+
+// The shape nearly every device endpoint uses. Both outcomes carry the fieldbus time, because a
+// failed operation still spent its time on the fieldbus.
 TEST(TimedTest, ReportsSuccessAsJsonWithTiming) {
   const auto response = timed([] { return std::expected<int, std::string>(7); });
   EXPECT_EQ(response.status, "200 OK");
   EXPECT_EQ(response.body, "7");
-  EXPECT_EQ(response.headers.size(), 2u);
+  EXPECT_EQ(response.headers.size(), 1u);
 }
 
 TEST(TimedTest, ReportsFailureWithTheGivenStatusAndTiming) {
@@ -240,7 +246,7 @@ TEST(TimedTest, ReportsFailureWithTheGivenStatusAndTiming) {
             "404 Not Found");
   EXPECT_EQ(response.status, "404 Not Found");
   EXPECT_EQ(response.body, R"({"error":"no such device"})");
-  EXPECT_EQ(response.headers.size(), 2u) << "a failure carries the timing header too";
+  EXPECT_EQ(response.headers.size(), 1u) << "a failure carries the fieldbus time too";
 }
 
 TEST(InvokeHandler, TurnsAnExceptionIntoA500) {

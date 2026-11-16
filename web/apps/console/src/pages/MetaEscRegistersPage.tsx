@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
+import { formatHex } from '@synapticon/motion-master-client';
 
 export default function MetaEscRegistersPage() {
   const { api } = useConnection();
@@ -59,9 +60,7 @@ export default function MetaEscRegistersPage() {
                 {registers.map((r) => (
                   <tr key={r.address} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 font-mono">{r.address}</td>
-                    <td className="px-4 py-2 font-mono">
-                      0x{r.address.toString(16).toUpperCase().padStart(4, '0')}
-                    </td>
+                    <td className="px-4 py-2 font-mono">{formatHex(r.address, 4)}</td>
                     <td className="px-4 py-2 font-mono">{r.length}</td>
                     <td className="px-4 py-2 font-mono">{r.name}</td>
                     <td className="px-4 py-2 text-grey-600">{r.description}</td>

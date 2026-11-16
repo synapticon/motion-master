@@ -1817,7 +1817,7 @@ export class Api<
   foeWriteFile = (
     slavePosition: number,
     filename: string,
-    data: File,
+    data: Blob | Uint8Array,
     params: RequestParams = {},
   ) =>
     this.request<
@@ -1836,6 +1836,7 @@ export class Api<
       path: `/api/devices/${slavePosition}/files/${filename}`,
       method: "PUT",
       body: data,
+      type: ContentType.Binary,
       format: "json",
       ...params,
     });
@@ -1903,7 +1904,11 @@ export class Api<
    * @summary Write a raw SII (EEPROM) image to a device
    * @request PUT:/api/devices/{slavePosition}/sii
    */
-  writeSii = (slavePosition: number, data: File, params: RequestParams = {}) =>
+  writeSii = (
+    slavePosition: number,
+    data: Blob | Uint8Array,
+    params: RequestParams = {},
+  ) =>
     this.request<
       {
         /** @example true */
@@ -1924,6 +1929,7 @@ export class Api<
       path: `/api/devices/${slavePosition}/sii`,
       method: "PUT",
       body: data,
+      type: ContentType.Binary,
       format: "json",
       ...params,
     });
@@ -1934,11 +1940,12 @@ export class Api<
    * @summary Parse a raw SII (EEPROM) image
    * @request POST:/api/sii/parse
    */
-  parseSii = (data: File, params: RequestParams = {}) =>
+  parseSii = (data: Blob | Uint8Array, params: RequestParams = {}) =>
     this.request<SlaveInformationInterface, void>({
       path: `/api/sii/parse`,
       method: "POST",
       body: data,
+      type: ContentType.Binary,
       format: "json",
       ...params,
     });
@@ -2052,11 +2059,15 @@ export class Api<
    * @summary Parse an iC-MU restore file
    * @request POST:/api/ic-mu-restore-file/parse
    */
-  parseIcMuRestoreFile = (data: File, params: RequestParams = {}) =>
+  parseIcMuRestoreFile = (
+    data: Blob | Uint8Array,
+    params: RequestParams = {},
+  ) =>
     this.request<IcMuRestoreFile, void>({
       path: `/api/ic-mu-restore-file/parse`,
       method: "POST",
       body: data,
+      type: ContentType.Binary,
       format: "json",
       ...params,
     });
@@ -2067,11 +2078,12 @@ export class Api<
    * @summary Parse a .variant file
    * @request POST:/api/integro-variant/parse
    */
-  parseIntegroVariant = (data: File, params: RequestParams = {}) =>
+  parseIntegroVariant = (data: Blob | Uint8Array, params: RequestParams = {}) =>
     this.request<IntegroVariant, void>({
       path: `/api/integro-variant/parse`,
       method: "POST",
       body: data,
+      type: ContentType.Binary,
       format: "json",
       ...params,
     });
@@ -2090,7 +2102,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Decodes an ENI document supplied in the request body. No device is involved, and that is the point: the useful case is reading a configuration somebody else's tool wrote — acontis EC-Engineer, TwinCAT — rather than the one this master exports from `GET /api/eni`. **An ENI is a script, not a description.** Every configuration step in it is an EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs to, so a listing of the raw elements would show `FPWR to 2064, data 0018060064000100` and leave the reading undone. Each datagram therefore carries a `register` object naming what its `ado` selects, with the instance for a repeating block, and `decoded` fields where the payload is a sync-manager or FMMU register block. A write to AL Control reports `requestsState`, and the read that follows it reports `waitsForState`. Every enumeration is spelled out beside its value — `cmd` 5 with `cmdName` `FPWR`, transitions as `IP`/`PS`/`SO` — and every payload carries its hex beside its byte count, because the reader of this JSON is a person rather than a master. Tolerant by design. Only three things fail: XML that will not parse, a root that is not `EtherCATConfig`, and a missing `Config`. Anything else costs that value and a line in `warnings`, including an element this model has no room for. The sample documents ETG itself ships need that tolerance: two of them omit elements their own schema marks mandatory, and a previous port of `A` is spec-legal while ENI Schema 1.7 enumerates only `B`, `C` and `D`.
+   * @description Decodes an ENI document supplied in the request body. No device is involved, and that is the point: the useful case is reading a configuration somebody else's tool wrote — acontis EC-Engineer, TwinCAT — rather than the one this master exports from `GET /api/eni`. **An ENI is a script, not a description.** Every configuration step in it is an EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs to, so a listing of the raw elements would show `FPWR to 2064, data 0018060064000100` and leave the reading undone. Each datagram therefore carries a `register` object naming what its `ado` selects, with the instance for a repeating block, and `decoded` fields where the payload is a sync-manager or FMMU register block. A write to AL Control reports `requestsState`, and the read that follows it reports `waitsForState`. **The process image gives a value a name, a size and an offset, and nothing more.** Each variable of `processImage` therefore carries `devicePosition`, the device whose window holds it, counted from 1 in bus order; `object`, its `index` and `subindex` from the PDOs of that device; and its name split at the first dot into `scope`, the label a tool gave the device, and `signal`. `devicePosition`, `object` and `scope` are null where the document does not say. Every enumeration is spelled out beside its value — `cmd` 5 with `cmdName` `FPWR`, transitions as `IP`/`PS`/`SO` — and every payload carries its hex beside its byte count, because the reader of this JSON is a person rather than a master. Tolerant by design. Only three things fail: XML that will not parse, a root that is not `EtherCATConfig`, and a missing `Config`. Anything else costs that value and a line in `warnings`, including an element this model has no room for. The sample documents ETG itself ships need that tolerance: two of them omit elements their own schema marks mandatory, and a previous port of `A` is spec-legal while ENI Schema 1.7 enumerates only `B`, `C` and `D`.
    *
    * @name ParseEni
    * @summary Parse an EtherCAT Network Information (ENI) file
@@ -2117,6 +2129,7 @@ export class Api<
       path: `/api/eni/parse`,
       method: "POST",
       body: data,
+      type: ContentType.Xml,
       format: "json",
       ...params,
     });
@@ -2128,7 +2141,7 @@ export class Api<
    * @request POST:/api/esi/parse
    */
   parseEsi = (
-    data: string,
+    data: Blob | Uint8Array,
     query?: {
       /** Comma-separated `ModuleIdent` values (hexadecimal or decimal) restricting the merge, applied to every device by intersection with the idents that device's slots actually reference. Omit to merge every module each device references. */
       modules?: string;
@@ -2140,6 +2153,7 @@ export class Api<
       method: "POST",
       query: query,
       body: data,
+      type: ContentType.Xml,
       format: "json",
       ...params,
     });
@@ -3084,7 +3098,7 @@ export class Api<
    */
   exportEni = (params: RequestParams = {}) =>
     this.request<
-      File,
+      Blob | Uint8Array,
       | {
           /** Human-readable reason the export could not be produced */
           error: string;
@@ -3266,7 +3280,11 @@ export class Api<
    * @summary Upload a user-cache file
    * @request PUT:/api/user-cache/{path}
    */
-  putUserCacheFile = (path: string, data: File, params: RequestParams = {}) =>
+  putUserCacheFile = (
+    path: string,
+    data: Blob | Uint8Array,
+    params: RequestParams = {},
+  ) =>
     this.request<
       {
         /**
@@ -3285,6 +3303,7 @@ export class Api<
       path: `/api/user-cache/${path}`,
       method: "PUT",
       body: data,
+      type: ContentType.Binary,
       format: "json",
       ...params,
     });

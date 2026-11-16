@@ -1,26 +1,30 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import type { EsiDeviceSummary, EsiEntry, EsiParseResult } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  type EsiDeviceSummary,
+  type EsiEntry,
+  type EsiParseResult,
+  formatBytes,
+  formatHex,
+  objectAddressText,
+} from '@synapticon/motion-master-client';
 import { ChevronRight } from 'lucide-react';
 import Checkbox, { selectAllState } from '../components/Checkbox';
 import EsiExplainer from '../components/EsiExplainer';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
-import { ESIS_FOLDER, userCacheBasename, userCacheUrl } from '../utils/userCache';
+import { ESIS_FOLDER, userCacheBasename } from '../utils/userCache';
 
 const inputCls = 'h-[38px] border border-grey-300 px-3 text-sm w-full bg-white';
 
-function toHex(value: number, digits: number): string {
-  return `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
-}
-
 // An entry's address, the way the CoE world writes it: 0x6040:00.
 function address(entry: EsiEntry): string {
-  return `${toHex(entry.index, 4)}:${entry.subindex.toString(16).toUpperCase().padStart(2, '0')}`;
+  return objectAddressText(entry.index, entry.subindex);
 }
 
 // Access as a config tool spells it: the mode, plus any AL-state restriction the ESI attaches.
@@ -91,10 +95,10 @@ function SourceCell({ entry, moduleNames }: { entry: EsiEntry; moduleNames: Map<
   const name = moduleNames.get(ident);
   return (
     <span
-      title={`${name ? `${name} — ` : ''}module ${toHex(ident, 8)}, slot ${slot}`}
+      title={`${name ? `${name} — ` : ''}module ${formatHex(ident, 8)}, slot ${slot}`}
       className="cursor-help"
     >
-      {toHex(ident, 8)} · {slot}
+      {formatHex(ident, 8)} · {slot}
     </span>
   );
 }
@@ -152,8 +156,8 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
               keeps it — but this span is data: uppercased it renders 0X00000201 and "506 ENTRIES",
               contradicting the same values shown as 0x00000201 in the tables below. */}
           <span className="ml-3 text-xs text-grey-500 font-mono normal-case">
-            {device.productCode !== undefined && toHex(device.productCode, 8)}
-            {device.revisionNo !== undefined && ` rev ${toHex(device.revisionNo, 8)}`}
+            {device.productCode !== undefined && formatHex(device.productCode, 8)}
+            {device.revisionNo !== undefined && ` rev ${formatHex(device.revisionNo, 8)}`}
             {` · ${entries.length} entries`}
             {device.warnings &&
               device.warnings.length > 0 &&
@@ -306,8 +310,8 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
                                 // onto every member, so point there instead of leaving a blank.
                                 <p className="text-xs text-grey-500">
                                   No description of its own — see{' '}
-                                  <span className="font-mono">{toHex(e.index, 4)}:00</span> for the
-                                  object's.
+                                  <span className="font-mono">{objectAddressText(e.index, 0)}</span>{' '}
+                                  for the object's.
                                 </p>
                               ) : (
                                 // Every row expands, so one with nothing but the metadata below
@@ -362,9 +366,10 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
                               </div>
                             )}
                             <p className="text-[11px] text-grey-500 font-mono">
-                              ETG.1020 type {toHex(e.dataType, 4)} · bit offset {e.bitOffset} ·
-                              ObjAccess {toHex(e.objAccess, 4)}
-                              {e.rawIndex !== undefined && ` · declared at ${toHex(e.rawIndex, 4)}`}
+                              ETG.1020 type {formatHex(e.dataType, 4)} · bit offset {e.bitOffset} ·
+                              ObjAccess {formatHex(e.objAccess, 4)}
+                              {e.rawIndex !== undefined &&
+                                ` · declared at ${formatHex(e.rawIndex, 4)}`}
                             </p>
                           </td>
                         </tr>
@@ -400,7 +405,7 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
 }
 
 export default function ToolsEsiPage() {
-  const { api } = useConnection();
+  const { client } = useConnection();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<EsiParseResult | null>(null);
   // Which modules the user has ticked, and which selection the loaded `result` was built with.
@@ -410,7 +415,7 @@ export default function ToolsEsiPage() {
   const [applied, setApplied] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { timing, measure, reset: resetTiming } = useWireTiming();
+  const { timing, measure, reset: resetTiming } = useRequestTiming();
   // The cached ESI on show, or null when the file came from the picker.
   const [cachedPath, setCachedPath] = useState<string | null>(null);
 
@@ -418,11 +423,11 @@ export default function ToolsEsiPage() {
   // refreshes this list.
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => api.listUserCacheFiles(),
+    queryFn: () => client.listUserCacheFiles(),
   });
   const cachedEsis = useMemo(
     () =>
-      (cacheQuery.data?.data?.files ?? [])
+      (cacheQuery.data?.files ?? [])
         .filter((f) => f.path.startsWith(`${ESIS_FOLDER}/`) && f.path.endsWith('.xml'))
         .sort((a, b) => a.path.localeCompare(b.path)),
     [cacheQuery.data],
@@ -436,24 +441,15 @@ export default function ToolsEsiPage() {
     setError(null);
     try {
       // No selection means "merge everything each device's slots reference", which is the
-      // endpoint's own default — so send no query at all rather than an empty one.
-      const query = idents.size > 0 ? `?modules=${encodeURIComponent([...idents].join(','))}` : '';
-      const payload = await f.arrayBuffer();
-      const res = await measure(() =>
-        fetch(`${api.baseUrl}/api/esi/parse${query}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/xml' },
-          body: payload,
-        }),
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
-      setResult((await res.json()) as EsiParseResult);
+      // endpoint's own default.
+      const payload = new Uint8Array(await f.arrayBuffer());
+      // The generated call, because the page shows the server time from the response.
+      const modules = idents.size > 0 ? { modules: [...idents].join(',') } : undefined;
+      const res = await measure(() => client.api.parseEsi(payload, modules));
+      setResult(res.data);
       setApplied(new Set(idents));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse the ESI file.');
+      setError(apiErrorMessage(err, 'Failed to parse the ESI file.'));
       setResult(null);
     } finally {
       setBusy(false);
@@ -488,15 +484,13 @@ export default function ToolsEsiPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(userCacheUrl(api.baseUrl, path));
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
+      const bytes = await client.readUserCacheFile(path);
       setCachedPath(path);
-      await loadFile(new File([blob], userCacheBasename(path), { type: 'application/xml' }));
+      await loadFile(
+        new File([bytes as BlobPart], userCacheBasename(path), { type: 'application/xml' }),
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to read the cached ESI.');
+      setError(apiErrorMessage(err, 'Failed to read the cached ESI.'));
       setBusy(false);
     }
   }
@@ -564,8 +558,7 @@ export default function ToolsEsiPage() {
                     >
                       {userCacheBasename(f.path)}
                       <span className="block text-grey-500 font-sans">
-                        {(f.size / 1024).toFixed(0)} KB ·{' '}
-                        {new Date(f.modifiedMs).toLocaleDateString()}
+                        {formatBytes(f.size)} · {new Date(f.modifiedMs).toLocaleDateString()}
                       </span>
                     </button>
                   </li>
@@ -585,17 +578,11 @@ export default function ToolsEsiPage() {
               </FilePickerButton>
               {file && (
                 <span className="text-xs text-grey-500 font-mono">
-                  {file.name} · {(file.size / 1024).toFixed(0)} KB
+                  {file.name} · {formatBytes(file.size)}
                 </span>
               )}
               {busy && <span className="text-xs text-grey-600">Parsing…</span>}
-              {!busy && (
-                <WireTiming
-                  label="Parse"
-                  timing={timing}
-                  title="Parse — server-measured time to read the ESI XML and assemble every device's object dictionary, reported by the backend. This is CPU work, not a device transaction; the round-trip beside it also carries the file upload, which for a megabyte-scale ESI dominates."
-                />
-              )}
+              {!busy && <RequestTiming timing={timing} />}
             </div>
 
             {error && <p className="text-xs text-status-bad font-mono">{error}</p>}
@@ -616,7 +603,7 @@ export default function ToolsEsiPage() {
                   <dl className="px-4 py-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">
                     <dt className="text-grey-600">Vendor</dt>
                     <dd className="font-mono">
-                      {result.vendor.name} · {toHex(result.vendor.id, 8)}
+                      {result.vendor.name} · {formatHex(result.vendor.id, 8)}
                     </dd>
                     <dt className="text-grey-600">Devices</dt>
                     <dd className="font-mono">{result.devices.length}</dd>
@@ -721,7 +708,9 @@ export default function ToolsEsiPage() {
                                     aria-label={`Merge ${m.type}`}
                                   />
                                 </td>
-                                <td className="px-3 py-1.5 font-mono">{toHex(m.moduleIdent, 8)}</td>
+                                <td className="px-3 py-1.5 font-mono">
+                                  {formatHex(m.moduleIdent, 8)}
+                                </td>
                                 <td className="px-3 py-1.5 text-grey-800">{m.type}</td>
                                 <td className="px-3 py-1.5 text-grey-700">{m.name}</td>
                                 <td className="px-3 py-1.5 font-mono">{m.objectCount ?? '—'}</td>

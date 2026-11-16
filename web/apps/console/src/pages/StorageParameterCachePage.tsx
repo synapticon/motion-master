@@ -1,14 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ParameterCacheEntry } from '@synapticon/motion-master-client';
+import { formatBytes, formatHex, type ParameterCacheEntry } from '@synapticon/motion-master-client';
 import PageHeader from '../components/PageHeader';
 import ParameterCacheExplainer from '../components/ParameterCacheExplainer';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
-import { formatBytes } from '../utils/format';
 import { btnOutline } from '../utils/styles';
-
-const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`;
 
 // One entry per table column. `help` is the header's tooltip: what the value is and where Motion
 // Master got it.
@@ -43,7 +40,7 @@ const COLUMNS: { label: string; help?: string }[] = [
 ];
 
 export default function StorageParameterCachePage() {
-  const { api } = useConnection();
+  const { client } = useConnection();
   const queryClient = useQueryClient();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
@@ -51,23 +48,19 @@ export default function StorageParameterCachePage() {
   // Motion Master is unreachable, surfaced as the error state below.
   const cachesQuery = useQuery({
     queryKey: ['parameter-cache'],
-    queryFn: () => api.listParameterCacheEntries(),
+    queryFn: () => client.listParameterCacheEntries(),
   });
-  const caches = cachesQuery.data?.data ?? [];
+  const caches = cachesQuery.data ?? [];
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteParameterCache(id),
+    mutationFn: (id: string) => client.removeParameterCacheEntry(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['parameter-cache'] }),
   });
 
   async function handleDownload(entry: ParameterCacheEntry) {
     setDownloadingId(entry.id);
     try {
-      const res = await fetch(`${api.baseUrl}/api/parameter-cache/${entry.id}`);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      const bytes = await client.readParameterCacheEntry(entry.id, { format: 'bytes' });
       downloadBytes(bytes, `parameters-${entry.id}.json`);
     } finally {
       setDownloadingId(null);
@@ -76,7 +69,7 @@ export default function StorageParameterCachePage() {
 
   function handleDelete(entry: ParameterCacheEntry) {
     const confirmed = window.confirm(
-      `Delete the cached object dictionary for ${hex(entry.vendorId)} / ${hex(entry.productCode)} / ` +
+      `Delete the cached object dictionary for ${formatHex(entry.vendorId, 8)} / ${formatHex(entry.productCode, 8)} / ` +
         `${entry.firmwareVersion}?\n\nThis only removes Motion Master's saved copy — the device ` +
         `is untouched. The next scan of this hardware will re-enumerate it over SDO.`,
     );
@@ -162,8 +155,8 @@ export default function StorageParameterCachePage() {
               <tbody>
                 {caches.map((entry) => (
                   <tr key={entry.id} className="border-b border-grey-100 last:border-0">
-                    <td className="px-4 py-2 font-mono">{hex(entry.vendorId)}</td>
-                    <td className="px-4 py-2 font-mono">{hex(entry.productCode)}</td>
+                    <td className="px-4 py-2 font-mono">{formatHex(entry.vendorId, 8)}</td>
+                    <td className="px-4 py-2 font-mono">{formatHex(entry.productCode, 8)}</td>
                     <td className="px-4 py-2 font-mono">{entry.firmwareVersion}</td>
                     <td className="px-4 py-2">{entry.parameterCount}</td>
                     <td className="px-4 py-2">{formatBytes(entry.sizeBytes)}</td>

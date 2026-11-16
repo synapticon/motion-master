@@ -6,12 +6,11 @@ import Checkbox from '../components/Checkbox';
 import DevicePageHeader from '../components/DevicePageHeader';
 import HrdExplainer from '../components/HrdExplainer';
 import MonitoringChart, { SAMPLE_INDEX } from '../components/MonitoringChart';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
-import { downloadBytes } from '../utils/download';
-import { formatBytes } from '../utils/format';
+import { downloadText } from '../utils/download';
 import { btnOutline, btnPrimary } from '../utils/styles';
-import { apiErrorMessage } from '@synapticon/motion-master-client';
+import { apiErrorMessage, formatBytes } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
@@ -33,8 +32,8 @@ const HIDDEN_BY_DEFAULT = ['raw'];
 export default function DeviceHrdPage() {
   const { deviceId } = useParams();
   const slavePosition = Number(deviceId);
-  const { api } = useConnection();
-  const { timing, measure } = useWireTiming();
+  const { api, client } = useConnection();
+  const { timing, measure } = useRequestTiming();
 
   const [data, setData] = useState<HrdData>('encoder-raw');
   const [recording, setRecording] = useState<HrdRecording | null>(null);
@@ -72,14 +71,8 @@ export default function DeviceHrdPage() {
     setDownloading(true);
     setError(null);
     try {
-      const url = `${api.baseUrl}/api/devices/${slavePosition}/hrd?data=${data}`;
-      const response = await fetch(url, { headers: { Accept: 'text/csv' } });
-      if (!response.ok) {
-        const json = await response.json().catch(() => null);
-        throw new Error(json?.error ?? `HTTP ${response.status}`);
-      }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      downloadBytes(bytes, `hrd-slave-${slavePosition}-${data}.csv`);
+      const csv = await client.readHrdRecording(slavePosition, data, { format: 'csv' });
+      downloadText(csv, `hrd-slave-${slavePosition}-${data}.csv`, 'text/csv');
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -179,7 +172,7 @@ export default function DeviceHrdPage() {
                 {downloading ? 'Downloading…' : 'Download CSV'}
               </button>
             </div>
-            <WireTiming label="HRD read" timing={timing} />
+            <RequestTiming timing={timing} />
           </div>
 
           {error && <p className="text-xs text-syn-red">{error}</p>}

@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiErrorMessage, type ProcedureSnapshot } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  type ProcedureSnapshot,
+  formatHex,
+  stepValue,
+  procedureFailure,
+} from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
 import DevicePageHeader from '../components/DevicePageHeader';
@@ -69,20 +75,6 @@ const OUTCOME_TEXT: Record<Outcome, string> = {
 
 const DRIVE_FILE = "the drive's config.csv";
 
-const hex = (value: number, digits: number) =>
-  `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
-
-function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
-}
-
-function failure(snapshot: ProcedureSnapshot | undefined): string | undefined {
-  if (snapshot?.status !== 'failed' && snapshot?.status !== 'cancelled') {
-    return undefined;
-  }
-  return snapshot.error ?? snapshot.steps.find((step) => step.error)?.error ?? snapshot.status;
-}
-
 function valueText(value: unknown): string {
   if (value === null || value === undefined) {
     return '—';
@@ -93,7 +85,7 @@ function valueText(value: unknown): string {
 export default function DeviceConfigurationPage() {
   const { deviceId } = useParams();
   const slavePosition = Number(deviceId);
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const queryClient = useQueryClient();
 
   const [showFile, setShowFile] = useState(false);
@@ -154,12 +146,8 @@ export default function DeviceConfigurationPage() {
   });
   const download = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`${api.baseUrl}/api/devices/${slavePosition}/files/config.csv`);
-      if (!response.ok) {
-        const json = await response.json().catch(() => null);
-        throw new Error(json?.error ?? `HTTP ${response.status}`);
-      }
-      downloadBytes(new Uint8Array(await response.arrayBuffer()), `config-${slavePosition}.csv`);
+      const bytes = await client.readFile(slavePosition, 'config.csv');
+      downloadBytes(bytes, `config-${slavePosition}.csv`);
     },
   });
 
@@ -238,9 +226,9 @@ export default function DeviceConfigurationPage() {
   const compareError = compare.isError
     ? apiErrorMessage(compare.error)
     : first
-      ? failure(compareQuery.data)
+      ? procedureFailure(compareQuery.data)
       : undefined;
-  const loadError = load.isError ? apiErrorMessage(load.error) : failure(loadQuery.data);
+  const loadError = load.isError ? apiErrorMessage(load.error) : procedureFailure(loadQuery.data);
   const verify = stepValue<{ differing: { address: string }[] }>(loadQuery.data, 'verify');
   const problems = [
     ...(result?.first.problems ?? []).map((p) => ({ ...p, file: firstName })),
@@ -333,8 +321,8 @@ export default function DeviceConfigurationPage() {
                     highlight: row.differs,
                     cells: [
                       <NameCell name={row.name} outcome={row.outcome as Outcome} />,
-                      hex(row.index, 4),
-                      hex(row.subindex, 2),
+                      formatHex(row.index, 4),
+                      formatHex(row.subindex, 2),
                       row.value,
                       ...(withValues ? [valueText(row.live)] : []),
                     ],
@@ -537,8 +525,8 @@ export default function DeviceConfigurationPage() {
                         ''
                       ),
                       <NameCell name={row.name} outcome={row.outcome} />,
-                      hex(row.index, 4),
-                      hex(row.subindex, 2),
+                      formatHex(row.index, 4),
+                      formatHex(row.subindex, 2),
                       valueText(row.first),
                       valueText(row.second),
                       valueText(row.live),
@@ -636,7 +624,7 @@ function Differences({
   secondName: string;
 }) {
   const name = (row: CompareRow) => <NameCell name={row.name} outcome={row.outcome} />;
-  const address = (row: CompareRow) => [hex(row.index, 4), hex(row.subindex, 2)];
+  const address = (row: CompareRow) => [formatHex(row.index, 4), formatHex(row.subindex, 2)];
   const different = result.rows.filter((row) => row.differsBetween);
   const onlyFirst = result.rows.filter((row) => row.first !== null && row.second === null);
   const onlySecond = result.rows.filter((row) => row.second !== null && row.first === null);

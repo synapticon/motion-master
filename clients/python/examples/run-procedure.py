@@ -9,13 +9,15 @@ exits with 1 unless the run succeeds. Ctrl-C cancels the run.
 Parameters go on the command line as name=value. The script converts each value by the type the
 descriptor of the procedure gives:
 
-    integer       decimal or 0x-prefixed hex
+    integer       decimal, or hex, octal or binary with 0x, 0o or 0b
     boolean       true or false
     enum          one of the option values that --describe lists
     byteArray     bytes separated by commas, each decimal or 0x-prefixed hex
     string        as written
     stringArray   values separated by commas
     file          a local path, which the script reads and sends as base64
+
+procedure_parameter_value() of the client converts every type but file, as the Console does.
 
 Opens the fieldbus driver, scans and moves the device to --state first when needed. The default
 is PREOP, because most procedures need the mailbox. A procedure that enables the drive needs OP,
@@ -37,34 +39,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from motion_master_client import (  # noqa: E402
     MotionMasterClient,
+    procedure_parameter_value,
     run,
 )
-from options import AL_STATES, byte_list, integer, parser  # noqa: E402
+from options import AL_STATES, integer, parser  # noqa: E402
 from procedures import run_to_end  # noqa: E402
 
 
 def convert(param, text):
-    """Convert the text of one name=value argument to the JSON value of its parameter type."""
-    kind = param["type"]
-    if kind == "integer":
-        return integer(text)
-    if kind == "boolean":
-        if text.lower() not in ("true", "false"):
-            raise ValueError("expected true or false")
-        return text.lower() == "true"
-    if kind == "enum":
-        for option in param["options"]:
-            if str(option["value"]) == text:
-                return option["value"]
-        values = ", ".join(str(o["value"]) for o in param["options"])
-        raise ValueError(f"expected one of {values}")
-    if kind == "byteArray":
-        return byte_list(text)
-    if kind == "stringArray":
-        return text.split(",") if text else []
-    if kind == "file":
-        return base64.b64encode(Path(text).read_bytes()).decode("ascii")
-    return text
+    """Convert the text of one name=value argument to the JSON value of its parameter type.
+
+    A file parameter names a local path, which the script reads and sends as base64.
+    """
+    if param["type"] == "file":
+        text = base64.b64encode(Path(text).read_bytes()).decode("ascii")
+    return procedure_parameter_value(param, text)
 
 
 def build_params(descriptor, assignments):
@@ -79,9 +68,12 @@ def build_params(descriptor, assignments):
             known = ", ".join(params) or "none"
             sys.exit(f"{descriptor['name']} has no parameter {name!r} (parameters: {known})")
         try:
-            body[name] = convert(params[name], text)
+            value = convert(params[name], text)
         except (ValueError, OSError) as e:
             sys.exit(f"{name}: {e}")
+        # An empty value leaves the parameter out, so the server uses its default.
+        if value is not None:
+            body[name] = value
     missing = [n for n, p in params.items() if p["required"] and n not in body]
     if missing:
         sys.exit(f"{descriptor['name']} needs {', '.join(missing)}")

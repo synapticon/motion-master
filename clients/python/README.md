@@ -262,10 +262,44 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `int.from_bytes(data, "little")` turns bytes into an integer.
 - `list_files(position)` returns the files on a device, each as `{"name": ..., "byteCount": ...}`.
   `read_file(position, name, format="bytes")` reads one over FoE as `"bytes"`, `"text"` or
-  `"json"`. `write_file(position, name, content)` writes bytes, or a str as UTF-8, and
+  `"json"`. `write_file(position, name, content)` writes bytes, or a str as UTF-8.
   `remove_file(position, name)` removes a file.
+- `read_sii(position, format="json")` returns the parsed SII of a device, or its raw EEPROM image
+  with `format="bytes"`. `write_sii(position, image)` writes a raw image.
+- `list_user_cache_files()` returns the files in the user cache of the server, a folder that keeps
+  files across restarts: its `root`, and each file with its `path` relative to the root, its `size`
+  and its `modifiedMs`. `read_user_cache_file(path, format="bytes")`,
+  `write_user_cache_file(path, content)` and `remove_user_cache_file(path)` read, write and remove
+  one file, as `read_file`, `write_file` and `remove_file` do on a device. The path has `/` between
+  its folders.
+- `read_hrd_recording(position, data, format="json")` reads the high resolution data recording that
+  the `hrd-streaming` procedure left on a drive, decoded as `data` says (`"encoder-raw"` or
+  `"system-identification"`). It returns the recording, or CSV text with `format="csv"`.
+- `list_parameter_cache_entries()`, `read_parameter_cache_entry(id, format="json")` and
+  `remove_parameter_cache_entry(id)` manage the parameter cache, the object dictionaries that a scan
+  reads from the cache instead of from a device. `server_log()` returns the log of the server as
+  text.
+- `run_auto_tuning(request)` runs one function of the auto-tuning program of the server, such as
+  `{"run": "auto_tune_velocity_controller", "data": ...}`, and returns its result. The program
+  answers an input that it refuses with an `"error"` key in the result.
+- `parse_sii(image)`, `parse_integro_variant(data)` and `parse_ic_mu_restore_file(data)` decode a
+  file on the server, with no device involved. `parse_esi(xml, modules=None)` reads an ESI document
+  and returns every device it describes.
+- `server_time_ms(response)` returns the time that the server spent on the request, in
+  milliseconds, from the metric `server` of the `Server-Timing` header.
+  `fieldbus_time_ms(response)` returns the time of the fieldbus operation of the request, from the
+  metric `fieldbus`. They return `None` when the response has no such time.
 - `object_name(index, subindex)` returns the generated name of an object, such as `STATUSWORD`, and
   `object_address_text(index, subindex)` its address, such as `0x6041:00`.
+  `device_parameter_text(position, index, subindex)` and
+  `device_parameter_name(position, index, subindex)` add the position of the device, such as
+  `1:0x6041:00` and `1:STATUSWORD`. `object_access(access)` decodes the access word of an object
+  into `readable`, `writable`, `rxPdoMappable`, `txPdoMappable`, `backup`, `settings` and `text`,
+  such as `RW`.
+- `format_duration(ms)` formats a duration with three decimals, such as `0.087 ms` or `2.745 s`,
+  and `format_bytes(count)` a byte count, such as `87.0 KiB`. `format_times(round_trip_ms, server_ms, fieldbus_ms)` writes
+  the times of one request, such as `round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`. They
+  write the same digits as the TypeScript client and the Console.
 - `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until
   the predicate is true. It raises `TimeoutError` with the last value when the time runs out.
 - `ensure_scanned()` scans when the last scan is missing or wrong, and moves no device.
@@ -295,6 +329,11 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   of late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
 - `step_changes(run)` yields each snapshot of a run as `(snapshot, changed)`, where `changed` lists
   the steps whose status changed. `format_step(step)` turns a step into one line.
+- `step_value(snapshot, step_id)` returns what one step of a run produced, and
+  `procedure_failure(snapshot)` why a run failed or was cancelled.
+  `procedure_parameter_value(parameter, text)` converts the text of one parameter by the type that
+  the descriptor of the procedure declares, and raises `ValueError`, which says what is wrong with
+  it. A list splits on commas and line breaks.
 - `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
   WebSocket.
 - `monitoring(parameters, interval_ms=50, topic=None, name=None)` returns a `MonitoringRecording`
@@ -304,7 +343,7 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   - `values()` returns the values in a time window.
   - `first()` returns the time of the first value that meets a condition.
   - `print_table()` prints one row every `every_ms`, with the CiA402 state beside a statusword.
-  - `write_csv(path)` writes every row to a CSV file.
+  - `to_csv()` returns every row as CSV text, and `write_csv(path)` writes it to a file.
   - `names` gives the name of each column, such as `1:STATUSWORD`, which `print_table()` and
     `write_csv()` use. `sources` gives where each value comes from, `pdo` or `sdo`.
 - `notifications()` streams the notifications from the WebSocket.
@@ -333,6 +372,30 @@ client cannot reach raises `requests.ConnectionError`.
 The helpers log each step they take, such as `found 1 device(s)`, through the
 `motion_master_client` logger. The log is off by default. Turn on logging at INFO to see it.
 
+The client also writes one line per HTTP request to the logger `motion_master_client.http`: the
+method, the path, the status, the round trip, and the times that the server reported in
+`Server-Timing`: `server`, and `fieldbus` for a request that ran a fieldbus operation. It is off by
+default, as for any logger of a library. A script turns it on with the standard logging of
+Python:
+
+```python
+logging.basicConfig(format="%(name)s %(message)s")
+logging.getLogger("motion_master_client.http").setLevel(logging.DEBUG)
+```
+
+Every example turns it on with `-v` or `--verbose`:
+
+```bash
+python examples/read-sdo.py --index 0x1000 --subindex 0 --verbose
+```
+
+```text
+motion_master_client.http GET /api/devices/1/sdo/4096/0 200 round-trip 1.270 ms, server 0.931 ms, fieldbus 0.888 ms
+```
+
+A helper returns the decoded result. A script that needs a response, for its headers, calls
+`client.call(operation_id, …)`, which returns the `requests.Response`.
+
 ## Objects and states
 
 The module names objects and states with classes:
@@ -349,7 +412,8 @@ The module names objects and states with classes:
 - `AlState` names the AL states, `INIT`, `PREOP`, `BOOT`, `SAFEOP` and `OP`. It is an `IntEnum`, so
   a member goes into a request body as a number, and `AlState(value)` converts an `alState` from a
   response. The name of a member is its label. The server reports `UNKNOWN`, 0, for a device that
-  does not answer.
+  does not answer. `mailbox_active(al_state)` says whether a device in that state answers mailbox
+  requests, such as an SDO: in PREOP, SAFEOP and OP.
 - `Cia402State` names the CiA402 states. It is a `StrEnum` whose members equal the names that the
   API uses: `Cia402State.OPERATION_ENABLED == "OperationEnabled"`. `Cia402.state(statusword)`
   returns the state that a statusword reports. It is meant for recorded rows, where the server

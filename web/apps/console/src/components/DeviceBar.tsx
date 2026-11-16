@@ -1,18 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import type { Cia402Status } from '@synapticon/motion-master-client';
+import { type Cia402Status, AlState, mailboxActive } from '@synapticon/motion-master-client';
 import DeviceMotionRow from './DeviceMotionRow';
 import DeviceStatusRow from './DeviceStatusRow';
 import { useConnection } from '../contexts/ConnectionContext';
 import { useCia402Status } from '../hooks/useCia402Status';
-
-// The AL state a CiA402 command needs. The drive's state machine only advances while its statusword
-// and controlword are exchanging as process data, which happens in OP and nowhere else — an SDO
-// write to the controlword in PREOP lands in the object and is never acted on.
-export const OP_STATE = 8;
-
-// Mailbox-carrying AL states (PREOP, SAFEOP, OP). Reading the status needs one; INIT has no
-// mailbox and BOOT's is FoE-only. Mirrors the sidebar's own check.
-const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8]);
 
 /**
  * What every row of the bar reads: the device, its AL state, the CiA402 status poll, and whether
@@ -71,14 +62,17 @@ export default function DeviceBar({ slavePosition }: DeviceBarProps) {
   const deviceState = statesQuery.data?.data.find((s) => s.slavePosition === slavePosition);
   const alState = deviceState?.alState;
   const isCia402 = device?.isCia402 ?? false;
-  const mailboxActive = alState !== undefined && MAILBOX_ACTIVE_STATES.has(alState);
+  // Reading the status needs the mailbox.
+  const canReadStatus = alState !== undefined && mailboxActive(alState);
 
-  const statusQuery = useCia402Status(slavePosition, isCia402 && mailboxActive);
+  const statusQuery = useCia402Status(slavePosition, isCia402 && canReadStatus);
 
-  // Commanding needs OP, for the reason on OP_STATE. Disabled rather than hidden: a button that
-  // vanishes leaves you wondering where it went, where a disabled one with a reason tells you what
-  // to fix.
-  const canCommand = isCia402 && alState === OP_STATE;
+  // Commanding needs OP. The drive's state machine only advances while its statusword and
+  // controlword are exchanging as process data, which happens in OP and nowhere else — an SDO write
+  // to the controlword in PREOP lands in the object and is never acted on. Disabled rather than
+  // hidden: a button that vanishes leaves you wondering where it went, where a disabled one with a
+  // reason tells you what to fix.
+  const canCommand = isCia402 && alState === AlState.OP;
   const whyDisabled = !isCia402
     ? 'this device is not a CiA402 drive'
     : alState === undefined
@@ -94,7 +88,7 @@ export default function DeviceBar({ slavePosition }: DeviceBarProps) {
     productName: device?.productName ?? device?.name ?? `Device ${slavePosition}`,
     isCia402,
     alState,
-    mailboxActive,
+    mailboxActive: canReadStatus,
     status: statusQuery.data,
     statusError: statusQuery.isError ? statusQuery.error : undefined,
     canCommand,

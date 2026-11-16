@@ -53,6 +53,7 @@ describe('MonitoringRecording', () => {
         '0.001000,1001000,,8\r\n' +
         '0.002500,1002500,1591,"a,b"\r\n',
     );
+    expect(recording().toCsv()).toBe(readFileSync(path, 'utf8'));
   });
 
   it('prints the same table as the Python client', () => {

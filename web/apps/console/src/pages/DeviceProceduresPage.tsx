@@ -3,6 +3,7 @@ import { Navigate, NavLink, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   apiErrorMessage,
+  formatDuration,
   type ProcedureListing,
   type ProcedureSnapshot,
   type ProgressStep,
@@ -64,14 +65,6 @@ function formatTime(epochMs?: number): string {
     second: '2-digit',
     fractionalSecondDigits: 3,
   });
-}
-
-// How long a finished run took, or how long the current one has been going.
-function formatDuration(ms: number): string {
-  if (ms < 1000) {
-    return `${ms} ms`;
-  }
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
 }
 
 export default function DeviceProceduresPage() {

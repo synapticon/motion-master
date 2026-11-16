@@ -21,6 +21,73 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- Both clients write one debug line per HTTP request: the method, the path, the status, the round
+  trip, and the times `server` and `fieldbus` from `Server-Timing`, such as
+  `GET /api/devices/1/sdo/4096/0 200 round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`. Each
+  client follows the convention of its platform. The TypeScript client turns it on with
+  `DEBUG=motion-master-client:http`, the convention of the `debug` package of Node.js. The Python
+  client writes it to the logger `motion_master_client.http`, which a script sets to DEBUG, and
+  every Python example turns it on with `-v` or `--verbose`.
+- Every operation of the API can go through the generated client `client.api`, which returns the
+  response with its headers. The generator sends a file as `application/octet-stream` and an XML
+  document as `application/xml`, where it sent every body as JSON, so a file arrived as `{}`. The
+  rule is in templates in `web/packages/motion-master-client/templates/`, and swagger-typescript-api
+  is pinned to 13.12.2. A binary body, the ESI of `parseEsi` included, is a `Blob` or a
+  `Uint8Array`, where it was a `File` or a string. The
+  helpers that sent a file with their own `fetch` use the generated calls, and the Console reads the
+  times of the requests it times from the responses of the generated calls.
+
+- Each variable of the process image that `POST /api/eni/parse` returns has `devicePosition`, the
+  device whose window holds it, `object`, the index and subindex of its object from the PDOs of
+  that device, and its name split at the first dot into `scope` and `signal`. The Console's ENI
+  page reads them in place of its own copies.
+- Both clients format a duration with `formatDuration(ms)` and `format_duration(ms)`, always with
+  three decimals, such as `0.087 ms` or `2.745 s`, and a byte count with `formatBytes(bytes)` and
+  `format_bytes(count)`, such as `87.0 KiB`. Both round half up, so they write the same digits. The
+  Console uses them in place of five copies of a duration formatter and two of a byte formatter, one
+  of which wrote KB. `formatTimes(roundTripMs, { serverMs, fieldbusMs })` and `format_times()`
+  write the times of one request, such as `round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`.
+  The Console shows the times of every request it times with it, on every page, and the debug log of
+  both clients writes them with it, so the two read alike.
+- `MonitoringRecording.toCsv()` and `to_csv()` return the CSV text that `writeCsv()` and
+  `write_csv()` write, such as for a download in a browser.
+- The TypeScript client exports `DEFAULT_HOST`, `DEFAULT_HTTP_PORT` and `DEFAULT_WS_PORT`, from
+  which it builds `API_BASE_URL` and `WS_URL`. The Console's Connection page uses them.
+
+- Each parameter of a device, as `GET /api/devices/{slavePosition}/parameters` and the other
+  parameter routes send it, has `readable`, `writable`, `rxPdoMappable` and `txPdoMappable` beside
+  its raw `access` word (ETG.1000.6), and `pdoMappingObject`, which is true for a PDO mapping object
+  of CiA 301, 0x1600 to 0x17FF or 0x1A00 to 0x1BFF. The Console reads them in place of its own
+  copies of the bits and the ranges. For a raw word from elsewhere, such as a parameter cache file,
+  both clients decode it with `objectAccess(access)` and `object_access(access)`, which also give
+  the backup and settings bits and the text `RW`, `RO`, `WO` or `—`.
+- `GET /api/bus-config` and the parsed SII name the bits and codes they send. The bus config has
+  `protocolNames` and `coeDetailNames` beside `protocols` and `coeDetails`, and a `typeName` for
+  each sync manager and FMMU. The SII has `mailboxProtocolNames`, `coeDetailNames`,
+  `syncManagerTypeName` and `fmmuUsageNames`. The names follow ETG.2010 and the ESC datasheet. The
+  Console reads them in place of two copies of its own tables, and names an FMMU whose type is 3
+  `Inputs and outputs`, where it wrote `SM status`, and the sync manager types 5 and 6, dynamic
+  outputs and inputs.
+- Both clients read a procedure run with `stepValue(snapshot, id)`, the value one step produced,
+  and `procedureFailure(snapshot)`, why a run failed or was cancelled, and convert the text of one
+  parameter with `procedureParameterValue(parameter, text)`, by the type its descriptor declares.
+  The Python twins are `step_value()`, `procedure_failure()` and `procedure_parameter_value()`. The
+  Console, both `run-procedure` examples and the production scripts use them in place of their own
+  copies. So the examples check the range of an integer and the length of a byte list, as the
+  Console did, and the Console reads bytes separated by commas as well as by spaces. A list splits
+  on commas and line breaks in both: the Console split it on line breaks only, and the examples on
+  commas only.
+- The CiA402 status, `GET /api/devices/{slavePosition}/cia402`, has `activeTarget`: the kind of the
+  target that the active operation mode acts on, as `POST …/cia402/target` takes it, and the index
+  and subindex of its object, such as `{"kind": "velocity", "index": 24831, "subindex": 0}`. It is
+  null in a mode with no linear target. The server decides it, so a client keeps no table of the
+  modes. The Console's motion row reads it in place of its own table, and the Console names the
+  objects of the Tuning, Motion, Firmware and iC-MU pages with `Cia402`, `Somanet` and `Profile`.
+- Both clients say whether a device in an AL state answers mailbox requests with
+  `mailboxActive(alState)` and `mailbox_active(al_state)`: in PREOP, SAFEOP and OP, as the server
+  decides. The Console uses it, `alStateName()` and `AlState` in place of its two label tables, two
+  copies of the mailbox states and the bare numbers of the AL states. The Control page names an
+  unknown state `UNKNOWN`, where it wrote `0x0`.
 - The TypeScript client streams the batches of a monitoring with `streamMonitoring(topic)`, which a
   program reads with `for await`.
 - The TypeScript client builds a client from `config.jsonc`, JSON with comments, with
@@ -32,10 +99,39 @@ the HTTP/WebSocket API may break between any two alphas.
   CI fails when a client has an example that its twin lacks.
 - Both clients read and write objects and files with `writeValue()`, `readSdo()`, `writeSdo()`,
   `listFiles()`, `readFile()`, `writeFile()` and `removeFile()`, and the Python twins
-  `write_value()`, `read_sdo()` and so on. `readFile()` returns bytes, text or JSON. `writeFile()`
-  writes a string as UTF-8.
+  `write_value()`, `read_sdo()` and so on. `readSii()` returns the parsed SII or the raw image, and
+  `writeSii()` writes an image. `readFile()` returns bytes, text or JSON. `writeFile()` writes a
+  string as UTF-8.
+- Both clients decode a file on the server with `parseSii()`, `parseEsi()`, `parseIntegroVariant()`
+  and `parseIcMuRestoreFile()`, and the Python twins `parse_sii()` and so on. Each sends the file as
+  raw bytes. `parseEsi()` takes the modules to merge. The Console and the `parse-esi` examples use
+  them in place of their own requests.
+- Both clients read and write the user cache of the server with `listUserCacheFiles()`,
+  `readUserCacheFile()`, `writeUserCacheFile()` and `removeUserCacheFile()`, and the Python twins
+  `list_user_cache_files()` and so on. A path is relative to the root of the user cache, and each
+  folder and the name are percent-encoded, so any name works. `readUserCacheFile()` returns bytes,
+  text or JSON, as `readFile()` does, and `writeUserCacheFile()` writes a string as UTF-8.
+  `encodeUserCachePath()` encodes a path for a call of `client.api`. The Console, the `firmware-installation` examples, the
+  production scripts and the bench tests use them in place of their own requests.
+- Both clients read the high resolution data recording of a device with `readHrdRecording()`, as
+  JSON or, with `format: 'csv'`, as CSV text. They list, read and remove the entries of the
+  parameter cache with `listParameterCacheEntries()`, `readParameterCacheEntry()` and
+  `removeParameterCacheEntry()`, and return the log of the server with `serverLog()`. The Python
+  twins are `read_hrd_recording()` and so on. The Console uses them in place of its own requests.
+- Both clients run one function of the auto-tuning program of the server with `runAutoTuning()` and
+  `run_auto_tuning()`. The Console's Auto-Tuning page sends its request through the client, and
+  shows the answer of a refusal from `HttpError.response`. The Console sends no request with its
+  own `fetch` any more.
+- Both clients read the times that the server measured from a response: `serverTimeMs()` and
+  `server_time_ms()` the metric `server`, and `fieldbusTimeMs()` and `fieldbus_time_ms()` the metric
+  `fieldbus`, in milliseconds, or `null` and `None` when the response has none. The TypeScript
+  twins also read them from a `PerformanceResourceTiming` entry of the browser.
 - The TypeScript client exports `objectName()` and `objectAddressText()`, with the Python twins
   `object_name()` and `object_address_text()`, and formats bytes as hex with `formatHexBytes()`.
+- Both clients name a parameter of a device with `deviceParameterText()`, such as `1:0x6041:00`, and
+  `deviceParameterName()`, such as `1:STATUSWORD`, and the Python twins `device_parameter_text()` and
+  `device_parameter_name()`. The columns of a `MonitoringRecording` take their names from
+  `deviceParameterName()`.
 - The examples of both clients share their command line, the run of a procedure and their files
   folder through `options`, `procedures` and `files` modules, the same in both languages.
 - The TypeScript client has the device and AL state helpers of the Python client: `init`, `reset`,
@@ -67,6 +163,37 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- The Console downloads a monitoring as CSV in the layout of `MonitoringRecording.toCsv()`: the
+  columns `time_s` and `timestamp_us`, then one column per parameter named by its device and its
+  object, such as `1:STATUSWORD`; a field is quoted where it must be, and each line ends with `\r\n`.
+  It wrote `t_us`, the microseconds from the first sample, and the object addresses.
+
+- The TypeScript client parses an integer with `parseInteger(text, { min, max })`, as Python's
+  `int(text, 0)` does: decimal, or `0x`, `0o` or `0b`, with an optional sign. It returns a number,
+  or null for other text, for an integer beyond 2^53 - 1 and for one outside the range.
+  `parseIntegerFlexible()` is now `parseBigInt()`, follows the same rule, and returns a `bigint`.
+  It accepted no `+`, `0o` or `0b`, and it read a decimal with a leading zero, such as `010`, which
+  it now refuses. The Console
+  and the examples use the two in place of 7 parsers of their own. So the Console's number fields
+  accept octal, binary and a `+` sign, refuse `010`, and refuse a fraction or an exponent, such as
+  `1e3`, which the procedure parameters took.
+- The Console writes a vendor ID, a product code and a revision with 8 hex digits on every page,
+  such as `0x000022D2`. The Control and Parameter Cache pages wrote them without leading zeros. Its
+  hex numbers, byte lists and object addresses come from `formatHex()`, `formatHexBytes()` and
+  `objectAddressText()` of the client, in place of 14 local copies. The Monitorings and Recorder
+  pages label a parameter `1:0x6041:00` with `deviceParameterText()`. They wrote `1·0x6041:00`.
+- The server sends the times it measured in the standard `Server-Timing` header, in milliseconds:
+  `Server-Timing: server;dur=7.100, fieldbus;dur=6.200`. Every response has `server`, the time from
+  the complete request to the response. Every endpoint that runs a fieldbus operation adds
+  `fieldbus`, the time of that operation: the wait for the control-plane lock and every mailbox or
+  ESC transaction. That is also true of the CiA402 controls, the brake and encoder reads, the AL
+  state routes, `init`, `scan`, `reset` and the ENI export, which sent no time before. The ENI and
+  ESI parses and the user cache send only `server`. The server sent the time of a device operation
+  in `X-Wire-Us`, in microseconds, which is gone. Every response also has `Timing-Allow-Origin`, so
+  the developer tools of a browser show the times of each request, and a page of the allowed origin
+  reads them with the Performance API.
+- The ENI export exposes `X-Eni-Warnings` to the browser, so the Console's ENI page shows the
+  number of export warnings. A browser could not read the header before.
 - The Python client needs Python 3.12 or newer. It needed 3.11. Debian 12 and the Raspberry Pi OS
   based on it have 3.11 as their system Python, so there a newer Python goes beside it, for example
   with `uv python install 3.12`. The server packages for arm64 already need Debian 13. CI tests the
@@ -133,11 +260,26 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Removed
 
+- `decodeSdoBytes()` of the TypeScript client. The Console's Set button on the Parameters page was
+  its only caller: it encoded the typed text to bytes and decoded them back, which checked the range
+  before the server did. The Console now sends the typed number, string or bytes, and the server
+  checks the value against the data type and refuses one the type cannot hold. Its 64-bit result
+  lost the digits above 2^53.
+
 - The TypeScript client's `ws.onProgress()`. The server never sends procedure progress over the
   WebSocket: a program polls a procedure with `runProcedure()`.
 
 ### Fixed
 
+- The schema of a procedure request in `swagger.yml` lists the six chirp fields that
+  `system-identification` and `plant-identification` take: `startFrequencyMilliHz`,
+  `targetFrequencyMilliHz`, `targetAmplitudePermil`, `transitionTimeMs`, `signalType` and `start`.
+  The generated `ProcedureRequest` has them, so the two TypeScript examples build their request
+  without a cast.
+
+- The Console pages that list the user cache kept two shapes under one shared query: the listing,
+  and the response that holds it. A page that read the shape of the other found no files until its
+  own request returned. Every page now keeps the listing.
 - The file routes of a device, `GET`, `PUT` and `DELETE /api/devices/{slavePosition}/files/{filename}`,
   decode the file name. A name that a client percent-encoded reached the drive encoded, so
   `a b.txt` was written as `a%20b.txt`. Both clients encode the name in `readFile`, `writeFile` and

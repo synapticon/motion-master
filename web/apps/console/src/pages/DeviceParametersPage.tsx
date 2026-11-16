@@ -7,7 +7,12 @@ import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
 import DevicePageHeader from '../components/DevicePageHeader';
 import HexDecInput from '../components/HexDecInput';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import {
+  RequestTiming,
+  requestTiming,
+  type RequestTimingValue,
+  useRequestTiming,
+} from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import {
   apiErrorMessage,
@@ -18,11 +23,17 @@ import {
   SDO_TYPE_HINT,
   type SdoType,
   encodeSdoValue,
-  decodeSdoBytes,
   interpretSdoBytes,
   sdoTypeForDataTypeName,
   isIntegerSdoType,
-  wireTimeMs,
+  formatHex,
+  formatHexBytes,
+  objectAddressText,
+  parseInteger,
+  parseBigInt,
+  parseHexBytes,
+  type ParameterValue,
+  objectAccess,
 } from '@synapticon/motion-master-client';
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white';
@@ -31,21 +42,6 @@ const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 const btnGhostCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
-
-function parseHexOrDec(s: string): number | null {
-  const t = s.trim();
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) {
-    return parseInt(t.slice(2), 16);
-  }
-  if (/^[0-9]+$/.test(t)) {
-    return parseInt(t, 10);
-  }
-  return null;
-}
-
-function toHex(n: number, pad: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(pad, '0')}`;
-}
 
 function formatValue(v: number | string | number[] | undefined): string {
   if (v === undefined) {
@@ -61,10 +57,7 @@ function formatValue(v: number | string | number[] | undefined): string {
   if (v.length === 0) {
     return '[]';
   }
-  const head = v
-    .slice(0, 16)
-    .map((b) => b.toString(16).toUpperCase().padStart(2, '0'))
-    .join(' ');
+  const head = formatHexBytes(v.slice(0, 16));
   return v.length > 16 ? `${head} …(${v.length}B)` : head;
 }
 
@@ -80,7 +73,7 @@ function valueToInputString(v: number | string | number[] | undefined): string {
   if (typeof v === 'string') {
     return v;
   }
-  return v.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+  return formatHexBytes(v);
 }
 
 // ETG.1000.6 ObjAccess: write bits 3-5 (Wr PREOP/SAFEOP/OP). Writable iff any is set.
@@ -114,81 +107,43 @@ function outsideRange(p: DeviceParameter, raw: string): boolean {
   return false;
 }
 
-function isWritable(access: number): boolean {
-  return (access & 0x38) !== 0;
-}
-
-// ETG.1000.6 ObjAccess: read bits 0-2 (Rd PREOP/SAFEOP/OP). Readable iff any is set.
-function isReadable(access: number): boolean {
-  return (access & 0x07) !== 0;
-}
-
-// Compares two decoded parameter values. Both come through decodeSdoBytes, so a
-// written/read-back pair with identical wire bytes compares equal even for floats
-// (same bytes → same decoded number); strings ignore NUL padding (already stripped).
-function valuesEqual(
-  a: number | string | number[] | undefined,
-  b: number | string | number[] | undefined,
-): boolean {
+// Compares two parameter values as the server sends them: arrays by their bytes, anything else by
+// value.
+function valuesEqual(a: ParameterValue | undefined, b: ParameterValue | undefined): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((x, i) => x === b[i]);
   }
   return a === b;
 }
 
-function formatAccess(a: number): string {
-  // ETG.1000.6: bit 0=Rd PREOP, 1=Rd SAFEOP, 2=Rd OP, 3=Wr PREOP, 4=Wr SAFEOP, 5=Wr OP
-  const r = (a & 0x07) !== 0;
-  const w = isWritable(a);
-  if (r && w) {
-    return 'RW';
+// Converts the text of a value input to the JSON type that a write takes for this data type: a
+// number, a string, or bytes, which the input shows as hex. The server converts the value to the
+// declared type and refuses one that the type cannot hold, so this checks only the form of the
+// text, not the range.
+function inputValue(dataTypeName: string, text: string): ParameterValue | { error: string } {
+  const type = sdoTypeForDataTypeName(dataTypeName);
+  const trimmed = text.trim();
+  if (isIntegerSdoType(type)) {
+    const value = parseInteger(trimmed);
+    if (value !== null) {
+      return value;
+    }
+    return parseBigInt(trimmed) === null
+      ? { error: 'Not a whole number. Write it in decimal, or in hex with 0x.' }
+      : { error: 'Beyond 2^53 - 1, which the Console cannot send exactly.' };
   }
-  if (r) {
-    return 'RO';
+  if (type === 'float32' || type === 'float64') {
+    const value = Number(trimmed);
+    return trimmed === '' || !Number.isFinite(value) ? { error: 'Not a number.' } : value;
   }
-  if (w) {
-    return 'WO';
+  if (type === 'string') {
+    return text;
   }
-  return '—';
-}
-
-function formatElapsed(ms: number): string {
-  // Sub-10 ms ops (a single fast SDO) keep one decimal so they don't round to "0 ms";
-  // larger ops (the list rebuilds) round to whole ms / two-decimal seconds.
-  if (ms < 10) {
-    return `${ms.toFixed(1)} ms`;
-  }
-  if (ms < 1000) {
-    return `${Math.round(ms)} ms`;
-  }
-  return `${(ms / 1000).toFixed(2)} s`;
+  return parseHexBytes(trimmed) ?? { error: 'Not hex bytes, such as 0A FF.' };
 }
 
 function paramKey(index: number, subindex: number): string {
   return `${index}-${subindex}`;
-}
-
-// Timing readout for the raw SDO tools: the server-measured wire transaction (from the
-// response's `wireUs`) and the browser-observed HTTP round-trip. The gap between them is
-// cross-origin/transport overhead, not device time.
-function SdoTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: number }) {
-  return (
-    <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
-      <span
-        className="cursor-help"
-        title="SDO — server-measured duration of the SDO transaction itself (control-plane lock acquire + CoE mailbox wire round-trip), reported by the backend. This is the true cost of talking to the device."
-      >
-        SDO {formatElapsed(wireMs)}
-      </span>
-      <span
-        className="text-grey-400 cursor-help"
-        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the SDO time plus cross-origin/TLS and transport overhead, so it is normally much larger than the SDO figure and is not device time."
-      >
-        {' · round-trip '}
-        {formatElapsed(roundTripMs)}
-      </span>
-    </span>
-  );
 }
 
 // Freshness of the cached value relative to the device, rendered as a labelled badge.
@@ -250,14 +205,12 @@ const ReadSdoCard = memo(function ReadSdoCard({
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<number[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
-  // server-measured SDO transaction (`X-Wire-Us` header). Showing both makes clear the SDO is
-  // fast and the rest is browser/transport overhead, not the device.
-  const [readSdoElapsedMs, setReadSdoElapsedMs] = useState<number | null>(null);
-  const [readSdoWireMs, setReadSdoWireMs] = useState<number | null>(null);
+  // The times of the last read: the round trip that the browser measured, and the server and fieldbus
+  // times from Server-Timing.
+  const [readTiming, setReadTiming] = useState<RequestTimingValue | null>(null);
 
-  const indexNum = parseHexOrDec(index);
-  const subindexNum = parseHexOrDec(subindex);
+  const indexNum = parseInteger(index, { min: 0 });
+  const subindexNum = parseInteger(subindex, { min: 0 });
   const indexValid = indexNum !== null && indexNum >= 0 && indexNum <= 0xffff;
   const subindexValid = subindexNum !== null && subindexNum >= 0 && subindexNum <= 0xff;
   const canUpload = indexValid && subindexValid && !uploading;
@@ -265,8 +218,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
   function clearReadStatus() {
     setResult(null);
     setError(null);
-    setReadSdoElapsedMs(null);
-    setReadSdoWireMs(null);
+    setReadTiming(null);
   }
 
   function handleIndexChange(val: string) {
@@ -288,15 +240,13 @@ const ReadSdoCard = memo(function ReadSdoCard({
     const start = performance.now();
     try {
       const res = await api.sdoUpload(slavePosition, indexNum!, subindexNum!);
-      setReadSdoElapsedMs(performance.now() - start);
-      setReadSdoWireMs(wireTimeMs(res));
+      setReadTiming(requestTiming(res, start));
       setResult(res.data.data);
     } catch (err) {
-      // A failed transaction still consumed wire time (an SDO read waits out the mailbox timeout);
-      // the backend attaches X-Wire-Us to the error too, so show the same timing as on success.
-      setReadSdoElapsedMs(performance.now() - start);
+      // A failed transaction still spent its time (an SDO read waits out the mailbox timeout), and
+      // the server sends Server-Timing with the error too, so show the same times as on success.
       if (err instanceof HttpError) {
-        setReadSdoWireMs(wireTimeMs(err.response));
+        setReadTiming(requestTiming(err.response, start));
       }
       setError(apiErrorMessage(err));
     } finally {
@@ -326,7 +276,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {indexValid ? toHex(indexNum!, 4) : '—'}
+              {indexValid ? formatHex(indexNum!, 4) : '—'}
             </p>
           </div>
           <div>
@@ -339,7 +289,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {subindexValid ? toHex(subindexNum!, 2) : '—'}
+              {subindexValid ? formatHex(subindexNum!, 2) : '—'}
             </p>
           </div>
         </div>
@@ -348,9 +298,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
           <button onClick={handleUpload} disabled={!canUpload} className={btnCls}>
             {uploading ? 'Reading…' : 'Read SDO'}
           </button>
-          {readSdoElapsedMs !== null && readSdoWireMs !== null && (
-            <SdoTiming wireMs={readSdoWireMs} roundTripMs={readSdoElapsedMs} />
-          )}
+          <RequestTiming timing={readTiming} />
         </div>
 
         {error && <p className="text-xs text-status-bad font-mono">{error}</p>}
@@ -360,7 +308,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
             <p className="text-xs text-grey-600 uppercase tracking-wide mb-2">Result</p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Hex:&nbsp;</span>
-              {result.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+              {formatHexBytes(result)}
             </p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Dec:&nbsp;</span>[{result.join(', ')}]
@@ -394,11 +342,10 @@ const WriteSdoCard = memo(function WriteSdoCard({
   const [downloading, setDownloading] = useState(false);
   const [dlOk, setDlOk] = useState<number[] | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
-  const [writeSdoElapsedMs, setWriteSdoElapsedMs] = useState<number | null>(null);
-  const [writeSdoWireMs, setWriteSdoWireMs] = useState<number | null>(null);
+  const [writeTiming, setWriteTiming] = useState<RequestTimingValue | null>(null);
 
-  const dlIndexNum = parseHexOrDec(dlIndex);
-  const dlSubindexNum = parseHexOrDec(dlSubindex);
+  const dlIndexNum = parseInteger(dlIndex, { min: 0 });
+  const dlSubindexNum = parseInteger(dlSubindex, { min: 0 });
   const dlIndexValid = dlIndexNum !== null && dlIndexNum >= 0 && dlIndexNum <= 0xffff;
   const dlSubindexValid = dlSubindexNum !== null && dlSubindexNum >= 0 && dlSubindexNum <= 0xff;
 
@@ -411,8 +358,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
   function clearDownloadStatus() {
     setDlOk(null);
     setDlError(null);
-    setWriteSdoElapsedMs(null);
-    setWriteSdoWireMs(null);
+    setWriteTiming(null);
   }
 
   async function handleDownload() {
@@ -426,14 +372,12 @@ const WriteSdoCard = memo(function WriteSdoCard({
       const res = await api.sdoDownload(slavePosition, dlIndexNum!, dlSubindexNum!, {
         data: encodedBytes,
       });
-      setWriteSdoElapsedMs(performance.now() - start);
-      setWriteSdoWireMs(wireTimeMs(res));
+      setWriteTiming(requestTiming(res, start));
       setDlOk(encodedBytes);
     } catch (err) {
-      // Show the wire time on failure too — the backend attaches X-Wire-Us to the error.
-      setWriteSdoElapsedMs(performance.now() - start);
+      // Show the times on failure too — the server sends Server-Timing with the error.
       if (err instanceof HttpError) {
-        setWriteSdoWireMs(wireTimeMs(err.response));
+        setWriteTiming(requestTiming(err.response, start));
       }
       setDlError(apiErrorMessage(err));
     } finally {
@@ -467,7 +411,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {dlIndexValid ? toHex(dlIndexNum!, 4) : '—'}
+              {dlIndexValid ? formatHex(dlIndexNum!, 4) : '—'}
             </p>
           </div>
           <div>
@@ -483,7 +427,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
               className={inputCls}
             />
             <p className="text-xs text-grey-500 mt-1 font-mono">
-              {dlSubindexValid ? toHex(dlSubindexNum!, 2) : '—'}
+              {dlSubindexValid ? formatHex(dlSubindexNum!, 2) : '—'}
             </p>
           </div>
         </div>
@@ -525,7 +469,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
               ) : (
                 <span className="text-grey-500">
                   {encodedBytes
-                    ? `${encodedBytes.length} B · ${encodedBytes.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`
+                    ? `${encodedBytes.length} B · ${formatHexBytes(encodedBytes)}`
                     : '—'}
                 </span>
               )}
@@ -537,9 +481,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
           <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
             {downloading ? 'Writing…' : 'Write SDO'}
           </button>
-          {writeSdoElapsedMs !== null && writeSdoWireMs !== null && (
-            <SdoTiming wireMs={writeSdoWireMs} roundTripMs={writeSdoElapsedMs} />
-          )}
+          <RequestTiming timing={writeTiming} />
         </div>
 
         {dlError && <p className="text-xs text-status-bad font-mono">{dlError}</p>}
@@ -551,7 +493,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
             </p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Hex:&nbsp;</span>
-              {dlOk.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+              {formatHexBytes(dlOk)}
             </p>
             <p className="text-xs font-mono">
               <span className="text-grey-600">Dec:&nbsp;</span>[{dlOk.join(', ')}]
@@ -571,10 +513,10 @@ export default function DeviceParametersPage() {
 
   const [readValues, setReadValues] = useState(false);
   const [filter, setFilter] = useState('');
-  // init + read-all both hit the wire (SDO Info enumeration / value reads), so they carry X-Wire-Us
-  // and get the wire-vs-round-trip readout. Reload is a cached server re-fetch (no bus traffic), so
-  // it only has a round-trip figure.
-  const bulkTiming = useWireTiming();
+  // init + read-all both run on the fieldbus (SDO Info enumeration / value reads), so they carry
+  // the metric fieldbus and get the fieldbus-vs-round-trip readout. Reload is a cached server re-fetch (no bus
+  // traffic), so it only has a round-trip figure.
+  const bulkTiming = useRequestTiming();
   const [reloadElapsedMs, setReloadElapsedMs] = useState<number | null>(null);
   const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set());
   const [settingKeys, setSettingKeys] = useState<Set<string>>(new Set());
@@ -692,15 +634,11 @@ export default function DeviceParametersPage() {
   async function handleSetValue(p: DeviceParameter) {
     const key = paramKey(p.index, p.subindex);
     const raw = editValues[key] ?? valueToInputString(p.value);
-    const encoded = encodeSdoValue(sdoTypeForDataTypeName(p.dataTypeName), raw);
-    if ('error' in encoded) {
-      setRowMsg({ key, message: encoded.error, kind: 'error' });
+    const sent = inputValue(p.dataTypeName, raw);
+    if (typeof sent === 'object' && sent !== null && 'error' in sent) {
+      setRowMsg({ key, message: sent.error, kind: 'error' });
       return;
     }
-    // Reuse the SDO encoder/decoder purely to validate the input and turn it into the typed JS
-    // value the smart write expects (number / string / byte array) — the server coerces it to the
-    // object's declared width.
-    const sent = decodeSdoBytes(p.dataTypeName, encoded.bytes);
     setSettingKeys((prev) => new Set(prev).add(key));
     setRowMsg(null);
     try {
@@ -708,7 +646,7 @@ export default function DeviceParametersPage() {
       // device may still clamp, coerce, or ignore the value — so for readable objects read it back
       // (PDO-aware) rather than trusting what we sent. Write-only objects keep the sent value.
       const written = await api.writeParameter(slavePosition, p.index, p.subindex, { value: sent });
-      const readBack = isReadable(p.access);
+      const readBack = p.readable;
       const value = readBack
         ? (await api.readParameter(slavePosition, p.index, p.subindex)).data.value
         : written.data.value;
@@ -724,10 +662,11 @@ export default function DeviceParametersPage() {
         return { ...prev, data: next };
       });
       clearEdit(key);
-      // If the read-back differs from what we sent, the device silently rejected or
-      // adjusted the write (out-of-range clamp, rounding, ignored). Flag it — the
-      // displayed value is now the device's actual value, not what was typed.
-      if (readBack && !valuesEqual(value, sent)) {
+      // If the read-back differs from the value the server wrote, the device silently rejected or
+      // adjusted the write (out-of-range clamp, rounding, ignored). Flag it — the displayed value
+      // is now the device's actual value, not what was typed. The server's value is the typed one
+      // converted to the declared type, so a REAL32 compares by the value it can hold.
+      if (readBack && !valuesEqual(value, written.data.value)) {
         setRowMsg({
           key,
           message:
@@ -783,7 +722,7 @@ export default function DeviceParametersPage() {
     ? params.filter(
         (p) =>
           p.name.toLowerCase().includes(filterLower) ||
-          toHex(p.index, 4).toLowerCase().includes(filterLower) ||
+          formatHex(p.index, 4).toLowerCase().includes(filterLower) ||
           p.dataTypeName.toLowerCase().includes(filterLower),
       )
     : params;
@@ -886,15 +825,14 @@ export default function DeviceParametersPage() {
                   {paramsQuery.isFetching ? 'Reloading…' : 'Reload list'}
                 </button>
                 {bulkTiming.timing ? (
-                  <WireTiming label="Object dictionary" timing={bulkTiming.timing} />
+                  <RequestTiming timing={bulkTiming.timing} />
                 ) : (
+                  // The reload re-fetches the cached list through react-query, which keeps no
+                  // response, so only its round trip shows.
                   reloadElapsedMs !== null && (
-                    <span
-                      className="text-xs text-grey-500 font-mono whitespace-nowrap cursor-help"
-                      title="Round-trip for the cached list re-fetch — no bus traffic, so there is no device wire time to report."
-                    >
-                      took {formatElapsed(reloadElapsedMs)}
-                    </span>
+                    <RequestTiming
+                      timing={{ roundTripMs: reloadElapsedMs, serverMs: null, fieldbusMs: null }}
+                    />
                   )
                 )}
               </div>
@@ -949,7 +887,7 @@ export default function DeviceParametersPage() {
                         const refreshing = refreshingKeys.has(key);
                         const setting = settingKeys.has(key);
                         const busy = refreshing || setting;
-                        const writable = isWritable(p.access);
+                        const writable = p.writable;
                         const editValue = editValues[key] ?? valueToInputString(p.value);
                         const cellMsg = rowMsg?.key === key ? rowMsg : null;
                         const description =
@@ -981,8 +919,7 @@ export default function DeviceParametersPage() {
                                 )}
                               </td>
                               <td className="px-3 py-1.5 font-mono whitespace-nowrap">
-                                {toHex(p.index, 4)}:
-                                {p.subindex.toString(16).toUpperCase().padStart(2, '0')}
+                                {objectAddressText(p.index, p.subindex)}
                               </td>
                               <td className="px-3 py-1.5 text-grey-800">
                                 <span className="inline-flex items-center gap-1.5">
@@ -1012,7 +949,7 @@ export default function DeviceParametersPage() {
                               </td>
                               <td className="px-3 py-1.5 font-mono text-grey-700">{p.bitLength}</td>
                               <td className="px-3 py-1.5 font-mono text-grey-700">
-                                {formatAccess(p.access)}
+                                {objectAccess(p.access).text}
                               </td>
                               {/* The controls here edit the value, so a click on them must not open or close the row. */}
                               <td
@@ -1118,9 +1055,9 @@ export default function DeviceParametersPage() {
                               </td>
                               <td
                                 className="px-3 py-1.5 font-mono text-grey-600"
-                                title={p.unit !== undefined ? toHex(p.unit, 8) : undefined}
+                                title={p.unit !== undefined ? formatHex(p.unit, 8) : undefined}
                               >
-                                {p.unit === undefined ? '—' : p.unitSymbol || toHex(p.unit, 8)}
+                                {p.unit === undefined ? '—' : p.unitSymbol || formatHex(p.unit, 8)}
                               </td>
                             </tr>
                             {descriptionOpen && (

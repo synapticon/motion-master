@@ -2,9 +2,15 @@ import { useState } from 'react';
 import { useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import DevicePageHeader from '../components/DevicePageHeader';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
-import { apiErrorMessage, parseHexBytes } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  parseHexBytes,
+  formatHex,
+  formatHexBytes,
+  parseInteger,
+} from '@synapticon/motion-master-client';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
 
@@ -48,26 +54,24 @@ export default function DeviceRegistersPage() {
   const [reading, setReading] = useState(false);
   const [readResult, setReadResult] = useState<number[] | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
-  const readTiming = useWireTiming();
+  const readTiming = useRequestTiming();
 
   const [writeAddress, setWriteAddress] = useState('');
   const [writeValue, setWriteValue] = useState('');
   const [writing, setWriting] = useState(false);
   const [writeOk, setWriteOk] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
-  const writeTiming = useWireTiming();
+  const writeTiming = useRequestTiming();
 
-  const addrNum = parseInt(address, 10);
-  const addrHex = isNaN(addrNum) ? '—' : `0x${addrNum.toString(16).toUpperCase().padStart(4, '0')}`;
-  const lenNum = parseInt(length, 10);
-  const canRead = !isNaN(addrNum) && addrNum >= 0 && !isNaN(lenNum) && lenNum >= 1 && !reading;
+  const addrNum = parseInteger(address, { min: 0, max: 0xffff });
+  const addrHex = addrNum === null ? '—' : formatHex(addrNum, 4);
+  const lenNum = parseInteger(length, { min: 1 });
+  const canRead = addrNum !== null && lenNum !== null && !reading;
 
-  const writeAddrNum = parseInt(writeAddress, 10);
-  const writeAddrHex = isNaN(writeAddrNum)
-    ? '—'
-    : `0x${writeAddrNum.toString(16).toUpperCase().padStart(4, '0')}`;
+  const writeAddrNum = parseInteger(writeAddress, { min: 0, max: 0xffff });
+  const writeAddrHex = writeAddrNum === null ? '—' : formatHex(writeAddrNum, 4);
   const writeBytes = parseHexBytes(writeValue);
-  const canWrite = !isNaN(writeAddrNum) && writeAddrNum >= 0 && writeBytes !== null && !writing;
+  const canWrite = writeAddrNum !== null && writeBytes !== null && !writing;
 
   function selectFromCatalogue(addr: number) {
     const reg = catalogue.find((r) => r.address === addr);
@@ -93,7 +97,7 @@ export default function DeviceRegistersPage() {
   }
 
   async function handleRead() {
-    if (!canRead) {
+    if (!canRead || addrNum === null || lenNum === null) {
       return;
     }
     setReading(true);
@@ -124,7 +128,7 @@ export default function DeviceRegistersPage() {
   }
 
   async function handleWrite() {
-    if (!canWrite || writeBytes === null) {
+    if (!canWrite || writeAddrNum === null || writeBytes === null) {
       return;
     }
     const ok = window.confirm(
@@ -149,9 +153,8 @@ export default function DeviceRegistersPage() {
     }
   }
 
-  const selectedInCatalogue = isNaN(addrNum)
-    ? undefined
-    : catalogue.find((r) => r.address === addrNum);
+  const selectedInCatalogue =
+    addrNum === null ? undefined : catalogue.find((r) => r.address === addrNum);
 
   if (!supportsEsc) {
     return (
@@ -201,7 +204,7 @@ export default function DeviceRegistersPage() {
                   {catalogue.map((r) => (
                     <option key={r.address} value={r.address}>
                       {r.name} · {r.address} / 0x
-                      {r.address.toString(16).toUpperCase().padStart(4, '0')} · {r.length}B
+                      {formatHex(r.address, 4, false)} · {r.length}B
                     </option>
                   ))}
                 </select>
@@ -239,7 +242,7 @@ export default function DeviceRegistersPage() {
                 <button onClick={handleRead} disabled={!canRead} className={btnCls}>
                   {reading ? 'Reading…' : 'Read'}
                 </button>
-                <WireTiming label="Registers" timing={readTiming.timing} />
+                <RequestTiming timing={readTiming.timing} />
               </div>
 
               {readError && <p className="text-xs text-status-bad font-mono">{readError}</p>}
@@ -249,7 +252,7 @@ export default function DeviceRegistersPage() {
                   <p className="text-xs text-grey-600 uppercase tracking-wide mb-2">Result</p>
                   <p className="text-xs font-mono">
                     <span className="text-grey-600">Hex:&nbsp;</span>
-                    {readResult.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+                    {formatHexBytes(readResult)}
                   </p>
                   <p className="text-xs font-mono">
                     <span className="text-grey-600">Dec:&nbsp;</span>[{readResult.join(', ')}]
@@ -281,7 +284,7 @@ export default function DeviceRegistersPage() {
                   {catalogue.map((r) => (
                     <option key={r.address} value={r.address}>
                       {r.name} · {r.address} / 0x
-                      {r.address.toString(16).toUpperCase().padStart(4, '0')} · {r.length}B
+                      {formatHex(r.address, 4, false)} · {r.length}B
                     </option>
                   ))}
                 </select>
@@ -321,7 +324,7 @@ export default function DeviceRegistersPage() {
                 <button onClick={handleWrite} disabled={!canWrite} className={btnCls}>
                   {writing ? 'Writing…' : 'Write'}
                 </button>
-                <WireTiming label="Registers" timing={writeTiming.timing} />
+                <RequestTiming timing={writeTiming.timing} />
               </div>
 
               {writeError && <p className="text-xs text-status-bad font-mono">{writeError}</p>}
@@ -372,9 +375,7 @@ export default function DeviceRegistersPage() {
                         className={`border-b border-grey-100 last:border-0 cursor-pointer transition-colors ${isSelected ? 'bg-grey-100' : 'hover:bg-grey-50'}`}
                       >
                         <td className="px-4 py-2 font-mono">{r.address}</td>
-                        <td className="px-4 py-2 font-mono">
-                          0x{r.address.toString(16).toUpperCase().padStart(4, '0')}
-                        </td>
+                        <td className="px-4 py-2 font-mono">{formatHex(r.address, 4)}</td>
                         <td className="px-4 py-2 font-mono">{r.length}</td>
                         <td className={`px-4 py-2 font-mono ${isSelected ? 'text-syn-red' : ''}`}>
                           {r.name}

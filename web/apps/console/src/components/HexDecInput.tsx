@@ -1,4 +1,4 @@
-import { parseIntegerFlexible } from '@synapticon/motion-master-client';
+import { parseBigInt } from '@synapticon/motion-master-client';
 
 // A text input for an integer value that can be viewed and edited in either decimal or
 // hexadecimal. It is deliberately stateless: the "base" is read straight off the string
@@ -35,7 +35,7 @@ function isHexForm(value: string): boolean {
 // Reformat a flexible-int string into the requested base, or null if it isn't a parseable integer
 // (empty, mid-edit, or a non-integer) — in which case the caller leaves the text untouched.
 function toBase(value: string, base: 'dec' | 'hex', hexPadDigits?: number): string | null {
-  const n = parseIntegerFlexible(value.trim());
+  const n = parseBigInt(value.trim());
   if (n === null) {
     return null;
   }

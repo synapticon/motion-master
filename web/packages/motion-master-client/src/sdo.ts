@@ -1,6 +1,7 @@
 // Encoding and decoding helpers for CoE SDO values: turning the raw little-endian
 // byte arrays exchanged over the wire into human-readable values and back.
 import { parseHexBytes } from './hex';
+import { parseBigInt } from './integer';
 
 // CoE data types the SDO download card can encode a value into. `raw` is an
 // escape hatch for entering bytes directly.
@@ -47,22 +48,6 @@ const INT_ENC: Partial<Record<SdoType, { size: number; signed: boolean }>> = {
   int64: { size: 8, signed: true },
 };
 
-// Accepts decimal (with optional leading '-') or 0x-prefixed hex; returns null on anything else.
-// Signed hex is signed-magnitude ("-0x1"), not two's-complement — so a value round-trips through
-// the range check in encodeSdoValue regardless of the base it was entered in.
-export function parseIntegerFlexible(s: string): bigint | null {
-  if (/^-?[0-9]+$/.test(s)) {
-    return BigInt(s);
-  }
-  if (/^0[xX][0-9a-fA-F]+$/.test(s)) {
-    return BigInt(s);
-  }
-  if (/^-0[xX][0-9a-fA-F]+$/.test(s)) {
-    return -BigInt(s.slice(1));
-  }
-  return null;
-}
-
 // True for the fixed-width integer types — the ones a value can meaningfully be shown and edited
 // in hexadecimal (floats and strings have no base; `raw` is already entered as hex bytes).
 export function isIntegerSdoType(type: SdoType): boolean {
@@ -78,7 +63,7 @@ export function encodeSdoValue(
 
   const meta = INT_ENC[type];
   if (meta) {
-    const n = parseIntegerFlexible(s);
+    const n = parseBigInt(s);
     if (n === null) {
       return { error: 'Not a valid integer' };
     }
@@ -249,70 +234,4 @@ export function interpretSdoBytes(bytes: number[]): SdoInterpretation[] {
   }
 
   return out;
-}
-
-// Decodes raw SDO bytes into a typed value, given the object's CoE data-type name.
-// Falls back to the raw byte array for unknown types or short reads.
-export function decodeSdoBytes(dataTypeName: string, bytes: number[]): number | string | number[] {
-  const view = new DataView(new Uint8Array(bytes).buffer);
-  switch (dataTypeName) {
-    case 'BOOLEAN':
-    case 'UNSIGNED8':
-    case 'BYTE':
-      if (bytes.length >= 1) {
-        return view.getUint8(0);
-      }
-      break;
-    case 'INTEGER8':
-      if (bytes.length >= 1) {
-        return view.getInt8(0);
-      }
-      break;
-    case 'INTEGER16':
-      if (bytes.length >= 2) {
-        return view.getInt16(0, true);
-      }
-      break;
-    case 'INTEGER32':
-      if (bytes.length >= 4) {
-        return view.getInt32(0, true);
-      }
-      break;
-    case 'UNSIGNED16':
-    case 'WORD':
-      if (bytes.length >= 2) {
-        return view.getUint16(0, true);
-      }
-      break;
-    case 'UNSIGNED32':
-    case 'DWORD':
-      if (bytes.length >= 4) {
-        return view.getUint32(0, true);
-      }
-      break;
-    case 'REAL32':
-      if (bytes.length >= 4) {
-        return view.getFloat32(0, true);
-      }
-      break;
-    case 'REAL64':
-      if (bytes.length >= 8) {
-        return view.getFloat64(0, true);
-      }
-      break;
-    case 'INTEGER64':
-      if (bytes.length >= 8) {
-        return Number(view.getBigInt64(0, true));
-      }
-      break;
-    case 'UNSIGNED64':
-      if (bytes.length >= 8) {
-        return Number(view.getBigUint64(0, true));
-      }
-      break;
-    case 'VISIBLE_STRING':
-    case 'UNICODE_STRING':
-      return new TextDecoder().decode(new Uint8Array(bytes.filter((b) => b !== 0)));
-  }
-  return bytes;
 }

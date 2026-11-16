@@ -12,7 +12,13 @@ export * from './errors';
 export { errorLine, run } from './error-line';
 export * from './procedures';
 export { MonitoringRecording } from './monitoring-recording';
-export { type DeviceParameterAddress, objectAddressText, objectName } from './parameter-address';
+export {
+  type DeviceParameterAddress,
+  deviceParameterName,
+  deviceParameterText,
+  objectAddressText,
+  objectName,
+} from './parameter-address';
 export * from './constants';
 export * from './web-socket-connection';
 export * from './client';
@@ -29,7 +35,11 @@ export * from './al-state';
 // server on another machine under a name the bundled certificate covers.
 export * from './lan';
 export * from './eni';
+export * from './format';
 export * from './hex';
 export * from './sdo';
+export * from './integer';
+export * from './object-access';
 export * from './mmpd';
-export * from './wire-time';
+export * from './server-timing';
+export { encodeUserCachePath } from './user-cache';

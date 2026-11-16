@@ -11,6 +11,7 @@ import {
   ProcedureError,
   ProcessDataDumpError,
   run,
+  fieldbusTimeMs,
   StateError,
 } from '../src/index';
 import { fakeServer, HTTP_URL, server } from './fakes';
@@ -96,7 +97,11 @@ describe('the errors of a request', () => {
       http.get(`${HTTP_URL}/api/devices`, () =>
         HttpResponse.json(
           { error: 'busy' },
-          { status: 409, statusText: 'Conflict', headers: { 'X-Wire-Us': '120' } },
+          {
+            status: 409,
+            statusText: 'Conflict',
+            headers: { 'Server-Timing': 'server;dur=0.300, fieldbus;dur=0.120' },
+          },
         ),
       ),
     );
@@ -111,7 +116,7 @@ describe('the errors of a request', () => {
     });
     const { response } = error as HttpError;
     expect(response.bodyUsed).toBe(false);
-    expect(response.headers.get('X-Wire-Us')).toBe('120');
+    expect(fieldbusTimeMs(response)).toBe(0.12);
   });
 
   it('takes the text of the body, or the status text, when the body has no error', async () => {

@@ -183,7 +183,7 @@ importers:
         specifier: 15.0.0
         version: 15.0.0
       swagger-typescript-api:
-        specifier: ^13.7.2
+        specifier: 13.12.2
         version: 13.12.2(react@19.2.7)
       tsx:
         specifier: ^4.23.15

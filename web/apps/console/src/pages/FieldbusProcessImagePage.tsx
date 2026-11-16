@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { type ProcessImageObject, formatHex } from '@synapticon/motion-master-client';
+import { type ProcessImageObject, objectAddressText } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import PageHeader from '../components/PageHeader';
 import ProcessImageExplainer from '../components/ProcessImageExplainer';
@@ -121,7 +121,7 @@ function MappingTable({
                     {deviceName(e.slavePosition)}
                   </td>
                   <td className="px-4 py-2 font-mono whitespace-nowrap">
-                    {formatHex(e.index)}:{formatHex(e.subindex, 2, false)}
+                    {objectAddressText(e.index, e.subindex)}
                   </td>
                   <td className="px-4 py-2 text-grey-800 truncate" title={e.name}>
                     {e.name || <span className="text-grey-400">—</span>}

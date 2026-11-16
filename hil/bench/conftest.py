@@ -163,12 +163,11 @@ def packet_capture(bench: Bench, request: pytest.FixtureRequest) -> Iterator[Non
     finally:
         try:
             stopped = bench.client.stop_capture()
-            remote = {"path": stopped["path"]}
-            data = bench.client.call("getUserCacheFile", path=remote).content
+            data = bench.client.read_user_cache_file(stopped["path"])
             CAPTURES.mkdir(exist_ok=True)
             path = CAPTURES / f"{name}.pcap"
             path.write_bytes(data)
-            bench.client.call("deleteUserCacheFile", path=remote)
+            bench.client.remove_user_cache_file(stopped["path"])
             log.info("%s: saved %s, %d bytes", name, path.relative_to(CAPTURES.parent), len(data))
         except Exception:
             log.exception("%s: the packet capture failed", name)

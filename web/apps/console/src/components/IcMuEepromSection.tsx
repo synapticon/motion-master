@@ -6,7 +6,11 @@ import {
   type IcMuEepromByte,
   type IcMuI2CTransfer,
   type IcMuKeyRegister,
-  type ProcedureSnapshot,
+  formatHex,
+  formatHexBytes,
+  parseInteger,
+  stepValue,
+  procedureFailure,
 } from '@synapticon/motion-master-client';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadText } from '../utils/download';
@@ -23,33 +27,17 @@ const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 type Target = 'eeprom' | 'ic-pvl' | 'ic-pvl-status';
 
-function hex(n: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(2, '0')}`;
-}
-
-function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
-}
-
-// The error of the first failed step, which says why a run failed.
-function failure(snapshot: ProcedureSnapshot | undefined): string | undefined {
-  return snapshot?.steps.find((step) => step.status === 'failed')?.error ?? undefined;
-}
-
 // A byte typed as decimal or with a 0x prefix, or nothing for anything else.
 function parseByte(text: string): number | undefined {
-  const trimmed = text.trim();
-  const value = /^0x[0-9a-f]{1,2}$/i.test(trimmed)
-    ? parseInt(trimmed.slice(2), 16)
-    : /^\d{1,3}$/.test(trimmed)
-      ? Number(trimmed)
-      : NaN;
-  return Number.isInteger(value) && value >= 0 && value <= 255 ? value : undefined;
+  return parseInteger(text, { min: 0, max: 255 }) ?? undefined;
 }
 
 function eepromCsv(bytes: IcMuEepromByte[]): string {
   return (
-    ['address,value', ...bytes.map((b) => `${hex(b.address)},${hex(b.value)}`)].join('\n') + '\n'
+    [
+      'address,value',
+      ...bytes.map((b) => `${formatHex(b.address, 2)},${formatHex(b.value, 2)}`),
+    ].join('\n') + '\n'
   );
 }
 
@@ -297,8 +285,8 @@ export default function IcMuEepromSection({
         </button>
         {transfer && (
           <span className="text-sm font-mono h-[38px] flex items-center">
-            {transfer.target} {hex(transfer.registerAddress)} {transfer.write ? '←' : '='}{' '}
-            {hex(transfer.value)}
+            {transfer.target} {formatHex(transfer.registerAddress, 2)} {transfer.write ? '←' : '='}{' '}
+            {formatHex(transfer.value, 2)}
           </span>
         )}
       </div>
@@ -315,7 +303,7 @@ export default function IcMuEepromSection({
         </p>
       ))}
       {[keyRegisters, exported, i2c, restoreFile, erase].map(({ snapshot }, index) => {
-        const message = snapshot?.status === 'failed' ? failure(snapshot) : undefined;
+        const message = snapshot?.status === 'failed' ? procedureFailure(snapshot) : undefined;
         return message ? (
           <p key={index} className="text-xs text-status-bad">
             {message}
@@ -351,13 +339,13 @@ export default function IcMuEepromSection({
             <tbody>
               {registers.map((r) => (
                 <tr key={r.ramAddress} className="border-b border-grey-100 last:border-0">
-                  <td className="py-1.5 pr-3 font-mono">{hex(r.ramAddress)}</td>
-                  <td className="py-1.5 pr-3 font-mono">{hex(r.eepromAddress)}</td>
+                  <td className="py-1.5 pr-3 font-mono">{formatHex(r.ramAddress, 2)}</td>
+                  <td className="py-1.5 pr-3 font-mono">{formatHex(r.eepromAddress, 2)}</td>
                   <td className="py-1.5 pr-3 font-mono">
                     {r.register?.layout ?? 'not in the map'}
                   </td>
                   <td className="py-1.5 pr-3 font-mono">
-                    {hex(r.value)} ({r.value})
+                    {formatHex(r.value, 2)} ({r.value})
                   </td>
                 </tr>
               ))}
@@ -387,11 +375,8 @@ export default function IcMuEepromSection({
           <div className="font-mono text-xs leading-5">
             {Array.from({ length: Math.ceil(exportBytes.length / 16) }, (_, row) => (
               <div key={row}>
-                <span className="text-grey-500">{hex(row * 16)} </span>
-                {exportBytes
-                  .slice(row * 16, row * 16 + 16)
-                  .map((b) => b.value.toString(16).toUpperCase().padStart(2, '0'))
-                  .join(' ')}
+                <span className="text-grey-500">{formatHex(row * 16, 2)} </span>
+                {formatHexBytes(exportBytes.slice(row * 16, row * 16 + 16).map((b) => b.value))}
               </div>
             ))}
           </div>

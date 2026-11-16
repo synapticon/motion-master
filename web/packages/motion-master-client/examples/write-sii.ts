@@ -12,7 +12,7 @@
 //     pnpm example examples/write-sii.ts --file files/sii.bin
 
 import { readFileSync } from 'node:fs';
-import { HttpError, MotionMasterClient, run } from '@synapticon/motion-master-client';
+import { MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { cli, integer } from './options';
 
 async function main(): Promise<void> {
@@ -30,16 +30,7 @@ async function main(): Promise<void> {
   await client.init();
   await client.ensureScanned();
 
-  // The generated writeSii encodes the body as JSON, so the program sends the raw bytes itself.
-  const url = `${client.api.baseUrl}/api/devices/${slave}/sii`;
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: new Uint8Array(image),
-  });
-  if (!response.ok) {
-    throw await HttpError.from(new Request(url, { method: 'PUT' }), response);
-  }
+  await client.writeSii(slave, new Uint8Array(image));
   console.log(`wrote ${image.length} byte(s) of SII to slave ${slave}. Power cycle it to apply.`);
 }
 

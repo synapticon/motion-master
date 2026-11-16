@@ -723,6 +723,9 @@ paths:
       responses:
         "200":
           description: Driver initialised successfully
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -777,8 +780,8 @@ paths:
         "200":
           description: Whether a scan is required, and the facts it is decided from
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -851,6 +854,9 @@ paths:
       responses:
         "200":
           description: Scan successful; returns the number of slaves found (0 for an empty or unpowered bus)
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -876,6 +882,9 @@ paths:
       responses:
         "200":
           description: Reset completed successfully
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1335,8 +1344,8 @@ paths:
         "200":
           description: Parameter list ordered by (index, subindex)
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1377,8 +1386,8 @@ paths:
         "200":
           description: Refreshed parameter list ordered by (index, subindex)
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1479,8 +1488,8 @@ paths:
         "200":
           description: The parameter (value plus metadata)
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1568,8 +1577,8 @@ paths:
         "200":
           description: The updated parameter (value plus metadata)
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1622,8 +1631,8 @@ paths:
         "200":
           description: Raw register bytes
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1701,8 +1710,8 @@ paths:
         "200":
           description: Write completed successfully
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1754,8 +1763,8 @@ paths:
         "200":
           description: Decoded watchdog configuration
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1815,8 +1824,8 @@ paths:
         "200":
           description: Watchdog configuration actually programmed (timeout rounded to the tick base)
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1869,8 +1878,8 @@ paths:
         "200":
           description: The device's grouped PDO mapping
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1882,8 +1891,8 @@ paths:
         "409":
           description: The device's mailbox is not active (it is in INIT or BOOT)
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
         "500":
           $ref: "#/components/responses/DriverError"
     put:
@@ -1930,8 +1939,8 @@ paths:
         "200":
           description: The device's grouped read-back mapping, verified equal to the request
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1945,8 +1954,8 @@ paths:
             The write was rejected — most often because the device is not in PREOP, but also a
             malformed mapping the device aborted, or a read-back that did not match the request
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/cia402:
@@ -1970,8 +1979,8 @@ paths:
         "200":
           description: The device's CiA402 control snapshot
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -1983,8 +1992,8 @@ paths:
         "409":
           description: The device is not a CiA402 drive, or its object dictionary is not enumerated
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
   /api/devices/{slavePosition}/operation-modes:
     get:
       summary: List a device's operation modes
@@ -2011,8 +2020,8 @@ paths:
         "200":
           description: The device's operation modes
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2024,8 +2033,8 @@ paths:
         "409":
           description: The device is not a CiA402 drive, or its object dictionary is not enumerated
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
   /api/devices/{slavePosition}/cia402/mode:
     post:
       summary: Set a device's CiA402 operation mode
@@ -2074,6 +2083,9 @@ paths:
       responses:
         "200":
           description: The post-write CiA402 control snapshot
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2137,6 +2149,9 @@ paths:
       responses:
         "200":
           description: The CiA402 control snapshot after arriving
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2189,6 +2204,9 @@ paths:
       responses:
         "200":
           description: The post-command CiA402 control snapshot
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2240,6 +2258,9 @@ paths:
       responses:
         "204":
           description: The setpoint was written
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
         "400":
           description: slavePosition is invalid, the body is malformed, or the target kind is unknown
         "404":
@@ -2280,6 +2301,9 @@ paths:
       responses:
         "200":
           description: The target was written
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2490,6 +2514,9 @@ paths:
       responses:
         "200":
           description: The encoder records and the controller sources
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Encoders" }
@@ -2524,6 +2551,9 @@ paths:
       responses:
         "200":
           description: The brake's configuration and current state
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BrakeState" }
@@ -2597,8 +2627,8 @@ paths:
         "200":
           description: The decoded recording
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HrdRecording" }
@@ -2662,8 +2692,8 @@ paths:
         "200":
           description: The brake state read back after the command
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BrakeState" }
@@ -2702,8 +2732,8 @@ paths:
         "200":
           description: The brake state read back after the command
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BrakeState" }
@@ -2753,8 +2783,8 @@ paths:
         "200":
           description: Raw object bytes from the device
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2831,8 +2861,8 @@ paths:
         "200":
           description: Download completed successfully
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2875,8 +2905,8 @@ paths:
         "200":
           description: The files the device reported, in the order it reported them
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2917,8 +2947,8 @@ paths:
         "200":
           description: The decoded file
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2954,6 +2984,9 @@ paths:
       responses:
         "200":
           description: The decoded file
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2989,6 +3022,9 @@ paths:
       responses:
         "200":
           description: The decoded file
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3026,6 +3062,9 @@ paths:
       responses:
         "200":
           description: The file, row by row
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3056,8 +3095,8 @@ paths:
         "200":
           description: The descriptors
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3103,8 +3142,8 @@ paths:
         "200":
           description: The verdict, compatible or not
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3161,8 +3200,8 @@ paths:
         "200":
           description: Raw file bytes from the device
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/octet-stream:
               schema:
@@ -3214,8 +3253,8 @@ paths:
         "200":
           description: File written successfully
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3272,8 +3311,8 @@ paths:
         "200":
           description: The file is gone
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3331,8 +3370,8 @@ paths:
         "200":
           description: Parsed SII structure, or the raw EEPROM image
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3390,8 +3429,8 @@ paths:
         "200":
           description: SII image written successfully
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3686,6 +3725,14 @@ paths:
         reports `waitsForState`.
 
 
+        **The process image gives a value a name, a size and an offset, and nothing more.**
+        Each variable of `processImage` therefore carries `devicePosition`, the device whose
+        window holds it, counted from 1 in bus order; `object`, its `index` and `subindex`
+        from the PDOs of that device; and its name split at the first dot into `scope`, the
+        label a tool gave the device, and `signal`. `devicePosition`, `object` and `scope`
+        are null where the document does not say.
+
+
         Every enumeration is spelled out beside its value — `cmd` 5 with `cmdName` `FPWR`,
         transitions as `IP`/`PS`/`SO` — and every payload carries its hex beside its byte
         count, because the reader of this JSON is a person rather than a master.
@@ -3706,9 +3753,6 @@ paths:
       responses:
         "200":
           description: The parsed ENI
-          headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -3784,12 +3828,13 @@ paths:
           application/xml:
             schema:
               type: string
+              format: binary
+              description: >
+                The document as it is in its file, because an ESI may declare an encoding other
+                than UTF-8.
       responses:
         "200":
           description: The parsed ESI — every device with its assembled entry table
-          headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -3823,8 +3868,8 @@ paths:
         "200":
           description: Decoded ESC diagnostics for each queried device
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3879,8 +3924,8 @@ paths:
         "200":
           description: Decoded DC sync status for each queried device
           headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4192,6 +4237,9 @@ paths:
       responses:
         "200":
           description: AL state snapshot for each queried device
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4306,6 +4354,9 @@ paths:
             Transition command completed and the settled state of each targeted device
             was read back. `ok` is true only when every device reached the target state
             within the timeout; otherwise inspect `devices` to see which fell short and why.
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4454,6 +4505,9 @@ paths:
             Transition command completed and the settled state of each targeted device
             was read back. `ok` is true only when every device reached the target state
             within the timeout; otherwise inspect `devices` to see which fell short and why.
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4593,6 +4647,9 @@ paths:
             The restart ran and the settled state of each targeted device after its last step
             was read back. `ok` is true only when every device reached `target`; otherwise
             `step` says where the restart stopped and `devices` which device fell short and why.
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -5274,6 +5331,8 @@ paths:
         "200":
           description: The ENI document
           headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
             X-Eni-Warnings:
               description: Number of parts that could not be read; each is logged
               schema:
@@ -5525,9 +5584,6 @@ paths:
       responses:
         "200":
           description: The cache root and its files.
-          headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -5569,9 +5625,6 @@ paths:
       responses:
         "200":
           description: The file's contents.
-          headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
           content:
             application/octet-stream:
               schema:
@@ -5597,9 +5650,6 @@ paths:
       responses:
         "200":
           description: The file was written.
-          headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -5628,9 +5678,6 @@ paths:
       responses:
         "204":
           description: The file or directory was removed.
-          headers:
-            X-Wire-Us:
-              $ref: "#/components/headers/WireTime"
         "400":
           description: The path is invalid, or the removal failed.
         "404":
@@ -5648,7 +5695,7 @@ components:
       required:
         [state, statusword, controlword, operationMode, modeName, targetPosition,
          targetVelocity, targetTorque, actualPosition, actualVelocity, actualTorque,
-         errorDescription]
+         errorDescription, activeTarget]
       properties:
         state:
           type: string
@@ -5732,6 +5779,28 @@ components:
             holds one. A SOMANET drive keeps it in 0x203F:01 and reports an empty string while
             there is no fault. `null` when the drive has no such object or the read failed.
           example: CyclicHb
+        activeTarget:
+          type: object
+          nullable: true
+          description: >-
+            The target that the active operation mode acts on: its kind, which
+            `POST /api/devices/{slavePosition}/cia402/target` takes, and its object. Position,
+            0x607A, in profile position and cyclic synchronous position; velocity, 0x60FF, in
+            profile velocity and cyclic synchronous velocity; torque, 0x6071, in profile torque and
+            the cyclic synchronous torque modes. `null` in a mode with no linear target: no mode,
+            homing, velocity (vl) and interpolated position.
+          required: [kind, index, subindex]
+          properties:
+            kind:
+              type: string
+              enum: [position, velocity, torque]
+              example: velocity
+            index:
+              type: integer
+              example: 24831
+            subindex:
+              type: integer
+              example: 0
     OperationModes:
       type: object
       description: >-
@@ -7856,6 +7925,60 @@ components:
             `controller-auto-tuning` only, velocity tuning only, when `full` is false: the
             bandwidth of the closed velocity loop, in mHz.
           example: 5000
+        startFrequencyMilliHz:
+          type: integer
+          minimum: 100
+          maximum: 1000000
+          description: >
+            `system-identification` and `plant-identification` only, and required for them: where
+            the chirp begins, in mHz. It must not be above `targetFrequencyMilliHz`, because the
+            sweep runs upwards.
+          example: 1000
+        targetFrequencyMilliHz:
+          type: integer
+          minimum: 100
+          maximum: 1000000
+          description: >
+            `system-identification` and `plant-identification` only, and required for them: where
+            the chirp ends, in mHz.
+          example: 100000
+        targetAmplitudePermil:
+          type: integer
+          minimum: 0
+          maximum: 4294967295
+          description: >
+            `system-identification` and `plant-identification` only, and required for them: the
+            peak excitation, in per mille of the rated torque. The logarithmic chirp starts at half
+            of it and rises to it, and the linear chirp holds it. Neither the server nor the drive
+            checks it, because it is a torque command, so choose it for the machine.
+          example: 100
+        transitionTimeMs:
+          type: integer
+          minimum: 1000
+          maximum: 20000
+          description: >
+            `system-identification` and `plant-identification` only, and required for them: how
+            long the sweep takes. `plant-identification` has a lower maximum, because the recording
+            adds time around the sweep. Its descriptor gives the maximum.
+          example: 5000
+        signalType:
+          type: string
+          enum: [logarithmic, linear]
+          default: logarithmic
+          description: >
+            `system-identification` and `plant-identification` only: logarithmic sweeps the
+            frequency logarithmically and raises the amplitude with it, and linear sweeps the
+            frequency linearly at a constant amplitude.
+          example: logarithmic
+        start:
+          type: string
+          enum: [none, immediately, after-hrd-stream-start]
+          default: none
+          description: >
+            `system-identification` only: whether the run arms the chirp, and on what trigger.
+            `none` configures the drive and excites nothing. `plant-identification` arms the chirp
+            itself.
+          example: none
     OutputStageResult:
       type: object
       required: [slavePosition, index, subindex, staged, error]
@@ -7886,7 +8009,7 @@ components:
           example: ""
     SyncManagerConfig:
       type: object
-      required: [index, physicalStart, length, flags, type]
+      required: [index, physicalStart, length, flags, type, typeName]
       properties:
         index:
           type: integer
@@ -7910,11 +8033,18 @@ components:
           type: integer
           description: "0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs"
           example: 3
+        typeName:
+          type: string
+          nullable: true
+          description: >-
+            The name of `type` (ETG.2010 Table 11): Unused, Mailbox Out, Mailbox In, Outputs,
+            Inputs, Dynamic outputs or Dynamic inputs. `null` for a value it does not define.
+          example: Outputs
     FmmuConfig:
       type: object
       required:
         [index, logicalStart, length, logicalStartBit, logicalEndBit,
-         physicalStart, physicalStartBit, type, active]
+         physicalStart, physicalStartBit, type, typeName, active]
       properties:
         index:
           type: integer
@@ -7948,6 +8078,16 @@ components:
           type: integer
           description: "ESC FMMU type: 1 read (inputs/TxPDO), 2 write (outputs/RxPDO)"
           example: 2
+        typeName:
+          type: string
+          nullable: true
+          description: >-
+            What the FMMU maps: Unused, Inputs (bit 0 of the type register, read accesses), Outputs
+            (bit 1, write accesses), or Inputs and outputs. An FMMU whose `physicalStart` lies in
+            the sync manager registers (0x0800 to 0x087F) is Mailbox state: it maps the status of a
+            mailbox into the logical address space, which is not process data. `null` for a type
+            the register does not define.
+          example: Outputs
         active:
           type: boolean
           description: Whether the FMMU is active
@@ -8015,8 +8155,8 @@ components:
         mailbox:
           type: object
           required:
-            [writeLength, writeOffset, readLength, readOffset, protocols, coeDetails,
-             foeDetails, eoeDetails, soeDetails]
+            [writeLength, writeOffset, readLength, readOffset, protocols, protocolNames,
+             coeDetails, coeDetailNames, foeDetails, eoeDetails, soeDetails]
           properties:
             writeLength:
               type: integer
@@ -8038,15 +8178,27 @@ components:
               type: integer
               description: >-
                 Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE,
-                0x10 SoE, 0x20 VoE) — decoded by the client
+                0x10 SoE, 0x20 VoE), which `protocolNames` names
               example: 14
+            protocolNames:
+              type: array
+              items: { type: string, enum: [AoE, EoE, CoE, FoE, SoE, VoE] }
+              description: The protocols whose bits are set in `protocols`, in the order of their bits.
+              example: [EoE, CoE, FoE]
             coeDetails:
               type: integer
               description: >-
-                CoE detail bits, advertised in EEPROM — decoded by the client (0x01 SDO,
-                0x02 SDO-Info, 0x04 PDO-Assign, 0x08 PDO-Config, 0x10 Upload, 0x20 Complete-Access).
+                CoE detail bits, advertised in EEPROM (0x01 SDO, 0x02 SDO Info, 0x04 PDO Assign,
+                0x08 PDO Config, 0x10 Upload, 0x20 Complete Access), which `coeDetailNames` names.
                 A hint, not a guarantee.
               example: 15
+            coeDetailNames:
+              type: array
+              items:
+                type: string
+                enum: [SDO, SDO Info, PDO Assign, PDO Config, Upload, Complete Access]
+              description: The CoE features whose bits are set in `coeDetails`, in the order of their bits.
+              example: [SDO, SDO Info, PDO Assign, PDO Config]
             foeDetails:
               type: integer
               description: FoE detail byte (bit 0 = enabled).
@@ -8412,7 +8564,9 @@ components:
       example: 12345
     DeviceParameter:
       type: object
-      required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, origin, value, syncState]
+      required:
+        [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, readable,
+         writable, rxPdoMappable, txPdoMappable, pdoMappingObject, origin, value, syncState]
       properties:
         index:
           type: integer
@@ -8444,8 +8598,32 @@ components:
           example: 32
         access:
           type: integer
-          description: ObjAccess bitfield (read/write per AL state)
+          description: >-
+            ObjAccess bitfield (ETG.1000.6): bits 0-2 read in PREOP, SAFEOP and OP, bits 3-5 write in
+            those states, bit 6 RxPDO mappable, bit 7 TxPDO mappable, bit 8 backup, bit 9 settings
           example: 7
+        readable:
+          type: boolean
+          description: Readable in some AL state (`access` bits 0-2).
+          example: true
+        writable:
+          type: boolean
+          description: Writable in some AL state (`access` bits 3-5).
+          example: false
+        rxPdoMappable:
+          type: boolean
+          description: Can be mapped into an RxPDO, the outputs (`access` bit 6).
+          example: false
+        txPdoMappable:
+          type: boolean
+          description: Can be mapped into a TxPDO, the inputs (`access` bit 7).
+          example: true
+        pdoMappingObject:
+          type: boolean
+          description: >-
+            A PDO mapping object of CiA 301, 0x1600-0x17FF or 0x1A00-0x1BFF. Its entries describe
+            the layout of the process image, not a value of the drive.
+          example: false
         origin:
           type: string
           enum: [objectDictionary, sii]
@@ -8577,6 +8755,11 @@ components:
               type: integer
               description: "Bitfield: 0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10 SoE, 0x20 VoE"
               example: 12
+            mailboxProtocolNames:
+              type: array
+              items: { type: string, enum: [AoE, EoE, CoE, FoE, SoE, VoE] }
+              description: The protocols whose bits are set in `mailboxProtocol`, in the order of their bits.
+              example: [CoE, FoE]
             size:
               type: integer
               description: "Raw EEPROM-size word (ETG: size in KiBit − 1)"
@@ -8599,6 +8782,12 @@ components:
                 orderIdx: { type: integer }
                 nameIdx: { type: integer }
                 coeDetails: { type: integer }
+                coeDetailNames:
+                  type: array
+                  items:
+                    type: string
+                    enum: [SDO, SDO Info, PDO Assign, PDO Config, Upload, Complete Access]
+                  description: The CoE features whose bits are set in `coeDetails`, in the order of their bits.
                 foeDetails: { type: integer }
                 eoeDetails: { type: integer }
                 soeChannels: { type: integer }
@@ -8610,8 +8799,19 @@ components:
                 physicalMemoryAddress: { type: integer }
             fmmus:
               type: array
-              description: FMMU defaults (category 40), one raw 16-bit word per entry
+              description: >-
+                FMMU usage (category 40), one byte per FMMU (ETG.2010 Table 9): 0x00 or 0xFF unused,
+                0x01 outputs, 0x02 inputs, 0x03 sync manager status, 0x04 dynamic outputs, 0x05
+                dynamic inputs
               items: { type: integer }
+            fmmuUsageNames:
+              type: array
+              description: >-
+                The name of each entry of `fmmus`, by position: Unused, Outputs, Inputs, SyncM
+                status, Dynamic outputs or Dynamic inputs, or `null` for a reserved value. This is
+                the usage byte of the SII, which numbers the other way round from the type register
+                of the ESC.
+              items: { type: string, nullable: true }
             syncManagers:
               type: array
               description: Sync-Manager defaults (category 41)
@@ -8626,6 +8826,12 @@ components:
                   syncManagerType:
                     type: integer
                     description: "1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs"
+                  syncManagerTypeName:
+                    type: string
+                    nullable: true
+                    description: >-
+                      The name of `syncManagerType` (ETG.2010 Table 11), or `null` for a value it
+                      does not define.
             rxPdos:
               type: array
               description: Default RxPDOs (category 51)
@@ -9436,32 +9642,37 @@ components:
           type: number
           format: double
   headers:
-    WireTime:
+    ServerTiming:
       description: >
-        Server-measured duration of the on-device operation in microseconds — the control-plane
-        lock acquire plus the mailbox/ESC wire transaction(s). For a single-transaction endpoint
-        (one SDO/FoE/register/EEPROM access) this is essentially the pure wire round-trip; for a
-        multi-transaction one (object-dictionary enumeration, bulk value read, PDO-mapping
-        read/write) it is the total across all of the operation's transactions. Either way it is
-        far smaller than the end-to-end HTTP round-trip a cross-origin browser client observes
-        (which additionally includes TLS and transport overhead), letting the client attribute the
-        device cost to the device and the remainder to the browser/transport. Present on **both**
-        the success and the failure response (driver-error 500, or 409 where applicable) of every
-        endpoint that performs a fieldbus operation — a failed operation still consumed device time
-        (e.g. an SDO read that waits out the mailbox timeout). CORS-exposed
-        (`Access-Control-Expose-Headers`) so a cross-origin client may read it.
+        The times that the server measured, as the standard `Server-Timing` header, each in
+        milliseconds with three decimals: `server;dur=7.100, fieldbus;dur=6.200`.
 
 
-        A few endpoints touch no device at all and report their **server-side** work on this same
-        header, because the client-side split it enables is the same one: the `/api/user-cache`
-        routes report the filesystem operation (path validation plus the read/write/list/remove),
-        so a slow large-file transfer is visibly transport cost rather than a slow server. Read the
-        figure as "time the server spent doing the work", of which a fieldbus transaction is the
-        usual — but not the only — case.
+        - `server` is on **every** response. It is the time from the complete request to the
+          response: the wait for a free worker, the handler, and the wait for the loop thread. It
+          does not include the upload of the body.
+
+        - `fieldbus` is on each response that lists this header, the endpoints that run a fieldbus
+          operation. It is the time of that operation: the wait for the control-plane lock and
+          every mailbox or ESC transaction, with their retries. For one SDO, FoE, register or
+          EEPROM access it is close to the transaction itself. For an operation of many
+          transactions, such as an object dictionary enumeration, a scan or an AL state walk, it is
+          the total. It is on a failure too, because a failed operation still spent its time, such
+          as an SDO read that waits out the mailbox timeout.
+
+
+        The round trip that a client measures is longer than `server`. The difference is the
+        network, TLS and the client. `server` minus `fieldbus` is the work of the server outside the
+        fieldbus, such as building the JSON.
+
+
+        A browser records the header per request in its Performance API
+        (`PerformanceResourceTiming.serverTiming`), which every response opens to the allowed
+        origin with `Timing-Allow-Origin`. The header is also CORS-exposed
+        (`Access-Control-Expose-Headers`), so a client that holds the response reads it there.
       schema:
-        type: integer
-        minimum: 0
-      example: 5000
+        type: string
+      example: server;dur=7.100, fieldbus;dur=6.200
   responses:
     DriverError:
       description: Fieldbus driver returned an error
@@ -9478,11 +9689,11 @@ components:
     DriverErrorTimed:
       description: >
         Fieldbus driver returned an error. Same body as `DriverError`, but carries the
-        `X-Wire-Us` timing header because the failing endpoint performed (or attempted) a
-        fieldbus transaction — the failure still consumed wire time.
+        `Server-Timing` header because the failing endpoint performed (or attempted) a fieldbus
+        transaction — the failure still consumed wire time.
       headers:
-        X-Wire-Us:
-          $ref: "#/components/headers/WireTime"
+        Server-Timing:
+          $ref: "#/components/headers/ServerTiming"
       content:
         application/json:
           schema:

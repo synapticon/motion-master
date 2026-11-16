@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiErrorMessage, type Cia402Status } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  Cia402,
+  formatHex,
+  OperationMode,
+  type Cia402Status,
+  type Cia402TargetKind,
+} from '@synapticon/motion-master-client';
 import type { DeviceBarContext } from './DeviceBar';
 import { LocateFixed, RefreshCw } from 'lucide-react';
 import {
@@ -14,56 +21,44 @@ import { useConnection } from '../contexts/ConnectionContext';
 import { cia402StatusKey } from '../hooks/useCia402Status';
 
 // The three cyclic synchronous modes (0x6061), the only modes this row shows for. A profile mode
-// has a profile run (#37); homing and the vendor modes have no linear target to drag.
-const CSP = 8;
-const CSV = 9;
-const CST = 10;
+// has a profile run (#37); homing and the vendor modes have no linear target to drag. The server
+// says which target a mode acts on, in the status's activeTarget.
+const CYCLIC_MODES: number[] = [
+  OperationMode.CYCLIC_SYNC_POSITION,
+  OperationMode.CYCLIC_SYNC_VELOCITY,
+  OperationMode.CYCLIC_SYNC_TORQUE,
+];
 
-type Quantity = 'position' | 'velocity' | 'torque';
+type Quantity = Cia402TargetKind;
 
-// What the row controls in one mode: which target it writes, which status field it follows, and
-// what its slider is. CST and CSV share one shape, a throttle centred on 0 and bounded by a single
+// What the row controls for one kind of target: which status field it follows, and what its slider
+// is. CST and CSV share one shape, a throttle centred on 0 and bounded by a single
 // limit object, which springs back to 0 on release. CSP has a position slider: one revolution of
 // the position encoder either side of a centre taken from the actual position, and the handle
 // stays where it is released.
 type SliderKind = 'throttle' | 'position';
 
-interface ModeControl {
-  quantity: Quantity;
-  label: string;
+interface KindControl {
   target: (s: Cia402Status) => number | null;
   slider: SliderKind;
 }
 
-const MODE_CONTROL: Record<number, ModeControl> = {
-  [CST]: {
-    quantity: 'torque',
-    label: 'Target torque (0x6071)',
-    target: (s) => s.targetTorque,
-    slider: 'throttle',
-  },
-  [CSV]: {
-    quantity: 'velocity',
-    label: 'Target velocity (0x60FF)',
-    target: (s) => s.targetVelocity,
-    slider: 'throttle',
-  },
-  [CSP]: {
-    quantity: 'position',
-    label: 'Target position (0x607A)',
-    target: (s) => s.targetPosition,
-    slider: 'position',
-  },
+const KIND_CONTROL: Record<Quantity, KindControl> = {
+  torque: { target: (s) => s.targetTorque, slider: 'throttle' },
+  velocity: { target: (s) => s.targetVelocity, slider: 'throttle' },
+  position: { target: (s) => s.targetPosition, slider: 'position' },
 };
 
 // The limit object of each mode. CST and CSV have one, which bounds the slider at ± its value.
 // CSP has the two subindices of the software position limit.
+const POSITION_MIN = Cia402.SOFTWARE_POSITION_LIMIT_SUB_INDEX_001;
+const POSITION_MAX = Cia402.SOFTWARE_POSITION_LIMIT_SUB_INDEX_002;
 const LIMIT_OBJECTS: Record<Quantity, { index: number; subindex: number; name: string }[]> = {
-  torque: [{ index: 0x6072, subindex: 0, name: 'Max torque (0x6072)' }],
-  velocity: [{ index: 0x6080, subindex: 0, name: 'Max motor speed (0x6080)' }],
+  torque: [{ ...Cia402.MAX_TORQUE, name: 'Max torque (0x6072)' }],
+  velocity: [{ ...Cia402.MAX_MOTOR_SPEED, name: 'Max motor speed (0x6080)' }],
   position: [
-    { index: 0x607d, subindex: 1, name: 'Software position limit, min (0x607D:01)' },
-    { index: 0x607d, subindex: 2, name: 'Software position limit, max (0x607D:02)' },
+    { ...POSITION_MIN, name: 'Software position limit, min (0x607D:01)' },
+    { ...POSITION_MAX, name: 'Software position limit, max (0x607D:02)' },
   ],
 };
 
@@ -114,35 +109,38 @@ export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
   const { api } = useConnection();
   const queryClient = useQueryClient();
 
-  const control = status ? MODE_CONTROL[status.operationMode] : undefined;
+  const active = status && CYCLIC_MODES.includes(status.operationMode) ? status.activeTarget : null;
+  const control = active
+    ? { ...KIND_CONTROL[active.kind], label: `Target ${active.kind} (${formatHex(active.index)})` }
+    : undefined;
   const show = isCia402 && status !== undefined && control !== undefined;
-  const quantity = control?.quantity ?? 'position';
+  const quantity = active?.kind ?? 'position';
   const limitObjects = LIMIT_OBJECTS[quantity];
 
   // Every mode's limit hook is called every render, because hooks cannot be conditional. Only the
   // active mode's queries are enabled; the other two sit idle at no cost.
   const torqueLimit = useLimit(
     slavePosition,
-    0x6072,
-    0,
+    Cia402.MAX_TORQUE.index,
+    Cia402.MAX_TORQUE.subindex,
     show && mailboxActive && quantity === 'torque',
   );
   const velocityLimit = useLimit(
     slavePosition,
-    0x6080,
-    0,
+    Cia402.MAX_MOTOR_SPEED.index,
+    Cia402.MAX_MOTOR_SPEED.subindex,
     show && mailboxActive && quantity === 'velocity',
   );
   const positionMin = useLimit(
     slavePosition,
-    0x607d,
-    1,
+    POSITION_MIN.index,
+    POSITION_MIN.subindex,
     show && mailboxActive && quantity === 'position',
   );
   const positionMax = useLimit(
     slavePosition,
-    0x607d,
-    2,
+    POSITION_MAX.index,
+    POSITION_MAX.subindex,
     show && mailboxActive && quantity === 'position',
   );
 

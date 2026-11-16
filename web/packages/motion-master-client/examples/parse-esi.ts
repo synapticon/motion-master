@@ -12,13 +12,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import {
-  type EsiParseResult,
-  formatHex,
-  HttpError,
-  MotionMasterClient,
-  run,
-} from '@synapticon/motion-master-client';
+import { formatHex, MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { cli } from './options';
 
 async function main(): Promise<void> {
@@ -31,18 +25,7 @@ async function main(): Promise<void> {
   const args = command.opts<{ output?: string }>();
 
   const client = await MotionMasterClient.fromConfig();
-  // The generated api.parseEsi sends a body it has no formatter for as JSON, so the document would
-  // arrive as a quoted JSON string.
-  const url = `${client.api.baseUrl}/api/esi/parse`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/xml' },
-    body: readFileSync(esi),
-  });
-  if (!response.ok) {
-    throw await HttpError.from(new Request(url, { method: 'POST' }), response);
-  }
-  const result = (await response.json()) as EsiParseResult;
+  const result = await client.parseEsi(readFileSync(esi));
 
   if (args.output) {
     const out = args.output;

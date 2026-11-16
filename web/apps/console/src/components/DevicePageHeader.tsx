@@ -2,15 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import DeviceBar from './DeviceBar';
 import { useConnection } from '../contexts/ConnectionContext';
+import { formatHex } from '@synapticon/motion-master-client';
 
 interface DevicePageHeaderProps {
   slavePosition: number;
   title: string;
   description?: ReactNode;
-}
-
-function hex32(n: number) {
-  return `0x${n.toString(16).toUpperCase().padStart(8, '0')}`;
 }
 
 export default function DevicePageHeader({
@@ -41,14 +38,14 @@ export default function DevicePageHeader({
               {(
                 [
                   { label: 'Name', value: device.name, mono: false },
-                  { label: 'Vendor ID', value: hex32(device.vendorId), mono: true },
+                  { label: 'Vendor ID', value: formatHex(device.vendorId, 8), mono: true },
                   {
                     label: 'Product Code',
-                    value: hex32(device.productCode),
+                    value: formatHex(device.productCode, 8),
                     mono: true,
                     title: device.productName,
                   },
-                  { label: 'Revision', value: hex32(device.revisionNumber), mono: true },
+                  { label: 'Revision', value: formatHex(device.revisionNumber, 8), mono: true },
                   { label: 'Serial', value: String(device.serialNumber), mono: false },
                 ] as { label: string; value: string; mono: boolean; title?: string }[]
               ).map(({ label, value, mono, title }, i) => (

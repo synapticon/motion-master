@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useConnection } from '../contexts/ConnectionContext';
+import { formatHex } from '@synapticon/motion-master-client';
 
 // Matches the shared control height used by every form control on the device pages: this theme's
 // spacing scale is geometric (h-9 = 6rem = 96px!), so it has to be explicit px.
@@ -12,10 +13,6 @@ const FORMAT_LABEL: Record<string, string> = {
   bitField: 'bit field',
   signedHalves: 'two signed 16-bit halves',
 };
-
-function hex2(value: number): string {
-  return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
-}
 
 /**
  * A picker over the Integro internal encoder's register map, which fills the address and length of
@@ -81,7 +78,7 @@ export default function KueblerRegisterPicker({
           ].filter(Boolean);
           return (
             <option key={r.address} value={r.address} disabled={!r.readableInOneCommand}>
-              {hex2(r.address)} — {r.name} ({notes.join(', ')})
+              {formatHex(r.address, 2)} — {r.name} ({notes.join(', ')})
             </option>
           );
         })}

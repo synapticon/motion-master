@@ -28,11 +28,7 @@ def main():
     args = ap.parse_args()
 
     client = MotionMasterClient.from_config()
-    result = client.call(
-        "parseEsi",
-        data=Path(args.esi).read_bytes(),
-        headers={"Content-Type": "application/xml"},
-    ).json()
+    result = client.parse_esi(Path(args.esi).read_bytes())
 
     if args.output:
         out = Path(args.output)

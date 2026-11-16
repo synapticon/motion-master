@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <format>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "comm/esc_names.h"
 
 namespace mm::comm {
 
@@ -365,6 +368,18 @@ std::expected<void, std::string> validateSiiImage(std::span<const uint8_t> buffe
   }
 }
 
+namespace {
+
+// What each FMMU of category 40 is used for, by position, null for a reserved value.
+nlohmann::json fmmuUsageNamesJson(const std::vector<uint8_t>& usages) {
+  nlohmann::json names = nlohmann::json::array();
+  std::transform(usages.begin(), usages.end(), std::back_inserter(names),
+                 [](uint8_t usage) { return nameJson(fmmuUsageName(usage)); });
+  return names;
+}
+
+}  // namespace
+
 void to_json(nlohmann::json& j, const SiiInfo& v) {
   j = nlohmann::json{
       {"pdiControl", v.pdiControl},
@@ -386,6 +401,7 @@ void to_json(nlohmann::json& j, const SiiInfo& v) {
       {"standardSendMailboxOffset", v.standardSendMailboxOffset},
       {"standardSendMailboxSize", v.standardSendMailboxSize},
       {"mailboxProtocol", v.mailboxProtocol},
+      {"mailboxProtocolNames", namesJson(mailboxProtocolNames(v.mailboxProtocol))},
       {"size", v.size},
       {"version", v.version},
   };
@@ -398,6 +414,7 @@ void to_json(nlohmann::json& j, const SiiCategoryGeneral& v) {
       {"orderIdx", v.orderIdx},
       {"nameIdx", v.nameIdx},
       {"coeDetails", v.coeDetails},
+      {"coeDetailNames", namesJson(coeDetailNames(v.coeDetails))},
       {"foeDetails", v.foeDetails},
       {"eoeDetails", v.eoeDetails},
       {"soeChannels", v.soeChannels},
@@ -412,9 +429,13 @@ void to_json(nlohmann::json& j, const SiiCategoryGeneral& v) {
 
 void to_json(nlohmann::json& j, const SiiCategorySyncManagerElement& v) {
   j = nlohmann::json{
-      {"physicalStartAddress", v.physicalStartAddress}, {"length", v.length},
-      {"controlRegister", v.controlRegister},           {"statusRegister", v.statusRegister},
-      {"enableSyncManager", v.enableSyncManager},       {"syncManagerType", v.syncManagerType},
+      {"physicalStartAddress", v.physicalStartAddress},
+      {"length", v.length},
+      {"controlRegister", v.controlRegister},
+      {"statusRegister", v.statusRegister},
+      {"enableSyncManager", v.enableSyncManager},
+      {"syncManagerType", v.syncManagerType},
+      {"syncManagerTypeName", nameJson(syncManagerTypeName(v.syncManagerType))},
   };
 }
 
@@ -452,6 +473,7 @@ void to_json(nlohmann::json& j, const SiiCategorySection& v) {
       {"strings", v.strings},
       {"general", v.general},
       {"fmmus", v.fmmus},
+      {"fmmuUsageNames", fmmuUsageNamesJson(v.fmmus)},
       {"syncManagers", v.syncManagers},
       {"rxPdos", v.rxPdos},
       {"txPdos", v.txPdos},

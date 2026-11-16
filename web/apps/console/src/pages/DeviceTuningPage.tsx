@@ -7,6 +7,10 @@ import {
   type ControllerTuningWrite,
   type ProcedureSnapshot,
   type ProgressStep,
+  objectAddressText,
+  Somanet,
+  stepValue,
+  HttpError,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -38,44 +42,33 @@ interface GainObject {
 // The objects the tuning writes, in the order it writes them.
 const GAINS: Record<Controller, GainObject[]> = {
   position: [
-    { index: 0x2012, subindex: 0x01, label: 'Position loop Kp' },
-    { index: 0x2012, subindex: 0x02, label: 'Position loop Ki' },
-    { index: 0x2012, subindex: 0x03, label: 'Position loop Kd' },
-    { index: 0x2012, subindex: 0x05, label: 'Velocity loop Kp' },
-    { index: 0x2012, subindex: 0x06, label: 'Velocity loop Ki' },
-    { index: 0x2012, subindex: 0x07, label: 'Velocity loop Kd' },
+    { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_KP, label: 'Position loop Kp' },
+    { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_KI, label: 'Position loop Ki' },
+    { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_KD, label: 'Position loop Kd' },
+    { ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_KP, label: 'Velocity loop Kp' },
+    { ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_KI, label: 'Velocity loop Ki' },
+    { ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_KD, label: 'Velocity loop Kd' },
   ],
   velocity: [
-    { index: 0x2011, subindex: 0x01, label: 'Kp' },
-    { index: 0x2011, subindex: 0x02, label: 'Ki' },
-    { index: 0x2011, subindex: 0x03, label: 'Kd' },
+    { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_KP, label: 'Kp' },
+    { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_KI, label: 'Ki' },
+    { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_KD, label: 'Kd' },
   ],
 };
 
 // The limits set-integral-limits writes, in the order it writes them.
 const LIMITS: GainObject[] = [
-  { index: 0x2011, subindex: 0x04, label: 'Velocity controller' },
-  { index: 0x2012, subindex: 0x04, label: 'Position loop' },
-  { index: 0x2012, subindex: 0x08, label: 'Velocity loop of the position controller' },
+  { ...Somanet.VELOCITY_CONTROLLER_CONTROLLER_INTEGRAL_LIMIT, label: 'Velocity controller' },
+  { ...Somanet.POSITION_CONTROLLER_POSITION_LOOP_INTEGRAL_LIMIT, label: 'Position loop' },
+  {
+    ...Somanet.POSITION_CONTROLLER_VELOCITY_LOOP_INTEGRAL_LIMIT,
+    label: 'Velocity loop of the position controller',
+  },
 ];
 
 interface LimitsWrite {
   limits: { object: string; before: number; after: number }[];
   skipped: string[];
-}
-
-function objectName(index: number, subindex: number): string {
-  return `0x${index.toString(16).toUpperCase()}:${subindex.toString(16).toUpperCase().padStart(2, '0')}`;
-}
-
-function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
-}
-
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
-  );
 }
 
 function formatNumber(value: unknown): string {
@@ -117,11 +110,16 @@ export default function DeviceTuningPage() {
       );
       const values = new Map<string, number | 'missing' | string>();
       results.forEach((result, i) => {
-        const key = objectName(objects[i].index, objects[i].subindex);
+        const key = objectAddressText(objects[i].index, objects[i].subindex);
         if (result.status === 'fulfilled') {
           values.set(key, result.value.value as number);
         } else {
-          values.set(key, isNotFound(result.reason) ? 'missing' : apiErrorMessage(result.reason));
+          values.set(
+            key,
+            result.reason instanceof HttpError && result.reason.status === 404
+              ? 'missing'
+              : apiErrorMessage(result.reason),
+          );
         }
       });
       return values;
@@ -183,7 +181,8 @@ export default function DeviceTuningPage() {
     }
   }, [finishedAt, limitsFinishedAt, queryClient, slavePosition]);
 
-  const noPlantModel = isNotFound(plantModelQuery.error);
+  const noPlantModel =
+    plantModelQuery.error instanceof HttpError && plantModelQuery.error.status === 404;
   const elapsedSeconds =
     snapshot?.startedAt && snapshot.finishedAt
       ? ((snapshot.finishedAt - snapshot.startedAt) / 1000).toFixed(1)
@@ -447,7 +446,7 @@ function GainsCard({
             </thead>
             <tbody>
               {GAINS[controller].map((gain) => {
-                const name = objectName(gain.index, gain.subindex);
+                const name = objectAddressText(gain.index, gain.subindex);
                 const value = values?.get(name);
                 return (
                   <tr key={name} className="border-t border-grey-100">
@@ -515,7 +514,7 @@ function LimitsCard({
           </thead>
           <tbody>
             {LIMITS.map((limit) => {
-              const name = objectName(limit.index, limit.subindex);
+              const name = objectAddressText(limit.index, limit.subindex);
               const value = values?.get(name);
               return (
                 <tr key={name} className="border-t border-grey-100">

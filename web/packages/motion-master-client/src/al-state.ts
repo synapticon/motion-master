@@ -13,6 +13,15 @@ export const AlState = {
 
 export type AlState = (typeof AlState)[keyof typeof AlState];
 
+/**
+ * Whether a device in this AL state answers mailbox requests, such as an SDO: true in PREOP,
+ * SAFEOP and OP, also with the error bit set. INIT has no mailbox, and the mailbox of BOOT carries
+ * FoE only. The server decides the same way.
+ */
+export function mailboxActive(alState: number): boolean {
+  return alState === AlState.PREOP || alState === AlState.SAFEOP || alState === AlState.OP;
+}
+
 /** The name of an AL state value, such as `PREOP` for 2. */
 export function alStateName(value: number): keyof typeof AlState | undefined {
   return (Object.keys(AlState) as (keyof typeof AlState)[]).find((name) => AlState[name] === value);

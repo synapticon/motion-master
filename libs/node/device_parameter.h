@@ -393,6 +393,22 @@ struct DeviceParameter {
   /// Write-only objects (e.g. a command/trigger sub-object) report no read bits; an SDO upload of
   /// one aborts, so a bulk value refresh should skip them rather than log a spurious failure.
   bool isReadable() const { return (access & 0x07) != 0; }
+
+  /// @brief Whether the object is writable in any state (ObjAccess write bits 3-5).
+  bool isWritable() const { return (access & 0x38) != 0; }
+
+  /// @brief Whether the object can be mapped into an RxPDO, the outputs (ObjAccess bit 6).
+  bool isRxPdoMappable() const { return (access & 0x40) != 0; }
+
+  /// @brief Whether the object can be mapped into a TxPDO, the inputs (ObjAccess bit 7).
+  bool isTxPdoMappable() const { return (access & 0x80) != 0; }
+
+  /// @brief Whether the object is a PDO mapping object of CiA 301: an RxPDO mapping in
+  ///        0x1600-0x17FF or a TxPDO mapping in 0x1A00-0x1BFF. Its entries describe the layout of
+  ///        the process image, not a value of the drive.
+  bool isPdoMappingObject() const {
+    return (index >= 0x1600 && index <= 0x17FF) || (index >= 0x1A00 && index <= 0x1BFF);
+  }
 };
 
 /// @brief Decodes a raw SDO byte sequence according to an ETG.1020 data type code.

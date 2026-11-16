@@ -6,16 +6,17 @@ import type {
   PortDiagnostics,
 } from '@synapticon/motion-master-client';
 import FilePickerButton from '../components/FilePickerButton';
-import { userCacheUrl } from '../utils/userCache';
+import { downloadBytes } from '../utils/download';
+import { userCacheBasename } from '../utils/userCache';
 import PageHeader from '../components/PageHeader';
 import DiagnosticsExplainer from '../components/DiagnosticsExplainer';
 import SlavePositionBadge from '../components/SlavePositionBadge';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
 import NoEscNotice from '../components/NoEscNotice';
 import { useSupportsEsc } from '../hooks/useSupportsEsc';
-import { apiErrorMessage } from '@synapticon/motion-master-client';
+import { apiErrorMessage, HttpError } from '@synapticon/motion-master-client';
 
 // Trims the float milliseconds (ticks × base, e.g. 100.0) to a tidy string.
 const formatMs = (ms: number): string => Number(ms.toFixed(3)).toString();
@@ -192,7 +193,7 @@ function WatchdogControl({
 }) {
   const { api } = useConnection();
   const queryClient = useQueryClient();
-  const setTiming = useWireTiming();
+  const setTiming = useRequestTiming();
   // null = follow the fetched value; a string = the user is editing.
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -286,8 +287,7 @@ function WatchdogControl({
             >
               {mutation.isPending ? 'Setting…' : 'Set'}
             </button>
-            <WireTiming
-              label="Watchdog"
+            <RequestTiming
               timing={setTiming.timing}
               className="text-xs text-grey-500 font-mono whitespace-nowrap pb-2"
             />
@@ -424,16 +424,11 @@ function SummaryTable({ summary }: { summary: CaptureSummary }) {
   );
 }
 
-// A server that cannot stop a capture early answers 501 to a start: Windows, where a program
-// without a console gets no signal. The page then records for a fixed time instead.
-const isNotImplemented = (err: unknown) =>
-  !!err && typeof err === 'object' && (err as { status?: number }).status === 501;
-
 // The longest a capture of a fixed length may run, the limit of POST /api/captures.
 const TIMED_CAPTURE_MAX_SECONDS = 300;
 
 function CaptureSection() {
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const [seconds, setSeconds] = useState('600');
   const [result, setResult] = useState<{ path: string; summary: CaptureSummary } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -468,7 +463,9 @@ function CaptureSection() {
       setNow(Date.now());
     },
     onError: (err, n) => {
-      if (isNotImplemented(err)) {
+      // A server that cannot stop a capture early answers 501 to a start: Windows, where a program
+      // without a console gets no signal. The page then records for a fixed time instead.
+      if (err instanceof HttpError && err.status === 501) {
         run.mutate(Math.min(n, TIMED_CAPTURE_MAX_SECONDS));
       } else {
         setError(apiErrorMessage(err));
@@ -496,15 +493,7 @@ function CaptureSection() {
   const upload = useMutation({
     mutationFn: async (file: File) => {
       const path = `${CAPTURES_FOLDER}/${file.name}`;
-      const res = await fetch(userCacheUrl(api.baseUrl, path), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: file,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
+      await client.writeUserCacheFile(path, new Uint8Array(await file.arrayBuffer()));
       const summary = await api.getCaptureSummary(file.name).then((r) => r.data);
       return { path: summary.path, summary: summary.summary };
     },
@@ -512,7 +501,7 @@ function CaptureSection() {
       setError(null);
     },
     onSuccess: (data) => setResult(data),
-    onError: (err) => setError(err instanceof Error ? err.message : apiErrorMessage(err)),
+    onError: (err) => setError(apiErrorMessage(err)),
   });
 
   const n = Number(seconds);
@@ -609,9 +598,18 @@ function CaptureSection() {
             <SummaryTable summary={result.summary} />
             <p className="text-xs text-grey-600">
               File: <span className="font-mono">{result.path}</span>{' '}
-              <a className="underline" href={userCacheUrl(api.baseUrl, result.path)} download>
+              <button
+                type="button"
+                className="underline"
+                onClick={() => {
+                  client
+                    .readUserCacheFile(result.path)
+                    .then((bytes) => downloadBytes(bytes, userCacheBasename(result.path)))
+                    .catch((err: unknown) => setError(apiErrorMessage(err)));
+                }}
+              >
                 Download
-              </a>
+              </button>
             </p>
           </div>
         )}
@@ -622,7 +620,7 @@ function CaptureSection() {
 
 export default function FieldbusDiagnosticsPage() {
   const { api } = useConnection();
-  const { timing, measure } = useWireTiming();
+  const { timing, measure } = useRequestTiming();
 
   const supportsEsc = useSupportsEsc();
 
@@ -670,7 +668,7 @@ export default function FieldbusDiagnosticsPage() {
         <DiagnosticsExplainer />
 
         <div className="flex items-center justify-end gap-3">
-          <WireTiming label="Diagnostics" timing={timing} />
+          <RequestTiming timing={timing} />
           <button
             onClick={() => query.refetch()}
             disabled={query.isFetching}

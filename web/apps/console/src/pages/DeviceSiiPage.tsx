@@ -6,7 +6,8 @@ import FilePickerButton from '../components/FilePickerButton';
 import SiiExplainer from '../components/SiiExplainer';
 import SiiView from '../components/SiiView';
 import SiiRawView from '../components/SiiRawView';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
+import { apiErrorMessage } from '@synapticon/motion-master-client';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import { btnOutline } from '../utils/styles';
@@ -16,10 +17,10 @@ import { useSupportsEsc } from '../hooks/useSupportsEsc';
 export default function DeviceSiiPage() {
   const { deviceId } = useParams();
   const slavePosition = Number(deviceId);
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const queryClient = useQueryClient();
   const [showRaw, setShowRaw] = useState(false);
-  const { timing, measure } = useWireTiming();
+  const { timing, measure } = useRequestTiming();
   const [downloading, setDownloading] = useState(false);
   const [writing, setWriting] = useState(false);
   const [writeStatus, setWriteStatus] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -32,26 +33,16 @@ export default function DeviceSiiPage() {
     queryFn: () => measure(() => api.readSii(slavePosition)),
   });
 
-  async function fetchRaw(): Promise<Uint8Array> {
-    const res = await fetch(`${api.baseUrl}/api/devices/${slavePosition}/sii`, {
-      headers: { Accept: 'application/octet-stream' },
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    return new Uint8Array(await res.arrayBuffer());
-  }
-
   const rawQuery = useQuery({
     queryKey: ['sii-raw', slavePosition],
-    queryFn: fetchRaw,
+    queryFn: () => client.readSii(slavePosition, { format: 'bytes' }),
     enabled: showRaw && supportsEsc,
   });
 
   async function handleDownload() {
     setDownloading(true);
     try {
-      const bytes = await fetchRaw();
+      const bytes = await client.readSii(slavePosition, { format: 'bytes' });
       downloadBytes(bytes, `sii-slave-${slavePosition}.bin`);
     } finally {
       setDownloading(false);
@@ -72,15 +63,7 @@ export default function DeviceSiiPage() {
     setWriting(true);
     setWriteStatus(null);
     try {
-      const res = await fetch(`${api.baseUrl}/api/devices/${slavePosition}/sii`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: bytes,
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => null);
-        throw new Error(errBody?.error ?? `HTTP ${res.status}`);
-      }
+      await client.writeSii(slavePosition, bytes);
       setWriteStatus({
         ok: true,
         msg: `Wrote ${bytes.length} bytes from "${file.name}". Power-cycle the device to apply.`,
@@ -89,7 +72,7 @@ export default function DeviceSiiPage() {
       // raw view reflects what is now stored.
       await queryClient.invalidateQueries({ queryKey: ['sii-raw', slavePosition] });
     } catch (err) {
-      setWriteStatus({ ok: false, msg: err instanceof Error ? err.message : 'Write failed.' });
+      setWriteStatus({ ok: false, msg: apiErrorMessage(err, 'Write failed.') });
     } finally {
       setWriting(false);
     }
@@ -149,7 +132,7 @@ export default function DeviceSiiPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {!query.isFetching && <WireTiming label="SII" timing={timing} />}
+            {!query.isFetching && <RequestTiming timing={timing} />}
             <button
               onClick={() => query.refetch()}
               disabled={query.isFetching}

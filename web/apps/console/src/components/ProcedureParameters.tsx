@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import type { ProcedureParameter } from '@synapticon/motion-master-client';
+import {
+  formatBytes,
+  type ProcedureParameter,
+  procedureParameterValue,
+} from '@synapticon/motion-master-client';
 import FilePickerButton from './FilePickerButton';
 
 // One shared control height for every interactive control, matching the device pages: this theme's
@@ -26,16 +30,6 @@ export function readAsBase64(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function formatBytes(count: number): string {
-  if (count < 1024) {
-    return `${count} B`;
-  }
-  if (count < 1024 * 1024) {
-    return `${(count / 1024).toFixed(0)} KB`;
-  }
-  return `${(count / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -65,17 +59,6 @@ export function initialParameterValues(parameters: ProcedureParameter[]): Parame
 }
 
 /** A decimal or `0x`-prefixed hex integer, or null when the text is not one. */
-function parseInteger(text: string): number | null {
-  const token = text.trim();
-  if (token === '') {
-    return null;
-  }
-  const value = /^0[xX][0-9a-fA-F]+$/.test(token)
-    ? Number.parseInt(token.slice(2), 16)
-    : Number(token);
-  return Number.isInteger(value) ? value : null;
-}
-
 /**
  * Turns the fields into a request body, or says what is wrong with them.
  *
@@ -93,92 +76,30 @@ export function parseParameterValues(
   const body: Record<string, unknown> = {};
   const errors: Record<string, string> = {};
   let missing = false;
-
   for (const parameter of parameters) {
     const raw = values[parameter.name];
-
-    if (parameter.type === 'boolean') {
-      body[parameter.name] = raw === true;
+    // A checkbox holds a boolean, every other field text. A file is base64 by the time it is in
+    // its field.
+    const text =
+      parameter.type === 'boolean' ? String(raw === true) : typeof raw === 'string' ? raw : '';
+    let value: unknown;
+    try {
+      value = procedureParameterValue(parameter, text);
+    } catch (err) {
+      errors[parameter.name] = err instanceof Error ? err.message : String(err);
       continue;
     }
-
-    if (parameter.type === 'stringArray') {
-      // Deliberately ahead of the empty check: for a list, empty is an answer rather than an
-      // absence. "Skip nothing" has to reach the server as [], not as an omitted field that the
-      // server then fills with its own default — which is the opposite of what was asked for.
-      const text = typeof raw === 'string' ? raw : '';
-      body[parameter.name] = text
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-      continue;
-    }
-
-    const text = typeof raw === 'string' ? raw.trim() : '';
-    if (text === '') {
-      // Only a required field blocks: an optional one left empty means "use the default", which is
-      // exactly what omitting it from the body does.
+    // An empty field leaves the parameter out, so the server uses its default. Only a required one
+    // blocks. An empty list is [], which is an answer: "skip nothing" must reach the server as [],
+    // not as an omitted field that the server fills with its own default.
+    if (value === undefined) {
       if (parameter.required) {
         missing = true;
       }
       continue;
     }
-
-    if (parameter.type === 'byteArray') {
-      const length = parameter.length ?? 0;
-      const tokens = text.split(/[\s,]+/).filter((t) => t.length > 0);
-      if (tokens.length !== length) {
-        errors[parameter.name] = `Enter exactly ${length} bytes (got ${tokens.length}).`;
-        continue;
-      }
-      const bytes: number[] = [];
-      for (const token of tokens) {
-        const value = parseInteger(token);
-        if (value === null || value < 0 || value > 255) {
-          errors[parameter.name] = `"${token}" is not a byte value (0-255, or 0x00-0xFF).`;
-          break;
-        }
-        bytes.push(value);
-      }
-      if (bytes.length === length) {
-        body[parameter.name] = bytes;
-      }
-      continue;
-    }
-
-    // Already base64 by the time it is in the field, and free text needs no interpretation, so both
-    // go on the wire as they stand.
-    if (parameter.type === 'file' || parameter.type === 'string') {
-      body[parameter.name] = text;
-      continue;
-    }
-
-    if (parameter.type === 'enum') {
-      // The option's own value goes on the wire, not the string the select carried it as — a
-      // parameter whose options are numbers must not turn into strings on the way out.
-      const option = (parameter.options ?? []).find((o) => String(o.value) === text);
-      if (option === undefined) {
-        errors[parameter.name] = 'Pick one of the listed values.';
-        continue;
-      }
-      body[parameter.name] = option.value;
-      continue;
-    }
-
-    const value = parseInteger(text);
-    if (value === null) {
-      errors[parameter.name] = 'Enter a whole number, decimal or 0x hex.';
-      continue;
-    }
-    const min = parameter.minValue;
-    const max = parameter.maxValue;
-    if ((min !== undefined && value < min) || (max !== undefined && value > max)) {
-      errors[parameter.name] = `Enter a value between ${min} and ${max}.`;
-      continue;
-    }
     body[parameter.name] = value;
   }
-
   const ok = !missing && Object.keys(errors).length === 0;
   return { body: ok ? body : null, errors, missing };
 }

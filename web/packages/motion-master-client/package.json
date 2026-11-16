@@ -22,7 +22,7 @@
   },
   "sideEffects": false,
   "scripts": {
-    "generate": "swagger-typescript-api generate -p ../../../apps/motion_master/swagger.yml -o ./src/generated -n api.ts --modular",
+    "generate": "swagger-typescript-api generate -p ../../../apps/motion_master/swagger.yml -o ./src/generated -n api.ts --modular -t ./templates --custom-config ./templates/config.mjs",
     "build": "tsc -p tsconfig.build.json && node scripts/fix-esm-imports.mjs",
     "example": "tsx --tsconfig examples/tsconfig.json",
     "typecheck:examples": "tsc -p examples/tsconfig.json",
@@ -46,7 +46,7 @@
     "@types/debug": "4.1.13",
     "@types/node": "^22.20.5",
     "commander": "15.0.0",
-    "swagger-typescript-api": "^13.7.2",
+    "swagger-typescript-api": "13.12.2",
     "tsx": "^4.23.15",
     "typescript": "^5.6.0"
   },

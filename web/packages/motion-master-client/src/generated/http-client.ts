@@ -60,6 +60,8 @@ export enum ContentType {
   FormData = "multipart/form-data",
   UrlEncoded = "application/x-www-form-urlencoded",
   Text = "text/plain",
+  Xml = "application/xml",
+  Binary = "application/octet-stream",
 }
 
 export class HttpClient<SecurityDataType = unknown> {
@@ -131,6 +133,8 @@ export class HttpClient<SecurityDataType = unknown> {
       input !== null && typeof input !== "string"
         ? JSON.stringify(input)
         : input,
+    [ContentType.Xml]: (input: any) => input,
+    [ContentType.Binary]: (input: any) => input,
     [ContentType.FormData]: (input: any) => {
       if (input instanceof FormData) {
         return input;

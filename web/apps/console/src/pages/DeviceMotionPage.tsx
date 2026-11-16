@@ -8,7 +8,7 @@ import { useMonitoringSocket, type SampleRows } from '../contexts/MonitoringSock
 import { useConnection } from '../contexts/ConnectionContext';
 import { cia402StatusKey, useCia402Status } from '../hooks/useCia402Status';
 import { useOperationModes } from '../hooks/useOperationModes';
-import { apiErrorMessage } from '@synapticon/motion-master-client';
+import { apiErrorMessage, Cia402, HttpError } from '@synapticon/motion-master-client';
 
 // One shared control height for every interactive control — selects, inputs, and buttons — so a
 // button and its neighbouring input/select are always the exact same height, and standalone
@@ -78,19 +78,13 @@ interface SeriesDef {
   index: number;
 }
 const SERIES: SeriesDef[] = [
-  { quantity: 'position', role: 'target', index: 0x607a },
-  { quantity: 'position', role: 'actual', index: 0x6064 },
-  { quantity: 'velocity', role: 'target', index: 0x60ff },
-  { quantity: 'velocity', role: 'actual', index: 0x606c },
-  { quantity: 'torque', role: 'target', index: 0x6071 },
-  { quantity: 'torque', role: 'actual', index: 0x6077 },
+  { quantity: 'position', role: 'target', index: Cia402.TARGET_POSITION.index },
+  { quantity: 'position', role: 'actual', index: Cia402.POSITION_ACTUAL_VALUE.index },
+  { quantity: 'velocity', role: 'target', index: Cia402.TARGET_VELOCITY.index },
+  { quantity: 'velocity', role: 'actual', index: Cia402.VELOCITY_ACTUAL_VALUE.index },
+  { quantity: 'torque', role: 'target', index: Cia402.TARGET_TORQUE.index },
+  { quantity: 'torque', role: 'actual', index: Cia402.TORQUE_ACTUAL_VALUE.index },
 ];
-
-// A thrown request carries the HTTP status; 409 from createMonitoring means the topic already
-// exists (so we reuse it rather than surfacing an error).
-function isConflict(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (err as { status?: number }).status === 409;
-}
 
 export default function DeviceMotionPage() {
   const { deviceId } = useParams();
@@ -426,7 +420,8 @@ function MotionGraph({
           parameters,
         });
       } catch (err) {
-        if (!isConflict(err)) {
+        // 409 means the topic exists already, so the page reuses it.
+        if (!(err instanceof HttpError && err.status === 409)) {
           if (!cancelled) {
             setCreateError(apiErrorMessage(err));
           }

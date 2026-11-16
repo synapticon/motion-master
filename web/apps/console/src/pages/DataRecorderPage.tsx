@@ -4,11 +4,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type uPlot from 'uplot';
 import {
   apiErrorMessage,
-  parseMmpd,
+  deviceParameterText,
+  formatBytes,
   isPlottableDataType,
-  formatHex,
   type MmpdFile,
   type MmpdPdoEntry,
+  objectAddressText,
+  parseMmpd,
 } from '@synapticon/motion-master-client';
 import Checkbox from '../components/Checkbox';
 import PageHeader from '../components/PageHeader';
@@ -18,13 +20,7 @@ import CycleStatsBar from '../components/CycleStatsBar';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection } from '../contexts/ConnectionContext';
 import { cycleStats } from '../utils/cycleStats';
-import { formatBytes } from '../utils/format';
-import {
-  DUMPS_FOLDER,
-  encodeUserCachePath,
-  userCacheBasename,
-  userCacheUrl,
-} from '../utils/userCache';
+import { DUMPS_FOLDER, userCacheBasename } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 
 // One PDO object flattened across devices, for the series picker.
@@ -52,8 +48,6 @@ function flatten(file: MmpdFile): FlatEntry[] {
   return out;
 }
 
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
 // One object's checkbox row in the series picker (direction is conveyed by the column it sits in).
 function EntryCheckbox({
   item,
@@ -72,9 +66,7 @@ function EntryCheckbox({
       title={item.plottable ? item.entry.name : 'Not a plottable numeric type'}
     >
       <Checkbox disabled={!item.plottable} checked={checked} onChange={onToggle} />
-      <span className="font-mono">
-        {formatHex(item.entry.index, 4)}:{formatHex(item.entry.subindex, 2, false)}
-      </span>
+      <span className="font-mono">{objectAddressText(item.entry.index, item.entry.subindex)}</span>
       <span className="truncate">{item.entry.name}</span>
     </label>
   );
@@ -96,11 +88,11 @@ export default function DataRecorderPage() {
   // the Storage → User Cache page uses — one shared key, so a delete on either page refreshes both.
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => api.listUserCacheFiles(),
+    queryFn: () => client.listUserCacheFiles(),
   });
   const dumps = useMemo(
     () =>
-      (cacheQuery.data?.data?.files ?? [])
+      (cacheQuery.data?.files ?? [])
         .filter((f) => f.path.startsWith(`${DUMPS_FOLDER}/`))
         // Newest first: the dump you just took is the one you want to open.
         .sort((a, b) => b.modifiedMs - a.modifiedMs),
@@ -114,7 +106,7 @@ export default function DataRecorderPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (path: string) => api.deleteUserCacheFile(encodeUserCachePath(path)),
+    mutationFn: (path: string) => client.removeUserCacheFile(path),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['user-cache'] }),
   });
 
@@ -138,7 +130,7 @@ export default function DataRecorderPage() {
       const parsed = parseMmpd(bytes);
       load(parsed, `Recorder ring — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
-      setViewError(errorText(e));
+      setViewError(apiErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -150,14 +142,10 @@ export default function DataRecorderPage() {
     setBusyPath(path);
     setViewError(null);
     try {
-      const res = await fetch(userCacheUrl(api.baseUrl, path));
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const parsed = parseMmpd(await res.arrayBuffer());
+      const parsed = parseMmpd(await client.readUserCacheFile(path));
       load(parsed, `${userCacheBasename(path)} — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
-      setViewError(errorText(e));
+      setViewError(apiErrorMessage(e));
     } finally {
       setBusyPath(null);
     }
@@ -181,7 +169,7 @@ export default function DataRecorderPage() {
       const parsed = parseMmpd(await picked.arrayBuffer());
       load(parsed, `${picked.name} — ${parsed.rowCount.toLocaleString()} cycles`);
     } catch (e) {
-      setViewError(errorText(e));
+      setViewError(apiErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -210,9 +198,8 @@ export default function DataRecorderPage() {
     const ys = chosen.map((e) => file.decodeSeries(e.entry));
     return {
       data: [xs, ...ys] as uPlot.AlignedData,
-      labels: chosen.map(
-        (e) =>
-          `${e.devicePosition}·${formatHex(e.entry.index, 4)}:${formatHex(e.entry.subindex, 2, false)}`,
+      labels: chosen.map((e) =>
+        deviceParameterText(e.devicePosition, e.entry.index, e.entry.subindex),
       ),
       titles: chosen.map((e) => e.entry.name || ''),
     };

@@ -3,7 +3,14 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-generator';
 import { Download, Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react';
 import type uPlot from 'uplot';
-import type { DeviceParameter, Monitoring } from '@synapticon/motion-master-client';
+import {
+  type DeviceParameter,
+  type Monitoring,
+  objectAddressText,
+  deviceParameterText,
+  MonitoringRecording,
+  parseInteger,
+} from '@synapticon/motion-master-client';
 import CycleStatsBar from '../components/CycleStatsBar';
 import MonitoringChart from '../components/MonitoringChart';
 import PageHeader from '../components/PageHeader';
@@ -22,31 +29,8 @@ const btnCls =
 const btnGhostCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 
-function parseHexOrDec(s: string): number | null {
-  const t = s.trim();
-  if (/^0[xX][0-9a-fA-F]+$/.test(t)) {
-    return parseInt(t.slice(2), 16);
-  }
-  if (/^[0-9]+$/.test(t)) {
-    return parseInt(t, 10);
-  }
-  return null;
-}
-
-function toHex(n: number, pad: number): string {
-  return `0x${n.toString(16).toUpperCase().padStart(pad, '0')}`;
-}
-
 function paramKey(pos: number, index: number, subindex: number): string {
   return `${pos}:${index}:${subindex}`;
-}
-
-// CiA301 PDO mapping objects: RxPDO 0x1600–0x17FF, TxPDO 0x1A00–0x1BFF. Their sub-entries encode
-// the process-image layout (which object is mapped where), not a measurable value — monitoring
-// them is meaningless, and in a long list they're easily mistaken for real parameters. The picker
-// shows them greyed-out and unselectable rather than offering them as a pick.
-function isPdoMappingObject(p: DeviceParameter): boolean {
-  return (p.index >= 0x1600 && p.index <= 0x17ff) || (p.index >= 0x1a00 && p.index <= 0x1bff);
 }
 
 // A memorable, URL-safe identifier + Title-cased label for a new monitoring, e.g. topic
@@ -224,10 +208,7 @@ function MonitoringCard({
     [params],
   );
   const labels = useMemo(
-    () =>
-      params.map(
-        (p) => `${p.devicePosition}·${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`,
-      ),
+    () => params.map((p) => deviceParameterText(p.devicePosition, p.index, p.subindex)),
     // The memo is keyed on sig, the content of params, so a refetch that returns equal params keeps
     // the chart.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -291,12 +272,11 @@ function MonitoringCard({
     statsAtRef.current = 0;
   }
 
-  // Export the retained buffer as CSV. First column is the cycle time in microseconds elapsed since
-  // the first sample; the rest are one per parameter, headed by the object address in hex
-  // (index:subindex, e.g. 0x6040:00), one row per collected cycle in capture order. A value is blank
-  // while its device was not exchanging (null on the wire).
+  // Export the retained buffer as CSV, in the layout of MonitoringRecording.toCsv(): the seconds from
+  // the first retained sample, the timestamp of the cycle in epoch microseconds, then one column per
+  // parameter. A value is blank while its device was not exchanging (null on the wire).
   //
-  // The time column is what makes the file diagnostic rather than merely a list of values. These
+  // The time columns are what make the file diagnostic rather than merely a list of values. These
   // timestamps come from the cycle the sample was recorded in, and the stream is lossless — so a
   // stall in the *live* stream still exports as an unbroken series, and a reader with only the values
   // cannot tell a smooth capture from one that froze and caught up. Gaps and duplicated timestamps
@@ -304,20 +284,13 @@ function MonitoringCard({
   function downloadCsv() {
     const xs = xsRef.current;
     const ys = ysRef.current;
-    const rowCount = xs.length;
-    if (rowCount === 0) {
+    const t0 = t0Ref.current;
+    if (xs.length === 0 || t0 === null) {
       return;
     }
-    const header = [
-      't_us',
-      ...params.map((p) => `${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`),
-    ];
-    const lines = [header.join(',')];
-    for (let r = 0; r < rowCount; r++) {
-      const values = ys.map((series) => (series[r] == null ? '' : String(series[r])));
-      lines.push([String(xs[r]), ...values].join(','));
-    }
-    downloadText(lines.join('\n'), `${monitoring.topic}.csv`, 'text/csv');
+    const rows = xs.map((x, r) => [t0 + x, ...ys.map((series) => series[r])]);
+    const recording = new MonitoringRecording(monitoring.topic, params, rows);
+    downloadText(recording.toCsv(), `${monitoring.topic}.csv`, 'text/csv');
   }
 
   return (
@@ -368,7 +341,7 @@ function MonitoringCard({
                   <SlavePositionBadge position={p.devicePosition} />
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">
-                  {toHex(p.index, 4)}:{toHex(p.subindex, 2).slice(2)}
+                  {objectAddressText(p.index, p.subindex)}
                 </td>
                 <td className="px-3 py-2 text-grey-700">{name ?? '—'}</td>
                 <td className="px-3 py-2">
@@ -417,7 +390,7 @@ function MonitoringCard({
             className={`${btnGhostCls} inline-flex items-center gap-1.5`}
             onClick={downloadCsv}
             disabled={count === 0}
-            title="Download the retained samples as CSV — first column is the cycle time in microseconds since the first sample, then one column per parameter (header is the object address in hex, e.g. 0x6040:00), one row per collected cycle."
+            title="Download the retained samples as CSV: the seconds since the first sample, the cycle timestamp in epoch microseconds, then one column per parameter, named by its device and its object, such as 1:STATUSWORD. One row per collected cycle."
           >
             <Download className="h-4 w-4" />
             CSV
@@ -530,9 +503,9 @@ function CreateMonitoringForm({
     }
     const parameters: number[][] = [];
     for (const [i, r] of rows.entries()) {
-      const pos = parseHexOrDec(r.devicePosition);
-      const index = parseHexOrDec(r.index);
-      const subindex = parseHexOrDec(r.subindex);
+      const pos = parseInteger(r.devicePosition, { min: 0 });
+      const index = parseInteger(r.index, { min: 0 });
+      const subindex = parseInteger(r.subindex, { min: 0 });
       if (pos === null || index === null || subindex === null) {
         setError(`Parameter ${i + 1}: device, index and subindex are required`);
         return;
@@ -686,7 +659,7 @@ function ParamRow({
   onChange: (patch: Partial<ParamRowState>) => void;
   onRemove?: () => void;
 }) {
-  const pos = parseHexOrDec(row.devicePosition);
+  const pos = parseInteger(row.devicePosition, { min: 0 });
   const deviceParams = pos !== null ? (paramsByDevice.get(pos) ?? []) : [];
 
   return (
@@ -713,10 +686,12 @@ function ParamRow({
           <ParameterPicker
             className="w-[32rem]"
             params={deviceParams}
-            selectedIndex={parseHexOrDec(row.index)}
-            selectedSubindex={parseHexOrDec(row.subindex)}
+            selectedIndex={parseInteger(row.index, { min: 0 })}
+            selectedSubindex={parseInteger(row.subindex, { min: 0 })}
             onSelect={(p) => onChange({ index: String(p.index), subindex: String(p.subindex) })}
-            isDisabled={isPdoMappingObject}
+            // A PDO mapping object describes the layout of the process image, not a measurable
+            // value, so monitoring it is meaningless. It shows greyed out rather than as a pick.
+            isDisabled={(p) => p.pdoMappingObject}
             disabledHint="PDO mapping"
           />
         </div>

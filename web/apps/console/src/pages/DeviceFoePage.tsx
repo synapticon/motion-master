@@ -6,14 +6,15 @@ import DevicePageHeader from '../components/DevicePageHeader';
 import HardwareDescriptionView from '../components/HardwareDescriptionView';
 import HexViewer from '../components/HexViewer';
 import IntegroVariantView from '../components/IntegroVariantView';
+import { RequestTiming, requestTiming, type RequestTimingValue } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import {
   apiErrorMessage,
-  formatHex,
-  wireTimeMs,
   type DeviceFile,
+  formatHex,
   type HardwareDescription,
+  HttpError,
   type IcMuRestoreFile,
   type IntegroVariant,
 } from '@synapticon/motion-master-client';
@@ -54,38 +55,6 @@ const SOMANET_FILES: { name: string; write: boolean }[] = [
 
 const SOMANET_READ_FILES = SOMANET_FILES.map((f) => f.name);
 const SOMANET_WRITE_FILES = SOMANET_FILES.filter((f) => f.write).map((f) => f.name);
-
-// Human-readable elapsed time for a FoE transfer — sub-second in ms, otherwise seconds.
-function formatDuration(ms: number): string {
-  // Sub-10 ms (a fast FoE wire transaction) keeps one decimal so it doesn't round to "0 ms".
-  if (ms < 10) {
-    return `${ms.toFixed(1)} ms`;
-  }
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
-}
-
-// Timing readout for a FoE transfer: the server-measured wire transaction (from the response's
-// `X-Wire-Us` header) and the browser-observed HTTP round-trip. The gap between them is
-// cross-origin/transport overhead, not device time — the same split shown on the Parameters page.
-function FoeTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: number }) {
-  return (
-    <>
-      <span
-        className="cursor-help"
-        title="FoE — server-measured duration of the FoE transfer itself (control-plane lock acquire + the FoE mailbox round-trip over EtherCAT), reported by the backend. This is the true cost of talking to the device."
-      >
-        FoE {formatDuration(wireMs)}
-      </span>
-      <span
-        className="text-grey-400 cursor-help"
-        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the FoE time plus cross-origin/TLS and transport overhead, so it is normally much larger than the FoE figure and is not device time."
-      >
-        {' · round-trip '}
-        {formatDuration(roundTripMs)}
-      </span>
-    </>
-  );
-}
 
 function decodeUtf8(bytes: Uint8Array): string | null {
   try {
@@ -141,7 +110,7 @@ function SomanetFileLinks({
 
 export default function DeviceFoePage() {
   const { deviceId } = useParams();
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const slavePosition = Number(deviceId);
 
   const devicesQuery = useQuery({
@@ -155,11 +124,9 @@ export default function DeviceFoePage() {
 
   const [filename, setFilename] = useState('');
   const [reading, setReading] = useState(false);
-  // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
-  // server-measured FoE transfer (`X-Wire-Us` header). Showing both attributes the wire cost to
-  // the device and the rest to browser/transport overhead.
-  const [readMs, setReadMs] = useState<number | null>(null);
-  const [readWireMs, setReadWireMs] = useState<number | null>(null);
+  // The times of the last read: the round trip that the browser measured, and the server and fieldbus
+  // times from Server-Timing.
+  const [readTiming, setReadTiming] = useState<RequestTimingValue | null>(null);
   const [result, setResult] = useState<Uint8Array | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'bytes' | 'text' | 'json'>('bytes');
@@ -172,8 +139,7 @@ export default function DeviceFoePage() {
   const [writeFilename, setWriteFilename] = useState('');
   const [writeBytes, setWriteBytes] = useState<Uint8Array | null>(null);
   const [writing, setWriting] = useState(false);
-  const [writeMs, setWriteMs] = useState<number | null>(null);
-  const [writeWireMs, setWriteWireMs] = useState<number | null>(null);
+  const [writeTiming, setWriteTiming] = useState<RequestTimingValue | null>(null);
   const [writeOk, setWriteOk] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
 
@@ -181,23 +147,25 @@ export default function DeviceFoePage() {
   const [unlockOk, setUnlockOk] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
-  // Read raw bytes for an arbitrary FoE filename, throwing on a non-OK response. `wireMs` is the
-  // server-measured FoE transfer time (from the `X-Wire-Us` header), null if the header is absent.
-  // A failed transfer still consumed wire time and the backend attaches the header to the error, so
-  // the thrown Error carries `wireMs` for the caller to surface the same timing as on success.
-  async function readRaw(name: string): Promise<{ bytes: Uint8Array; wireMs: number | null }> {
-    const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeURIComponent(name)}`;
-    const response = await fetch(url);
-    const wireMs = wireTimeMs(response);
-    if (!response.ok) {
-      const json = await response.json().catch(() => null);
-      const e = new Error(json?.error ?? `HTTP ${response.status}`) as Error & {
-        wireMs: number | null;
-      };
-      e.wireMs = wireMs;
+  // Read raw bytes for an arbitrary FoE filename, with the times of the request. A failed transfer
+  // still spent its time and the server sends Server-Timing with the error, so the thrown Error
+  // carries `timing` for the caller to show the same times as on success.
+  async function readRaw(name: string): Promise<{ bytes: Uint8Array; timing: RequestTimingValue }> {
+    const start = performance.now();
+    let response: Response;
+    try {
+      // The generated call, because the page shows the times from the response.
+      response = await client.api.foeReadFile(slavePosition, encodeURIComponent(name));
+    } catch (err) {
+      if (!(err instanceof HttpError)) {
+        throw err;
+      }
+      const e = new Error(err.reason) as Error & { timing: RequestTimingValue };
+      e.timing = requestTiming(err.response, start);
       throw e;
     }
-    return { bytes: new Uint8Array(await response.arrayBuffer()), wireMs };
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return { bytes, timing: requestTiming(response, start) };
   }
 
   async function handleRead(name: string = filename) {
@@ -208,20 +176,16 @@ export default function DeviceFoePage() {
     setReading(true);
     setResult(null);
     setError(null);
-    setReadMs(null);
-    setReadWireMs(null);
-    const start = performance.now();
+    setReadTiming(null);
     try {
-      const { bytes, wireMs } = await readRaw(name);
-      setReadMs(performance.now() - start);
-      setReadWireMs(wireMs);
+      const { bytes, timing } = await readRaw(name);
+      setReadTiming(timing);
       setResult(bytes);
       setView('bytes');
     } catch (err) {
-      // Surface the wire time on failure too — readRaw attaches it to the thrown Error.
-      setReadMs(performance.now() - start);
-      if (err && typeof err === 'object' && 'wireMs' in err) {
-        setReadWireMs((err as { wireMs: number | null }).wireMs);
+      // Show the times on failure too — readRaw attaches them to the thrown Error.
+      if (err && typeof err === 'object' && 'timing' in err) {
+        setReadTiming((err as { timing: RequestTimingValue }).timing);
       }
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -312,29 +276,31 @@ export default function DeviceFoePage() {
     setWriting(true);
     setWriteOk(false);
     setWriteError(null);
-    setWriteMs(null);
-    setWriteWireMs(null);
+    setWriteTiming(null);
     const start = performance.now();
     try {
-      const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeURIComponent(writeFilename)}`;
-      const response = await fetch(url, {
-        method: 'PUT',
-        body: new Blob([writeBytes as BlobPart]),
-      });
-      // Record timing as soon as the fetch resolves, before the ok-check, so a failed write shows
-      // the same wire time as a successful one (the backend attaches X-Wire-Us to the error too).
-      setWriteMs(performance.now() - start);
-      setWriteWireMs(wireTimeMs(response));
-      if (!response.ok) {
-        const json = await response.json().catch(() => null);
-        throw new Error(json?.error ?? `HTTP ${response.status}`);
+      let response: Response;
+      try {
+        response = await client.api.foeWriteFile(
+          slavePosition,
+          encodeURIComponent(writeFilename),
+          writeBytes,
+        );
+      } catch (err) {
+        // A failed write shows the same times as a successful one: the server sends Server-Timing
+        // with the error too.
+        if (err instanceof HttpError) {
+          setWriteTiming(requestTiming(err.response, start));
+        }
+        throw err;
       }
+      setWriteTiming(requestTiming(response, start));
       setWriteOk(true);
       if (isSomanet && files) {
         void handleList();
       }
     } catch (err) {
-      setWriteError(err instanceof Error ? err.message : 'Unknown error');
+      setWriteError(apiErrorMessage(err));
     } finally {
       setWriting(false);
       // The write consumes the unlock — the drive re-locks afterwards.
@@ -355,7 +321,7 @@ export default function DeviceFoePage() {
     setRemoving(name);
     setListError(null);
     try {
-      await api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
+      await client.removeFile(slavePosition, name);
       await handleList();
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Unknown error');
@@ -417,11 +383,7 @@ export default function DeviceFoePage() {
                 {reading ? 'Reading…' : 'Read'}
               </button>
               {error && <p className="text-xs text-status-bad font-mono">{error}</p>}
-              {error && readMs !== null && readWireMs !== null && (
-                <p className="text-xs text-grey-500 font-mono">
-                  <FoeTiming wireMs={readWireMs} roundTripMs={readMs} />
-                </p>
-              )}
+              {error && readTiming && <RequestTiming timing={readTiming} />}
             </div>
           </section>
 
@@ -487,23 +449,16 @@ export default function DeviceFoePage() {
                 {writing ? 'Writing…' : 'Write'}
               </button>
               {writeError && <p className="text-xs text-status-bad font-mono">{writeError}</p>}
-              {writeError && writeMs !== null && writeWireMs !== null && (
-                <p className="text-xs text-grey-500 font-mono">
-                  <FoeTiming wireMs={writeWireMs} roundTripMs={writeMs} />
-                </p>
-              )}
+              {writeError && writeTiming && <RequestTiming timing={writeTiming} />}
               {writeOk && (
                 <p className="text-xs text-status-good font-mono">
                   Wrote {writeBytes?.length.toLocaleString() ?? 0} byte(s) to {writeFilename}
-                  {writeMs !== null &&
-                    (writeWireMs !== null ? (
-                      <>
-                        {' '}
-                        — <FoeTiming wireMs={writeWireMs} roundTripMs={writeMs} />
-                      </>
-                    ) : (
-                      ` in ${formatDuration(writeMs)}`
-                    ))}
+                  {writeTiming && (
+                    <>
+                      {' '}
+                      — <RequestTiming timing={writeTiming} className="" />
+                    </>
+                  )}
                   .
                 </p>
               )}
@@ -591,15 +546,12 @@ export default function DeviceFoePage() {
               <p className="eyebrow">Result</p>
               <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
                 {result.length.toLocaleString()} bytes
-                {readMs !== null &&
-                  (readWireMs !== null ? (
-                    <>
-                      {' '}
-                      · <FoeTiming wireMs={readWireMs} roundTripMs={readMs} />
-                    </>
-                  ) : (
-                    ` · read in ${formatDuration(readMs)}`
-                  ))}
+                {readTiming && (
+                  <>
+                    {' '}
+                    · <RequestTiming timing={readTiming} className="" />
+                  </>
+                )}
               </span>
               <button onClick={() => downloadBytes(result, filename)} className={btnCls}>
                 Download
@@ -700,7 +652,7 @@ function IcMuRestoreFileView({ file }: { file: IcMuRestoreFile }) {
  * compatibility check will read. Any other filename renders nothing.
  */
 function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array }) {
-  const { api } = useConnection();
+  const { client } = useConnection();
   const kind =
     filename === '.hardware_description'
       ? 'hardware-description'
@@ -715,23 +667,14 @@ function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array 
     enabled: kind !== null,
     staleTime: Infinity,
     retry: false,
-    queryFn: async () => {
-      // Posted as raw bytes rather than through the generated client, which JSON-encodes its body.
-      const response = await fetch(`${api.baseUrl}/api/${kind}/parse`, {
-        method: 'POST',
-        headers: {
-          'Content-Type':
-            kind === 'hardware-description' ? 'text/plain' : 'application/octet-stream',
-        },
-        // Copied so the buffer is definitely an ArrayBuffer rather than a shared one, which is what
-        // fetch accepts as a body. Both files are a few hundred bytes.
-        body: bytes.slice(),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? `HTTP ${response.status}`);
+    queryFn: async (): Promise<HardwareDescription | IntegroVariant | IcMuRestoreFile> => {
+      if (kind === 'hardware-description') {
+        return (await client.api.parseHardwareDescription(new TextDecoder().decode(bytes))).data;
       }
-      return (await response.json()) as HardwareDescription | IntegroVariant | IcMuRestoreFile;
+      if (kind === 'integro-variant') {
+        return client.parseIntegroVariant(bytes);
+      }
+      return client.parseIcMuRestoreFile(bytes);
     },
   });
 

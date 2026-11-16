@@ -7,10 +7,39 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 #include "node/cia402_drive_objects.h"
 
 namespace mm::node {
+
+namespace {
+
+// The object that a target of this kind is written to.
+std::pair<uint16_t, uint8_t> targetObject(Cia402TargetKind kind) {
+  switch (kind) {
+    case Cia402TargetKind::kPosition:
+      return {cia402::objects::kTargetPosition.index, cia402::objects::kTargetPosition.subindex};
+    case Cia402TargetKind::kVelocity:
+      return {cia402::objects::kTargetVelocity.index, cia402::objects::kTargetVelocity.subindex};
+    case Cia402TargetKind::kTorque:
+      return {cia402::objects::kTargetTorque.index, cia402::objects::kTargetTorque.subindex};
+  }
+  return {};
+}
+
+// The target that the active mode acts on, or null in a mode with no linear target. A client
+// reads it here, so that it keeps no table of the modes of its own.
+nlohmann::json activeTarget(cia402::OperationMode mode) {
+  const auto kind = targetKindForMode(mode);
+  if (!kind) {
+    return nullptr;
+  }
+  const auto [index, subindex] = targetObject(*kind);
+  return {{"kind", toString(*kind)}, {"index", index}, {"subindex", subindex}};
+}
+
+}  // namespace
 
 void to_json(nlohmann::json& j, const Cia402Status& s) {
   j = nlohmann::json{
@@ -26,6 +55,7 @@ void to_json(nlohmann::json& j, const Cia402Status& s) {
       {"actualVelocity", s.actualVelocity ? nlohmann::json(*s.actualVelocity) : nullptr},
       {"actualTorque", s.actualTorque ? nlohmann::json(*s.actualTorque) : nullptr},
       {"errorDescription", s.errorDescription ? nlohmann::json(*s.errorDescription) : nullptr},
+      {"activeTarget", activeTarget(s.operationMode)},
   };
 }
 

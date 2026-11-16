@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { formatHex } from '@synapticon/motion-master-client';
 
-const hex2 = (b: number) => b.toString(16).padStart(2, '0').toUpperCase();
 const asciiChar = (b: number) => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.');
 const HL = 'bg-syn-red text-white';
 
@@ -30,7 +30,7 @@ export default function HexViewer({ bytes, offsetDigits = 4 }: HexViewerProps) {
       {rows.map((rowStart) => {
         const cells: ReactNode[] = [
           <span key="off" className="text-grey-400">
-            {rowStart.toString(16).padStart(offsetDigits, '0').toUpperCase()}
+            {formatHex(rowStart, offsetDigits, false)}
           </span>,
           '  ',
         ];
@@ -47,7 +47,7 @@ export default function HexViewer({ bytes, offsetDigits = 4 }: HexViewerProps) {
                 onMouseEnter={() => setHovered(idx)}
                 className={`cursor-default ${hovered === idx ? HL : ''}`}
               >
-                {hex2(bytes[idx])}
+                {formatHex(bytes[idx], 2, false)}
               </span>,
             );
           } else {

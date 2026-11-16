@@ -812,8 +812,9 @@ firmware compatibility.
 Multi-subindex objects are read with one CoE Complete Access upload, probed once per device,
 falling back to per-subindex reads. `parameters.useCompleteAccess` (default on) gates it.
 **The advertised mailbox capability bytes are a hint, not a gate** — SOMANET advertises
-`completeAccess=false` while CA works, so the runtime probe is authoritative. They are exposed
-raw on `GET /api/bus-config` and decoded client-side.
+`completeAccess=false` while CA works, so the runtime probe is authoritative. `GET /api/bus-config`
+and the parsed SII send each such number with its names beside it, from `libs/comm/esc_names.h`, so
+a client keeps no table of the bits.
 
 **A record's declared size is not on the wire, so the enumeration probes for it, but only on a
 slave that refuses correctly.** SOMANET firmware answers Get Object Description with the *runtime
@@ -1147,6 +1148,30 @@ A change that adds, renames or removes a helper in one client makes the same cha
 the same commit. A helper that belongs to one language gets a row with the other column empty and
 the reason. A Console function that is not about the UI belongs in the TypeScript client, and then
 under this rule.
+
+**A helper returns the decoded result, never the response.** A caller that needs the response, for
+a header such as `Server-Timing`, calls the generated `client.api.<operationId>`, or
+`client.call(operation_id, …)` in Python, which returns it, and reads a refusal's headers from
+`HttpError.response`. `serverTimeMs()` and `fieldbusTimeMs()` read the times from either. The
+Console does this for each request whose time it shows. A program that wants the times of its
+requests turns on the http log, which writes one line per request with the round trip and the times
+of the server. Each client follows the convention of its platform: `DEBUG=motion-master-client:http`
+in Node.js, and the logger `motion_master_client.http` at DEBUG in Python, which the Python examples
+set with `--verbose`.
+
+**Every response carries `Server-Timing`.** The router adds the metric `server` to every response,
+the time from the complete request to the response. A route that runs a fieldbus operation adds
+`fieldbus`, the time of that operation, with `mm::api::timed` or `mm::api::timedResponse`, on a
+failure too. A route that does not touch the fieldbus answers with `mm::api::respond` and sends no
+`fieldbus`. A new route that talks to a device is timed. In `swagger.yml`, a response that lists the
+`ServerTiming` header carries `fieldbus`.
+
+**Every operation can go through `client.api`.** The generator sends a JSON body as JSON and any
+other body as it is: a file as `application/octet-stream`, an XML document as `application/xml`.
+That rule is in the templates of `web/packages/motion-master-client/templates/`, copies of three
+templates of swagger-typescript-api with the changes its `README.md` lists. The version of the
+generator is pinned exactly, so after an upgrade, copy the templates of the new version again and
+make the same changes. A helper sends no request of its own with `fetch`.
 
 **The examples follow the same rule.** Each task has one example program in each client, with the
 same file name, the same options and the same output: `clients/python/examples/scan.py` and

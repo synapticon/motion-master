@@ -27,6 +27,7 @@ from motion_master_client import (  # noqa: E402
     error_line,
     format_step,
     step_changes,
+    step_value,
 )
 
 log = logging.getLogger("production")
@@ -514,12 +515,7 @@ def install_firmware(s):
         if confirm == "n":
             raise Exit("the user chose not to install a package that does not fit")
 
-    s.client.call(
-        "putUserCacheFile",
-        path={"path": f"firmwares/{package.name}"},
-        data=package.read_bytes(),
-        headers={"Content-Type": "application/octet-stream"},
-    )
+    s.client.write_user_cache_file(f"firmwares/{package.name}", package.read_bytes())
     log.info("uploaded %s", package.name)
     params = {"packageFilename": package.name, "finalState": AlState.PREOP}
     run_procedure(s, "firmware-installation", params)
@@ -548,13 +544,6 @@ def store_parameters(s):
     run_procedure(s, "store-parameters")
     return "parameters stored to flash"
 
-
-def step_value(snapshot, step_id):
-    """Return the value of one step of a finished procedure run, or None."""
-    for step in snapshot["steps"]:
-        if step["id"] == step_id:
-            return step.get("value")
-    return None
 
 
 def load_configuration(s, path):

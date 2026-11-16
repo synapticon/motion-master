@@ -1,23 +1,22 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UserCacheFile } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  encodeUserCachePath,
+  formatBytes,
+  type UserCacheFile,
+} from '@synapticon/motion-master-client';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
 import UserCacheExplainer from '../components/UserCacheExplainer';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
-import { formatBytes } from '../utils/format';
-import { encodeUserCachePath, userCacheBasename, userCacheUrl } from '../utils/userCache';
+import { userCacheBasename } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 
-// The `X-Wire-Us` figure on these endpoints is server-side file I/O, not a fieldbus transaction —
-// WireTiming's default tooltip would claim a device was involved, so override it.
-const SERVER_TIMING_TITLE =
-  'Server — time the backend spent on the operation itself: validating the path and reading, ' +
-  'writing or listing on the server’s own disk. No device is involved. The round-trip figure ' +
-  'beside it additionally covers transferring the file over the network, which for a large ' +
-  'upload or download is most of the wait.';
+// The `Server-Timing` figure on these endpoints is server-side file I/O, not a fieldbus transaction —
+// RequestTiming's default tooltip would claim a device was involved, so override it.
 
 const formatModified = (ms: number) => (ms > 0 ? new Date(ms).toLocaleString() : '—');
 
@@ -33,7 +32,7 @@ function normalizeFolder(folder: string): string {
 }
 
 export default function StorageUserCachePage() {
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const queryClient = useQueryClient();
   const [folder, setFolder] = useState('');
   const [busyPath, setBusyPath] = useState<string | null>(null);
@@ -41,17 +40,18 @@ export default function StorageUserCachePage() {
 
   // Two readouts, each next to the control that produces it: uploads by the Upload button, and
   // everything that acts on the listing (refresh, download, delete) by the Refresh button.
-  const uploadTiming = useWireTiming();
-  const fileTiming = useWireTiming();
+  const uploadTiming = useRequestTiming();
+  const fileTiming = useRequestTiming();
 
   // The cache is on disk, independent of the bus — no scan/connect gate. The query fails only if
   // Motion Master itself is unreachable, surfaced as the error state below.
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => fileTiming.measure(() => api.listUserCacheFiles()),
+    // The listing itself goes into the cache, as on the other pages that share this key.
+    queryFn: async () => (await fileTiming.measure(() => api.listUserCacheFiles())).data,
   });
-  const root = cacheQuery.data?.data?.root ?? '';
-  const files = cacheQuery.data?.data?.files ?? [];
+  const root = cacheQuery.data?.root ?? '';
+  const files = cacheQuery.data?.files ?? [];
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['user-cache'] });
@@ -60,51 +60,43 @@ export default function StorageUserCachePage() {
     mutationFn: async (file: File) => {
       const prefix = normalizeFolder(folder);
       const path = prefix ? `${prefix}/${file.name}` : file.name;
-      // The generated client JSON-encodes request bodies, so upload the raw bytes with fetch —
-      // the same reason the FoE and SII pages talk to their binary endpoints directly.
-      const res = await uploadTiming.measure(() =>
-        fetch(userCacheUrl(api.baseUrl, path), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: file,
-        }),
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      // The generated call, because the page shows the server time from the response.
+      await uploadTiming.measure(() =>
+        client.api.putUserCacheFile(encodeUserCachePath(path), bytes),
       );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
     },
     onSuccess: () => {
       setError(null);
       void invalidate();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => setError(apiErrorMessage(err)),
   });
 
+  // The refresh after a delete measures the listing, and its time replaces the time of the delete
+  // at once, so the delete itself is not measured.
   const deleteMutation = useMutation({
-    mutationFn: (path: string) =>
-      fileTiming.measure(() => api.deleteUserCacheFile(encodeUserCachePath(path))),
+    mutationFn: (path: string) => client.removeUserCacheFile(path),
     onSuccess: () => {
       setError(null);
       void invalidate();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => setError(apiErrorMessage(err)),
   });
 
   async function handleDownload(file: UserCacheFile) {
     setBusyPath(file.path);
     setError(null);
     try {
-      const res = await fileTiming.measure(() => fetch(userCacheUrl(api.baseUrl, file.path)));
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      const res = await fileTiming.measure(() =>
+        client.api.getUserCacheFile(encodeUserCachePath(file.path)),
+      );
       const bytes = new Uint8Array(await res.arrayBuffer());
       // Save under the file's own name, not its full path — a browser download cannot create
       // directories, and a slash in the suggested name is stripped anyway.
       downloadBytes(bytes, userCacheBasename(file.path));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Download failed.');
+      setError(apiErrorMessage(err, 'Download failed.'));
     } finally {
       setBusyPath(null);
     }
@@ -166,7 +158,7 @@ export default function StorageUserCachePage() {
           >
             {uploadMutation.isPending ? 'Uploading…' : 'Upload file'}
           </FilePickerButton>
-          <WireTiming label="Server" timing={uploadTiming.timing} title={SERVER_TIMING_TITLE} />
+          <RequestTiming timing={uploadTiming.timing} />
         </div>
 
         {/* The timing grows out of the left-hand group rather than sitting in front of Refresh, so
@@ -177,7 +169,7 @@ export default function StorageUserCachePage() {
               {files.length} {files.length === 1 ? 'file' : 'files'}
               {files.length > 0 && ` · ${formatBytes(totalBytes)}`}
             </p>
-            <WireTiming label="Server" timing={fileTiming.timing} title={SERVER_TIMING_TITLE} />
+            <RequestTiming timing={fileTiming.timing} />
           </div>
           <button
             onClick={() => cacheQuery.refetch()}

@@ -9,20 +9,19 @@ import {
   type PdoMapping,
   type PdoMappingRequest,
   type PdoMappingRequestObject,
+  parseInteger,
+  AlState,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import DevicePageHeader from '../components/DevicePageHeader';
 import ParameterPicker from '../components/ParameterPicker';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline, btnPrimary } from '../utils/styles';
 
-const AL_PREOP = 2;
-
-// ETG.1000.6 object-access (ObjAccess) mapping bits: an object is PDO-mappable in a direction only
-// when the corresponding bit is set. Used to constrain the parameter picker per direction.
-const RXPDO_MAPPABLE = 0x40; // master→slave (outputs / 0x1C12)
-const TXPDO_MAPPABLE = 0x80; // slave→master (inputs / 0x1C13)
+// Which field of a parameter says it can be mapped in a direction: outputs (0x1C12) or inputs
+// (0x1C13). Used to constrain the parameter picker per direction.
+type MappableField = 'rxPdoMappable' | 'txPdoMappable';
 
 const inputCls = 'border border-grey-300 px-2 py-1 text-xs font-mono bg-white';
 const iconBtn =
@@ -47,22 +46,9 @@ interface Draft {
 
 type Direction = keyof Draft;
 
-// Parses a hex ("0x...") or decimal string to a number, or NaN if it is neither.
-function parseNum(s: string): number {
-  const t = s.trim();
-  if (/^0x[0-9a-f]+$/i.test(t)) {
-    return parseInt(t.slice(2), 16);
-  }
-  if (/^[0-9]+$/.test(t)) {
-    return parseInt(t, 10);
-  }
-  return NaN;
-}
-
 // A valid integer parse, or null (so it can feed the picker's selected index/subindex).
 function parsedOrNull(s: string): number | null {
-  const n = parseNum(s);
-  return Number.isInteger(n) ? n : null;
+  return parseInteger(s, { min: 0 });
 }
 
 // Converts a device read-back into an editable draft (indices as hex, subindex/bitLength as decimal;
@@ -84,22 +70,22 @@ function fromResponse(m: PdoMapping): Draft {
 // out-of-range field (index/pdoIndex 16-bit, subindex/bitLength 8-bit).
 function toRequestObjects(objs: DraftObject[], dir: string): PdoMappingRequestObject[] {
   return objs.map((o, oi) => {
-    const pdoIndex = parseNum(o.pdoIndex);
-    if (!Number.isInteger(pdoIndex) || pdoIndex < 0 || pdoIndex > 0xffff) {
+    const pdoIndex = parseInteger(o.pdoIndex, { min: 0, max: 0xffff });
+    if (pdoIndex === null) {
       throw `${dir} object ${oi + 1}: pdoIndex must be 0…0xFFFF`;
     }
     const where = `${dir} ${formatHex(pdoIndex)}`;
     const entries = o.entries.map((e, ei) => {
-      const index = parseNum(e.index);
-      const subindex = parseNum(e.subindex);
-      const bitLength = parseNum(e.bitLength);
-      if (!Number.isInteger(index) || index < 0 || index > 0xffff) {
+      const index = parseInteger(e.index, { min: 0, max: 0xffff });
+      const subindex = parseInteger(e.subindex, { min: 0, max: 0xff });
+      const bitLength = parseInteger(e.bitLength, { min: 0, max: 0xff });
+      if (index === null) {
         throw `${where} entry ${ei + 1}: index must be 0…0xFFFF`;
       }
-      if (!Number.isInteger(subindex) || subindex < 0 || subindex > 0xff) {
+      if (subindex === null) {
         throw `${where} entry ${ei + 1}: subindex must be 0…255`;
       }
-      if (!Number.isInteger(bitLength) || bitLength < 0 || bitLength > 0xff) {
+      if (bitLength === null) {
         throw `${where} entry ${ei + 1}: bitLength must be 0…255`;
       }
       return { index, subindex, bitLength };
@@ -111,8 +97,7 @@ function toRequestObjects(objs: DraftObject[], dir: string): PdoMappingRequestOb
 // Sum of an object's mapped bit widths (invalid/blank entries count as 0), for the header badge.
 function objectBits(obj: DraftObject): number {
   return obj.entries.reduce((sum, e) => {
-    const n = parseNum(e.bitLength);
-    return sum + (Number.isInteger(n) && n > 0 ? n : 0);
+    return sum + (parseInteger(e.bitLength, { min: 1 }) ?? 0);
   }, 0);
 }
 
@@ -137,7 +122,7 @@ interface EntryRowProps {
   entry: DraftEntry;
   offset: number;
   params: DeviceParameter[];
-  mappableBit: number;
+  mappable: MappableField;
   mappableHint: string;
   first: boolean;
   last: boolean;
@@ -150,7 +135,7 @@ function EntryRow({
   entry,
   offset,
   params,
-  mappableBit,
+  mappable,
   mappableHint,
   first,
   last,
@@ -166,7 +151,7 @@ function EntryRow({
         selectedIndex={parsedOrNull(entry.index)}
         selectedSubindex={parsedOrNull(entry.subindex)}
         placeholder="Pick a mappable object…"
-        isDisabled={(p) => (p.access & mappableBit) === 0}
+        isDisabled={(p) => !p[mappable]}
         disabledHint={mappableHint}
         onSelect={(p) =>
           onChange({
@@ -235,7 +220,7 @@ interface DirectionEditorProps {
   defaultPdoIndex: string;
   objects: DraftObject[];
   params: DeviceParameter[];
-  mappableBit: number;
+  mappable: MappableField;
   mappableHint: string;
   onChange: (objs: DraftObject[]) => void;
 }
@@ -249,7 +234,7 @@ function DirectionEditor({
   defaultPdoIndex,
   objects,
   params,
-  mappableBit,
+  mappable,
   mappableHint,
   onChange,
 }: DirectionEditorProps) {
@@ -257,8 +242,7 @@ function DirectionEditor({
   const offsets = objects.map((o) =>
     o.entries.map((e) => {
       const at = runningBits;
-      const len = parseNum(e.bitLength);
-      runningBits += Number.isInteger(len) && len > 0 ? len : 0;
+      runningBits += parseInteger(e.bitLength, { min: 1 }) ?? 0;
       return at;
     }),
   );
@@ -346,7 +330,7 @@ function DirectionEditor({
                 entry={entry}
                 offset={offsets[oi][ei]}
                 params={params}
-                mappableBit={mappableBit}
+                mappable={mappable}
                 mappableHint={mappableHint}
                 first={ei === 0}
                 last={ei === obj.entries.length - 1}
@@ -391,8 +375,8 @@ export default function DevicePdoMappingPage() {
   const queryClient = useQueryClient();
   const slavePosition = Number(deviceId);
 
-  const readTiming = useWireTiming();
-  const writeTiming = useWireTiming();
+  const readTiming = useRequestTiming();
+  const writeTiming = useRequestTiming();
 
   const mappingKey = ['pdoMapping', slavePosition];
   const query = useQuery({
@@ -417,7 +401,7 @@ export default function DevicePdoMappingPage() {
     refetchInterval: 2000,
   });
   const state = statesQuery.data?.data.find((s) => s.slavePosition === slavePosition);
-  const inPreOp = state?.alState === AL_PREOP;
+  const inPreOp = state?.alState === AlState.PREOP;
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
@@ -525,12 +509,12 @@ export default function DevicePdoMappingPage() {
             >
               {query.isFetching ? 'Loading…' : 'Reload from device'}
             </button>
-            <WireTiming label="Read" timing={readTiming.timing} />
+            <RequestTiming timing={readTiming.timing} />
           </div>
           <div className="flex items-center gap-3">
             {dirty && <span className="text-xs text-status-warn">Unsaved changes</span>}
             {!dirty && saved && <span className="text-xs text-status-good">Mapping written ✓</span>}
-            <WireTiming label="Write" timing={writeTiming.timing} />
+            <RequestTiming timing={writeTiming.timing} />
             <button
               className={btnPrimary}
               onClick={() => writeMutation.mutate()}
@@ -552,7 +536,7 @@ export default function DevicePdoMappingPage() {
               defaultPdoIndex="0x1600"
               objects={draft.outputs}
               params={params}
-              mappableBit={RXPDO_MAPPABLE}
+              mappable="rxPdoMappable"
               mappableHint="not RxPDO-mappable"
               onChange={(objs) => setDirection('outputs', objs)}
             />
@@ -562,7 +546,7 @@ export default function DevicePdoMappingPage() {
               defaultPdoIndex="0x1A00"
               objects={draft.inputs}
               params={params}
-              mappableBit={TXPDO_MAPPABLE}
+              mappable="txPdoMappable"
               mappableHint="not TxPDO-mappable"
               onChange={(objs) => setDirection('inputs', objs)}
             />

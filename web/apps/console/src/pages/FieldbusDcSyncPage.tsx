@@ -3,7 +3,7 @@ import type { DcSyncStatus } from '@synapticon/motion-master-client';
 import PageHeader from '../components/PageHeader';
 import DcSyncExplainer from '../components/DcSyncExplainer';
 import SlavePositionBadge from '../components/SlavePositionBadge';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
 import NoEscNotice from '../components/NoEscNotice';
@@ -66,7 +66,7 @@ function RoleBadge({ device }: { device: DcSyncStatus }) {
 
 export default function FieldbusDcSyncPage() {
   const { api } = useConnection();
-  const { timing, measure } = useWireTiming();
+  const { timing, measure } = useRequestTiming();
   const supportsEsc = useSupportsEsc();
 
   const query = useQuery({
@@ -138,7 +138,7 @@ export default function FieldbusDcSyncPage() {
             <span />
           )}
           <div className="flex items-center gap-3">
-            <WireTiming label="DC sync" timing={timing} />
+            <RequestTiming timing={timing} />
             <button
               onClick={() => query.refetch()}
               disabled={query.isFetching}

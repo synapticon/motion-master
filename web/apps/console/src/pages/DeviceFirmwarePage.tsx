@@ -8,6 +8,8 @@ import {
   type ProcedureRequest,
   type ProcedureSnapshot,
   type ProgressStep,
+  Profile,
+  HttpError,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import DevicePageHeader from '../components/DevicePageHeader';
@@ -15,7 +17,7 @@ import HardwareDescriptionView from '../components/HardwareDescriptionView';
 import IntegroVariantView from '../components/IntegroVariantView';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline, btnPrimary } from '../utils/styles';
-import { userCacheUrl } from '../utils/userCache';
+import { userCacheBasename } from '../utils/userCache';
 
 const PROCEDURE = 'firmware-installation';
 const CACHE_DIRECTORY = 'firmwares/';
@@ -50,16 +52,6 @@ const STEP_TITLE: Record<string, string> = {
   'final-state': 'Leave the device in the final state',
 };
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404
-  );
-}
-
-function baseName(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1);
-}
-
 function stepValueText(value: unknown): string {
   if (value === undefined || value === null) {
     return '';
@@ -70,13 +62,14 @@ function stepValueText(value: unknown): string {
 export default function DeviceFirmwarePage() {
   const { deviceId } = useParams();
   const slavePosition = Number(deviceId);
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const queryClient = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
 
   const versionQuery = useQuery({
     queryKey: ['firmware-version', slavePosition],
-    queryFn: () => api.readParameter(slavePosition, 0x100a, 0).then((r) => String(r.data.value)),
+    queryFn: () =>
+      client.readValue(slavePosition, Profile.MANUFACTURER_SOFTWARE_VERSION).then((v) => String(v)),
     retry: false,
   });
   const hardwareQuery = useQuery({
@@ -102,7 +95,7 @@ export default function DeviceFirmwarePage() {
   });
   const cacheQuery = useQuery({
     queryKey: ['user-cache'],
-    queryFn: () => api.listUserCacheFiles().then((r) => r.data),
+    queryFn: () => client.listUserCacheFiles(),
     retry: false,
   });
   const snapshotQuery = useQuery({
@@ -116,7 +109,7 @@ export default function DeviceFirmwarePage() {
   const packages = (cacheQuery.data?.files ?? [])
     .map((file) => file.path)
     .filter((path) => path.startsWith(CACHE_DIRECTORY) && path.toLowerCase().endsWith('.zip'))
-    .map(baseName)
+    .map(userCacheBasename)
     .sort();
 
   // The server's verdict for each package. The page matches nothing itself.
@@ -163,18 +156,9 @@ export default function DeviceFirmwarePage() {
   };
 
   const upload = useMutation({
-    // The generated client JSON-encodes request bodies, which turns a File into "{}", so the raw
-    // bytes go up with fetch, as on the User Cache page.
     mutationFn: async (file: File) => {
-      const res = await fetch(userCacheUrl(api.baseUrl, `${CACHE_DIRECTORY}${file.name}`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: file,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await client.writeUserCacheFile(`${CACHE_DIRECTORY}${file.name}`, bytes);
     },
     onSuccess: (_data, file) => {
       setSelected(file.name);
@@ -253,9 +237,10 @@ export default function DeviceFirmwarePage() {
             )}
             {hardwareQuery.data && <HardwareDescriptionView description={hardwareQuery.data} />}
             {variantQuery.data && <IntegroVariantView variant={variantQuery.data} />}
-            {variantQuery.isError && !isNotFound(variantQuery.error) && (
-              <Callout variant="error">{apiErrorMessage(variantQuery.error)}</Callout>
-            )}
+            {variantQuery.isError &&
+              !(variantQuery.error instanceof HttpError && variantQuery.error.status === 404) && (
+                <Callout variant="error">{apiErrorMessage(variantQuery.error)}</Callout>
+              )}
           </div>
         </section>
 

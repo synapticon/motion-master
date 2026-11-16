@@ -67,16 +67,7 @@ async function main(): Promise<void> {
     console.log(`could not check the package against the device: ${e.message}`);
   }
 
-  // The generated putUserCacheFile encodes its body as JSON, so the raw bytes go with fetch.
-  const url = `${client.api.baseUrl}/api/user-cache/firmwares/${encodeURIComponent(packageName)}`;
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: readFileSync(packagePath),
-  });
-  if (!response.ok) {
-    throw await HttpError.from(new Request(url, { method: 'PUT' }), response);
-  }
+  await client.writeUserCacheFile(`firmwares/${packageName}`, readFileSync(packagePath));
   console.log(`uploaded ${packageName}`);
   const params = { packageFilename: packageName, finalState };
 

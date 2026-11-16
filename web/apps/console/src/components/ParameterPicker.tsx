@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
-import { type DeviceParameter, formatHex } from '@synapticon/motion-master-client';
+import { type DeviceParameter, objectAddressText } from '@synapticon/motion-master-client';
 
 interface ParameterPickerProps {
   /** The device's enumerated object dictionary. May be empty while a scan is in flight. */
@@ -28,14 +28,14 @@ interface ParameterPickerProps {
 // The display label for one object dictionary entry: "0x6064:00 — Position actual value".
 // Stable across the picker (trigger, list, search haystack) so the formats never drift.
 function paramLabel(p: DeviceParameter): string {
-  return `${formatHex(p.index, 4)}:${formatHex(p.subindex, 2, false)} — ${p.name}`;
+  return `${objectAddressText(p.index, p.subindex)} — ${p.name}`;
 }
 
 // The lowercased haystack a query is matched against. Folds in both the rendered hex form
 // ("0x6064:00") and the bare decimal index/subindex, so a user can search by name, by hex, by
 // decimal, or by the "index:subindex" pair without thinking about which the device reports in.
 function haystack(p: DeviceParameter): string {
-  return `${formatHex(p.index, 4)}:${formatHex(p.subindex, 2, false)} ${p.name} ${p.index} ${p.subindex}`.toLowerCase();
+  return `${objectAddressText(p.index, p.subindex)} ${p.name} ${p.index} ${p.subindex}`.toLowerCase();
 }
 
 // Every whitespace-separated token of the query must appear in the haystack (AND match), so
@@ -256,7 +256,7 @@ export default function ParameterPicker({
                             : 'text-grey-500'
                       }`}
                     >
-                      {formatHex(p.index, 4)}:{formatHex(p.subindex, 2, false)}
+                      {objectAddressText(p.index, p.subindex)}
                     </span>
                     <span className="truncate">{p.name}</span>
                     {rowDisabled && disabledHint ? (

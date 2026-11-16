@@ -69,7 +69,13 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `step_changes` | `stepChanges` | |
 | `object_name` | `objectName` | |
 | `object_address_text` | `objectAddressText` | |
+| `object_access` | `objectAccess` | |
+| `device_parameter_text` | `deviceParameterText` | |
+| `device_parameter_name` | `deviceParameterName` | |
 | `format_step` | `formatStep` | |
+| `step_value` | `stepValue` | |
+| `procedure_failure` | `procedureFailure` | |
+| `procedure_parameter_value` | `procedureParameterValue` | |
 | `error_line` | `errorLine` | |
 | — | `apiErrorMessage` | Returns a message for any error, with a fallback, for a page to show. `errorLine` returns `null` for a bug, so that a program shows its stack trace. |
 | `run` | `run` | |
@@ -83,23 +89,31 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `NOTIFICATION_TOPIC` | `NOTIFICATION_TOPIC` | |
 | — | `WebSocketConnection` | The WebSocket connection behind `client.ws`. It reconnects and routes each message to its listeners. Python opens one WebSocket for each stream and closes it when the stream ends. |
 | — | `alStateName` | Python reads the name from the enum: `AlState(2).name`. |
+| `mailbox_active` | `mailboxActive` | |
 | — | `operationModeName` | Python reads the name from the enum: `OperationMode(9).name`. |
+| — | `DEFAULT_HOST` | The host name of a server on this computer, for a web app. Python reads the host from `config.toml`. |
+| — | `DEFAULT_HTTP_PORT` | The port of the HTTP API, for a web app. Python reads the ports from `config.toml`. |
+| — | `DEFAULT_WS_PORT` | The port of the WebSocket, for a web app. Python reads the ports from `config.toml`. |
 | — | `API_BASE_URL` | The default address of the HTTP API for a web app. Python reads the host and the ports from `config.toml`. |
 | — | `WS_URL` | The default address of the WebSocket for a web app. Python reads the host and the ports from `config.toml`. |
 | — | `LAN_DOMAIN` | A program reaches a server on another computer under a name that the bundled certificate covers. Python takes the host from `config.toml`, so a script writes that name there. |
 | — | `lanAddress` | As `LAN_DOMAIN`. |
 | — | `lanHostname` | As `LAN_DOMAIN`. |
 | — | `isIpv4` | As `LAN_DOMAIN`. |
-| — | `WIRE_TIME_HEADER` | The Console shows the time a request spent on the wire. A Python script reads the header from `response.headers`. |
-| — | `wireTimeMs` | As `WIRE_TIME_HEADER`. |
+| `fieldbus_time_ms` | `fieldbusTimeMs` | |
+| `server_time_ms` | `serverTimeMs` | |
+| `format_bytes` | `formatBytes` | |
+| `format_duration` | `formatDuration` | |
+| `format_times` | `formatTimes` | |
 | — | `formatHex` | The hex input fields of the Console. Python formats and parses hex with `f"{value:#x}"` and `int(text, 16)`. |
 | — | `formatHexBytes` | Python writes the same with `data.hex(" ").upper()`. |
+| — | `encodeUserCachePath` | Encodes a path of the user cache for a call of `client.api`, which the Python client does not have. |
 | — | `parseHexBytes` | As `formatHex`. |
-| — | `parseIntegerFlexible` | As `formatHex`. |
+| — | `parseInteger` | The number inputs of the Console and the options of the examples. Python parses the same integers with `int(text, 0)`. |
+| — | `parseBigInt` | As `parseInteger`, for a 64-bit value as a `bigint`. Python's `int` holds any integer. |
 | — | `integerFromBytes` | Python has `int.from_bytes(data, "little", signed=...)` built in. |
 | — | `SDO_TYPES` | The SDO page of the Console encodes and decodes raw SDO bytes. A Python script reads and writes a value with `read_value` and the server decodes it. |
 | — | `SDO_TYPE_HINT` | As `SDO_TYPES`. |
-| — | `decodeSdoBytes` | As `SDO_TYPES`. |
 | — | `encodeSdoValue` | As `SDO_TYPES`. |
 | — | `interpretSdoBytes` | As `SDO_TYPES`. |
 | — | `isIntegerSdoType` | As `SDO_TYPES`. |
@@ -126,6 +140,19 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `read_file` | `readFile` | |
 | `write_file` | `writeFile` | |
 | `remove_file` | `removeFile` | |
+| `read_sii` | `readSii` | |
+| `write_sii` | `writeSii` | |
+| `parse_sii` | `parseSii` | |
+| `read_hrd_recording` | `readHrdRecording` | |
+| `list_user_cache_files` | `listUserCacheFiles` | |
+| `read_user_cache_file` | `readUserCacheFile` | |
+| `write_user_cache_file` | `writeUserCacheFile` | |
+| `remove_user_cache_file` | `removeUserCacheFile` | |
+| `list_parameter_cache_entries` | `listParameterCacheEntries` | |
+| `read_parameter_cache_entry` | `readParameterCacheEntry` | |
+| `remove_parameter_cache_entry` | `removeParameterCacheEntry` | |
+| `run_auto_tuning` | `runAutoTuning` | |
+| `server_log` | `serverLog` | |
 | `wait_for_value` | `waitForValue` | |
 | `ensure_scanned` | `ensureScanned` | |
 | `ensure_state` | `ensureState` | |
@@ -142,6 +169,9 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `start_capture` | `startCapture` | |
 | `export_eni` | `exportEni` | |
 | `parse_eni` | `parseEni` | |
+| `parse_esi` | `parseEsi` | |
+| `parse_integro_variant` | `parseIntegroVariant` | |
+| `parse_ic_mu_restore_file` | `parseIcMuRestoreFile` | |
 | `stop_capture` | `stopCapture` | |
 | `process_data_mark` | `processDataMark` | |
 | `process_data_dump` | `processDataDump` | |
@@ -155,6 +185,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `column` | `column` | |
 | `values` | `values` | |
 | `first` | `first` | |
+| `to_csv` | `toCsv` | |
 | `write_csv` | `writeCsv` | |
 | `print_table` | `printTable` | |
 
@@ -163,6 +194,10 @@ A row with a name in one column only belongs to that language. Its reason says w
 Each client has one example program per task, with the same name, the same options and the same
 output. A row names the two files. The scripts in `clients/python/examples/production/` are tools
 for one board each, not examples of the client, so the table leaves them out.
+
+One option differs, because each language keeps its own convention for a debug log. Every Python
+example takes `-v` / `--verbose`, which turns on the http log of the client. The TypeScript examples
+read `DEBUG=motion-master-client:http`, the convention of the `debug` package of Node.js.
 
 | Python | TypeScript | Reason |
 | --- | --- | --- |

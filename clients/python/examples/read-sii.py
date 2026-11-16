@@ -36,19 +36,15 @@ def main():
     client.init()
     client.ensure_scanned()
 
-    path = {"slavePosition": args.slave}
     if args.output:
-        # The Accept header selects the raw image over the parsed JSON.
-        content = client.call(
-            "readSii", path=path, headers={"Accept": "application/octet-stream"}
-        ).content
+        content = client.read_sii(args.slave, format="bytes")
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(content)
         print(f"read {len(content)} byte(s) of SII from slave {args.slave} -> {out}")
         return
 
-    print(json.dumps(client.call("readSii", path=path).json(), indent=2, ensure_ascii=False))
+    print(json.dumps(client.read_sii(args.slave), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

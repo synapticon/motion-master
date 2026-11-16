@@ -4,6 +4,7 @@ Not an example of its own: the examples import it.
 """
 
 import argparse
+import logging
 
 from motion_master_client import AlState
 
@@ -17,9 +18,36 @@ class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
         return super()._get_help_string(action)
 
 
+class _Parser(argparse.ArgumentParser):
+    """An argument parser that acts on -v/--verbose once it has parsed the command line."""
+
+    def parse_args(self, args=None, namespace=None):
+        options = super().parse_args(args, namespace)
+        if options.verbose:
+            # The http log of the client: one line for each request, with its times.
+            http_log = logging.getLogger("motion_master_client.http")
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(name)s %(message)s"))
+            http_log.addHandler(handler)
+            http_log.setLevel(logging.DEBUG)
+            http_log.propagate = False
+        return options
+
+
 def parser(doc):
-    """Return an argument parser whose --help starts with the first line of `doc`."""
-    return argparse.ArgumentParser(description=doc.splitlines()[0], formatter_class=_HelpFormatter)
+    """Return an argument parser whose --help starts with the first line of `doc`.
+
+    Every example has -v/--verbose, which writes one line for each HTTP request with its times. The
+    TypeScript examples take DEBUG=motion-master-client:http instead, the convention of Node.js.
+    """
+    ap = _Parser(description=doc.splitlines()[0], formatter_class=_HelpFormatter)
+    ap.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="write one line for each HTTP request, with its round trip and the server times",
+    )
+    return ap
 
 
 def integer(text):

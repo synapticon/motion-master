@@ -23,9 +23,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - Both clients write one debug line per HTTP request: the method, the path, the status, the round
   trip, and the times `server` and `fieldbus` from `Server-Timing`, such as
-  `GET /api/devices/1/sdo/4096/0 200 round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`. Turn it on with
-  `DEBUG=motion-master-client:http`, or in Python with the logger `motion_master_client.http` at
-  DEBUG.
+  `GET /api/devices/1/sdo/4096/0 200 round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`. Each
+  client follows the convention of its platform. The TypeScript client turns it on with
+  `DEBUG=motion-master-client:http`, the convention of the `debug` package of Node.js. The Python
+  client writes it to the logger `motion_master_client.http`, which a script sets to DEBUG, and
+  every Python example turns it on with `-v` or `--verbose`.
 - Every operation of the API can go through the generated client `client.api`, which returns the
   response with its headers. The generator sends a file as `application/octet-stream` and an XML
   document as `application/xml`, where it sent every body as JSON, so a file arrived as `{}`. The

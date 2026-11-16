@@ -374,16 +374,23 @@ The helpers log each step they take, such as `found 1 device(s)`, through the
 
 The client also writes one line per HTTP request to the logger `motion_master_client.http`: the
 method, the path, the status, the round trip, and the times that the server reported in
-`Server-Timing`: `server`, and `fieldbus` for a request that ran a fieldbus operation. Set that logger to DEBUG to see it, or set the environment variable, as for the
-TypeScript client:
+`Server-Timing`: `server`, and `fieldbus` for a request that ran a fieldbus operation. It is off by
+default, as for any logger of a library. A script turns it on with the standard logging of
+Python:
+
+```python
+logging.basicConfig(format="%(name)s %(message)s")
+logging.getLogger("motion_master_client.http").setLevel(logging.DEBUG)
+```
+
+Every example turns it on with `-v` or `--verbose`:
 
 ```bash
-DEBUG=motion-master-client:http python examples/server-info.py
+python examples/read-sdo.py --index 0x1000 --subindex 0 --verbose
 ```
 
 ```text
-motion-master-client:http GET /api/version 200 round-trip 0.912 ms, server 0.087 ms
-motion-master-client:http GET /api/devices/1/sdo/0x1000/0 200 round-trip 1.733 ms, server 1.292 ms, fieldbus 1.133 ms
+motion_master_client.http GET /api/devices/1/sdo/4096/0 200 round-trip 1.270 ms, server 0.931 ms, fieldbus 0.888 ms
 ```
 
 A helper returns the decoded result. A script that needs a response, for its headers, calls

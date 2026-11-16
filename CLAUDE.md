@@ -1154,8 +1154,10 @@ a header such as `Server-Timing`, calls the generated `client.api.<operationId>`
 `client.call(operation_id, …)` in Python, which returns it, and reads a refusal's headers from
 `HttpError.response`. `serverTimeMs()` and `fieldbusTimeMs()` read the times from either. The
 Console does this for each request whose time it shows. A program that wants the times of its
-requests turns on the http log: `DEBUG=motion-master-client:http` writes one line per request, with
-the round trip and the times of the server, in both clients.
+requests turns on the http log, which writes one line per request with the round trip and the times
+of the server. Each client follows the convention of its platform: `DEBUG=motion-master-client:http`
+in Node.js, and the logger `motion_master_client.http` at DEBUG in Python, which the Python examples
+set with `--verbose`.
 
 **Every response carries `Server-Timing`.** The router adds the metric `server` to every response,
 the time from the complete request to the response. A route that runs a fieldbus operation adds

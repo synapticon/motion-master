@@ -46,7 +46,6 @@ from __future__ import annotations
 import csv
 import decimal
 import enum
-import fnmatch
 import functools
 import io
 import json
@@ -83,22 +82,10 @@ log = logging.getLogger("motion_master_client")
 
 # One line for each request: the method, the path, the status, the round trip that the client
 # measured, and the times that the server reported in Server-Timing: server, and fieldbus for a
-# request that ran a fieldbus operation. Off by default. Turn it on
-# with logging.getLogger("motion_master_client.http").setLevel(logging.DEBUG), or with the
-# environment variable DEBUG=motion-master-client:http, the setting of the TypeScript client.
+# request that ran a fieldbus operation. Off by default, as for any logger of a library. A program
+# turns it on with logging.getLogger("motion_master_client.http").setLevel(logging.DEBUG) and a
+# handler, and the examples with -v/--verbose.
 http_log = logging.getLogger("motion_master_client.http")
-if any(
-    fnmatch.fnmatchcase("motion-master-client:http", pattern)
-    for pattern in re.split(r"[\s,]+", os.environ.get("DEBUG", ""))
-    if pattern
-):
-    # Turned on from the environment, the log writes to stderr itself, as the debug package of the
-    # TypeScript client does, so that a script with no logging setup shows it too.
-    _http_handler = logging.StreamHandler()
-    _http_handler.setFormatter(logging.Formatter("motion-master-client:http %(message)s"))
-    http_log.addHandler(_http_handler)
-    http_log.setLevel(logging.DEBUG)
-    http_log.propagate = False
 
 class AlState(enum.IntEnum):
     """An AL state, in the encoding of the AL control register that the API uses.

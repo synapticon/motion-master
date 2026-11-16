@@ -195,6 +195,10 @@ Each client has one example program per task, with the same name, the same optio
 output. A row names the two files. The scripts in `clients/python/examples/production/` are tools
 for one board each, not examples of the client, so the table leaves them out.
 
+One option differs, because each language keeps its own convention for a debug log. Every Python
+example takes `-v` / `--verbose`, which turns on the http log of the client. The TypeScript examples
+read `DEBUG=motion-master-client:http`, the convention of the `debug` package of Node.js.
+
 | Python | TypeScript | Reason |
 | --- | --- | --- |
 | `capture.py` | `capture.ts` | |

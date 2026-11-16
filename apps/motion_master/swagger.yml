@@ -7908,7 +7908,7 @@ components:
           example: ""
     SyncManagerConfig:
       type: object
-      required: [index, physicalStart, length, flags, type]
+      required: [index, physicalStart, length, flags, type, typeName]
       properties:
         index:
           type: integer
@@ -7932,11 +7932,18 @@ components:
           type: integer
           description: "0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs"
           example: 3
+        typeName:
+          type: string
+          nullable: true
+          description: >-
+            The name of `type` (ETG.2010 Table 11): Unused, Mailbox Out, Mailbox In, Outputs,
+            Inputs, Dynamic outputs or Dynamic inputs. `null` for a value it does not define.
+          example: Outputs
     FmmuConfig:
       type: object
       required:
         [index, logicalStart, length, logicalStartBit, logicalEndBit,
-         physicalStart, physicalStartBit, type, active]
+         physicalStart, physicalStartBit, type, typeName, active]
       properties:
         index:
           type: integer
@@ -7970,6 +7977,16 @@ components:
           type: integer
           description: "ESC FMMU type: 1 read (inputs/TxPDO), 2 write (outputs/RxPDO)"
           example: 2
+        typeName:
+          type: string
+          nullable: true
+          description: >-
+            What the FMMU maps: Unused, Inputs (bit 0 of the type register, read accesses), Outputs
+            (bit 1, write accesses), or Inputs and outputs. An FMMU whose `physicalStart` lies in
+            the sync manager registers (0x0800 to 0x087F) is Mailbox state: it maps the status of a
+            mailbox into the logical address space, which is not process data. `null` for a type
+            the register does not define.
+          example: Outputs
         active:
           type: boolean
           description: Whether the FMMU is active
@@ -8037,8 +8054,8 @@ components:
         mailbox:
           type: object
           required:
-            [writeLength, writeOffset, readLength, readOffset, protocols, coeDetails,
-             foeDetails, eoeDetails, soeDetails]
+            [writeLength, writeOffset, readLength, readOffset, protocols, protocolNames,
+             coeDetails, coeDetailNames, foeDetails, eoeDetails, soeDetails]
           properties:
             writeLength:
               type: integer
@@ -8060,15 +8077,27 @@ components:
               type: integer
               description: >-
                 Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE,
-                0x10 SoE, 0x20 VoE) — decoded by the client
+                0x10 SoE, 0x20 VoE), which `protocolNames` names
               example: 14
+            protocolNames:
+              type: array
+              items: { type: string, enum: [AoE, EoE, CoE, FoE, SoE, VoE] }
+              description: The protocols whose bits are set in `protocols`, in the order of their bits.
+              example: [EoE, CoE, FoE]
             coeDetails:
               type: integer
               description: >-
-                CoE detail bits, advertised in EEPROM — decoded by the client (0x01 SDO,
-                0x02 SDO-Info, 0x04 PDO-Assign, 0x08 PDO-Config, 0x10 Upload, 0x20 Complete-Access).
+                CoE detail bits, advertised in EEPROM (0x01 SDO, 0x02 SDO Info, 0x04 PDO Assign,
+                0x08 PDO Config, 0x10 Upload, 0x20 Complete Access), which `coeDetailNames` names.
                 A hint, not a guarantee.
               example: 15
+            coeDetailNames:
+              type: array
+              items:
+                type: string
+                enum: [SDO, SDO Info, PDO Assign, PDO Config, Upload, Complete Access]
+              description: The CoE features whose bits are set in `coeDetails`, in the order of their bits.
+              example: [SDO, SDO Info, PDO Assign, PDO Config]
             foeDetails:
               type: integer
               description: FoE detail byte (bit 0 = enabled).
@@ -8599,6 +8628,11 @@ components:
               type: integer
               description: "Bitfield: 0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10 SoE, 0x20 VoE"
               example: 12
+            mailboxProtocolNames:
+              type: array
+              items: { type: string, enum: [AoE, EoE, CoE, FoE, SoE, VoE] }
+              description: The protocols whose bits are set in `mailboxProtocol`, in the order of their bits.
+              example: [CoE, FoE]
             size:
               type: integer
               description: "Raw EEPROM-size word (ETG: size in KiBit − 1)"
@@ -8621,6 +8655,12 @@ components:
                 orderIdx: { type: integer }
                 nameIdx: { type: integer }
                 coeDetails: { type: integer }
+                coeDetailNames:
+                  type: array
+                  items:
+                    type: string
+                    enum: [SDO, SDO Info, PDO Assign, PDO Config, Upload, Complete Access]
+                  description: The CoE features whose bits are set in `coeDetails`, in the order of their bits.
                 foeDetails: { type: integer }
                 eoeDetails: { type: integer }
                 soeChannels: { type: integer }
@@ -8632,8 +8672,19 @@ components:
                 physicalMemoryAddress: { type: integer }
             fmmus:
               type: array
-              description: FMMU defaults (category 40), one raw 16-bit word per entry
+              description: >-
+                FMMU usage (category 40), one byte per FMMU (ETG.2010 Table 9): 0x00 or 0xFF unused,
+                0x01 outputs, 0x02 inputs, 0x03 sync manager status, 0x04 dynamic outputs, 0x05
+                dynamic inputs
               items: { type: integer }
+            fmmuUsageNames:
+              type: array
+              description: >-
+                The name of each entry of `fmmus`, by position: Unused, Outputs, Inputs, SyncM
+                status, Dynamic outputs or Dynamic inputs, or `null` for a reserved value. This is
+                the usage byte of the SII, which numbers the other way round from the type register
+                of the ESC.
+              items: { type: string, nullable: true }
             syncManagers:
               type: array
               description: Sync-Manager defaults (category 41)
@@ -8648,6 +8699,12 @@ components:
                   syncManagerType:
                     type: integer
                     description: "1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs"
+                  syncManagerTypeName:
+                    type: string
+                    nullable: true
+                    description: >-
+                      The name of `syncManagerType` (ETG.2010 Table 11), or `null` for a value it
+                      does not define.
             rxPdos:
               type: array
               description: Default RxPDOs (category 51)

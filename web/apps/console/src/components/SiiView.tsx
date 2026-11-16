@@ -5,45 +5,11 @@ import {
   formatHex,
   objectAddressText,
 } from '@synapticon/motion-master-client';
-import MailboxCapabilities from './MailboxCapabilities';
+import MailboxCapabilities, { MAILBOX_PROTOCOL_DESCRIPTIONS } from './MailboxCapabilities';
 
 type Sii = SlaveInformationInterface;
 type SyncManager = NonNullable<Sii['category']['syncManagers']>[number];
 type DistributedClock = NonNullable<Sii['category']['distributedClocks']>[number];
-
-// SII Sync-Manager type (category 41): mirrors the ESC SM role.
-const SM_TYPE: Record<number, string> = {
-  0: 'Unused',
-  1: 'Mailbox Out',
-  2: 'Mailbox In',
-  3: 'Outputs (RxPDO)',
-  4: 'Inputs (TxPDO)',
-};
-
-// Mailbox protocol bits (SII standard mailbox protocol word): bit, abbreviation, full name.
-const MBX_PROTOCOLS: [number, string, string][] = [
-  [0x01, 'AoE', 'ADS over EtherCAT'],
-  [0x02, 'EoE', 'Ethernet over EtherCAT'],
-  [0x04, 'CoE', 'CANopen over EtherCAT'],
-  [0x08, 'FoE', 'File over EtherCAT'],
-  [0x10, 'SoE', 'Servo Drive Profile over EtherCAT'],
-  [0x20, 'VoE', 'Vendor-specific over EtherCAT'],
-];
-
-const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit);
-
-// FMMU usage byte (SII category 40, ETG.2010 Table 9): one Unsigned8 per FMMU.
-const FMMU_USAGE: Record<number, string> = {
-  0x00: 'unused',
-  0x01: 'Outputs',
-  0x02: 'Inputs',
-  0x03: 'SyncM status',
-  0x04: 'dynamic Outputs',
-  0x05: 'dynamic Inputs',
-  0xff: 'unused',
-};
-
-const fmmuUsage = (v: number) => `(${FMMU_USAGE[v] ?? 'reserved'})`;
 
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
@@ -217,12 +183,12 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
           <Field
             label="Protocols"
             value={
-              decodeProtocols(info.mailboxProtocol ?? 0).length
-                ? decodeProtocols(info.mailboxProtocol ?? 0).map(([bit, abbr, full], i) => (
-                    <span key={bit}>
+              (info.mailboxProtocolNames ?? []).length
+                ? (info.mailboxProtocolNames ?? []).map((name, i) => (
+                    <span key={name}>
                       {i > 0 && <span className="text-grey-400"> · </span>}
-                      <span title={full} className="cursor-help">
-                        {abbr}
+                      <span title={MAILBOX_PROTOCOL_DESCRIPTIONS[name]} className="cursor-help">
+                        {name}
                       </span>
                     </span>
                   ))
@@ -328,7 +294,7 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
                 Mailbox capabilities
               </p>
               <MailboxCapabilities
-                coeDetails={general.coeDetails ?? 0}
+                coeDetailNames={general.coeDetailNames ?? []}
                 foeDetails={general.foeDetails ?? 0}
                 eoeDetails={general.eoeDetails ?? 0}
               />
@@ -357,7 +323,7 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
                 {syncManagers.map((sm: SyncManager, i: number) => (
                   <tr key={i} className="border-b border-grey-100 last:border-0">
                     <td className="px-4 py-2 text-grey-700">
-                      {SM_TYPE[sm.syncManagerType ?? 0] ?? `Type ${sm.syncManagerType}`}
+                      {sm.syncManagerTypeName ?? `Type ${sm.syncManagerType}`}
                     </td>
                     <td className="px-4 py-2 font-mono">
                       {formatHex(sm.physicalStartAddress ?? 0)}
@@ -393,7 +359,7 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
                 className="border border-grey-200 px-3 py-1.5 text-xs font-mono"
                 title="FMMU usage byte from the EEPROM (ETG.2010 Table 9)"
               >
-                FMMU{i}: {formatHex(f, 2)} {fmmuUsage(f)}
+                FMMU{i}: {formatHex(f, 2)} ({category.fmmuUsageNames?.[i] ?? 'reserved'})
               </span>
             ))}
           </div>

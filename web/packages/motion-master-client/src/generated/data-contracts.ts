@@ -1851,6 +1851,11 @@ export interface SyncManagerConfig {
    * @example 3
    */
   type: number;
+  /**
+   * The name of `type` (ETG.2010 Table 11): Unused, Mailbox Out, Mailbox In, Outputs, Inputs, Dynamic outputs or Dynamic inputs. `null` for a value it does not define.
+   * @example "Outputs"
+   */
+  typeName: string | null;
 }
 
 export interface FmmuConfig {
@@ -1894,6 +1899,11 @@ export interface FmmuConfig {
    * @example 2
    */
   type: number;
+  /**
+   * What the FMMU maps: Unused, Inputs (bit 0 of the type register, read accesses), Outputs (bit 1, write accesses), or Inputs and outputs. An FMMU whose `physicalStart` lies in the sync manager registers (0x0800 to 0x087F) is Mailbox state: it maps the status of a mailbox into the logical address space, which is not process data. `null` for a type the register does not define.
+   * @example "Outputs"
+   */
+  typeName: string | null;
   /**
    * Whether the FMMU is active
    * @example true
@@ -1983,15 +1993,32 @@ export interface SlaveConfig {
      */
     readOffset: number;
     /**
-     * Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10 SoE, 0x20 VoE) — decoded by the client
+     * Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10 SoE, 0x20 VoE), which `protocolNames` names
      * @example 14
      */
     protocols: number;
     /**
-     * CoE detail bits, advertised in EEPROM — decoded by the client (0x01 SDO, 0x02 SDO-Info, 0x04 PDO-Assign, 0x08 PDO-Config, 0x10 Upload, 0x20 Complete-Access). A hint, not a guarantee.
+     * The protocols whose bits are set in `protocols`, in the order of their bits.
+     * @example ["EoE","CoE","FoE"]
+     */
+    protocolNames: ("AoE" | "EoE" | "CoE" | "FoE" | "SoE" | "VoE")[];
+    /**
+     * CoE detail bits, advertised in EEPROM (0x01 SDO, 0x02 SDO Info, 0x04 PDO Assign, 0x08 PDO Config, 0x10 Upload, 0x20 Complete Access), which `coeDetailNames` names. A hint, not a guarantee.
      * @example 15
      */
     coeDetails: number;
+    /**
+     * The CoE features whose bits are set in `coeDetails`, in the order of their bits.
+     * @example ["SDO","SDO Info","PDO Assign","PDO Config"]
+     */
+    coeDetailNames: (
+      | "SDO"
+      | "SDO Info"
+      | "PDO Assign"
+      | "PDO Config"
+      | "Upload"
+      | "Complete Access"
+    )[];
     /**
      * FoE detail byte (bit 0 = enabled).
      * @example 1
@@ -2466,6 +2493,11 @@ export interface SlaveInformationInterface {
      * @example 12
      */
     mailboxProtocol?: number;
+    /**
+     * The protocols whose bits are set in `mailboxProtocol`, in the order of their bits.
+     * @example ["CoE","FoE"]
+     */
+    mailboxProtocolNames?: ("AoE" | "EoE" | "CoE" | "FoE" | "SoE" | "VoE")[];
     /** Raw EEPROM-size word (ETG: size in KiBit − 1) */
     size?: number;
     version?: number;
@@ -2484,6 +2516,15 @@ export interface SlaveInformationInterface {
       orderIdx?: number;
       nameIdx?: number;
       coeDetails?: number;
+      /** The CoE features whose bits are set in `coeDetails`, in the order of their bits. */
+      coeDetailNames?: (
+        | "SDO"
+        | "SDO Info"
+        | "PDO Assign"
+        | "PDO Config"
+        | "Upload"
+        | "Complete Access"
+      )[];
       foeDetails?: number;
       eoeDetails?: number;
       soeChannels?: number;
@@ -2494,8 +2535,10 @@ export interface SlaveInformationInterface {
       physicalPort?: number;
       physicalMemoryAddress?: number;
     };
-    /** FMMU defaults (category 40), one raw 16-bit word per entry */
+    /** FMMU usage (category 40), one byte per FMMU (ETG.2010 Table 9): 0x00 or 0xFF unused, 0x01 outputs, 0x02 inputs, 0x03 sync manager status, 0x04 dynamic outputs, 0x05 dynamic inputs */
     fmmus?: number[];
+    /** The name of each entry of `fmmus`, by position: Unused, Outputs, Inputs, SyncM status, Dynamic outputs or Dynamic inputs, or `null` for a reserved value. This is the usage byte of the SII, which numbers the other way round from the type register of the ESC. */
+    fmmuUsageNames?: (string | null)[];
     /** Sync-Manager defaults (category 41) */
     syncManagers?: {
       physicalStartAddress?: number;
@@ -2505,6 +2548,8 @@ export interface SlaveInformationInterface {
       enableSyncManager?: number;
       /** 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs */
       syncManagerType?: number;
+      /** The name of `syncManagerType` (ETG.2010 Table 11), or `null` for a value it does not define. */
+      syncManagerTypeName?: string | null;
     }[];
     /** Default RxPDOs (category 51) */
     rxPdos?: SiiPdo[];

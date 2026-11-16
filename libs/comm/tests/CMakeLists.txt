@@ -14,6 +14,7 @@ add_executable(
   mm_comm_tests
   base_test.cc
   control_plane_locks_test.cc
+  esc_names_test.cc
   fake_spoe_server_test.cc
   foe_error_test.cc
   sdo_abort_codes_test.cc

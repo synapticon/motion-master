@@ -21,6 +21,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- `GET /api/bus-config` and the parsed SII name the bits and codes they send. The bus config has
+  `protocolNames` and `coeDetailNames` beside `protocols` and `coeDetails`, and a `typeName` for
+  each sync manager and FMMU. The SII has `mailboxProtocolNames`, `coeDetailNames`,
+  `syncManagerTypeName` and `fmmuUsageNames`. The names follow ETG.2010 and the ESC datasheet. The
+  Console reads them in place of two copies of its own tables, and names an FMMU whose type is 3
+  `Inputs and outputs`, where it wrote `SM status`, and the sync manager types 5 and 6, dynamic
+  outputs and inputs.
 - Both clients read a procedure run with `stepValue(snapshot, id)`, the value one step produced,
   and `procedureFailure(snapshot)`, why a run failed or was cancelled, and convert the text of one
   parameter with `procedureParameterValue(parameter, text)`, by the type its descriptor declares.

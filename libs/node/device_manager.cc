@@ -27,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include "comm/esc_names.h"
 #include "core/platform.h"  // userCacheDir — the default root for recorder dumps
 #include "node/process_data.h"
 #include "node/process_data_dump.h"
@@ -1920,54 +1921,61 @@ void to_json(nlohmann::json& j, const SlaveConfigInfo& info) {
   nlohmann::json syncManagers = nlohmann::json::array();
   std::transform(c.syncManagers.begin(), c.syncManagers.end(), std::back_inserter(syncManagers),
                  [](const mm::comm::SyncManagerConfig& sm) {
-                   return nlohmann::json{{"index", sm.index},
-                                         {"physicalStart", sm.physicalStart},
-                                         {"length", sm.length},
-                                         {"flags", sm.flags},
-                                         {"type", sm.type}};
+                   return nlohmann::json{
+                       {"index", sm.index},
+                       {"physicalStart", sm.physicalStart},
+                       {"length", sm.length},
+                       {"flags", sm.flags},
+                       {"type", sm.type},
+                       {"typeName", mm::comm::nameJson(mm::comm::syncManagerTypeName(sm.type))}};
                  });
   nlohmann::json fmmus = nlohmann::json::array();
-  std::transform(c.fmmus.begin(), c.fmmus.end(), std::back_inserter(fmmus),
-                 [](const mm::comm::FmmuConfig& f) {
-                   return nlohmann::json{{"index", f.index},
-                                         {"logicalStart", f.logicalStart},
-                                         {"length", f.length},
-                                         {"logicalStartBit", f.logicalStartBit},
-                                         {"logicalEndBit", f.logicalEndBit},
-                                         {"physicalStart", f.physicalStart},
-                                         {"physicalStartBit", f.physicalStartBit},
-                                         {"type", f.type},
-                                         {"active", f.active != 0}};
-                 });
-  j = {{"slavePosition", c.slavePosition},
-       {"deviceName", info.deviceName},
-       {"productName", info.productName},
-       {"vendorId", info.vendorId},
-       {"productCode", info.productCode},
-       {"revisionNumber", info.revisionNumber},
-       {"serialNumber", info.serialNumber},
-       {"configuredAddress", c.configuredAddress},
-       {"aliasAddress", c.aliasAddress},
-       {"outputBits", c.outputBits},
-       {"inputBits", c.inputBits},
-       {"mailbox",
-        {{"writeLength", c.mailbox.writeLength},
-         {"writeOffset", c.mailbox.writeOffset},
-         {"readLength", c.mailbox.readLength},
-         {"readOffset", c.mailbox.readOffset},
-         {"protocols", c.mailbox.protocols},
-         {"coeDetails", c.mailbox.coeDetails},
-         {"foeDetails", c.mailbox.foeDetails},
-         {"eoeDetails", c.mailbox.eoeDetails},
-         {"soeDetails", c.mailbox.soeDetails}}},
-       {"dc",
-        {{"capable", c.dc.capable},
-         {"active", c.dc.active},
-         {"propagationDelay", c.dc.propagationDelay},
-         {"cycleTime", c.dc.cycleTime},
-         {"shift", c.dc.shift}}},
-       {"syncManagers", syncManagers},
-       {"fmmus", fmmus}};
+  std::transform(
+      c.fmmus.begin(), c.fmmus.end(), std::back_inserter(fmmus), [](const mm::comm::FmmuConfig& f) {
+        return nlohmann::json{
+            {"index", f.index},
+            {"logicalStart", f.logicalStart},
+            {"length", f.length},
+            {"logicalStartBit", f.logicalStartBit},
+            {"logicalEndBit", f.logicalEndBit},
+            {"physicalStart", f.physicalStart},
+            {"physicalStartBit", f.physicalStartBit},
+            {"type", f.type},
+            {"typeName", mm::comm::nameJson(mm::comm::fmmuTypeName(f.type, f.physicalStart))},
+            {"active", f.active != 0}};
+      });
+  j = {
+      {"slavePosition", c.slavePosition},
+      {"deviceName", info.deviceName},
+      {"productName", info.productName},
+      {"vendorId", info.vendorId},
+      {"productCode", info.productCode},
+      {"revisionNumber", info.revisionNumber},
+      {"serialNumber", info.serialNumber},
+      {"configuredAddress", c.configuredAddress},
+      {"aliasAddress", c.aliasAddress},
+      {"outputBits", c.outputBits},
+      {"inputBits", c.inputBits},
+      {"mailbox",
+       {{"writeLength", c.mailbox.writeLength},
+        {"writeOffset", c.mailbox.writeOffset},
+        {"readLength", c.mailbox.readLength},
+        {"readOffset", c.mailbox.readOffset},
+        {"protocols", c.mailbox.protocols},
+        {"protocolNames", mm::comm::namesJson(mm::comm::mailboxProtocolNames(c.mailbox.protocols))},
+        {"coeDetails", c.mailbox.coeDetails},
+        {"coeDetailNames", mm::comm::namesJson(mm::comm::coeDetailNames(c.mailbox.coeDetails))},
+        {"foeDetails", c.mailbox.foeDetails},
+        {"eoeDetails", c.mailbox.eoeDetails},
+        {"soeDetails", c.mailbox.soeDetails}}},
+      {"dc",
+       {{"capable", c.dc.capable},
+        {"active", c.dc.active},
+        {"propagationDelay", c.dc.propagationDelay},
+        {"cycleTime", c.dc.cycleTime},
+        {"shift", c.dc.shift}}},
+      {"syncManagers", syncManagers},
+      {"fmmus", fmmus}};
 }
 
 void to_json(nlohmann::json& j, const DeviceDiagnosticsInfo& info) {

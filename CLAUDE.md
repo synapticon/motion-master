@@ -812,8 +812,9 @@ firmware compatibility.
 Multi-subindex objects are read with one CoE Complete Access upload, probed once per device,
 falling back to per-subindex reads. `parameters.useCompleteAccess` (default on) gates it.
 **The advertised mailbox capability bytes are a hint, not a gate** — SOMANET advertises
-`completeAccess=false` while CA works, so the runtime probe is authoritative. They are exposed
-raw on `GET /api/bus-config` and decoded client-side.
+`completeAccess=false` while CA works, so the runtime probe is authoritative. `GET /api/bus-config`
+and the parsed SII send each such number with its names beside it, from `libs/comm/esc_names.h`, so
+a client keeps no table of the bits.
 
 **A record's declared size is not on the wire, so the enumeration probes for it, but only on a
 slave that refuses correctly.** SOMANET firmware answers Get Object Description with the *runtime

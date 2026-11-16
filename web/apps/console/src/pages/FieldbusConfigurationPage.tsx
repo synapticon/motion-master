@@ -8,52 +8,12 @@ import {
 } from '@synapticon/motion-master-client';
 import PageHeader from '../components/PageHeader';
 import ConfigExplainer from '../components/ConfigExplainer';
-import MailboxCapabilities from '../components/MailboxCapabilities';
+import MailboxCapabilities, {
+  MAILBOX_PROTOCOL_DESCRIPTIONS,
+} from '../components/MailboxCapabilities';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
-
-// SOEM SMtype: 0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs.
-const SM_TYPE: Record<number, string> = {
-  0: 'Unused',
-  1: 'Mailbox Out',
-  2: 'Mailbox In',
-  3: 'Outputs (RxPDO)',
-  4: 'Inputs (TxPDO)',
-};
-
-// ESC FMMU Type register (reg 0x060B): bit0 = read (Inputs/TxPDO), bit1 = write (Outputs/RxPDO).
-const FMMU_TYPE: Record<number, string> = {
-  0: 'Unused',
-  1: 'Inputs',
-  2: 'Outputs',
-  3: 'SM status',
-};
-
-// SyncManager configuration-register block in the ESC (8 bytes per SM from 0x0800). An FMMU whose
-// physical target falls here maps a mailbox SM's status byte into logical space so the master can
-// poll mailbox-full state via the cyclic LRW datagram — it is not process data.
-const SM_REGISTER_BLOCK_START = 0x0800;
-const SM_REGISTER_BLOCK_END = 0x0880;
-
-const fmmuType = (f: FmmuConfig): string => {
-  if (f.physicalStart >= SM_REGISTER_BLOCK_START && f.physicalStart < SM_REGISTER_BLOCK_END) {
-    return 'Mailbox state';
-  }
-  return FMMU_TYPE[f.type] ?? `Type ${f.type}`;
-};
-
-// Mailbox protocol bits (SOEM ECT_MBXPROT_*): bit, abbreviation, full name.
-const MBX_PROTOCOLS: [number, string, string][] = [
-  [0x01, 'AoE', 'ADS over EtherCAT'],
-  [0x02, 'EoE', 'Ethernet over EtherCAT'],
-  [0x04, 'CoE', 'CANopen over EtherCAT'],
-  [0x08, 'FoE', 'File over EtherCAT'],
-  [0x10, 'SoE', 'Servo Drive Profile over EtherCAT'],
-  [0x20, 'VoE', 'Vendor-specific over EtherCAT'],
-];
-
-const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit);
 
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
@@ -100,7 +60,7 @@ function SyncManagerTable({ entries }: { entries: SyncManagerConfig[] }) {
           {entries.map((sm) => (
             <tr key={sm.index} className="border-b border-grey-100 last:border-0">
               <td className="px-4 py-2 font-mono">SM{sm.index}</td>
-              <td className="px-4 py-2 text-grey-700">{SM_TYPE[sm.type] ?? `Type ${sm.type}`}</td>
+              <td className="px-4 py-2 text-grey-700">{sm.typeName ?? `Type ${sm.type}`}</td>
               <td className="px-4 py-2 font-mono">{formatHex(sm.physicalStart)}</td>
               <td className="px-4 py-2 font-mono">{sm.length} B</td>
               <td className="px-4 py-2 font-mono text-grey-500">{formatHex(sm.flags, 8)}</td>
@@ -135,7 +95,7 @@ function FmmuTable({ entries }: { entries: FmmuConfig[] }) {
         </thead>
         <tbody>
           {entries.map((f) => {
-            const type = fmmuType(f);
+            const type = f.typeName ?? `Type ${f.type}`;
             const typeHint =
               type === 'Mailbox state'
                 ? "A 1-byte flag, not process data: it tells the master when this slave has a mailbox message waiting to be read, so the master only fetches it when there's something there instead of constantly asking."
@@ -176,7 +136,7 @@ function FmmuTable({ entries }: { entries: FmmuConfig[] }) {
 }
 
 function SlaveCard({ slave }: { slave: SlaveConfig }) {
-  const protocols = decodeProtocols(slave.mailbox.protocols);
+  const protocols = slave.mailbox.protocolNames;
   return (
     <section className="border border-grey-200">
       <header className="border-b border-grey-200 bg-grey-50 px-4 py-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -254,11 +214,11 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
             label="Protocols"
             value={
               protocols.length
-                ? protocols.map(([bit, abbr, full], i) => (
-                    <span key={bit}>
+                ? protocols.map((name, i) => (
+                    <span key={name}>
                       {i > 0 && <span className="text-grey-400"> · </span>}
-                      <span title={full} className="cursor-help">
-                        {abbr}
+                      <span title={MAILBOX_PROTOCOL_DESCRIPTIONS[name]} className="cursor-help">
+                        {name}
                       </span>
                     </span>
                   ))
@@ -290,7 +250,7 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
             Mailbox capabilities
           </p>
           <MailboxCapabilities
-            coeDetails={slave.mailbox.coeDetails}
+            coeDetailNames={slave.mailbox.coeDetailNames}
             foeDetails={slave.mailbox.foeDetails}
             eoeDetails={slave.mailbox.eoeDetails}
           />

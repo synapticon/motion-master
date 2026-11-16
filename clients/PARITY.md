@@ -111,7 +111,6 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `integerFromBytes` | Python has `int.from_bytes(data, "little", signed=...)` built in. |
 | — | `SDO_TYPES` | The SDO page of the Console encodes and decodes raw SDO bytes. A Python script reads and writes a value with `read_value` and the server decodes it. |
 | — | `SDO_TYPE_HINT` | As `SDO_TYPES`. |
-| — | `decodeSdoBytes` | As `SDO_TYPES`. |
 | — | `encodeSdoValue` | As `SDO_TYPES`. |
 | — | `interpretSdoBytes` | As `SDO_TYPES`. |
 | — | `isIntegerSdoType` | As `SDO_TYPES`. |

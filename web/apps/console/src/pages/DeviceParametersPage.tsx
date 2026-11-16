@@ -18,7 +18,6 @@ import {
   SDO_TYPE_HINT,
   type SdoType,
   encodeSdoValue,
-  decodeSdoBytes,
   interpretSdoBytes,
   sdoTypeForDataTypeName,
   isIntegerSdoType,
@@ -28,6 +27,9 @@ import {
   formatHexBytes,
   objectAddressText,
   parseInteger,
+  parseBigInt,
+  parseHexBytes,
+  type ParameterValue,
   objectAccess,
 } from '@synapticon/motion-master-client';
 
@@ -102,17 +104,39 @@ function outsideRange(p: DeviceParameter, raw: string): boolean {
   return false;
 }
 
-// Compares two decoded parameter values. Both come through decodeSdoBytes, so a
-// written/read-back pair with identical wire bytes compares equal even for floats
-// (same bytes → same decoded number); strings ignore NUL padding (already stripped).
-function valuesEqual(
-  a: number | string | number[] | undefined,
-  b: number | string | number[] | undefined,
-): boolean {
+// Compares two parameter values as the server sends them: arrays by their bytes, anything else by
+// value.
+function valuesEqual(a: ParameterValue | undefined, b: ParameterValue | undefined): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((x, i) => x === b[i]);
   }
   return a === b;
+}
+
+// Converts the text of a value input to the JSON type that a write takes for this data type: a
+// number, a string, or bytes, which the input shows as hex. The server converts the value to the
+// declared type and refuses one that the type cannot hold, so this checks only the form of the
+// text, not the range.
+function inputValue(dataTypeName: string, text: string): ParameterValue | { error: string } {
+  const type = sdoTypeForDataTypeName(dataTypeName);
+  const trimmed = text.trim();
+  if (isIntegerSdoType(type)) {
+    const value = parseInteger(trimmed);
+    if (value !== null) {
+      return value;
+    }
+    return parseBigInt(trimmed) === null
+      ? { error: 'Not a whole number. Write it in decimal, or in hex with 0x.' }
+      : { error: 'Beyond 2^53 - 1, which the Console cannot send exactly.' };
+  }
+  if (type === 'float32' || type === 'float64') {
+    const value = Number(trimmed);
+    return trimmed === '' || !Number.isFinite(value) ? { error: 'Not a number.' } : value;
+  }
+  if (type === 'string') {
+    return text;
+  }
+  return parseHexBytes(trimmed) ?? { error: 'Not hex bytes, such as 0A FF.' };
 }
 
 function paramKey(index: number, subindex: number): string {
@@ -643,15 +667,11 @@ export default function DeviceParametersPage() {
   async function handleSetValue(p: DeviceParameter) {
     const key = paramKey(p.index, p.subindex);
     const raw = editValues[key] ?? valueToInputString(p.value);
-    const encoded = encodeSdoValue(sdoTypeForDataTypeName(p.dataTypeName), raw);
-    if ('error' in encoded) {
-      setRowMsg({ key, message: encoded.error, kind: 'error' });
+    const sent = inputValue(p.dataTypeName, raw);
+    if (typeof sent === 'object' && sent !== null && 'error' in sent) {
+      setRowMsg({ key, message: sent.error, kind: 'error' });
       return;
     }
-    // Reuse the SDO encoder/decoder purely to validate the input and turn it into the typed JS
-    // value the smart write expects (number / string / byte array) — the server coerces it to the
-    // object's declared width.
-    const sent = decodeSdoBytes(p.dataTypeName, encoded.bytes);
     setSettingKeys((prev) => new Set(prev).add(key));
     setRowMsg(null);
     try {
@@ -675,10 +695,11 @@ export default function DeviceParametersPage() {
         return { ...prev, data: next };
       });
       clearEdit(key);
-      // If the read-back differs from what we sent, the device silently rejected or
-      // adjusted the write (out-of-range clamp, rounding, ignored). Flag it — the
-      // displayed value is now the device's actual value, not what was typed.
-      if (readBack && !valuesEqual(value, sent)) {
+      // If the read-back differs from the value the server wrote, the device silently rejected or
+      // adjusted the write (out-of-range clamp, rounding, ignored). Flag it — the displayed value
+      // is now the device's actual value, not what was typed. The server's value is the typed one
+      // converted to the declared type, so a REAL32 compares by the value it can hold.
+      if (readBack && !valuesEqual(value, written.data.value)) {
         setRowMsg({
           key,
           message:

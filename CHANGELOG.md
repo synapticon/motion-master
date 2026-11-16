@@ -233,6 +233,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Removed
 
+- `decodeSdoBytes()` of the TypeScript client. The Console's Set button on the Parameters page was
+  its only caller: it encoded the typed text to bytes and decoded them back, which checked the range
+  before the server did. The Console now sends the typed number, string or bytes, and the server
+  checks the value against the data type and refuses one the type cannot hold. Its 64-bit result
+  lost the digits above 2^53.
+
 - The TypeScript client's `ws.onProgress()`. The server never sends procedure progress over the
   WebSocket: a program polls a procedure with `runProcedure()`.
 

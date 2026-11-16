@@ -297,6 +297,30 @@ def format_step(step):
     return line
 
 
+def wire_time_ms(response):
+    """Return the wire time of a request in milliseconds, or None when the server reported none.
+
+    The server reports the time that a fieldbus operation spent on the device in the standard
+    Server-Timing header, as the metric wire: "Server-Timing: wire;dur=1.500" is 1.5 ms.
+    """
+    header = response.headers.get("Server-Timing")
+    if header is None:
+        return None
+    for entry in header.split(","):
+        metric, *parameters = (part.strip() for part in entry.split(";"))
+        if metric != "wire":
+            continue
+        for parameter in parameters:
+            key, _, value = (part.strip() for part in parameter.partition("="))
+            if key == "dur":
+                try:
+                    return float(value)
+                except ValueError:
+                    return None
+        return None
+    return None
+
+
 def error_line(error):
     """Return one line that names an error a user can act on, or None for any other error."""
     if isinstance(error, requests.ConnectionError):
@@ -637,7 +661,7 @@ class MotionMasterClient:
 
         `format` says what to return: "bytes" (the default), "text", the file decoded as UTF-8, such
         as a CSV, "json", the file parsed as JSON, or "response", the requests.Response, for its
-        headers, such as the wire time in X-Wire-Us.
+        headers, such as the wire time that wire_time_ms() reads.
         """
         if format not in ("bytes", "text", "json", "response"):
             raise ValueError(f"format must be bytes, text, json or response, not {format!r}")

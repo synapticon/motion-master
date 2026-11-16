@@ -382,7 +382,7 @@ export class MotionMasterClient {
    * so any name works, a space included. `format` says what to return: `'bytes'`, a `Uint8Array`
    * (the default), `'text'`, the file decoded as UTF-8, such as a CSV, `'json'`, the file parsed as
    * JSON, or `'response'`, the answer of the server with its body unread, for its headers, such as
-   * the wire time in `X-Wire-Us`. The names are those of the methods of a `fetch` response.
+   * the wire time, which `wireTimeMs()` reads. The names are those of the methods of a `fetch` response.
    */
   readFile(
     slavePosition: number,
@@ -429,7 +429,7 @@ export class MotionMasterClient {
   /**
    * Writes a file to a device over FoE (`foeWriteFile`), and replaces a file of the same name. A
    * string is written as UTF-8. Returns the answer of the server, for its headers, such as the wire
-   * time in `X-Wire-Us`.
+   * time, which `wireTimeMs()` reads.
    */
   async writeFile(
     slavePosition: number,

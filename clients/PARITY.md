@@ -90,8 +90,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `lanAddress` | As `LAN_DOMAIN`. |
 | — | `lanHostname` | As `LAN_DOMAIN`. |
 | — | `isIpv4` | As `LAN_DOMAIN`. |
-| — | `WIRE_TIME_HEADER` | The Console shows the time a request spent on the wire. A Python script reads the header from `response.headers`. |
-| — | `wireTimeMs` | As `WIRE_TIME_HEADER`. |
+| `wire_time_ms` | `wireTimeMs` | |
 | — | `formatHex` | The hex input fields of the Console. Python formats and parses hex with `f"{value:#x}"` and `int(text, 16)`. |
 | — | `formatHexBytes` | Python writes the same with `data.hex(" ").upper()`. |
 | — | `parseHexBytes` | As `formatHex`. |

@@ -1,21 +1,45 @@
-// Helper for the server-measured wire-time channel.
+// The server-measured wire time of a request.
 //
-// Endpoints that perform a fieldbus transaction (SDO, FoE, ...) report the on-device wire cost —
-// control-plane lock acquire + the mailbox/ESC round-trip — via the `X-Wire-Us` response header
-// (microseconds), independent of the response body shape. A cross-origin client subtracts this
-// from its own observed HTTP round-trip to separate the device cost from browser/transport
-// overhead. The header is CORS-exposed by the server so it is readable cross-origin.
+// An endpoint that performs a fieldbus transaction (SDO, FoE, ...) reports the on-device cost —
+// control-plane lock acquire plus the mailbox/ESC round-trip — in the standard Server-Timing
+// header, as the metric `wire` in milliseconds: `Server-Timing: wire;dur=1.500`. A client subtracts
+// it from its own HTTP round-trip to separate the device cost from the browser and the transport.
+// A browser records the header per request in its Performance API, so a page reads the time of a
+// request that it made through any code; a program that holds the response reads it from there.
 
-// Name of the wire-time response header (microseconds, integer).
-export const WIRE_TIME_HEADER = 'X-Wire-Us';
+/** The name of the metric in `Server-Timing` that carries the wire time. */
+const WIRE_METRIC = 'wire';
 
-// Reads the server-measured wire time from a response, in milliseconds, or null if the header is
-// absent or unparseable. Accepts any `Response` (the generated client's `HttpResponse` extends it).
-export function wireTimeMs(res: Response): number | null {
-  const raw = res.headers.get(WIRE_TIME_HEADER);
-  if (raw === null) {
+/**
+ * Returns the wire time of a request in milliseconds, or `null` when the server reported none.
+ *
+ * `source` is the response, whose `Server-Timing` header holds the time, or the entry of the
+ * request in the browser's Performance API, a `PerformanceResourceTiming`.
+ */
+export function wireTimeMs(source: Response | PerformanceResourceTiming): number | null {
+  if ('serverTiming' in source) {
+    const metric = source.serverTiming.find((m) => m.name === WIRE_METRIC);
+    return metric === undefined ? null : metric.duration;
+  }
+  const header = source.headers.get('Server-Timing');
+  return header === null ? null : serverTimingDuration(header, WIRE_METRIC);
+}
+
+/** Returns the `dur` of one metric of a `Server-Timing` value, or `null` when it has none. */
+function serverTimingDuration(header: string, name: string): number | null {
+  for (const entry of header.split(',')) {
+    const [metric, ...parameters] = entry.split(';').map((part) => part.trim());
+    if (metric !== name) {
+      continue;
+    }
+    for (const parameter of parameters) {
+      const [key, value] = parameter.split('=').map((part) => part.trim());
+      if (key === 'dur') {
+        const duration = Number(value);
+        return Number.isFinite(duration) ? duration : null;
+      }
+    }
     return null;
   }
-  const us = Number(raw);
-  return Number.isFinite(us) ? us / 1000 : null;
+  return null;
 }

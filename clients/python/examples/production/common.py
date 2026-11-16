@@ -27,6 +27,7 @@ from motion_master_client import (  # noqa: E402
     error_line,
     format_step,
     step_changes,
+    step_value,
 )
 
 log = logging.getLogger("production")
@@ -543,13 +544,6 @@ def store_parameters(s):
     run_procedure(s, "store-parameters")
     return "parameters stored to flash"
 
-
-def step_value(snapshot, step_id):
-    """Return the value of one step of a finished procedure run, or None."""
-    for step in snapshot["steps"]:
-        if step["id"] == step_id:
-            return step.get("value")
-    return None
 
 
 def load_configuration(s, path):

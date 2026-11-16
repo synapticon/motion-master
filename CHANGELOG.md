@@ -21,6 +21,15 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- Both clients read a procedure run with `stepValue(snapshot, id)`, the value one step produced,
+  and `procedureFailure(snapshot)`, why a run failed or was cancelled, and convert the text of one
+  parameter with `procedureParameterValue(parameter, text)`, by the type its descriptor declares.
+  The Python twins are `step_value()`, `procedure_failure()` and `procedure_parameter_value()`. The
+  Console, both `run-procedure` examples and the production scripts use them in place of their own
+  copies. So the examples check the range of an integer and the length of a byte list, as the
+  Console did, and the Console reads bytes separated by commas as well as by spaces. A list splits
+  on commas and line breaks in both: the Console split it on line breaks only, and the examples on
+  commas only.
 - The CiA402 status, `GET /api/devices/{slavePosition}/cia402`, has `activeTarget`: the kind of the
   target that the active operation mode acts on, as `POST …/cia402/target` takes it, and the index
   and subindex of its object, such as `{"kind": "velocity", "index": 24831, "subindex": 0}`. It is

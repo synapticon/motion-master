@@ -10,6 +10,7 @@ import {
   formatHex,
   objectAddressText,
   Somanet,
+  stepValue,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -38,10 +39,6 @@ const STATE_BADGE: Record<NonNullable<IcMuEncoderStatus['state']>, string> = {
   invalid: 'bg-status-warn text-grey-900',
   'not-configured': 'bg-grey-700 text-white',
 };
-
-function stepValue(snapshot: ProcedureSnapshot | undefined, id: string): unknown {
-  return snapshot?.steps.find((step) => step.id === id)?.value;
-}
 
 export default function DeviceIcMuEncodersPage() {
   const { deviceId } = useParams();

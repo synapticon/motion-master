@@ -9,6 +9,7 @@ import {
   type IcMuCalibrationValidation,
   type ProcedureSnapshot,
   type ProgressStep,
+  stepValue,
 } from '@synapticon/motion-master-client';
 import Callout from './Callout';
 import Checkbox from './Checkbox';
@@ -33,10 +34,6 @@ const STEP_DOT: Record<ProgressStep['status'], string> = {
   succeeded: 'bg-green-600',
   failed: 'bg-syn-red',
 };
-
-function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
-}
 
 // The iterations a run has finished, in order.
 function iterations(snapshot: ProcedureSnapshot): IcMuCalibrationIteration[] {

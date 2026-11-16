@@ -8,13 +8,15 @@
 // Parameters go on the command line as name=value. The program converts each value by the type the
 // descriptor of the procedure gives:
 //
-//     integer       decimal or 0x-prefixed hex
+//     integer       decimal, or hex, octal or binary with 0x, 0o or 0b
 //     boolean       true or false
 //     enum          one of the option values that --describe lists
 //     byteArray     bytes separated by commas, each decimal or 0x-prefixed hex
 //     string        as written
 //     stringArray   values separated by commas
 //     file          a local path, which the program reads and sends as base64
+//
+// procedureParameterValue() of the client converts every type but file, as the Console does.
 //
 // Opens the fieldbus driver, scans and moves the device to --state first when needed. The default is
 // PREOP, because most procedures need the mailbox. A procedure that enables the drive needs OP,
@@ -27,9 +29,14 @@
 //     pnpm example examples/run-procedure.ts offset-detection --state op --slave 2
 
 import { readFileSync } from 'node:fs';
-import { MotionMasterClient, type ProcedureRequest, run } from '@synapticon/motion-master-client';
+import {
+  MotionMasterClient,
+  procedureParameterValue,
+  type ProcedureRequest,
+  run,
+} from '@synapticon/motion-master-client';
 import { Option } from 'commander';
-import { AL_STATES, byteList, cli, integer } from './options';
+import { AL_STATES, cli, integer } from './options';
 import { runToEnd } from './procedures';
 
 type Descriptor = Awaited<
@@ -43,33 +50,13 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-/** Converts the text of one name=value argument to the JSON value of its parameter type. */
+/**
+ * Converts the text of one name=value argument to the JSON value of its parameter type. A file
+ * parameter names a local path, which the program reads and sends as base64.
+ */
 function convert(param: Parameter, text: string): unknown {
-  switch (param.type) {
-    case 'integer':
-      return integer(text);
-    case 'boolean':
-      if (!['true', 'false'].includes(text.toLowerCase())) {
-        throw new Error('expected true or false');
-      }
-      return text.toLowerCase() === 'true';
-    case 'enum': {
-      const option = (param.options ?? []).find((o) => String(o.value) === text);
-      if (option === undefined) {
-        const values = (param.options ?? []).map((o) => String(o.value)).join(', ');
-        throw new Error(`expected one of ${values}`);
-      }
-      return option.value;
-    }
-    case 'byteArray':
-      return byteList(text);
-    case 'stringArray':
-      return text ? text.split(',') : [];
-    case 'file':
-      return readFileSync(text).toString('base64');
-    default:
-      return text;
-  }
+  const value = param.type === 'file' ? readFileSync(text).toString('base64') : text;
+  return procedureParameterValue(param, value);
 }
 
 /** Builds the request body from name=value arguments, checked against the descriptor. */
@@ -87,10 +74,15 @@ function buildParams(descriptor: Descriptor, assignments: string[]): ProcedureRe
       const known = [...params.keys()].join(', ') || 'none';
       fail(`${descriptor.name} has no parameter '${name}' (parameters: ${known})`);
     }
+    let value: unknown;
     try {
-      body[name] = convert(param, assignment.slice(sep + 1));
+      value = convert(param, assignment.slice(sep + 1));
     } catch (e) {
       fail(`${name}: ${(e as Error).message}`);
+    }
+    // An empty value leaves the parameter out, so the server uses its default.
+    if (value !== undefined) {
+      body[name] = value;
     }
   }
   const missing = [...params.values()].filter((p) => p.required && !(p.name in body));

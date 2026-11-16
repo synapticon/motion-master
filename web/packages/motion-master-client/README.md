@@ -227,6 +227,7 @@ The client has helpers for the steps that most programs take. They have the same
 - `startCapture({ adapter, seconds })` starts a capture of the EtherCAT frames that runs until `stopCapture()`, which returns the path of the pcap file in the user cache and the summary of late frames. Linux and macOS servers only. Both throw a `CaptureError` with the server's reason.
 - `streamMonitoring(topic)`, `monitoring(parameters, span)` and `notifications()` read from the WebSocket. [Monitoring](#monitoring) and [Notifications](#notifications) describe them.
 - `stepChanges(run)` yields each snapshot of a run as `[snapshot, changed]`, where `changed` lists the steps whose status changed. `formatStep(step)` turns a step into one line.
+- `stepValue(snapshot, id)` returns what one step of a run produced, and `procedureFailure(snapshot)` why a run failed or was cancelled. `procedureParameterValue(parameter, text)` converts the text of one parameter by the type that the descriptor of the procedure declares, and throws an `Error` that says what is wrong with it. A list splits on commas and line breaks.
 
 ```ts
 for await (const [snapshot, changed] of stepChanges(client.runProcedure(1, 'store-parameters'))) {

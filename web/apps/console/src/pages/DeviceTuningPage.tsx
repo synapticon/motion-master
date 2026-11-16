@@ -9,6 +9,7 @@ import {
   type ProgressStep,
   objectAddressText,
   Somanet,
+  stepValue,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -67,10 +68,6 @@ const LIMITS: GainObject[] = [
 interface LimitsWrite {
   limits: { object: string; before: number; after: number }[];
   skipped: string[];
-}
-
-function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
 }
 
 function isNotFound(error: unknown): boolean {

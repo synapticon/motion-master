@@ -322,6 +322,11 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   of late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
 - `step_changes(run)` yields each snapshot of a run as `(snapshot, changed)`, where `changed` lists
   the steps whose status changed. `format_step(step)` turns a step into one line.
+- `step_value(snapshot, step_id)` returns what one step of a run produced, and
+  `procedure_failure(snapshot)` why a run failed or was cancelled.
+  `procedure_parameter_value(parameter, text)` converts the text of one parameter by the type that
+  the descriptor of the procedure declares, and raises `ValueError`, which says what is wrong with
+  it. A list splits on commas and line breaks.
 - `stream_monitoring(topic)` streams the batches of a monitoring that exists already, from the
   WebSocket.
 - `monitoring(parameters, interval_ms=50, topic=None, name=None)` returns a `MonitoringRecording`

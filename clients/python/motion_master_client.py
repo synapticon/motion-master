@@ -49,6 +49,7 @@ import functools
 import json
 import logging
 import os
+import re
 import signal
 import ssl
 import sys
@@ -331,6 +332,97 @@ def format_step(step):
     if "error" in step:
         line += f"  {step['error']}"
     return line
+
+
+def step_value(snapshot, step_id):
+    """Return the value that one step of a run produced, such as step_value(snapshot, "compute").
+
+    The shape depends on the procedure and the step, as the API documents it. Returns None when the
+    run has no step with this id, and when the step has produced nothing so far.
+    """
+    for step in snapshot["steps"]:
+        if step["id"] == step_id:
+            return step.get("value")
+    return None
+
+
+def procedure_failure(snapshot):
+    """Return why a run failed or was cancelled, or None while it goes on and after it succeeded.
+
+    The reason is the error of the run, else the error of a step, else the status itself.
+    """
+    if snapshot["status"] not in ("failed", "cancelled"):
+        return None
+    if snapshot.get("error"):
+        return snapshot["error"]
+    for step in snapshot["steps"]:
+        if step.get("error"):
+            return step["error"]
+    return snapshot["status"]
+
+
+_INTEGER = re.compile(r"[+-]?(0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|[1-9][0-9]*|0+)")
+
+
+def procedure_parameter_value(parameter, text):
+    """Convert the text of one parameter of a procedure to the value its request takes.
+
+    The type that the descriptor of the procedure declares decides:
+
+    - integer: decimal, or hex, octal or binary with 0x, 0o or 0b, within minValue and maxValue.
+    - boolean: true or false, in any case.
+    - enum: the value of one of the options, as text.
+    - byteArray: bytes from 0 to 255, separated by commas or white space, exactly `length` of them
+      when the descriptor gives a length.
+    - stringArray: the items, separated by commas or line breaks. An item can hold neither.
+    - string and file: the text as it is. A file goes as its content in base64, which the caller
+      reads.
+
+    Returns None for empty text, which leaves the parameter out of the request so that the server
+    uses its default. An empty stringArray is [], an empty list. Raises ValueError, which says what
+    is wrong with the text.
+    """
+    kind = parameter["type"]
+    if kind == "stringArray":
+        return [item.strip() for item in re.split(r"[,\n]", text) if item.strip()]
+    if kind in ("string", "file"):
+        return text if text != "" else None
+    trimmed = text.strip()
+    if trimmed == "":
+        return None
+    if kind == "integer":
+        if not _INTEGER.fullmatch(trimmed):
+            raise ValueError("Not a whole number. Write it in decimal, or in hex with 0x.")
+        value = int(trimmed, 0)
+        low, high = parameter.get("minValue"), parameter.get("maxValue")
+        if (low is not None and value < low) or (high is not None and value > high):
+            low_text = "-∞" if low is None else low
+            high_text = "∞" if high is None else high
+            raise ValueError(f"Not between {low_text} and {high_text}.")
+        return value
+    if kind == "boolean":
+        if trimmed.lower() not in ("true", "false"):
+            raise ValueError("Expected true or false.")
+        return trimmed.lower() == "true"
+    if kind == "enum":
+        options = parameter.get("options") or []
+        for option in options:
+            if str(option["value"]) == trimmed:
+                return option["value"]
+        values = ", ".join(str(o["value"]) for o in options)
+        raise ValueError(f"Expected one of {values}.")
+    if kind == "byteArray":
+        tokens = [t for t in re.split(r"[\s,]+", trimmed) if t]
+        length = parameter.get("length")
+        if length is not None and len(tokens) != length:
+            raise ValueError(f"Expected {length} bytes, got {len(tokens)}.")
+        data = []
+        for token in tokens:
+            if not _INTEGER.fullmatch(token) or not 0 <= int(token, 0) <= 255:
+                raise ValueError(f"{token} is not a byte, 0 to 255.")
+            data.append(int(token, 0))
+        return data
+    return trimmed
 
 
 def wire_time_ms(response):

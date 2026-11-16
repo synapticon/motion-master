@@ -5,6 +5,8 @@ import {
   apiErrorMessage,
   type ProcedureSnapshot,
   formatHex,
+  stepValue,
+  procedureFailure,
 } from '@synapticon/motion-master-client';
 import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
@@ -72,17 +74,6 @@ const OUTCOME_TEXT: Record<Outcome, string> = {
 };
 
 const DRIVE_FILE = "the drive's config.csv";
-
-function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
-}
-
-function failure(snapshot: ProcedureSnapshot | undefined): string | undefined {
-  if (snapshot?.status !== 'failed' && snapshot?.status !== 'cancelled') {
-    return undefined;
-  }
-  return snapshot.error ?? snapshot.steps.find((step) => step.error)?.error ?? snapshot.status;
-}
 
 function valueText(value: unknown): string {
   if (value === null || value === undefined) {
@@ -235,9 +226,9 @@ export default function DeviceConfigurationPage() {
   const compareError = compare.isError
     ? apiErrorMessage(compare.error)
     : first
-      ? failure(compareQuery.data)
+      ? procedureFailure(compareQuery.data)
       : undefined;
-  const loadError = load.isError ? apiErrorMessage(load.error) : failure(loadQuery.data);
+  const loadError = load.isError ? apiErrorMessage(load.error) : procedureFailure(loadQuery.data);
   const verify = stepValue<{ differing: { address: string }[] }>(loadQuery.data, 'verify');
   const problems = [
     ...(result?.first.problems ?? []).map((p) => ({ ...p, file: firstName })),

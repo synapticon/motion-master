@@ -6,10 +6,11 @@ import {
   type IcMuEepromByte,
   type IcMuI2CTransfer,
   type IcMuKeyRegister,
-  type ProcedureSnapshot,
   formatHex,
   formatHexBytes,
   parseInteger,
+  stepValue,
+  procedureFailure,
 } from '@synapticon/motion-master-client';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadText } from '../utils/download';
@@ -25,15 +26,6 @@ const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 
 type Target = 'eeprom' | 'ic-pvl' | 'ic-pvl-status';
-
-function stepValue<T>(snapshot: ProcedureSnapshot | undefined, id: string): T | undefined {
-  return snapshot?.steps.find((step) => step.id === id)?.value as T | undefined;
-}
-
-// The error of the first failed step, which says why a run failed.
-function failure(snapshot: ProcedureSnapshot | undefined): string | undefined {
-  return snapshot?.steps.find((step) => step.status === 'failed')?.error ?? undefined;
-}
 
 // A byte typed as decimal or with a 0x prefix, or nothing for anything else.
 function parseByte(text: string): number | undefined {
@@ -311,7 +303,7 @@ export default function IcMuEepromSection({
         </p>
       ))}
       {[keyRegisters, exported, i2c, restoreFile, erase].map(({ snapshot }, index) => {
-        const message = snapshot?.status === 'failed' ? failure(snapshot) : undefined;
+        const message = snapshot?.status === 'failed' ? procedureFailure(snapshot) : undefined;
         return message ? (
           <p key={index} className="text-xs text-status-bad">
             {message}

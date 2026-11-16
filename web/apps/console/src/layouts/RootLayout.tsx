@@ -519,7 +519,7 @@ export default function RootLayout() {
             Motion Master
           </span>
           <p className="mt-0.5 text-xs font-display tracking-wide text-white/30">
-            v6.0.0-alpha.126
+            v6.0.0-alpha.127
           </p>
         </div>
 

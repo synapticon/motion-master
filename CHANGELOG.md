@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.127] - 2026-11-16
+
 ### Added
 
 - Both clients write one debug line per HTTP request: the method, the path, the status, the round
@@ -1401,7 +1403,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.126...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.127...HEAD
+[6.0.0-alpha.127]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.126...v6.0.0-alpha.127
 [6.0.0-alpha.126]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.125...v6.0.0-alpha.126
 [6.0.0-alpha.125]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.124...v6.0.0-alpha.125
 [6.0.0-alpha.124]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.123...v6.0.0-alpha.124

@@ -172,6 +172,14 @@ def _path(position, **more):
     return {"slavePosition": position, **more}
 
 
+def _file_path(position, name):
+    """Return the path parameters of a file of a device, with the name percent-encoded.
+
+    The server decodes the name, so a name with a space or a slash names the file it means.
+    """
+    return _path(position, filename=urllib.parse.quote(name, safe=""))
+
+
 _CONFIG_TEMPLATE_URL = (
     "https://github.com/synapticon/motion-master/blob/main/clients/python/config.example.toml"
 )
@@ -632,7 +640,7 @@ class MotionMasterClient:
         """
         if format not in ("bytes", "text", "json"):
             raise ValueError(f"format must be bytes, text or json, not {format!r}")
-        content = self.call("foeReadFile", path=_path(position, filename=name)).content
+        content = self.call("foeReadFile", path=_file_path(position, name)).content
         if format == "text":
             return content.decode("utf-8")
         if format == "json":
@@ -647,14 +655,14 @@ class MotionMasterClient:
         data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
         self.call(
             "foeWriteFile",
-            path=_path(position, filename=name),
+            path=_file_path(position, name),
             data=data,
             headers={"Content-Type": "application/octet-stream"},
         )
 
     def remove_file(self, position, name):
         """Remove a file from the flash of a device (deleteDeviceFile)."""
-        self.call("deleteDeviceFile", path=_path(position, filename=name))
+        self.call("deleteDeviceFile", path=_file_path(position, name))
 
     def wait_for_value(
         self,

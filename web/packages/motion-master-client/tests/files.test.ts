@@ -87,6 +87,29 @@ describe('files', () => {
   });
 });
 
+describe('file names in the path', () => {
+  it('percent-encodes the name in every file request', async () => {
+    const paths: string[] = [];
+    server.use(
+      http.all(`${FILES}/*`, ({ request }) => {
+        paths.push(`${request.method} ${new URL(request.url).pathname}`);
+        return request.method === 'GET'
+          ? new HttpResponse(new Uint8Array([1]))
+          : HttpResponse.json({ ok: true });
+      }),
+    );
+    const client = new MotionMasterClient({ baseUrl: HTTP_URL });
+    await client.readFile(1, 'a b.txt');
+    await client.writeFile(1, 'a+b.txt', 'x');
+    await client.removeFile(1, 'fs-stackunlock=DD1317');
+    expect(paths).toEqual([
+      'GET /api/devices/1/files/a%20b.txt',
+      'PUT /api/devices/1/files/a%2Bb.txt',
+      'DELETE /api/devices/1/files/fs-stackunlock%3DDD1317',
+    ]);
+  });
+});
+
 describe('text of bytes and addresses', () => {
   it('formats bytes as hex in capitals', () => {
     expect(formatHexBytes([0x0a, 0xff])).toBe('0A FF');

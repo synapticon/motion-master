@@ -136,6 +136,13 @@ the HTTP/WebSocket API may break between any two alphas.
 - The TypeScript client's `ws.onProgress()`. The server never sends procedure progress over the
   WebSocket: a program polls a procedure with `runProcedure()`.
 
+### Fixed
+
+- The file routes of a device, `GET`, `PUT` and `DELETE /api/devices/{slavePosition}/files/{filename}`,
+  decode the file name. A name that a client percent-encoded reached the drive encoded, so
+  `a b.txt` was written as `a%20b.txt`. Both clients encode the name in `readFile`, `writeFile` and
+  `removeFile`, so a name reaches the drive as it is, whichever client sends it.
+
 ## [6.0.0-alpha.126] - 2026-11-15
 
 ### Changed

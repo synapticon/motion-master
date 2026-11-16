@@ -668,6 +668,33 @@ class MotionMasterClient:
         """Remove a file from the flash of a device (deleteDeviceFile), and return the response."""
         return self.call("deleteDeviceFile", path=_file_path(position, name))
 
+    def read_sii(self, position, format="json"):
+        """Read the SII of a device, the configuration in its EEPROM (readSii).
+
+        `format` says what to return: "json", the parsed SII (the default), or "bytes", the raw
+        EEPROM image.
+        """
+        if format not in ("json", "bytes"):
+            raise ValueError(f"format must be json or bytes, not {format!r}")
+        if format == "json":
+            return self.call("readSii", path=_path(position)).json()
+        # The Accept header selects the raw image over the parsed JSON.
+        headers = {"Accept": "application/octet-stream"}
+        return self.call("readSii", path=_path(position), headers=headers).content
+
+    def write_sii(self, position, image):
+        """Write a raw SII image to the EEPROM of a device (writeSii), and return the response.
+
+        A wrong image can leave the device unidentifiable, and the device takes the new image only
+        after a power cycle.
+        """
+        return self.call(
+            "writeSii",
+            path=_path(position),
+            data=bytes(image),
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
     def wait_for_value(
         self,
         position: int,

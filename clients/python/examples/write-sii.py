@@ -38,12 +38,7 @@ def main():
     client.init()
     client.ensure_scanned()
 
-    client.call(
-        "writeSii",
-        path={"slavePosition": args.slave},
-        data=image,
-        headers={"Content-Type": "application/octet-stream"},
-    )
+    client.write_sii(args.slave, image)
     print(f"wrote {len(image)} byte(s) of SII to slave {args.slave}. Power cycle it to apply.")
 
 

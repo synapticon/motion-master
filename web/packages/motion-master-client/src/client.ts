@@ -24,6 +24,7 @@ import type {
   DeviceFile,
   ProcedureRequest,
   ProcedureSnapshot,
+  SlaveInformationInterface,
 } from './generated/data-contracts';
 import type { ApiConfig } from './generated/http-client';
 import { API_BASE_URL, WS_URL } from './constants';
@@ -454,6 +455,56 @@ export class MotionMasterClient {
    */
   async removeFile(slavePosition: number, name: string): Promise<Response> {
     return this.api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
+  }
+
+  /**
+   * Reads the SII of a device, the configuration in its EEPROM (`readSii`). `format` says what to
+   * return: `'json'`, the parsed SII (the default), or `'bytes'`, the raw EEPROM image.
+   */
+  readSii(
+    slavePosition: number,
+    options?: { format?: 'json'; signal?: AbortSignal },
+  ): Promise<SlaveInformationInterface>;
+  readSii(
+    slavePosition: number,
+    options: { format: 'bytes'; signal?: AbortSignal },
+  ): Promise<Uint8Array>;
+  async readSii(
+    slavePosition: number,
+    options: { format?: 'json' | 'bytes'; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const { format = 'json', signal } = options;
+    if (format === 'json') {
+      return (await this.api.readSii(slavePosition, { signal })).data;
+    }
+    // The Accept header selects the raw image. With no response format, the generated client
+    // returns the answer with its body unread.
+    const response = await this.api.readSii(slavePosition, {
+      format: undefined,
+      headers: { Accept: 'application/octet-stream' },
+      signal,
+    });
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  /**
+   * Writes a raw SII image to the EEPROM of a device (`writeSii`), and returns the answer of the
+   * server. A wrong image can leave the device unidentifiable, and the device takes the new image
+   * only after a power cycle.
+   */
+  async writeSii(
+    slavePosition: number,
+    image: Uint8Array,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Response> {
+    // The generated writeSii sends a body it has no formatter for as JSON, so the bytes go with the
+    // fetch of this client.
+    return this.fetch(`${this.httpBaseUrl}/api/devices/${slavePosition}/sii`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: image.slice(),
+      signal: options.signal,
+    });
   }
 
   /**

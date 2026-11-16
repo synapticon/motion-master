@@ -126,6 +126,8 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `read_file` | `readFile` | |
 | `write_file` | `writeFile` | |
 | `remove_file` | `removeFile` | |
+| `read_sii` | `readSii` | |
+| `write_sii` | `writeSii` | |
 | `wait_for_value` | `waitForValue` | |
 | `ensure_scanned` | `ensureScanned` | |
 | `ensure_state` | `ensureState` | |

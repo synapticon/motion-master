@@ -107,6 +107,33 @@ describe('the answer of a file request', () => {
   });
 });
 
+describe('SII', () => {
+  it('reads the parsed SII, or the raw image, and writes a raw image', async () => {
+    const received: { accept: string | null; type: string | null; body: number[] }[] = [];
+    server.use(
+      http.all(`${HTTP_URL}/api/devices/1/sii`, async ({ request }) => {
+        received.push({
+          accept: request.headers.get('Accept'),
+          type: request.headers.get('Content-Type'),
+          body: [...new Uint8Array(await request.arrayBuffer())],
+        });
+        if (request.method === 'PUT') {
+          return HttpResponse.json({ ok: true });
+        }
+        return request.headers.get('Accept') === 'application/octet-stream'
+          ? new HttpResponse(new Uint8Array([0x01, 0x02]))
+          : HttpResponse.json({ general: { nameIdx: 1 } });
+      }),
+    );
+    const client = new MotionMasterClient({ baseUrl: HTTP_URL });
+    expect(await client.readSii(1)).toEqual({ general: { nameIdx: 1 } });
+    expect(await client.readSii(1, { format: 'bytes' })).toEqual(new Uint8Array([1, 2]));
+    expect((await client.writeSii(1, new Uint8Array([9, 8]))).ok).toBe(true);
+    expect(received.at(-1)).toMatchObject({ type: 'application/octet-stream', body: [9, 8] });
+    expect(received[1].accept).toBe('application/octet-stream');
+  });
+});
+
 describe('file names in the path', () => {
   it('percent-encodes the name in every file request', async () => {
     const paths: string[] = [];

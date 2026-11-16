@@ -125,6 +125,15 @@ TEST(PercentDecode, DecodesEscapes) {
   EXPECT_EQ(percentDecode(""), "");
 }
 
+// The file routes of a device decode the name, so that both clients reach the same file whatever
+// they encode. A path keeps `+` as it is: only a query string spells a space as `+`.
+TEST(PercentDecode, KeepsTheFileNamesOfADevice) {
+  EXPECT_EQ(percentDecode("fs-stackunlock%3DDD1317"), "fs-stackunlock=DD1317");
+  EXPECT_EQ(percentDecode("fs-stackunlock=DD1317"), "fs-stackunlock=DD1317");
+  EXPECT_EQ(percentDecode("a%2Bb.txt"), "a+b.txt");
+  EXPECT_EQ(percentDecode("a+b.txt"), "a+b.txt");
+}
+
 // The reason path and query decoding are separate functions. A query decoder also maps '+' to a
 // space, which is right for application/x-www-form-urlencoded and wrong in a path — sharing one
 // would look up a file called "a+b.zip" as "a b.zip".

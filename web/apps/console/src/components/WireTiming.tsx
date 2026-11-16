@@ -19,7 +19,7 @@ export function formatWireMs(ms: number): string {
 }
 
 export interface WireTimingValue {
-  // Server-measured device time in ms, or null if the response carried no X-Wire-Us header.
+  // Server-measured device time in ms, or null if the response carried no Server-Timing header.
   wireMs: number | null;
   // Browser-observed HTTP round-trip in ms (measured around the fetch).
   roundTripMs: number;
@@ -69,10 +69,10 @@ export function WireTiming({
   );
 }
 
-// Captures both the server-measured wire time (X-Wire-Us) and the browser round-trip around an API
-// call, on both success and failure — the backend attaches X-Wire-Us to the error response too, so
-// a slow or failed operation still shows its device cost. Pass a thunk so timing starts right
-// before the request. Re-throws the error so react-query / callers still see it.
+// Captures both the server-measured wire time (Server-Timing) and the browser round-trip around an
+// API call, on both success and failure — the backend attaches Server-Timing to the error response
+// too, so a slow or failed operation still shows its device cost. Pass a thunk so timing starts
+// right before the request. Re-throws the error so react-query / callers still see it.
 export function useWireTiming() {
   const [timing, setTiming] = useState<WireTimingValue | null>(null);
   const measure = useCallback(async <T extends Response>(call: () => Promise<T>): Promise<T> => {

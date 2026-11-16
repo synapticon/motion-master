@@ -11,7 +11,7 @@ import { formatBytes } from '../utils/format';
 import { encodeUserCachePath, userCacheBasename, userCacheUrl } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 
-// The `X-Wire-Us` figure on these endpoints is server-side file I/O, not a fieldbus transaction —
+// The `Server-Timing` figure on these endpoints is server-side file I/O, not a fieldbus transaction —
 // WireTiming's default tooltip would claim a device was involved, so override it.
 const SERVER_TIMING_TITLE =
   'Server — time the backend spent on the operation itself: validating the path and reading, ' +

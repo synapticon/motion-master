@@ -689,8 +689,8 @@ class MotionMasterClient:
         )
 
     def remove_file(self, position, name):
-        """Remove a file from the flash of a device (deleteDeviceFile), and return the response."""
-        return self.call("deleteDeviceFile", path=_file_path(position, name))
+        """Remove a file from the flash of a device (deleteDeviceFile)."""
+        self.call("deleteDeviceFile", path=_file_path(position, name))
 
     def read_sii(self, position, format="json"):
         """Read the SII of a device, the configuration in its EEPROM (readSii).
@@ -707,12 +707,12 @@ class MotionMasterClient:
         return self.call("readSii", path=_path(position), headers=headers).content
 
     def write_sii(self, position, image):
-        """Write a raw SII image to the EEPROM of a device (writeSii), and return the response.
+        """Write a raw SII image to the EEPROM of a device (writeSii).
 
         A wrong image can leave the device unidentifiable, and the device takes the new image only
         after a power cycle.
         """
-        return self.call(
+        self.call(
             "writeSii",
             path=_path(position),
             data=bytes(image),

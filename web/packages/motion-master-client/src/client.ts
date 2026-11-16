@@ -449,12 +449,9 @@ export class MotionMasterClient {
     });
   }
 
-  /**
-   * Removes a file from the flash of a device (`deleteDeviceFile`). Returns the answer of the
-   * server, for its headers.
-   */
-  async removeFile(slavePosition: number, name: string): Promise<Response> {
-    return this.api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
+  /** Removes a file from the flash of a device (`deleteDeviceFile`). */
+  async removeFile(slavePosition: number, name: string): Promise<void> {
+    await this.api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
   }
 
   /**
@@ -488,18 +485,17 @@ export class MotionMasterClient {
   }
 
   /**
-   * Writes a raw SII image to the EEPROM of a device (`writeSii`), and returns the answer of the
-   * server. A wrong image can leave the device unidentifiable, and the device takes the new image
-   * only after a power cycle.
+   * Writes a raw SII image to the EEPROM of a device (`writeSii`). A wrong image can leave the
+   * device unidentifiable, and the device takes the new image only after a power cycle.
    */
   async writeSii(
     slavePosition: number,
     image: Uint8Array,
     options: { signal?: AbortSignal } = {},
-  ): Promise<Response> {
+  ): Promise<void> {
     // The generated writeSii sends a body it has no formatter for as JSON, so the bytes go with the
     // fetch of this client.
-    return this.fetch(`${this.httpBaseUrl}/api/devices/${slavePosition}/sii`, {
+    await this.fetch(`${this.httpBaseUrl}/api/devices/${slavePosition}/sii`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: image.slice(),

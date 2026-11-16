@@ -169,7 +169,7 @@ function paramKey(index: number, subindex: number): string {
 }
 
 // Timing readout for the raw SDO tools: the server-measured wire transaction (from the
-// response's `wireUs`) and the browser-observed HTTP round-trip. The gap between them is
+// response's `Server-Timing` header) and the browser-observed HTTP round-trip. The gap between them is
 // cross-origin/transport overhead, not device time.
 function SdoTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: number }) {
   return (
@@ -251,7 +251,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
   const [result, setResult] = useState<number[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
-  // server-measured SDO transaction (`X-Wire-Us` header). Showing both makes clear the SDO is
+  // server-measured SDO transaction (`Server-Timing` header). Showing both makes clear the SDO is
   // fast and the rest is browser/transport overhead, not the device.
   const [readSdoElapsedMs, setReadSdoElapsedMs] = useState<number | null>(null);
   const [readSdoWireMs, setReadSdoWireMs] = useState<number | null>(null);
@@ -293,7 +293,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
       setResult(res.data.data);
     } catch (err) {
       // A failed transaction still consumed wire time (an SDO read waits out the mailbox timeout);
-      // the backend attaches X-Wire-Us to the error too, so show the same timing as on success.
+      // the backend attaches Server-Timing to the error too, so show the same timing as on success.
       setReadSdoElapsedMs(performance.now() - start);
       if (err instanceof HttpError) {
         setReadSdoWireMs(wireTimeMs(err.response));
@@ -430,7 +430,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
       setWriteSdoWireMs(wireTimeMs(res));
       setDlOk(encodedBytes);
     } catch (err) {
-      // Show the wire time on failure too — the backend attaches X-Wire-Us to the error.
+      // Show the wire time on failure too — the backend attaches Server-Timing to the error.
       setWriteSdoElapsedMs(performance.now() - start);
       if (err instanceof HttpError) {
         setWriteSdoWireMs(wireTimeMs(err.response));
@@ -571,9 +571,9 @@ export default function DeviceParametersPage() {
 
   const [readValues, setReadValues] = useState(false);
   const [filter, setFilter] = useState('');
-  // init + read-all both hit the wire (SDO Info enumeration / value reads), so they carry X-Wire-Us
-  // and get the wire-vs-round-trip readout. Reload is a cached server re-fetch (no bus traffic), so
-  // it only has a round-trip figure.
+  // init + read-all both hit the wire (SDO Info enumeration / value reads), so they carry
+  // Server-Timing and get the wire-vs-round-trip readout. Reload is a cached server re-fetch (no bus
+  // traffic), so it only has a round-trip figure.
   const bulkTiming = useWireTiming();
   const [reloadElapsedMs, setReloadElapsedMs] = useState<number | null>(null);
   const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set());

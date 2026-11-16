@@ -94,7 +94,7 @@ describe('files', () => {
 });
 
 describe('the answer of a file request', () => {
-  it('gives the response of a read, a write and a removal, for its headers', async () => {
+  it('gives the response of a read and a write, for its headers', async () => {
     server.use(
       http.all(`${FILES}/*`, ({ request }) => {
         const headers = { 'Server-Timing': 'wire;dur=1.500' };
@@ -109,7 +109,6 @@ describe('the answer of a file request', () => {
     expect(wireTimeMs(read)).toBe(1.5);
     expect(new Uint8Array(await read.arrayBuffer())).toEqual(new Uint8Array([7, 8]));
     expect(wireTimeMs(await client.writeFile(1, 'note.txt', 'x'))).toBe(1.5);
-    expect(wireTimeMs(await client.removeFile(1, 'note.txt'))).toBe(1.5);
   });
 });
 
@@ -134,7 +133,7 @@ describe('SII', () => {
     const client = new MotionMasterClient({ baseUrl: HTTP_URL });
     expect(await client.readSii(1)).toEqual({ general: { nameIdx: 1 } });
     expect(await client.readSii(1, { format: 'bytes' })).toEqual(new Uint8Array([1, 2]));
-    expect((await client.writeSii(1, new Uint8Array([9, 8]))).ok).toBe(true);
+    await client.writeSii(1, new Uint8Array([9, 8]));
     expect(received.at(-1)).toMatchObject({ type: 'application/octet-stream', body: [9, 8] });
     expect(received[1].accept).toBe('application/octet-stream');
   });

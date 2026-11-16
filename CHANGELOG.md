@@ -32,10 +32,12 @@ the HTTP/WebSocket API may break between any two alphas.
   CI fails when a client has an example that its twin lacks.
 - Both clients read and write objects and files with `writeValue()`, `readSdo()`, `writeSdo()`,
   `listFiles()`, `readFile()`, `writeFile()` and `removeFile()`, and the Python twins
-  `write_value()`, `read_sdo()` and so on. `readSii()` returns the parsed SII or the raw image, and `writeSii()` writes an image.
-  `readFile()` returns bytes, text, JSON or the response,
-  for its headers. `writeFile()` writes a string as UTF-8. `writeFile()` and `removeFile()` return
-  the response.
+  `write_value()`, `read_sdo()` and so on. `readSii()` returns the parsed SII or the raw image, and
+  `writeSii()` writes an image. `readFile()` returns bytes, text, JSON or the response, for its
+  headers. `writeFile()` writes a string as UTF-8 and returns the response, for its headers.
+- Both clients read the wire time of an operation from a response with `wireTimeMs()` and
+  `wire_time_ms()`, in milliseconds, or `null` and `None` when the response has none. The
+  TypeScript twin also reads it from a `PerformanceResourceTiming` entry of the browser.
 - The TypeScript client exports `objectName()` and `objectAddressText()`, with the Python twins
   `object_name()` and `object_address_text()`, and formats bytes as hex with `formatHexBytes()`.
 - The examples of both clients share their command line, the run of a procedure and their files
@@ -69,6 +71,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- The server sends the wire time of an operation in the standard `Server-Timing` header, as the
+  metric `wire` in milliseconds: `Server-Timing: wire;dur=1.500` is 1.5 ms. It sent `X-Wire-Us` in
+  microseconds, which is gone. Every response also has `Timing-Allow-Origin`, so the developer
+  tools of a browser show the wire time of each request, and a page of the allowed origin reads it
+  with the Performance API.
 - The Python client needs Python 3.12 or newer. It needed 3.11. Debian 12 and the Raspberry Pi OS
   based on it have 3.11 as their system Python, so there a newer Python goes beside it, for example
   with `uv python install 3.12`. The server packages for arm64 already need Debian 13. CI tests the

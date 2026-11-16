@@ -262,8 +262,13 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `int.from_bytes(data, "little")` turns bytes into an integer.
 - `list_files(position)` returns the files on a device, each as `{"name": ..., "byteCount": ...}`.
   `read_file(position, name, format="bytes")` reads one over FoE as `"bytes"`, `"text"` or
-  `"json"`. `write_file(position, name, content)` writes bytes, or a str as UTF-8, and
-  `remove_file(position, name)` removes a file.
+  `"json"`, or returns the `"response"`. `write_file(position, name, content)` writes bytes, or a
+  str as UTF-8, and returns the response. `remove_file(position, name)` removes a file.
+- `read_sii(position, format="json")` returns the parsed SII of a device, or its raw EEPROM image
+  with `format="bytes"`. `write_sii(position, image)` writes a raw image.
+- `wire_time_ms(response)` returns the time that the server spent on the operation, in
+  milliseconds, from the `Server-Timing` header of a response. It returns `None` when the server
+  sent no time.
 - `object_name(index, subindex)` returns the generated name of an object, such as `STATUSWORD`, and
   `object_address_text(index, subindex)` its address, such as `0x6041:00`.
 - `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until

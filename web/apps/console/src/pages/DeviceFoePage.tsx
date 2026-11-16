@@ -66,7 +66,7 @@ function formatDuration(ms: number): string {
 }
 
 // Timing readout for a FoE transfer: the server-measured wire transaction (from the response's
-// `X-Wire-Us` header) and the browser-observed HTTP round-trip. The gap between them is
+// `Server-Timing` header) and the browser-observed HTTP round-trip. The gap between them is
 // cross-origin/transport overhead, not device time — the same split shown on the Parameters page.
 function FoeTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: number }) {
   return (
@@ -157,7 +157,7 @@ export default function DeviceFoePage() {
   const [filename, setFilename] = useState('');
   const [reading, setReading] = useState(false);
   // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
-  // server-measured FoE transfer (`X-Wire-Us` header). Showing both attributes the wire cost to
+  // server-measured FoE transfer (`Server-Timing` header). Showing both attributes the wire cost to
   // the device and the rest to browser/transport overhead.
   const [readMs, setReadMs] = useState<number | null>(null);
   const [readWireMs, setReadWireMs] = useState<number | null>(null);
@@ -183,7 +183,7 @@ export default function DeviceFoePage() {
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
   // Read raw bytes for an arbitrary FoE filename. `wireMs` is the server-measured FoE transfer time
-  // (from the `X-Wire-Us` header), null if the header is absent. A failed transfer still consumed
+  // (from the `Server-Timing` header), null if the header is absent. A failed transfer still consumed
   // wire time and the backend attaches the header to the error, so the thrown Error carries
   // `wireMs` for the caller to surface the same timing as on success.
   async function readRaw(name: string): Promise<{ bytes: Uint8Array; wireMs: number | null }> {
@@ -322,7 +322,7 @@ export default function DeviceFoePage() {
         response = await client.writeFile(slavePosition, writeFilename, writeBytes);
       } catch (err) {
         // A failed write shows the same timing as a successful one: the backend attaches
-        // X-Wire-Us to the error too.
+        // Server-Timing to the error too.
         setWriteMs(performance.now() - start);
         if (err instanceof HttpError) {
           setWriteWireMs(wireTimeMs(err.response));

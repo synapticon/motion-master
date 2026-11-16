@@ -127,6 +127,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `remove_file` | `removeFile` | |
 | `read_sii` | `readSii` | |
 | `write_sii` | `writeSii` | |
+| `parse_sii` | `parseSii` | |
 | `wait_for_value` | `waitForValue` | |
 | `ensure_scanned` | `ensureScanned` | |
 | `ensure_state` | `ensureState` | |
@@ -143,6 +144,9 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `start_capture` | `startCapture` | |
 | `export_eni` | `exportEni` | |
 | `parse_eni` | `parseEni` | |
+| `parse_esi` | `parseEsi` | |
+| `parse_integro_variant` | `parseIntegroVariant` | |
+| `parse_ic_mu_restore_file` | `parseIcMuRestoreFile` | |
 | `stop_capture` | `stopCapture` | |
 | `process_data_mark` | `processDataMark` | |
 | `process_data_dump` | `processDataDump` | |

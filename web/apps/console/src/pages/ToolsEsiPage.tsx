@@ -1,7 +1,12 @@
 import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import type { EsiDeviceSummary, EsiEntry, EsiParseResult } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  type EsiDeviceSummary,
+  type EsiEntry,
+  type EsiParseResult,
+} from '@synapticon/motion-master-client';
 import { ChevronRight } from 'lucide-react';
 import Checkbox, { selectAllState } from '../components/Checkbox';
 import EsiExplainer from '../components/EsiExplainer';
@@ -400,7 +405,7 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
 }
 
 export default function ToolsEsiPage() {
-  const { api } = useConnection();
+  const { api, client } = useConnection();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<EsiParseResult | null>(null);
   // Which modules the user has ticked, and which selection the loaded `result` was built with.
@@ -436,24 +441,15 @@ export default function ToolsEsiPage() {
     setError(null);
     try {
       // No selection means "merge everything each device's slots reference", which is the
-      // endpoint's own default — so send no query at all rather than an empty one.
-      const query = idents.size > 0 ? `?modules=${encodeURIComponent([...idents].join(','))}` : '';
-      const payload = await f.arrayBuffer();
+      // endpoint's own default.
+      const payload = new Uint8Array(await f.arrayBuffer());
       const res = await measure(() =>
-        fetch(`${api.baseUrl}/api/esi/parse${query}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/xml' },
-          body: payload,
-        }),
+        client.parseEsi(payload, { modules: [...idents], format: 'response' }),
       );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
       setResult((await res.json()) as EsiParseResult);
       setApplied(new Set(idents));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse the ESI file.');
+      setError(apiErrorMessage(err, 'Failed to parse the ESI file.'));
       setResult(null);
     } finally {
       setBusy(false);

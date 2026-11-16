@@ -702,7 +702,7 @@ function IcMuRestoreFileView({ file }: { file: IcMuRestoreFile }) {
  * compatibility check will read. Any other filename renders nothing.
  */
 function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array }) {
-  const { api } = useConnection();
+  const { client } = useConnection();
   const kind =
     filename === '.hardware_description'
       ? 'hardware-description'
@@ -717,23 +717,14 @@ function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array 
     enabled: kind !== null,
     staleTime: Infinity,
     retry: false,
-    queryFn: async () => {
-      // Posted as raw bytes rather than through the generated client, which JSON-encodes its body.
-      const response = await fetch(`${api.baseUrl}/api/${kind}/parse`, {
-        method: 'POST',
-        headers: {
-          'Content-Type':
-            kind === 'hardware-description' ? 'text/plain' : 'application/octet-stream',
-        },
-        // Copied so the buffer is definitely an ArrayBuffer rather than a shared one, which is what
-        // fetch accepts as a body. Both files are a few hundred bytes.
-        body: bytes.slice(),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? `HTTP ${response.status}`);
+    queryFn: async (): Promise<HardwareDescription | IntegroVariant | IcMuRestoreFile> => {
+      if (kind === 'hardware-description') {
+        return (await client.api.parseHardwareDescription(new TextDecoder().decode(bytes))).data;
       }
-      return (await response.json()) as HardwareDescription | IntegroVariant | IcMuRestoreFile;
+      if (kind === 'integro-variant') {
+        return client.parseIntegroVariant(bytes);
+      }
+      return client.parseIcMuRestoreFile(bytes);
     },
   });
 

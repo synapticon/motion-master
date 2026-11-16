@@ -22,6 +22,9 @@ import { Api } from './generated/Api';
 import type {
   Cia402Status,
   DeviceFile,
+  EsiParseResult,
+  IcMuRestoreFile,
+  IntegroVariant,
   ProcedureRequest,
   ProcedureSnapshot,
   SlaveInformationInterface,
@@ -501,6 +504,18 @@ export class MotionMasterClient {
       body: image.slice(),
       signal: options.signal,
     });
+  }
+
+  /**
+   * Decodes a raw SII image (`parseSii`), such as a file that `readSii()` saved, and returns the
+   * parsed SII. No device is involved.
+   */
+  async parseSii(
+    image: Uint8Array,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SlaveInformationInterface> {
+    const response = await this.postBytes('/api/sii/parse', image, options.signal);
+    return (await response.json()) as SlaveInformationInterface;
   }
 
   /**
@@ -1035,6 +1050,79 @@ export class MotionMasterClient {
       signal: options.signal,
     });
     return (await response.json()) as EniParseResult;
+  }
+
+  /**
+   * Reads an ESI document (`parseEsi`) and returns every device it describes, each with its own
+   * object table. No device is involved. `modules` limits the merge to these `ModuleIdent` values,
+   * where a slot offers a choice; without it, every module that a slot references is merged.
+   * `format` says what to return: `'json'`, the parsed result (the default), or `'response'`, the
+   * answer of the server with its body unread, for its headers, such as the time the server spent,
+   * which `wireTimeMs()` reads.
+   */
+  parseEsi(
+    xml: string | Uint8Array,
+    options?: { modules?: number[]; format?: 'json'; signal?: AbortSignal },
+  ): Promise<EsiParseResult>;
+  parseEsi(
+    xml: string | Uint8Array,
+    options: { modules?: number[]; format: 'response'; signal?: AbortSignal },
+  ): Promise<Response>;
+  async parseEsi(
+    xml: string | Uint8Array,
+    options: { modules?: number[]; format?: 'json' | 'response'; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const { modules = [], format = 'json', signal } = options;
+    // The document goes as bytes, because an ESI may declare an encoding other than UTF-8.
+    const bytes = typeof xml === 'string' ? new TextEncoder().encode(xml) : xml;
+    const query = modules.length > 0 ? `?modules=${modules.join(',')}` : '';
+    const response = await this.postBytes(
+      `/api/esi/parse${query}`,
+      bytes,
+      signal,
+      'application/xml',
+    );
+    return format === 'response' ? response : await response.json();
+  }
+
+  /** Decodes the `.variant` file of an Integro (`parseIntegroVariant`). No device is involved. */
+  async parseIntegroVariant(
+    bytes: Uint8Array,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<IntegroVariant> {
+    const response = await this.postBytes('/api/integro-variant/parse', bytes, options.signal);
+    return (await response.json()) as IntegroVariant;
+  }
+
+  /**
+   * Decodes an iC-MU restore file, the `circulo_integrated_encoder_<port>_config.bin` that a
+   * configuration writes (`parseIcMuRestoreFile`). No device is involved.
+   */
+  async parseIcMuRestoreFile(
+    bytes: Uint8Array,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<IcMuRestoreFile> {
+    const response = await this.postBytes('/api/ic-mu-restore-file/parse', bytes, options.signal);
+    return (await response.json()) as IcMuRestoreFile;
+  }
+
+  /**
+   * Posts raw bytes. The generated calls send a body they have no formatter for as JSON, so a file
+   * goes with the fetch of this client.
+   */
+  private postBytes(
+    path: string,
+    bytes: Uint8Array,
+    signal: AbortSignal | undefined,
+    contentType = 'application/octet-stream',
+  ): Promise<Response> {
+    return this.fetch(`${this.httpBaseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': contentType },
+      // A copy, so that the body is an ArrayBuffer and not a view of a shared one.
+      body: bytes.slice(),
+      signal,
+    });
   }
 
   /** Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown. */

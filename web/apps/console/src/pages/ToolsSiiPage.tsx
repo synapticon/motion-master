@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { SlaveInformationInterface } from '@synapticon/motion-master-client';
+import { apiErrorMessage, type SlaveInformationInterface } from '@synapticon/motion-master-client';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
 import SiiExplainer from '../components/SiiExplainer';
@@ -8,7 +8,7 @@ import SiiRawView from '../components/SiiRawView';
 import { useConnection } from '../contexts/ConnectionContext';
 
 export default function ToolsSiiPage() {
-  const { api } = useConnection();
+  const { client } = useConnection();
   const [filename, setFilename] = useState<string | null>(null);
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [sii, setSii] = useState<SlaveInformationInterface | null>(null);
@@ -24,20 +24,10 @@ export default function ToolsSiiPage() {
       setBytes(raw);
       setFilename(file.name);
       // Parse through the backend so the same C++ decoder the device read path uses produces the
-      // structure — no second parser to keep in sync. The generated client JSON-encodes bodies, so
-      // post the raw bytes directly.
-      const res = await fetch(`${api.baseUrl}/api/sii/parse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: raw,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
-      }
-      setSii((await res.json()) as SlaveInformationInterface);
+      // structure — no second parser to keep in sync.
+      setSii(await client.parseSii(raw));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse the SII file.');
+      setError(apiErrorMessage(err, 'Failed to parse the SII file.'));
     } finally {
       setParsing(false);
     }

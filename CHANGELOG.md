@@ -35,6 +35,11 @@ the HTTP/WebSocket API may break between any two alphas.
   `write_value()`, `read_sdo()` and so on. `readSii()` returns the parsed SII or the raw image, and
   `writeSii()` writes an image. `readFile()` returns bytes, text, JSON or the response, for its
   headers. `writeFile()` writes a string as UTF-8 and returns the response, for its headers.
+- Both clients decode a file on the server with `parseSii()`, `parseEsi()`, `parseIntegroVariant()`
+  and `parseIcMuRestoreFile()`, and the Python twins `parse_sii()` and so on. Each sends the file as
+  raw bytes, which the generated calls send as JSON. `parseEsi()` takes the modules to merge, and
+  returns the response with `format: 'response'`, for its headers. The Console and the `parse-esi`
+  examples use them in place of their own requests.
 - Both clients read the wire time of an operation from a response with `wireTimeMs()` and
   `wire_time_ms()`, in milliseconds, or `null` and `None` when the response has none. The
   TypeScript twin also reads it from a `PerformanceResourceTiming` entry of the browser.

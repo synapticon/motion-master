@@ -593,6 +593,38 @@ class MotionMasterClient:
         headers = {"Content-Type": "application/xml"}
         return self.call("parseEni", data=body, headers=headers).json()
 
+    def parse_esi(self, xml, modules=None, format="json"):
+        """Read an ESI document (parseEsi) and return every device it describes.
+
+        Each device comes with its own object table. No device is involved. `xml` is a str, or
+        bytes, because an ESI may declare an encoding other than UTF-8. `modules` limits the merge
+        to these ModuleIdent values, where a slot offers a choice; without it, every module that a
+        slot references is merged. `format` says what to return: "json", the parsed result (the
+        default), or "response", the requests.Response, for its headers, such as the time the
+        server spent, which wire_time_ms() reads.
+        """
+        if format not in ("json", "response"):
+            raise ValueError(f"format must be json or response, not {format!r}")
+        data = xml.encode("utf-8") if isinstance(xml, str) else xml
+        query = {"modules": ",".join(str(m) for m in modules)} if modules else None
+        response = self._post_bytes("parseEsi", data, "application/xml", query=query)
+        return response if format == "response" else response.json()
+
+    def parse_integro_variant(self, data):
+        """Decode the .variant file of an Integro (parseIntegroVariant). No device is involved."""
+        return self._post_bytes("parseIntegroVariant", data).json()
+
+    def parse_ic_mu_restore_file(self, data):
+        """Decode an iC-MU restore file (parseIcMuRestoreFile). No device is involved.
+
+        The file is the circulo_integrated_encoder_<port>_config.bin that a configuration writes.
+        """
+        return self._post_bytes("parseIcMuRestoreFile", data).json()
+
+    def _post_bytes(self, operation_id, data, content_type="application/octet-stream", query=None):
+        headers = {"Content-Type": content_type}
+        return self.call(operation_id, data=bytes(data), headers=headers, query=query)
+
     def devices(self):
         """Return the scanned devices, in bus order, as GET /api/devices gives them (getDevices).
 
@@ -718,6 +750,13 @@ class MotionMasterClient:
             data=bytes(image),
             headers={"Content-Type": "application/octet-stream"},
         )
+
+    def parse_sii(self, image):
+        """Decode a raw SII image (parseSii), such as a file that read_sii() saved.
+
+        Returns the parsed SII. No device is involved.
+        """
+        return self._post_bytes("parseSii", image).json()
 
     def wait_for_value(
         self,

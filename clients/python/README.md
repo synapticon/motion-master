@@ -266,6 +266,9 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   str as UTF-8, and returns the response. `remove_file(position, name)` removes a file.
 - `read_sii(position, format="json")` returns the parsed SII of a device, or its raw EEPROM image
   with `format="bytes"`. `write_sii(position, image)` writes a raw image.
+- `parse_sii(image)`, `parse_integro_variant(data)` and `parse_ic_mu_restore_file(data)` decode a
+  file on the server, with no device involved. `parse_esi(xml, modules=None, format="json")` reads
+  an ESI document and returns every device it describes, or the `"response"`.
 - `wire_time_ms(response)` returns the time that the server spent on the operation, in
   milliseconds, from the `Server-Timing` header of a response. It returns `None` when the server
   sent no time.

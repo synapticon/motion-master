@@ -55,12 +55,6 @@ const SOMANET_FILES: { name: string; write: boolean }[] = [
 const SOMANET_READ_FILES = SOMANET_FILES.map((f) => f.name);
 const SOMANET_WRITE_FILES = SOMANET_FILES.filter((f) => f.write).map((f) => f.name);
 
-// uWebSockets does not URL-decode path parameters, so encode the filename but
-// keep `=` literal — `fs-stackunlock=DD1317` must reach the backend verbatim.
-function encodeFilename(name: string): string {
-  return encodeURIComponent(name).replace(/%3D/g, '=');
-}
-
 // Human-readable elapsed time for a FoE transfer — sub-second in ms, otherwise seconds.
 function formatDuration(ms: number): string {
   // Sub-10 ms (a fast FoE wire transaction) keeps one decimal so it doesn't round to "0 ms".
@@ -192,7 +186,7 @@ export default function DeviceFoePage() {
   // A failed transfer still consumed wire time and the backend attaches the header to the error, so
   // the thrown Error carries `wireMs` for the caller to surface the same timing as on success.
   async function readRaw(name: string): Promise<{ bytes: Uint8Array; wireMs: number | null }> {
-    const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(name)}`;
+    const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeURIComponent(name)}`;
     const response = await fetch(url);
     const wireMs = wireTimeMs(response);
     if (!response.ok) {
@@ -322,7 +316,7 @@ export default function DeviceFoePage() {
     setWriteWireMs(null);
     const start = performance.now();
     try {
-      const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(writeFilename)}`;
+      const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeURIComponent(writeFilename)}`;
       const response = await fetch(url, {
         method: 'PUT',
         body: new Blob([writeBytes as BlobPart]),
@@ -361,7 +355,7 @@ export default function DeviceFoePage() {
     setRemoving(name);
     setListError(null);
     try {
-      await api.deleteDeviceFile(slavePosition, encodeFilename(name));
+      await api.deleteDeviceFile(slavePosition, encodeURIComponent(name));
       await handleList();
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Unknown error');

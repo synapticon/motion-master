@@ -710,6 +710,15 @@ class MotionMasterClient:
         """
         self.call("deleteParameterCache", path={"id": id})
 
+    def run_auto_tuning(self, request):
+        """Run one function of the auto-tuning program of the server (runAutoTuning).
+
+        `request` is a dict such as {"run": "auto_tune_velocity_controller", "data": {...}}. Returns
+        the result. The program answers an input that it refuses with an "error" key in the result,
+        not with an error status, so a caller checks the result for one.
+        """
+        return self.call("runAutoTuning", body=request).json()
+
     def server_log(self):
         """Return the log of the server (getLog), the entries it keeps in memory, oldest first."""
         return self.call("getLog").content.decode("utf-8")

@@ -136,6 +136,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `list_parameter_cache_entries` | `listParameterCacheEntries` | |
 | `read_parameter_cache_entry` | `readParameterCacheEntry` | |
 | `remove_parameter_cache_entry` | `removeParameterCacheEntry` | |
+| `run_auto_tuning` | `runAutoTuning` | |
 | `server_log` | `serverLog` | |
 | `wait_for_value` | `waitForValue` | |
 | `ensure_scanned` | `ensureScanned` | |

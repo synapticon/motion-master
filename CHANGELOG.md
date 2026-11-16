@@ -52,6 +52,10 @@ the HTTP/WebSocket API may break between any two alphas.
   parameter cache with `listParameterCacheEntries()`, `readParameterCacheEntry()` and
   `removeParameterCacheEntry()`, and return the log of the server with `serverLog()`. The Python
   twins are `read_hrd_recording()` and so on. The Console uses them in place of its own requests.
+- Both clients run one function of the auto-tuning program of the server with `runAutoTuning()` and
+  `run_auto_tuning()`. The Console's Auto-Tuning page sends its request through the client, and
+  shows the answer of a refusal from `HttpError.response`. The Console sends no request with its
+  own `fetch` any more.
 - Both clients read the wire time of an operation from a response with `wireTimeMs()` and
   `wire_time_ms()`, in milliseconds, or `null` and `None` when the response has none. The
   TypeScript twin also reads it from a `PerformanceResourceTiming` entry of the browser.

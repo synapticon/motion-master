@@ -279,6 +279,9 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `remove_parameter_cache_entry(id)` manage the parameter cache, the object dictionaries that a scan
   reads from the cache instead of from a device. `server_log()` returns the log of the server as
   text.
+- `run_auto_tuning(request)` runs one function of the auto-tuning program of the server, such as
+  `{"run": "auto_tune_velocity_controller", "data": ...}`, and returns its result. The program
+  answers an input that it refuses with an `"error"` key in the result.
 - `parse_sii(image)`, `parse_integro_variant(data)` and `parse_ic_mu_restore_file(data)` decode a
   file on the server, with no device involved. `parse_esi(xml, modules=None, format="json")` reads
   an ESI document and returns every device it describes, or the `"response"`.

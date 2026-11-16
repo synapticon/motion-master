@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { HttpError, type AutoTuningRunRequest } from '@synapticon/motion-master-client';
 import AutoTuningExplainer from '../components/AutoTuningExplainer';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
@@ -319,15 +320,18 @@ export default function ToolsAutoTuningPage() {
           data.csv = csv.text;
         }
       }
-      // A direct fetch rather than the generated client, because this page's job is to show what the
-      // API answered. The generated client throws the body away into an exception for any non-2xx,
-      // and those statuses — a refused input, an unknown function, a process that has died — are
-      // exactly what somebody on this page is looking at.
-      const response = await fetch(`${api.baseUrl}/api/auto-tuning/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      // This page shows what the API answered, also for a refusal: a refused input, an unknown
+      // function, a process that has died. The client throws an HttpError for those, and its
+      // response still holds the unread body. The text of the editor goes as it is, unchecked.
+      let response: Response;
+      try {
+        response = await api.runAutoTuning(body as AutoTuningRunRequest);
+      } catch (err) {
+        if (!(err instanceof HttpError)) {
+          throw err;
+        }
+        response = err.response;
+      }
       const raw = await response.text();
       const wallMs = performance.now() - startedAt;
       let parsed: unknown = null;

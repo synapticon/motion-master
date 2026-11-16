@@ -20,6 +20,8 @@ import {
 } from './errors';
 import { Api } from './generated/Api';
 import type {
+  AutoTuningRunRequest,
+  AutoTuningRunResponse,
   Cia402Status,
   DeviceFile,
   EsiParseResult,
@@ -1266,6 +1268,19 @@ export class MotionMasterClient {
     options: { signal?: AbortSignal } = {},
   ): Promise<void> {
     await this.api.deleteParameterCache(id, { signal: options.signal });
+  }
+
+  /**
+   * Runs one function of the auto-tuning program of the server (`runAutoTuning`), such as
+   * `{ run: 'auto_tune_velocity_controller', data: { … } }`, and returns its result. The program
+   * answers an input that it refuses with an `error` property in the result, not with an error
+   * status, so a caller checks the result for one.
+   */
+  async runAutoTuning(
+    request: AutoTuningRunRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AutoTuningRunResponse> {
+    return (await this.api.runAutoTuning(request, { signal: options.signal })).data;
   }
 
   /**

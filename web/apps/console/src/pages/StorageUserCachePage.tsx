@@ -1,22 +1,22 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiErrorMessage, formatBytes, type UserCacheFile } from '@synapticon/motion-master-client';
+import {
+  apiErrorMessage,
+  encodeUserCachePath,
+  formatBytes,
+  type UserCacheFile,
+} from '@synapticon/motion-master-client';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
 import UserCacheExplainer from '../components/UserCacheExplainer';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
 import { userCacheBasename } from '../utils/userCache';
 import { btnOutline } from '../utils/styles';
 
 // The `Server-Timing` figure on these endpoints is server-side file I/O, not a fieldbus transaction —
-// WireTiming's default tooltip would claim a device was involved, so override it.
-const SERVER_TIMING_TITLE =
-  'Server — time the backend spent on the operation itself: validating the path and reading, ' +
-  'writing or listing on the server’s own disk. No device is involved. The round-trip figure ' +
-  'beside it additionally covers transferring the file over the network, which for a large ' +
-  'upload or download is most of the wait.';
+// RequestTiming's default tooltip would claim a device was involved, so override it.
 
 const formatModified = (ms: number) => (ms > 0 ? new Date(ms).toLocaleString() : '—');
 
@@ -40,8 +40,8 @@ export default function StorageUserCachePage() {
 
   // Two readouts, each next to the control that produces it: uploads by the Upload button, and
   // everything that acts on the listing (refresh, download, delete) by the Refresh button.
-  const uploadTiming = useWireTiming();
-  const fileTiming = useWireTiming();
+  const uploadTiming = useRequestTiming();
+  const fileTiming = useRequestTiming();
 
   // The cache is on disk, independent of the bus — no scan/connect gate. The query fails only if
   // Motion Master itself is unreachable, surfaced as the error state below.
@@ -61,7 +61,10 @@ export default function StorageUserCachePage() {
       const prefix = normalizeFolder(folder);
       const path = prefix ? `${prefix}/${file.name}` : file.name;
       const bytes = new Uint8Array(await file.arrayBuffer());
-      await uploadTiming.measure(() => client.writeUserCacheFile(path, bytes));
+      // The generated call, because the page shows the server time from the response.
+      await uploadTiming.measure(() =>
+        client.api.putUserCacheFile(encodeUserCachePath(path), bytes),
+      );
     },
     onSuccess: () => {
       setError(null);
@@ -86,7 +89,7 @@ export default function StorageUserCachePage() {
     setError(null);
     try {
       const res = await fileTiming.measure(() =>
-        client.readUserCacheFile(file.path, { format: 'response' }),
+        client.api.getUserCacheFile(encodeUserCachePath(file.path)),
       );
       const bytes = new Uint8Array(await res.arrayBuffer());
       // Save under the file's own name, not its full path — a browser download cannot create
@@ -155,7 +158,7 @@ export default function StorageUserCachePage() {
           >
             {uploadMutation.isPending ? 'Uploading…' : 'Upload file'}
           </FilePickerButton>
-          <WireTiming label="Server" timing={uploadTiming.timing} title={SERVER_TIMING_TITLE} />
+          <RequestTiming timing={uploadTiming.timing} />
         </div>
 
         {/* The timing grows out of the left-hand group rather than sitting in front of Refresh, so
@@ -166,7 +169,7 @@ export default function StorageUserCachePage() {
               {files.length} {files.length === 1 ? 'file' : 'files'}
               {files.length > 0 && ` · ${formatBytes(totalBytes)}`}
             </p>
-            <WireTiming label="Server" timing={fileTiming.timing} title={SERVER_TIMING_TITLE} />
+            <RequestTiming timing={fileTiming.timing} />
           </div>
           <button
             onClick={() => cacheQuery.refetch()}

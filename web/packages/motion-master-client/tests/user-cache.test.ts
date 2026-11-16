@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw/http';
 import { describe, expect, it } from 'vitest';
-import { HttpError, MotionMasterClient, wireTimeMs } from '../src/index';
+import { HttpError, MotionMasterClient, serverTimeMs } from '../src/index';
 import { HTTP_URL, server } from './fakes';
 
 const CACHE = `${HTTP_URL}/api/user-cache`;
@@ -32,22 +32,22 @@ describe('user cache', () => {
     );
   });
 
-  it('reads a file as bytes, text, JSON or the response', async () => {
+  it('reads a file as bytes, text or JSON, and the generated call gives the response', async () => {
     server.use(
       http.get(`${CACHE}/*`, () =>
-        HttpResponse.text('{"a":1}', { headers: { 'Server-Timing': 'wire;dur=0.250' } }),
+        HttpResponse.text('{"a":1}', { headers: { 'Server-Timing': 'server;dur=0.250' } }),
       ),
     );
     const client = new MotionMasterClient({ baseUrl: HTTP_URL });
     expect(await client.readUserCacheFile('x.json')).toEqual(new TextEncoder().encode('{"a":1}'));
     expect(await client.readUserCacheFile('x.json', { format: 'text' })).toBe('{"a":1}');
     expect(await client.readUserCacheFile('x.json', { format: 'json' })).toEqual({ a: 1 });
-    const response = await client.readUserCacheFile('x.json', { format: 'response' });
+    const response = await client.api.getUserCacheFile('x.json');
     expect(response.bodyUsed).toBe(false);
-    expect(wireTimeMs(response)).toBe(0.25);
+    expect(serverTimeMs(response)).toBe(0.25);
   });
 
-  it('writes bytes, or a string as UTF-8, and gives the response', async () => {
+  it('writes bytes, or a string as UTF-8, and the generated call gives the response', async () => {
     const received: { type: string | null; body: number[] }[] = [];
     server.use(
       http.put(`${CACHE}/*`, async ({ request }) => {
@@ -57,17 +57,19 @@ describe('user cache', () => {
         });
         return HttpResponse.json(
           { path: 'x', size: 1 },
-          { headers: { 'Server-Timing': 'wire;dur=1.000' } },
+          { headers: { 'Server-Timing': 'server;dur=1.000' } },
         );
       }),
     );
     const client = new MotionMasterClient({ baseUrl: HTTP_URL });
     await client.writeUserCacheFile('a.bin', new Uint8Array([7, 8]));
-    const response = await client.writeUserCacheFile('a.txt', 'é');
-    expect(wireTimeMs(response)).toBe(1);
+    await client.writeUserCacheFile('a.txt', 'é');
+    const response = await client.api.putUserCacheFile('b.bin', new Uint8Array([9]));
+    expect(serverTimeMs(response)).toBe(1);
     expect(received).toEqual([
       { type: 'application/octet-stream', body: [7, 8] },
       { type: 'application/octet-stream', body: [0xc3, 0xa9] },
+      { type: 'application/octet-stream', body: [9] },
     ]);
   });
 

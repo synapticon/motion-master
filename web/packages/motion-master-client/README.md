@@ -7,7 +7,7 @@ The package contains four parts:
 - `client.api`: an HTTP client for every operation of the Motion Master API. It is generated from the OpenAPI specification of the server.
 - `client.ws`: a connection to the WebSocket of the server. It delivers monitoring data and notifications.
 - The helper methods of the client, for the steps that most programs take. [Helpers](#helpers) lists them.
-- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, `integerFromBytes`, `parseInteger` (the rule of Python's `int(text, 0)`), hex text with `formatHex` and `formatHexBytes`, object names with `objectName` and `objectAddressText`, the parameters of a device with `deviceParameterText` (`1:0x6041:00`) and `deviceParameterName` (`1:STATUSWORD`), the access word of an object with `objectAccess`, durations and byte counts with `formatDuration` and `formatBytes`, the default host and ports with `DEFAULT_HOST`, `DEFAULT_HTTP_PORT` and `DEFAULT_WS_PORT`, and the host names for a server on another machine.
+- Free functions: a parser for process data dumps (`.mmpd` files), CoE value encoding and decoding, `integerFromBytes`, `parseInteger` (the rule of Python's `int(text, 0)`), hex text with `formatHex` and `formatHexBytes`, object names with `objectName` and `objectAddressText`, the parameters of a device with `deviceParameterText` (`1:0x6041:00`) and `deviceParameterName` (`1:STATUSWORD`), the access word of an object with `objectAccess`, durations, the times of a request and byte counts with `formatDuration`, `formatTimes` and `formatBytes`, the default host and ports with `DEFAULT_HOST`, `DEFAULT_HTTP_PORT` and `DEFAULT_WS_PORT`, and the host names for a server on another machine.
 
 ## Version
 
@@ -204,14 +204,14 @@ The client has helpers for the steps that most programs take. They have the same
 - `hardwareDescription(slavePosition)` returns the parsed `.hardware_description` of a device.
 - `readValue(slavePosition, address)` reads one object and returns the value that the server decoded. `writeValue(slavePosition, address, value)` writes one, converted by the server to its data type, and returns the value read back.
 - `readSdo(slavePosition, index, subindex)` returns the raw bytes of one object, read with an SDO upload, and `writeSdo(slavePosition, index, subindex, bytes)` writes raw bytes with an SDO download. `integerFromBytes(bytes, { byteOrder, signed })` turns bytes into an integer of any length, little-endian by default.
-- `listFiles(slavePosition)` returns the files on a device, each as `{ name, byteCount }`. `readFile(slavePosition, name, { format })` reads one over FoE as `'bytes'` (the default), `'text'` or `'json'`, or returns the `'response'` with its body unread. `writeFile(slavePosition, name, content)` writes bytes, or a string as UTF-8, and returns the response. `removeFile(slavePosition, name)` removes a file.
+- `listFiles(slavePosition)` returns the files on a device, each as `{ name, byteCount }`. `readFile(slavePosition, name, { format })` reads one over FoE as `'bytes'` (the default), `'text'` or `'json'`. `writeFile(slavePosition, name, content)` writes bytes, or a string as UTF-8. `removeFile(slavePosition, name)` removes a file.
 - `readSii(slavePosition, { format })` returns the parsed SII of a device (`'json'`, the default) or its raw EEPROM image (`'bytes'`). `writeSii(slavePosition, image)` writes a raw image.
 - `listUserCacheFiles()` returns the files in the user cache of the server, a folder that keeps files across restarts: its `root`, and each file with its `path` relative to the root, its `size` and its `modifiedMs`. `readUserCacheFile(path, { format })`, `writeUserCacheFile(path, content)` and `removeUserCacheFile(path)` read, write and remove one file, as `readFile`, `writeFile` and `removeFile` do on a device. The path has `/` between its folders.
 - `readHrdRecording(slavePosition, data, { format })` reads the high resolution data recording that the `hrd-streaming` procedure left on a drive, decoded as `data` says (`'encoder-raw'` or `'system-identification'`). It returns the recording, or CSV text with `format: 'csv'`.
 - `listParameterCacheEntries()`, `readParameterCacheEntry(id, { format })` and `removeParameterCacheEntry(id)` manage the parameter cache, the object dictionaries that a scan reads from the cache instead of from a device. `serverLog()` returns the log of the server as text.
 - `runAutoTuning(request)` runs one function of the auto-tuning program of the server, such as `{ run: 'auto_tune_velocity_controller', data }`, and returns its result. The program answers an input that it refuses with an `error` property in the result.
-- `parseSii(image)`, `parseIntegroVariant(bytes)` and `parseIcMuRestoreFile(bytes)` decode a file on the server, with no device involved. `parseEsi(xml, { modules, format })` reads an ESI document and returns every device it describes, or the `'response'` with its body unread.
-- `wireTimeMs(response)` returns the time that the server spent on the operation, in milliseconds, from the `Server-Timing` header of a response. It also reads a `PerformanceResourceTiming` entry of the browser. It returns `null` when the server sent no time.
+- `parseSii(image)`, `parseIntegroVariant(bytes)` and `parseIcMuRestoreFile(bytes)` decode a file on the server, with no device involved. `parseEsi(xml, { modules })` reads an ESI document and returns every device it describes.
+- `serverTimeMs(response)` returns the time that the server spent on the request, in milliseconds, from the metric `server` of the `Server-Timing` header. `fieldbusTimeMs(response)` returns the time of the fieldbus operation of the request, from the metric `fieldbus`. Both also read a `PerformanceResourceTiming` entry of the browser. They return `null` when the response has no such time.
 - `waitForValue(slavePosition, address, predicate, { timeoutMs, intervalMs, signal })` reads one object until the predicate is true. It throws a `DOMException` named `TimeoutError` with the last value when the time runs out, 1000 ms by default.
 - `ensureScanned()` scans when the last scan is missing or wrong, and moves no device.
 - `ensureState(state, { positions, exact })` scans when needed and brings the devices to an AL state. A device above that state stays where it is, unless `exact` is true.
@@ -248,6 +248,19 @@ DEBUG=motion-master-client pnpm example examples/scan.ts
 ```
 
 In a browser, run `localStorage.debug = 'motion-master-client'` in the developer tools and reload the page.
+
+The namespace `motion-master-client:http` writes one line per HTTP request: the method, the path, the status, the round trip, and the times that the server reported in `Server-Timing`: `server`, and `fieldbus` for a request that ran a fieldbus operation. `DEBUG=motion-master-client*` turns on both logs.
+
+```bash
+DEBUG=motion-master-client:http pnpm example examples/server-info.ts
+```
+
+```text
+motion-master-client:http GET /api/version 200 round-trip 0.912 ms, server 0.087 ms
+motion-master-client:http GET /api/devices/1/sdo/0x1000/0 200 round-trip 1.733 ms, server 1.292 ms, fieldbus 1.133 ms
+```
+
+A helper returns the decoded result. A program that needs a response, for its headers, calls the method of `client.api`, which returns it, as the next section describes. Every operation can go through `client.api`, including those that send a file.
 
 ## HTTP calls
 

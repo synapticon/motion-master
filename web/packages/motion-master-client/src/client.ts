@@ -46,6 +46,8 @@ import {
 } from './parameter-address';
 import { listen } from './stream';
 import { encodeUserCachePath } from './user-cache';
+import { formatTimes } from './format';
+import { fieldbusTimeMs, serverTimeMs } from './server-timing';
 import {
   type MonitoringBatch,
   type NotificationData,
@@ -82,6 +84,27 @@ export type { FieldbusSettings };
 // DEBUG=motion-master-client in Node.js, or localStorage.debug = 'motion-master-client' in a
 // browser.
 const log = createDebug('motion-master-client');
+
+// One line for each request: the method, the path, the status, the round trip that the client
+// measured, and the times that the server reported in Server-Timing: `server`, and `fieldbus` for a
+// request that ran a fieldbus operation. Off by default. Turn it on
+// with DEBUG=motion-master-client:http, or with DEBUG=motion-master-client* together with the steps.
+const logHttp = createDebug('motion-master-client:http');
+
+/** Writes the line of one request to the `motion-master-client:http` log. */
+function logRequest(request: Request, startMs: number, outcome: Response | string): void {
+  const { pathname, search } = new URL(request.url);
+  const roundTripMs = performance.now() - startMs;
+  if (typeof outcome === 'string') {
+    logHttp('%s %s %s %s', request.method, pathname + search, outcome, formatTimes(roundTripMs));
+    return;
+  }
+  const times = formatTimes(roundTripMs, {
+    serverMs: serverTimeMs(outcome),
+    fieldbusMs: fieldbusTimeMs(outcome),
+  });
+  logHttp('%s %s %d %s', request.method, pathname + search, outcome.status, times);
+}
 
 /** An AL state that a device can be commanded to. `UNKNOWN` is only ever reported. */
 export type TargetAlState = Exclude<AlState, typeof AlState.UNKNOWN>;
@@ -197,13 +220,10 @@ function requestOf(input: RequestInfo | URL, init?: RequestInit): Request {
  * @param customFetch The `fetch` to wrap. Without it, the global `fetch` is read at each request, so
  *   a tool that replaces it later, such as MSW in the tests, still gets the requests.
  */
-/** What a read of a file returns: its bytes, its text, its JSON, or the response itself. */
-type BodyFormat = 'bytes' | 'text' | 'json' | 'response';
+/** What a read of a file returns: its bytes, its text or its JSON. */
+type BodyFormat = 'bytes' | 'text' | 'json';
 
 async function decodeBody(response: Response, format: BodyFormat): Promise<unknown> {
-  if (format === 'response') {
-    return response;
-  }
   if (format === 'text') {
     return response.text();
   }
@@ -216,10 +236,14 @@ async function decodeBody(response: Response, format: BodyFormat): Promise<unkno
 function throwingFetch(customFetch?: typeof fetch): typeof fetch {
   return async (input, init) => {
     const doFetch = customFetch ?? globalThis.fetch;
+    const startMs = performance.now();
     let response: Response;
     try {
       response = await doFetch(input, init);
     } catch (error) {
+      if (logHttp.enabled) {
+        logRequest(requestOf(input, init), startMs, error instanceof Error ? error.name : 'failed');
+      }
       // fetch rejects with a TypeError when the request does not reach the server. An abort rejects
       // with an AbortError, which stays as it is.
       if (error instanceof TypeError) {
@@ -228,6 +252,9 @@ function throwingFetch(customFetch?: typeof fetch): typeof fetch {
         throw new ConnectionError(`cannot connect to ${origin}`, request, { cause: error });
       }
       throw error;
+    }
+    if (logHttp.enabled) {
+      logRequest(requestOf(input, init), startMs, response);
     }
     if (!response.ok) {
       throw await HttpError.from(requestOf(input, init), response);
@@ -253,8 +280,6 @@ export class MotionMasterClient {
   readonly fieldbus?: FieldbusSettings;
 
   private readonly httpBaseUrl: string;
-  /** The fetch of this client. See `throwingFetch`. */
-  private readonly fetch: typeof fetch;
 
   constructor(options: MotionMasterClientOptions = {}) {
     this.httpBaseUrl = options.baseUrl ?? API_BASE_URL;
@@ -262,8 +287,12 @@ export class MotionMasterClient {
     checkUrl('baseUrl', this.httpBaseUrl, ['http:', 'https:']);
     checkUrl('wsUrl', wsUrl, ['ws:', 'wss:']);
     this.fieldbus = options.fieldbus;
-    this.fetch = throwingFetch(options.customFetch);
-    this.api = new Api({ baseUrl: this.httpBaseUrl, customFetch: this.fetch });
+    // Every request goes through throwingFetch, client.api included, so each refusal is an HttpError
+    // and each request has its line in the http log.
+    this.api = new Api({
+      baseUrl: this.httpBaseUrl,
+      customFetch: throwingFetch(options.customFetch),
+    });
     this.ws = new WebSocketConnection({
       url: wsUrl,
       WebSocket: options.WebSocket,
@@ -409,8 +438,7 @@ export class MotionMasterClient {
    * Reads a file from a device over FoE (`foeReadFile`). The name is percent-encoded in the path,
    * so any name works, a space included. `format` says what to return: `'bytes'`, a `Uint8Array`
    * (the default), `'text'`, the file decoded as UTF-8, such as a CSV, `'json'`, the file parsed as
-   * JSON, or `'response'`, the answer of the server with its body unread, for its headers, such as
-   * the wire time, which `wireTimeMs()` reads. The names are those of the methods of a `fetch` response.
+   * JSON. The names are those of the methods of a `fetch` response.
    */
   readFile(
     slavePosition: number,
@@ -427,11 +455,6 @@ export class MotionMasterClient {
     name: string,
     options: { format: 'json'; signal?: AbortSignal },
   ): Promise<unknown>;
-  readFile(
-    slavePosition: number,
-    name: string,
-    options: { format: 'response'; signal?: AbortSignal },
-  ): Promise<Response>;
   async readFile(
     slavePosition: number,
     name: string,
@@ -447,23 +470,16 @@ export class MotionMasterClient {
 
   /**
    * Writes a file to a device over FoE (`foeWriteFile`), and replaces a file of the same name. A
-   * string is written as UTF-8. Returns the answer of the server, for its headers, such as the wire
-   * time, which `wireTimeMs()` reads.
+   * string is written as UTF-8.
    */
   async writeFile(
     slavePosition: number,
     name: string,
     content: Uint8Array | string,
     options: { signal?: AbortSignal } = {},
-  ): Promise<Response> {
-    // The generated foeWriteFile sends a body it has no formatter for as JSON, so the bytes go with
-    // the fetch of this client.
+  ): Promise<void> {
     const body = typeof content === 'string' ? new TextEncoder().encode(content) : content;
-    const path = `/api/devices/${slavePosition}/files/${encodeURIComponent(name)}`;
-    return this.fetch(`${this.httpBaseUrl}${path}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: body.slice(),
+    await this.api.foeWriteFile(slavePosition, encodeURIComponent(name), body, {
       signal: options.signal,
     });
   }
@@ -512,14 +528,7 @@ export class MotionMasterClient {
     image: Uint8Array,
     options: { signal?: AbortSignal } = {},
   ): Promise<void> {
-    // The generated writeSii sends a body it has no formatter for as JSON, so the bytes go with the
-    // fetch of this client.
-    await this.fetch(`${this.httpBaseUrl}/api/devices/${slavePosition}/sii`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: image.slice(),
-      signal: options.signal,
-    });
+    await this.api.writeSii(slavePosition, image, { signal: options.signal });
   }
 
   /**
@@ -530,8 +539,7 @@ export class MotionMasterClient {
     image: Uint8Array,
     options: { signal?: AbortSignal } = {},
   ): Promise<SlaveInformationInterface> {
-    const response = await this.postBytes('/api/sii/parse', image, options.signal);
-    return (await response.json()) as SlaveInformationInterface;
+    return (await this.api.parseSii(image, { signal: options.signal })).data;
   }
 
   /**
@@ -1091,49 +1099,25 @@ export class MotionMasterClient {
    * throws an HttpError.
    */
   async parseEni(xml: string, options: { signal?: AbortSignal } = {}): Promise<EniParseResult> {
-    // The generated api.parseEni sends a body it has no formatter for as JSON, so the document would
-    // arrive as a quoted JSON string. Its answer types `network` as a bare object; EniParseResult
-    // has the full shape.
-    const response = await this.fetch(`${this.httpBaseUrl}/api/eni/parse`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/xml' },
-      body: xml,
-      signal: options.signal,
-    });
-    return (await response.json()) as EniParseResult;
+    // The generated answer types `network` as a bare object; EniParseResult has the full shape.
+    const response = await this.api.parseEni(xml, { signal: options.signal });
+    return response.data as unknown as EniParseResult;
   }
 
   /**
    * Reads an ESI document (`parseEsi`) and returns every device it describes, each with its own
    * object table. No device is involved. `modules` limits the merge to these `ModuleIdent` values,
    * where a slot offers a choice; without it, every module that a slot references is merged.
-   * `format` says what to return: `'json'`, the parsed result (the default), or `'response'`, the
-   * answer of the server with its body unread, for its headers, such as the time the server spent,
-   * which `wireTimeMs()` reads.
    */
-  parseEsi(
-    xml: string | Uint8Array,
-    options?: { modules?: number[]; format?: 'json'; signal?: AbortSignal },
-  ): Promise<EsiParseResult>;
-  parseEsi(
-    xml: string | Uint8Array,
-    options: { modules?: number[]; format: 'response'; signal?: AbortSignal },
-  ): Promise<Response>;
   async parseEsi(
     xml: string | Uint8Array,
-    options: { modules?: number[]; format?: 'json' | 'response'; signal?: AbortSignal } = {},
-  ): Promise<unknown> {
-    const { modules = [], format = 'json', signal } = options;
+    options: { modules?: number[]; signal?: AbortSignal } = {},
+  ): Promise<EsiParseResult> {
+    const { modules = [], signal } = options;
     // The document goes as bytes, because an ESI may declare an encoding other than UTF-8.
     const bytes = typeof xml === 'string' ? new TextEncoder().encode(xml) : xml;
-    const query = modules.length > 0 ? `?modules=${modules.join(',')}` : '';
-    const response = await this.postBytes(
-      `/api/esi/parse${query}`,
-      bytes,
-      signal,
-      'application/xml',
-    );
-    return format === 'response' ? response : await response.json();
+    const query = modules.length > 0 ? { modules: modules.join(',') } : undefined;
+    return (await this.api.parseEsi(bytes, query, { signal })).data;
   }
 
   /** Decodes the `.variant` file of an Integro (`parseIntegroVariant`). No device is involved. */
@@ -1141,8 +1125,7 @@ export class MotionMasterClient {
     bytes: Uint8Array,
     options: { signal?: AbortSignal } = {},
   ): Promise<IntegroVariant> {
-    const response = await this.postBytes('/api/integro-variant/parse', bytes, options.signal);
-    return (await response.json()) as IntegroVariant;
+    return (await this.api.parseIntegroVariant(bytes, { signal: options.signal })).data;
   }
 
   /**
@@ -1153,8 +1136,7 @@ export class MotionMasterClient {
     bytes: Uint8Array,
     options: { signal?: AbortSignal } = {},
   ): Promise<IcMuRestoreFile> {
-    const response = await this.postBytes('/api/ic-mu-restore-file/parse', bytes, options.signal);
-    return (await response.json()) as IcMuRestoreFile;
+    return (await this.api.parseIcMuRestoreFile(bytes, { signal: options.signal })).data;
   }
 
   /**
@@ -1169,9 +1151,7 @@ export class MotionMasterClient {
   /**
    * Reads a file of the user cache (`getUserCacheFile`). `path` is relative to the root, with `/`
    * between the folders, such as `'dumps/recorder-1.mmpd'`. `format` says what to return, as for
-   * `readFile()`: `'bytes'` (the default), `'text'`, `'json'`, or `'response'`, the answer of the
-   * server with its body unread, for its headers, such as the time the server spent, which
-   * `wireTimeMs()` reads.
+   * `readFile()`: `'bytes'` (the default), `'text'` or `'json'`.
    */
   readUserCacheFile(
     path: string,
@@ -1185,10 +1165,6 @@ export class MotionMasterClient {
     path: string,
     options: { format: 'json'; signal?: AbortSignal },
   ): Promise<unknown>;
-  readUserCacheFile(
-    path: string,
-    options: { format: 'response'; signal?: AbortSignal },
-  ): Promise<Response>;
   async readUserCacheFile(
     path: string,
     options: { format?: BodyFormat; signal?: AbortSignal } = {},
@@ -1201,23 +1177,15 @@ export class MotionMasterClient {
 
   /**
    * Writes a file into the user cache (`putUserCacheFile`), and replaces a file of the same path.
-   * The server creates the folders of the path. A string is written as UTF-8. Returns the answer of
-   * the server, for its headers, such as the time the server spent, which `wireTimeMs()` reads.
+   * The server creates the folders of the path. A string is written as UTF-8.
    */
   async writeUserCacheFile(
     path: string,
     content: Uint8Array | string,
     options: { signal?: AbortSignal } = {},
-  ): Promise<Response> {
-    // The generated putUserCacheFile sends a body it has no formatter for as JSON, so the bytes go
-    // with the fetch of this client.
+  ): Promise<void> {
     const body = typeof content === 'string' ? new TextEncoder().encode(content) : content;
-    return this.fetch(`${this.httpBaseUrl}/api/user-cache/${encodeUserCachePath(path)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: body.slice(),
-      signal: options.signal,
-    });
+    await this.api.putUserCacheFile(encodeUserCachePath(path), body, { signal: options.signal });
   }
 
   /** Removes a file from the user cache (`deleteUserCacheFile`). */
@@ -1290,25 +1258,6 @@ export class MotionMasterClient {
   async serverLog(options: { signal?: AbortSignal } = {}): Promise<string> {
     // No response format: the generated client returns the answer with its body unread.
     return (await this.api.getLog({ signal: options.signal })).text();
-  }
-
-  /**
-   * Posts raw bytes. The generated calls send a body they have no formatter for as JSON, so a file
-   * goes with the fetch of this client.
-   */
-  private postBytes(
-    path: string,
-    bytes: Uint8Array,
-    signal: AbortSignal | undefined,
-    contentType = 'application/octet-stream',
-  ): Promise<Response> {
-    return this.fetch(`${this.httpBaseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': contentType },
-      // A copy, so that the body is an ArrayBuffer and not a view of a shared one.
-      body: bytes.slice(),
-      signal,
-    });
   }
 
   /** Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown. */

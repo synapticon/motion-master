@@ -6,7 +6,7 @@ import Checkbox from '../components/Checkbox';
 import DevicePageHeader from '../components/DevicePageHeader';
 import HrdExplainer from '../components/HrdExplainer';
 import MonitoringChart, { SAMPLE_INDEX } from '../components/MonitoringChart';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadText } from '../utils/download';
 import { btnOutline, btnPrimary } from '../utils/styles';
@@ -33,7 +33,7 @@ export default function DeviceHrdPage() {
   const { deviceId } = useParams();
   const slavePosition = Number(deviceId);
   const { api, client } = useConnection();
-  const { timing, measure } = useWireTiming();
+  const { timing, measure } = useRequestTiming();
 
   const [data, setData] = useState<HrdData>('encoder-raw');
   const [recording, setRecording] = useState<HrdRecording | null>(null);
@@ -172,7 +172,7 @@ export default function DeviceHrdPage() {
                 {downloading ? 'Downloading…' : 'Download CSV'}
               </button>
             </div>
-            <WireTiming label="HRD read" timing={timing} />
+            <RequestTiming timing={timing} />
           </div>
 
           {error && <p className="text-xs text-syn-red">{error}</p>}

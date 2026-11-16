@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw/http';
 import { describe, expect, it } from 'vitest';
-import { HttpError, MotionMasterClient, wireTimeMs } from '../src/index';
+import { HttpError, MotionMasterClient, serverTimeMs } from '../src/index';
 import { HTTP_URL, server } from './fakes';
 
 interface Received {
@@ -24,7 +24,7 @@ function parseServer(): Received[] {
       });
       return HttpResponse.json(
         { route: params.kind },
-        { headers: { 'Server-Timing': 'wire;dur=12.000' } },
+        { headers: { 'Server-Timing': 'server;dur=12.000' } },
       );
     }),
   );
@@ -60,15 +60,17 @@ describe('parse', () => {
       type: 'application/xml',
       body: [...new TextEncoder().encode('<a/>')],
     });
-    expect(received[1]).toMatchObject({ query: '?modules=16,32', body: [0x3c] });
+    // The generated client encodes the comma, and the server decodes the query.
+    expect(received[1]).toMatchObject({ query: '?modules=16%2C32', body: [0x3c] });
   });
 
-  it('gives the response of an ESI parse, for its headers', async () => {
-    parseServer();
+  it('gives the response of the generated ESI parse, for its headers', async () => {
+    const received = parseServer();
     const client = new MotionMasterClient({ baseUrl: HTTP_URL });
-    const response = await client.parseEsi('<a/>', { format: 'response' });
-    expect(response.bodyUsed).toBe(false);
-    expect(wireTimeMs(response)).toBe(12);
+    const response = await client.api.parseEsi(new Uint8Array([0x3c]));
+    expect(serverTimeMs(response)).toBe(12);
+    expect(response.data).toEqual({ route: 'esi' });
+    expect(received[0]).toMatchObject({ type: 'application/xml', body: [0x3c] });
   });
 
   it('throws an HttpError with the reason of the server', async () => {

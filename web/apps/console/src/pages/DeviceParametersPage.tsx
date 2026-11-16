@@ -7,7 +7,12 @@ import Callout from '../components/Callout';
 import Checkbox from '../components/Checkbox';
 import DevicePageHeader from '../components/DevicePageHeader';
 import HexDecInput from '../components/HexDecInput';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import {
+  RequestTiming,
+  requestTiming,
+  type RequestTimingValue,
+  useRequestTiming,
+} from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import {
   apiErrorMessage,
@@ -21,8 +26,6 @@ import {
   interpretSdoBytes,
   sdoTypeForDataTypeName,
   isIntegerSdoType,
-  wireTimeMs,
-  formatDuration,
   formatHex,
   formatHexBytes,
   objectAddressText,
@@ -143,29 +146,6 @@ function paramKey(index: number, subindex: number): string {
   return `${index}-${subindex}`;
 }
 
-// Timing readout for the raw SDO tools: the server-measured wire transaction (from the
-// response's `Server-Timing` header) and the browser-observed HTTP round-trip. The gap between them is
-// cross-origin/transport overhead, not device time.
-function SdoTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: number }) {
-  return (
-    <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
-      <span
-        className="cursor-help"
-        title="SDO — server-measured duration of the SDO transaction itself (control-plane lock acquire + CoE mailbox wire round-trip), reported by the backend. This is the true cost of talking to the device."
-      >
-        SDO {formatDuration(wireMs)}
-      </span>
-      <span
-        className="text-grey-400 cursor-help"
-        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the SDO time plus cross-origin/TLS and transport overhead, so it is normally much larger than the SDO figure and is not device time."
-      >
-        {' · round-trip '}
-        {formatDuration(roundTripMs)}
-      </span>
-    </span>
-  );
-}
-
 // Freshness of the cached value relative to the device, rendered as a labelled badge.
 // Each state carries a title explaining it; the help cursor signals the tooltip.
 function SyncBadge({ state }: { state: DeviceParameter['syncState'] }) {
@@ -225,11 +205,9 @@ const ReadSdoCard = memo(function ReadSdoCard({
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<number[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
-  // server-measured SDO transaction (`Server-Timing` header). Showing both makes clear the SDO is
-  // fast and the rest is browser/transport overhead, not the device.
-  const [readSdoElapsedMs, setReadSdoElapsedMs] = useState<number | null>(null);
-  const [readSdoWireMs, setReadSdoWireMs] = useState<number | null>(null);
+  // The times of the last read: the round trip that the browser measured, and the server and fieldbus
+  // times from Server-Timing.
+  const [readTiming, setReadTiming] = useState<RequestTimingValue | null>(null);
 
   const indexNum = parseInteger(index, { min: 0 });
   const subindexNum = parseInteger(subindex, { min: 0 });
@@ -240,8 +218,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
   function clearReadStatus() {
     setResult(null);
     setError(null);
-    setReadSdoElapsedMs(null);
-    setReadSdoWireMs(null);
+    setReadTiming(null);
   }
 
   function handleIndexChange(val: string) {
@@ -263,15 +240,13 @@ const ReadSdoCard = memo(function ReadSdoCard({
     const start = performance.now();
     try {
       const res = await api.sdoUpload(slavePosition, indexNum!, subindexNum!);
-      setReadSdoElapsedMs(performance.now() - start);
-      setReadSdoWireMs(wireTimeMs(res));
+      setReadTiming(requestTiming(res, start));
       setResult(res.data.data);
     } catch (err) {
-      // A failed transaction still consumed wire time (an SDO read waits out the mailbox timeout);
-      // the backend attaches Server-Timing to the error too, so show the same timing as on success.
-      setReadSdoElapsedMs(performance.now() - start);
+      // A failed transaction still spent its time (an SDO read waits out the mailbox timeout), and
+      // the server sends Server-Timing with the error too, so show the same times as on success.
       if (err instanceof HttpError) {
-        setReadSdoWireMs(wireTimeMs(err.response));
+        setReadTiming(requestTiming(err.response, start));
       }
       setError(apiErrorMessage(err));
     } finally {
@@ -323,9 +298,7 @@ const ReadSdoCard = memo(function ReadSdoCard({
           <button onClick={handleUpload} disabled={!canUpload} className={btnCls}>
             {uploading ? 'Reading…' : 'Read SDO'}
           </button>
-          {readSdoElapsedMs !== null && readSdoWireMs !== null && (
-            <SdoTiming wireMs={readSdoWireMs} roundTripMs={readSdoElapsedMs} />
-          )}
+          <RequestTiming timing={readTiming} />
         </div>
 
         {error && <p className="text-xs text-status-bad font-mono">{error}</p>}
@@ -369,8 +342,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
   const [downloading, setDownloading] = useState(false);
   const [dlOk, setDlOk] = useState<number[] | null>(null);
   const [dlError, setDlError] = useState<string | null>(null);
-  const [writeSdoElapsedMs, setWriteSdoElapsedMs] = useState<number | null>(null);
-  const [writeSdoWireMs, setWriteSdoWireMs] = useState<number | null>(null);
+  const [writeTiming, setWriteTiming] = useState<RequestTimingValue | null>(null);
 
   const dlIndexNum = parseInteger(dlIndex, { min: 0 });
   const dlSubindexNum = parseInteger(dlSubindex, { min: 0 });
@@ -386,8 +358,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
   function clearDownloadStatus() {
     setDlOk(null);
     setDlError(null);
-    setWriteSdoElapsedMs(null);
-    setWriteSdoWireMs(null);
+    setWriteTiming(null);
   }
 
   async function handleDownload() {
@@ -401,14 +372,12 @@ const WriteSdoCard = memo(function WriteSdoCard({
       const res = await api.sdoDownload(slavePosition, dlIndexNum!, dlSubindexNum!, {
         data: encodedBytes,
       });
-      setWriteSdoElapsedMs(performance.now() - start);
-      setWriteSdoWireMs(wireTimeMs(res));
+      setWriteTiming(requestTiming(res, start));
       setDlOk(encodedBytes);
     } catch (err) {
-      // Show the wire time on failure too — the backend attaches Server-Timing to the error.
-      setWriteSdoElapsedMs(performance.now() - start);
+      // Show the times on failure too — the server sends Server-Timing with the error.
       if (err instanceof HttpError) {
-        setWriteSdoWireMs(wireTimeMs(err.response));
+        setWriteTiming(requestTiming(err.response, start));
       }
       setDlError(apiErrorMessage(err));
     } finally {
@@ -512,9 +481,7 @@ const WriteSdoCard = memo(function WriteSdoCard({
           <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
             {downloading ? 'Writing…' : 'Write SDO'}
           </button>
-          {writeSdoElapsedMs !== null && writeSdoWireMs !== null && (
-            <SdoTiming wireMs={writeSdoWireMs} roundTripMs={writeSdoElapsedMs} />
-          )}
+          <RequestTiming timing={writeTiming} />
         </div>
 
         {dlError && <p className="text-xs text-status-bad font-mono">{dlError}</p>}
@@ -546,10 +513,10 @@ export default function DeviceParametersPage() {
 
   const [readValues, setReadValues] = useState(false);
   const [filter, setFilter] = useState('');
-  // init + read-all both hit the wire (SDO Info enumeration / value reads), so they carry
-  // Server-Timing and get the wire-vs-round-trip readout. Reload is a cached server re-fetch (no bus
+  // init + read-all both run on the fieldbus (SDO Info enumeration / value reads), so they carry
+  // the metric fieldbus and get the fieldbus-vs-round-trip readout. Reload is a cached server re-fetch (no bus
   // traffic), so it only has a round-trip figure.
-  const bulkTiming = useWireTiming();
+  const bulkTiming = useRequestTiming();
   const [reloadElapsedMs, setReloadElapsedMs] = useState<number | null>(null);
   const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set());
   const [settingKeys, setSettingKeys] = useState<Set<string>>(new Set());
@@ -858,15 +825,14 @@ export default function DeviceParametersPage() {
                   {paramsQuery.isFetching ? 'Reloading…' : 'Reload list'}
                 </button>
                 {bulkTiming.timing ? (
-                  <WireTiming label="Object dictionary" timing={bulkTiming.timing} />
+                  <RequestTiming timing={bulkTiming.timing} />
                 ) : (
+                  // The reload re-fetches the cached list through react-query, which keeps no
+                  // response, so only its round trip shows.
                   reloadElapsedMs !== null && (
-                    <span
-                      className="text-xs text-grey-500 font-mono whitespace-nowrap cursor-help"
-                      title="Round-trip for the cached list re-fetch — no bus traffic, so there is no device wire time to report."
-                    >
-                      took {formatDuration(reloadElapsedMs)}
-                    </span>
+                    <RequestTiming
+                      timing={{ roundTripMs: reloadElapsedMs, serverMs: null, fieldbusMs: null }}
+                    />
                   )
                 )}
               </div>

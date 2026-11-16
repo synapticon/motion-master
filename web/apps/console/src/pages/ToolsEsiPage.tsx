@@ -6,6 +6,7 @@ import {
   type EsiDeviceSummary,
   type EsiEntry,
   type EsiParseResult,
+  formatBytes,
   formatHex,
   objectAddressText,
 } from '@synapticon/motion-master-client';
@@ -14,7 +15,7 @@ import Checkbox, { selectAllState } from '../components/Checkbox';
 import EsiExplainer from '../components/EsiExplainer';
 import FilePickerButton from '../components/FilePickerButton';
 import PageHeader from '../components/PageHeader';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
 import { ESIS_FOLDER, userCacheBasename } from '../utils/userCache';
@@ -414,7 +415,7 @@ export default function ToolsEsiPage() {
   const [applied, setApplied] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { timing, measure, reset: resetTiming } = useWireTiming();
+  const { timing, measure, reset: resetTiming } = useRequestTiming();
   // The cached ESI on show, or null when the file came from the picker.
   const [cachedPath, setCachedPath] = useState<string | null>(null);
 
@@ -442,10 +443,10 @@ export default function ToolsEsiPage() {
       // No selection means "merge everything each device's slots reference", which is the
       // endpoint's own default.
       const payload = new Uint8Array(await f.arrayBuffer());
-      const res = await measure(() =>
-        client.parseEsi(payload, { modules: [...idents], format: 'response' }),
-      );
-      setResult((await res.json()) as EsiParseResult);
+      // The generated call, because the page shows the server time from the response.
+      const modules = idents.size > 0 ? { modules: [...idents].join(',') } : undefined;
+      const res = await measure(() => client.api.parseEsi(payload, modules));
+      setResult(res.data);
       setApplied(new Set(idents));
     } catch (err) {
       setError(apiErrorMessage(err, 'Failed to parse the ESI file.'));
@@ -557,8 +558,7 @@ export default function ToolsEsiPage() {
                     >
                       {userCacheBasename(f.path)}
                       <span className="block text-grey-500 font-sans">
-                        {(f.size / 1024).toFixed(0)} KB ·{' '}
-                        {new Date(f.modifiedMs).toLocaleDateString()}
+                        {formatBytes(f.size)} · {new Date(f.modifiedMs).toLocaleDateString()}
                       </span>
                     </button>
                   </li>
@@ -578,17 +578,11 @@ export default function ToolsEsiPage() {
               </FilePickerButton>
               {file && (
                 <span className="text-xs text-grey-500 font-mono">
-                  {file.name} · {(file.size / 1024).toFixed(0)} KB
+                  {file.name} · {formatBytes(file.size)}
                 </span>
               )}
               {busy && <span className="text-xs text-grey-600">Parsing…</span>}
-              {!busy && (
-                <WireTiming
-                  label="Parse"
-                  timing={timing}
-                  title="Parse — server-measured time to read the ESI XML and assemble every device's object dictionary, reported by the backend. This is CPU work, not a device transaction; the round-trip beside it also carries the file upload, which for a megabyte-scale ESI dominates."
-                />
-              )}
+              {!busy && <RequestTiming timing={timing} />}
             </div>
 
             {error && <p className="text-xs text-status-bad font-mono">{error}</p>}

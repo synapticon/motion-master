@@ -100,11 +100,14 @@ A row with a name in one column only belongs to that language. Its reason says w
 | — | `lanAddress` | As `LAN_DOMAIN`. |
 | — | `lanHostname` | As `LAN_DOMAIN`. |
 | — | `isIpv4` | As `LAN_DOMAIN`. |
-| `wire_time_ms` | `wireTimeMs` | |
+| `fieldbus_time_ms` | `fieldbusTimeMs` | |
+| `server_time_ms` | `serverTimeMs` | |
 | `format_bytes` | `formatBytes` | |
 | `format_duration` | `formatDuration` | |
+| `format_times` | `formatTimes` | |
 | — | `formatHex` | The hex input fields of the Console. Python formats and parses hex with `f"{value:#x}"` and `int(text, 16)`. |
 | — | `formatHexBytes` | Python writes the same with `data.hex(" ").upper()`. |
+| — | `encodeUserCachePath` | Encodes a path of the user cache for a call of `client.api`, which the Python client does not have. |
 | — | `parseHexBytes` | As `formatHex`. |
 | — | `parseInteger` | The number inputs of the Console and the options of the examples. Python parses the same integers with `int(text, 0)`. |
 | — | `parseBigInt` | As `parseInteger`, for a 64-bit value as a `bigint`. Python's `int` holds any integer. |

@@ -21,14 +21,32 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- Both clients write one debug line per HTTP request: the method, the path, the status, the round
+  trip, and the times `server` and `fieldbus` from `Server-Timing`, such as
+  `GET /api/devices/1/sdo/4096/0 200 round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`. Turn it on with
+  `DEBUG=motion-master-client:http`, or in Python with the logger `motion_master_client.http` at
+  DEBUG.
+- Every operation of the API can go through the generated client `client.api`, which returns the
+  response with its headers. The generator sends a file as `application/octet-stream` and an XML
+  document as `application/xml`, where it sent every body as JSON, so a file arrived as `{}`. The
+  rule is in templates in `web/packages/motion-master-client/templates/`, and swagger-typescript-api
+  is pinned to 13.12.2. A binary body, the ESI of `parseEsi` included, is a `Blob` or a
+  `Uint8Array`, where it was a `File` or a string. The
+  helpers that sent a file with their own `fetch` use the generated calls, and the Console reads the
+  times of the requests it times from the responses of the generated calls.
+
 - Each variable of the process image that `POST /api/eni/parse` returns has `devicePosition`, the
   device whose window holds it, `object`, the index and subindex of its object from the PDOs of
   that device, and its name split at the first dot into `scope` and `signal`. The Console's ENI
   page reads them in place of its own copies.
-- Both clients format a duration with `formatDuration(ms)` and `format_duration(ms)`, such as
-  `4.2 ms` or `2.75 s`, and a byte count with `formatBytes(bytes)` and `format_bytes(count)`, such as
-  `87.0 KiB`. Both round half up, so they write the same digits. The Console uses them in place of
-  five copies of a duration formatter and two of a byte formatter, one of which wrote KB.
+- Both clients format a duration with `formatDuration(ms)` and `format_duration(ms)`, always with
+  three decimals, such as `0.087 ms` or `2.745 s`, and a byte count with `formatBytes(bytes)` and
+  `format_bytes(count)`, such as `87.0 KiB`. Both round half up, so they write the same digits. The
+  Console uses them in place of five copies of a duration formatter and two of a byte formatter, one
+  of which wrote KB. `formatTimes(roundTripMs, { serverMs, fieldbusMs })` and `format_times()`
+  write the times of one request, such as `round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`.
+  The Console shows the times of every request it times with it, on every page, and the debug log of
+  both clients writes them with it, so the two read alike.
 - `MonitoringRecording.toCsv()` and `to_csv()` return the CSV text that `writeCsv()` and
   `write_csv()` write, such as for a download in a browser.
 - The TypeScript client exports `DEFAULT_HOST`, `DEFAULT_HTTP_PORT` and `DEFAULT_WS_PORT`, from
@@ -80,19 +98,18 @@ the HTTP/WebSocket API may break between any two alphas.
 - Both clients read and write objects and files with `writeValue()`, `readSdo()`, `writeSdo()`,
   `listFiles()`, `readFile()`, `writeFile()` and `removeFile()`, and the Python twins
   `write_value()`, `read_sdo()` and so on. `readSii()` returns the parsed SII or the raw image, and
-  `writeSii()` writes an image. `readFile()` returns bytes, text, JSON or the response, for its
-  headers. `writeFile()` writes a string as UTF-8 and returns the response, for its headers.
+  `writeSii()` writes an image. `readFile()` returns bytes, text or JSON. `writeFile()` writes a
+  string as UTF-8.
 - Both clients decode a file on the server with `parseSii()`, `parseEsi()`, `parseIntegroVariant()`
   and `parseIcMuRestoreFile()`, and the Python twins `parse_sii()` and so on. Each sends the file as
-  raw bytes, which the generated calls send as JSON. `parseEsi()` takes the modules to merge, and
-  returns the response with `format: 'response'`, for its headers. The Console and the `parse-esi`
-  examples use them in place of their own requests.
+  raw bytes. `parseEsi()` takes the modules to merge. The Console and the `parse-esi` examples use
+  them in place of their own requests.
 - Both clients read and write the user cache of the server with `listUserCacheFiles()`,
   `readUserCacheFile()`, `writeUserCacheFile()` and `removeUserCacheFile()`, and the Python twins
   `list_user_cache_files()` and so on. A path is relative to the root of the user cache, and each
   folder and the name are percent-encoded, so any name works. `readUserCacheFile()` returns bytes,
-  text, JSON or the response, as `readFile()` does, and `writeUserCacheFile()` writes a string as
-  UTF-8 and returns the response. The Console, the `firmware-installation` examples, the
+  text or JSON, as `readFile()` does, and `writeUserCacheFile()` writes a string as UTF-8.
+  `encodeUserCachePath()` encodes a path for a call of `client.api`. The Console, the `firmware-installation` examples, the
   production scripts and the bench tests use them in place of their own requests.
 - Both clients read the high resolution data recording of a device with `readHrdRecording()`, as
   JSON or, with `format: 'csv'`, as CSV text. They list, read and remove the entries of the
@@ -103,9 +120,10 @@ the HTTP/WebSocket API may break between any two alphas.
   `run_auto_tuning()`. The Console's Auto-Tuning page sends its request through the client, and
   shows the answer of a refusal from `HttpError.response`. The Console sends no request with its
   own `fetch` any more.
-- Both clients read the wire time of an operation from a response with `wireTimeMs()` and
-  `wire_time_ms()`, in milliseconds, or `null` and `None` when the response has none. The
-  TypeScript twin also reads it from a `PerformanceResourceTiming` entry of the browser.
+- Both clients read the times that the server measured from a response: `serverTimeMs()` and
+  `server_time_ms()` the metric `server`, and `fieldbusTimeMs()` and `fieldbus_time_ms()` the metric
+  `fieldbus`, in milliseconds, or `null` and `None` when the response has none. The TypeScript
+  twins also read them from a `PerformanceResourceTiming` entry of the browser.
 - The TypeScript client exports `objectName()` and `objectAddressText()`, with the Python twins
   `object_name()` and `object_address_text()`, and formats bytes as hex with `formatHexBytes()`.
 - Both clients name a parameter of a device with `deviceParameterText()`, such as `1:0x6041:00`, and
@@ -162,11 +180,18 @@ the HTTP/WebSocket API may break between any two alphas.
   hex numbers, byte lists and object addresses come from `formatHex()`, `formatHexBytes()` and
   `objectAddressText()` of the client, in place of 14 local copies. The Monitorings and Recorder
   pages label a parameter `1:0x6041:00` with `deviceParameterText()`. They wrote `1·0x6041:00`.
-- The server sends the wire time of an operation in the standard `Server-Timing` header, as the
-  metric `wire` in milliseconds: `Server-Timing: wire;dur=1.500` is 1.5 ms. It sent `X-Wire-Us` in
-  microseconds, which is gone. Every response also has `Timing-Allow-Origin`, so the developer
-  tools of a browser show the wire time of each request, and a page of the allowed origin reads it
-  with the Performance API.
+- The server sends the times it measured in the standard `Server-Timing` header, in milliseconds:
+  `Server-Timing: server;dur=7.100, fieldbus;dur=6.200`. Every response has `server`, the time from
+  the complete request to the response. Every endpoint that runs a fieldbus operation adds
+  `fieldbus`, the time of that operation: the wait for the control-plane lock and every mailbox or
+  ESC transaction. That is also true of the CiA402 controls, the brake and encoder reads, the AL
+  state routes, `init`, `scan`, `reset` and the ENI export, which sent no time before. The ENI and
+  ESI parses and the user cache send only `server`. The server sent the time of a device operation
+  in `X-Wire-Us`, in microseconds, which is gone. Every response also has `Timing-Allow-Origin`, so
+  the developer tools of a browser show the times of each request, and a page of the allowed origin
+  reads them with the Performance API.
+- The ENI export exposes `X-Eni-Warnings` to the browser, so the Console's ENI page shows the
+  number of export warnings. A browser could not read the header before.
 - The Python client needs Python 3.12 or newer. It needed 3.11. Debian 12 and the Raspberry Pi OS
   based on it have 3.11 as their system Python, so there a newer Python goes beside it, for example
   with `uv python install 3.12`. The server packages for arm64 already need Debian 13. CI tests the

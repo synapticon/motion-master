@@ -41,4 +41,5 @@ export * from './sdo';
 export * from './integer';
 export * from './object-access';
 export * from './mmpd';
-export * from './wire-time';
+export * from './server-timing';
+export { encodeUserCachePath } from './user-cache';

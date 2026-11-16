@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import DevicePageHeader from '../components/DevicePageHeader';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import {
   apiErrorMessage,
@@ -54,14 +54,14 @@ export default function DeviceRegistersPage() {
   const [reading, setReading] = useState(false);
   const [readResult, setReadResult] = useState<number[] | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
-  const readTiming = useWireTiming();
+  const readTiming = useRequestTiming();
 
   const [writeAddress, setWriteAddress] = useState('');
   const [writeValue, setWriteValue] = useState('');
   const [writing, setWriting] = useState(false);
   const [writeOk, setWriteOk] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
-  const writeTiming = useWireTiming();
+  const writeTiming = useRequestTiming();
 
   const addrNum = parseInteger(address, { min: 0, max: 0xffff });
   const addrHex = addrNum === null ? '—' : formatHex(addrNum, 4);
@@ -242,7 +242,7 @@ export default function DeviceRegistersPage() {
                 <button onClick={handleRead} disabled={!canRead} className={btnCls}>
                   {reading ? 'Reading…' : 'Read'}
                 </button>
-                <WireTiming label="Registers" timing={readTiming.timing} />
+                <RequestTiming timing={readTiming.timing} />
               </div>
 
               {readError && <p className="text-xs text-status-bad font-mono">{readError}</p>}
@@ -324,7 +324,7 @@ export default function DeviceRegistersPage() {
                 <button onClick={handleWrite} disabled={!canWrite} className={btnCls}>
                   {writing ? 'Writing…' : 'Write'}
                 </button>
-                <WireTiming label="Registers" timing={writeTiming.timing} />
+                <RequestTiming timing={writeTiming.timing} />
               </div>
 
               {writeError && <p className="text-xs text-status-bad font-mono">{writeError}</p>}

@@ -262,8 +262,8 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `int.from_bytes(data, "little")` turns bytes into an integer.
 - `list_files(position)` returns the files on a device, each as `{"name": ..., "byteCount": ...}`.
   `read_file(position, name, format="bytes")` reads one over FoE as `"bytes"`, `"text"` or
-  `"json"`, or returns the `"response"`. `write_file(position, name, content)` writes bytes, or a
-  str as UTF-8, and returns the response. `remove_file(position, name)` removes a file.
+  `"json"`. `write_file(position, name, content)` writes bytes, or a str as UTF-8.
+  `remove_file(position, name)` removes a file.
 - `read_sii(position, format="json")` returns the parsed SII of a device, or its raw EEPROM image
   with `format="bytes"`. `write_sii(position, image)` writes a raw image.
 - `list_user_cache_files()` returns the files in the user cache of the server, a folder that keeps
@@ -283,11 +283,12 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `{"run": "auto_tune_velocity_controller", "data": ...}`, and returns its result. The program
   answers an input that it refuses with an `"error"` key in the result.
 - `parse_sii(image)`, `parse_integro_variant(data)` and `parse_ic_mu_restore_file(data)` decode a
-  file on the server, with no device involved. `parse_esi(xml, modules=None, format="json")` reads
-  an ESI document and returns every device it describes, or the `"response"`.
-- `wire_time_ms(response)` returns the time that the server spent on the operation, in
-  milliseconds, from the `Server-Timing` header of a response. It returns `None` when the server
-  sent no time.
+  file on the server, with no device involved. `parse_esi(xml, modules=None)` reads an ESI document
+  and returns every device it describes.
+- `server_time_ms(response)` returns the time that the server spent on the request, in
+  milliseconds, from the metric `server` of the `Server-Timing` header.
+  `fieldbus_time_ms(response)` returns the time of the fieldbus operation of the request, from the
+  metric `fieldbus`. They return `None` when the response has no such time.
 - `object_name(index, subindex)` returns the generated name of an object, such as `STATUSWORD`, and
   `object_address_text(index, subindex)` its address, such as `0x6041:00`.
   `device_parameter_text(position, index, subindex)` and
@@ -295,8 +296,10 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   `1:0x6041:00` and `1:STATUSWORD`. `object_access(access)` decodes the access word of an object
   into `readable`, `writable`, `rxPdoMappable`, `txPdoMappable`, `backup`, `settings` and `text`,
   such as `RW`.
-- `format_duration(ms)` formats a duration, such as `4.2 ms` or `2.75 s`, and `format_bytes(count)`
-  a byte count, such as `87.0 KiB`. They write the same digits as the TypeScript client.
+- `format_duration(ms)` formats a duration with three decimals, such as `0.087 ms` or `2.745 s`,
+  and `format_bytes(count)` a byte count, such as `87.0 KiB`. `format_times(round_trip_ms, server_ms, fieldbus_ms)` writes
+  the times of one request, such as `round-trip 3.557 ms, server 1.416 ms, fieldbus 1.356 ms`. They
+  write the same digits as the TypeScript client and the Console.
 - `wait_for_value(position, obj, predicate, timeout_ms=1000, interval_ms=50)` reads one object until
   the predicate is true. It raises `TimeoutError` with the last value when the time runs out.
 - `ensure_scanned()` scans when the last scan is missing or wrong, and moves no device.
@@ -368,6 +371,23 @@ client cannot reach raises `requests.ConnectionError`.
 
 The helpers log each step they take, such as `found 1 device(s)`, through the
 `motion_master_client` logger. The log is off by default. Turn on logging at INFO to see it.
+
+The client also writes one line per HTTP request to the logger `motion_master_client.http`: the
+method, the path, the status, the round trip, and the times that the server reported in
+`Server-Timing`: `server`, and `fieldbus` for a request that ran a fieldbus operation. Set that logger to DEBUG to see it, or set the environment variable, as for the
+TypeScript client:
+
+```bash
+DEBUG=motion-master-client:http python examples/server-info.py
+```
+
+```text
+motion-master-client:http GET /api/version 200 round-trip 0.912 ms, server 0.087 ms
+motion-master-client:http GET /api/devices/1/sdo/0x1000/0 200 round-trip 1.733 ms, server 1.292 ms, fieldbus 1.133 ms
+```
+
+A helper returns the decoded result. A script that needs a response, for its headers, calls
+`client.call(operation_id, …)`, which returns the `requests.Response`.
 
 ## Objects and states
 

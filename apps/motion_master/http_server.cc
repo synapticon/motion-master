@@ -1149,10 +1149,7 @@ void HttpServer::run() {
   // datagram gets the name of the register its address selects, and a register block gets its
   // fields. Offline, like the SII and ESI parsers beside it — no bus is touched and none is needed.
   router.post("/api/eni/parse", [](const mm::api::Request& req) -> mm::api::Response {
-    // Timed through the same Server-Timing channel as a device operation. The figure is CPU rather
-    // than wire time here, as it is for the ESI parse.
-    return mm::api::timed([&] { return mm::node::buildEniResponse(req.body()); },
-                          "400 Bad Request");
+    return mm::api::respond(mm::node::buildEniResponse(req.body()), "400 Bad Request");
   });
 
   router.post("/api/esi/parse", [](const mm::api::Request& req) -> mm::api::Response {
@@ -1164,11 +1161,7 @@ void HttpServer::run() {
       }
       request.moduleIdents = std::move(*idents);
     }
-    // Timed through the same Server-Timing channel as a device operation. The figure is CPU rather
-    // than wire time here (parse + assemble every device's dictionary), which for a megabyte-scale
-    // ESI is the part worth watching. JSON serialisation stays outside it, as everywhere else.
-    return mm::api::timed([&] { return mm::etg::buildEsiResponse(req.body(), request); },
-                          "400 Bad Request");
+    return mm::api::respond(mm::etg::buildEsiResponse(req.body(), request), "400 Bad Request");
   });
 
   // ── Raw device access: ESC registers, EEPROM, watchdog ──────────────────────────────────────
@@ -1225,8 +1218,8 @@ void HttpServer::run() {
 
   // Content negotiation: the raw EEPROM image only when the client asks via
   // `Accept: application/octet-stream`, otherwise the parsed structure, which is the default. Only
-  // the EEPROM read touches the wire (parseSii is local CPU), so the read is what is timed and
-  // Server-Timing rides every outcome.
+  // the EEPROM read touches the fieldbus (parseSii is local CPU), so the read is what is timed, and
+  // the metric `fieldbus` rides every outcome.
   router.get(
       "/api/devices/:slavePosition/sii", [this](const mm::api::Request& req) -> mm::api::Response {
         if (auto refused = escUnavailable(deviceManager_); refused) {
@@ -1239,23 +1232,23 @@ void HttpServer::run() {
         return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
           const auto t0 = std::chrono::steady_clock::now();
           auto raw = device.readSii();
-          const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+          const auto fieldbusTime = std::chrono::duration_cast<std::chrono::microseconds>(
               std::chrono::steady_clock::now() - t0);
           if (!raw) {
-            return mm::api::withWireTime(mm::api::error("500 Internal Server Error", raw.error()),
-                                         wireUs);
+            return mm::api::withFieldbusTime(
+                mm::api::error("500 Internal Server Error", raw.error()), fieldbusTime);
           }
           if (req.accepts("application/octet-stream")) {
-            return mm::api::withWireTime(
+            return mm::api::withFieldbusTime(
                 mm::api::bytes("application/octet-stream", std::string(raw->begin(), raw->end())),
-                wireUs);
+                fieldbusTime);
           }
           auto parsed = mm::comm::parseSii(*raw);
           if (!parsed) {
-            return mm::api::withWireTime(
-                mm::api::error("500 Internal Server Error", parsed.error()), wireUs);
+            return mm::api::withFieldbusTime(
+                mm::api::error("500 Internal Server Error", parsed.error()), fieldbusTime);
           }
-          return mm::api::withWireTime(mm::api::json(nlohmann::json(*parsed)), wireUs);
+          return mm::api::withFieldbusTime(mm::api::json(nlohmann::json(*parsed)), fieldbusTime);
         });
       });
 
@@ -1357,7 +1350,7 @@ void HttpServer::run() {
     if (!deviceManager_.hasDevice(*position)) {
       return mm::api::notFound("no device at that bus position");
     }
-    // Most of the round trip is the deliberate wait, which is what the wire time reports.
+    // Most of the round trip is the deliberate wait, which is what the fieldbus time reports.
     return mm::api::timed(
         [&] {
           return release ? mm::node::releaseBrake(deviceManager_, *position, settle)
@@ -1388,49 +1381,50 @@ void HttpServer::run() {
                    "409 Conflict");
              });
 
-  router.put("/api/devices/:slavePosition/pdo-mapping",
-             [this](const mm::api::Request& req) -> mm::api::Response {
-               auto position = req.parameterAs<uint16_t>("slavePosition");
-               if (!position) {
-                 return mm::api::badRequest("slavePosition must be a number");
-               }
-               const auto body = nlohmann::json::parse(req.body(), nullptr, false);
-               if (body.is_discarded()) {
-                 return mm::api::badRequest("body must be JSON");
-               }
-               auto mapping = parseDevicePdoMapping(body);
-               if (!mapping) {
-                 return mm::api::badRequest(mapping.error());
-               }
-               if (!deviceManager_.hasDevice(*position)) {
-                 return mm::api::notFound("no device at that bus position");
-               }
-               // Both the write and the verifying read-back are on the wire, so both are timed.
-               const auto t0 = std::chrono::steady_clock::now();
-               auto elapsed = [&t0] {
-                 return std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - t0);
-               };
-               // A failed write is usually a device-state precondition (not in PREOP) or a
-               // rejected/verify-mismatched mapping — a conflict with the device's state rather
-               // than a server fault.
-               if (auto r = deviceManager_.writeDevicePdoMapping(*position, *mapping); !r) {
-                 return mm::api::withWireTime(mm::api::error("409 Conflict", r.error()), elapsed());
-               }
-               // Echo the grouped read-back, whose entries carry the derived bitOffsets the
-               // request did not specify.
-               const auto device = deviceManager_.deviceAt(*position);
-               if (!device) {
-                 return mm::api::withWireTime(
-                     mm::api::error("404 Not Found", "no device at that bus position"), elapsed());
-               }
-               auto readBack = device->readPdoMapping();
-               if (!readBack) {
-                 return mm::api::withWireTime(
-                     mm::api::error("500 Internal Server Error", readBack.error()), elapsed());
-               }
-               return mm::api::withWireTime(mm::api::json(nlohmann::json(*readBack)), elapsed());
-             });
+  router.put(
+      "/api/devices/:slavePosition/pdo-mapping",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (body.is_discarded()) {
+          return mm::api::badRequest("body must be JSON");
+        }
+        auto mapping = parseDevicePdoMapping(body);
+        if (!mapping) {
+          return mm::api::badRequest(mapping.error());
+        }
+        if (!deviceManager_.hasDevice(*position)) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        // Both the write and the verifying read-back are on the wire, so both are timed.
+        const auto t0 = std::chrono::steady_clock::now();
+        auto elapsed = [&t0] {
+          return std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - t0);
+        };
+        // A failed write is usually a device-state precondition (not in PREOP) or a
+        // rejected/verify-mismatched mapping — a conflict with the device's state rather
+        // than a server fault.
+        if (auto r = deviceManager_.writeDevicePdoMapping(*position, *mapping); !r) {
+          return mm::api::withFieldbusTime(mm::api::error("409 Conflict", r.error()), elapsed());
+        }
+        // Echo the grouped read-back, whose entries carry the derived bitOffsets the
+        // request did not specify.
+        const auto device = deviceManager_.deviceAt(*position);
+        if (!device) {
+          return mm::api::withFieldbusTime(
+              mm::api::error("404 Not Found", "no device at that bus position"), elapsed());
+        }
+        auto readBack = device->readPdoMapping();
+        if (!readBack) {
+          return mm::api::withFieldbusTime(
+              mm::api::error("500 Internal Server Error", readBack.error()), elapsed());
+        }
+        return mm::api::withFieldbusTime(mm::api::json(nlohmann::json(*readBack)), elapsed());
+      });
 
   router.get("/api/devices/:slavePosition/cia402",
              [this](const mm::api::Request& req) -> mm::api::Response {
@@ -1487,12 +1481,12 @@ void HttpServer::run() {
                 if (!deviceManager_.hasDevice(*position)) {
                   return mm::api::notFound("no device at that bus position");
                 }
-                auto r = mm::node::setCia402OperationMode(deviceManager_, *position,
-                                                          static_cast<int8_t>(raw));
-                if (!r) {
-                  return mm::api::error("409 Conflict", r.error());
-                }
-                return mm::api::json(nlohmann::json(*r));
+                return mm::api::timed(
+                    [&] {
+                      return mm::node::setCia402OperationMode(deviceManager_, *position,
+                                                              static_cast<int8_t>(raw));
+                    },
+                    "409 Conflict");
               });
 
   router.post(
@@ -1514,46 +1508,43 @@ void HttpServer::run() {
         if (!deviceManager_.hasDevice(*position)) {
           return mm::api::notFound("no device at that bus position");
         }
-        auto r = mm::node::runCia402Command(deviceManager_, *position, *command);
-        if (!r) {
-          return mm::api::error("409 Conflict", r.error());
-        }
-        return mm::api::json(nlohmann::json(*r));
+        return mm::api::timed(
+            [&] { return mm::node::runCia402Command(deviceManager_, *position, *command); },
+            "409 Conflict");
       });
 
-  router.post("/api/devices/:slavePosition/cia402/state",
-              [this](const mm::api::Request& req) -> mm::api::Response {
-                auto position = req.parameterAs<uint16_t>("slavePosition");
-                if (!position) {
-                  return mm::api::badRequest("slavePosition must be a number");
-                }
-                const auto body = nlohmann::json::parse(req.body(), nullptr, false);
-                if (body.is_discarded() || !body.contains("state") || !body["state"].is_string()) {
-                  return mm::api::badRequest(R"(body must be {"state": "<name>"})");
-                }
-                auto target = mm::node::cia402::parseState(body["state"].get<std::string>());
-                if (!target) {
-                  return mm::api::badRequest(
-                      "unknown CiA402 state: use SwitchOnDisabled, ReadyToSwitchOn, SwitchedOn, "
-                      "OperationEnabled or QuickStopActive");
-                }
-                // Rejected here rather than by the walk, because it is a bad request rather than a
-                // failed operation: no command enters these states, so no drive could ever answer
-                // for one.
-                if (!mm::node::cia402::isCommandableState(*target)) {
-                  return mm::api::badRequest(std::format(
-                      "{} is not a state a master can ask for: the drive enters it on its own",
-                      mm::node::cia402::toString(*target)));
-                }
-                if (!deviceManager_.hasDevice(*position)) {
-                  return mm::api::notFound("no device at that bus position");
-                }
-                auto r = mm::node::transitionToCia402State(deviceManager_, *position, *target);
-                if (!r) {
-                  return mm::api::error("409 Conflict", r.error());
-                }
-                return mm::api::json(nlohmann::json(*r));
-              });
+  router.post(
+      "/api/devices/:slavePosition/cia402/state",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (body.is_discarded() || !body.contains("state") || !body["state"].is_string()) {
+          return mm::api::badRequest(R"(body must be {"state": "<name>"})");
+        }
+        auto target = mm::node::cia402::parseState(body["state"].get<std::string>());
+        if (!target) {
+          return mm::api::badRequest(
+              "unknown CiA402 state: use SwitchOnDisabled, ReadyToSwitchOn, SwitchedOn, "
+              "OperationEnabled or QuickStopActive");
+        }
+        // Rejected here rather than by the walk, because it is a bad request rather than a
+        // failed operation: no command enters these states, so no drive could ever answer
+        // for one.
+        if (!mm::node::cia402::isCommandableState(*target)) {
+          return mm::api::badRequest(
+              std::format("{} is not a state a master can ask for: the drive enters it on its own",
+                          mm::node::cia402::toString(*target)));
+        }
+        if (!deviceManager_.hasDevice(*position)) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        return mm::api::timed(
+            [&] { return mm::node::transitionToCia402State(deviceManager_, *position, *target); },
+            "409 Conflict");
+      });
 
   router.post(
       "/api/devices/:slavePosition/cia402/target",
@@ -1577,35 +1568,36 @@ void HttpServer::run() {
         if (!deviceManager_.hasDevice(*position)) {
           return mm::api::notFound("no device at that bus position");
         }
-        auto r = mm::node::setCia402Target(deviceManager_, *position, *kind, value);
-        if (!r) {
-          return mm::api::error("409 Conflict", r.error());
-        }
-        return mm::api::statusOnly("204 No Content");
+        return mm::api::timedResponse([&]() -> mm::api::Response {
+          auto r = mm::node::setCia402Target(deviceManager_, *position, *kind, value);
+          if (!r) {
+            return mm::api::error("409 Conflict", r.error());
+          }
+          return mm::api::statusOnly("204 No Content");
+        });
       });
 
-  router.post("/api/devices/:slavePosition/cia402/target/actual",
-              [this](const mm::api::Request& req) -> mm::api::Response {
-                auto position = req.parameterAs<uint16_t>("slavePosition");
-                if (!position) {
-                  return mm::api::badRequest("slavePosition must be a number");
-                }
-                std::optional<mm::node::Cia402TargetKind> kind;
-                if (const auto token = req.query("kind"); token && !token->empty()) {
-                  kind = mm::node::parseCia402TargetKind(*token);
-                  if (!kind) {
-                    return mm::api::badRequest("invalid kind: use position, velocity, or torque");
-                  }
-                }
-                if (!deviceManager_.hasDevice(*position)) {
-                  return mm::api::notFound("no device at that bus position");
-                }
-                auto r = mm::node::setCia402TargetToActual(deviceManager_, *position, kind);
-                if (!r) {
-                  return mm::api::error("409 Conflict", r.error());
-                }
-                return mm::api::json(nlohmann::json(*r));
-              });
+  router.post(
+      "/api/devices/:slavePosition/cia402/target/actual",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        std::optional<mm::node::Cia402TargetKind> kind;
+        if (const auto token = req.query("kind"); token && !token->empty()) {
+          kind = mm::node::parseCia402TargetKind(*token);
+          if (!kind) {
+            return mm::api::badRequest("invalid kind: use position, velocity, or torque");
+          }
+        }
+        if (!deviceManager_.hasDevice(*position)) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        return mm::api::timed(
+            [&] { return mm::node::setCia402TargetToActual(deviceManager_, *position, kind); },
+            "409 Conflict");
+      });
 
   // GET reports the brake, POST release/engage command it. Two verbs rather than one
   // PUT {released}: they are not symmetric operations — a release waits out the drive's pull time
@@ -1621,11 +1613,8 @@ void HttpServer::run() {
                if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
-               auto state = mm::node::brakeState(deviceManager_, *position);
-               if (!state) {
-                 return mm::api::error("409 Conflict", state.error());
-               }
-               return mm::api::json(nlohmann::json(*state));
+               return mm::api::timed(
+                   [&] { return mm::node::brakeState(deviceManager_, *position); }, "409 Conflict");
              });
 
   // Which encoder each controller uses, and what each is. A position in 0x6064 is in counts of
@@ -1639,11 +1628,8 @@ void HttpServer::run() {
                if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
-               auto encoders = mm::node::encoders(deviceManager_, *position);
-               if (!encoders) {
-                 return mm::api::error("409 Conflict", encoders.error());
-               }
-               return mm::api::json(nlohmann::json(*encoders));
+               return mm::api::timed([&] { return mm::node::encoders(deviceManager_, *position); },
+                                     "409 Conflict");
              });
 
   router.post("/api/devices/:slavePosition/brake/release",
@@ -1683,13 +1669,14 @@ void HttpServer::run() {
         }
         const auto t0 = std::chrono::steady_clock::now();
         auto recording = mm::node::readHrdRecording(deviceManager_, *position, *data);
-        const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        const auto fieldbusTime = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - t0);
         if (!recording) {
-          return mm::api::withWireTime(mm::api::error("409 Conflict", recording.error()), wireUs);
+          return mm::api::withFieldbusTime(mm::api::error("409 Conflict", recording.error()),
+                                           fieldbusTime);
         }
-        return mm::api::withWireTime(mm::api::bytes("text/csv", mm::node::toCsv(*recording)),
-                                     wireUs);
+        return mm::api::withFieldbusTime(mm::api::bytes("text/csv", mm::node::toCsv(*recording)),
+                                         fieldbusTime);
       });
 
   // One resource per (device, procedure), addressed by name, with three verbs — POST starts a run,
@@ -1758,8 +1745,8 @@ void HttpServer::run() {
              });
 
   // ── SDO access and File over EtherCAT ───────────────────────────────────────────────────────
-  // Both are single mailbox transactions whose wire cost is worth separating from the browser-side
-  // round trip, which is much larger — hence Server-Timing on every outcome, success or failure. A
+  // Both are single mailbox transactions whose fieldbus time is worth separating from the
+  // browser-side round trip, which is much larger — hence the metric `fieldbus` on every outcome. A
   // failed SDO is the clearest case: it can spend the full 700 ms mailbox timeout getting no
   // answer.
   router.get("/api/devices/:slavePosition/sdo/:index/:subindex",
@@ -1839,22 +1826,22 @@ void HttpServer::run() {
                return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
                  const auto t0 = std::chrono::steady_clock::now();
                  auto contents = device.readFile(filename);
-                 const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                 const auto fieldbusTime = std::chrono::duration_cast<std::chrono::microseconds>(
                      std::chrono::steady_clock::now() - t0);
                  if (!contents) {
                    // A file the drive does not hold is a missing resource, as a missing .variant
                    // is. Every other failure is the transfer's.
                    const bool notFound =
                        contents.error().kind == mm::comm::FoeErrorKind::FileNotFound;
-                   return mm::api::withWireTime(
+                   return mm::api::withFieldbusTime(
                        mm::api::error(notFound ? "404 Not Found" : "500 Internal Server Error",
                                       contents.error().message),
-                       wireUs);
+                       fieldbusTime);
                  }
-                 return mm::api::withWireTime(
+                 return mm::api::withFieldbusTime(
                      mm::api::bytes("application/octet-stream",
                                     std::string(contents->begin(), contents->end())),
-                     wireUs);
+                     fieldbusTime);
                });
              });
 
@@ -1935,16 +1922,18 @@ void HttpServer::run() {
                if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
-               auto model = mm::node::readPlantModel(deviceManager_, *position);
-               if (!model) {
-                 return mm::api::error("409 Conflict", model.error());
-               }
-               if (!model->has_value()) {
-                 return mm::api::notFound(
-                     "this device carries no plant_model.csv; run the plant-identification "
-                     "procedure to identify one");
-               }
-               return mm::api::json(nlohmann::json(**model));
+               return mm::api::timedResponse([&]() -> mm::api::Response {
+                 auto model = mm::node::readPlantModel(deviceManager_, *position);
+                 if (!model) {
+                   return mm::api::error("409 Conflict", model.error());
+                 }
+                 if (!model->has_value()) {
+                   return mm::api::notFound(
+                       "this device carries no plant_model.csv; run the plant-identification "
+                       "procedure to identify one");
+                 }
+                 return mm::api::json(nlohmann::json(**model));
+               });
              });
 
   // A 404 for a device that carries no .variant, because that is what the resource is: absent. Only
@@ -1958,14 +1947,16 @@ void HttpServer::run() {
                if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
-               auto variant = mm::node::readIntegroVariant(deviceManager_, *position);
-               if (!variant) {
-                 return mm::api::error("409 Conflict", variant.error());
-               }
-               if (!variant->has_value()) {
-                 return mm::api::notFound("this device carries no .variant file");
-               }
-               return mm::api::json(nlohmann::json(**variant));
+               return mm::api::timedResponse([&]() -> mm::api::Response {
+                 auto variant = mm::node::readIntegroVariant(deviceManager_, *position);
+                 if (!variant) {
+                   return mm::api::error("409 Conflict", variant.error());
+                 }
+                 if (!variant->has_value()) {
+                   return mm::api::notFound("this device carries no .variant file");
+                 }
+                 return mm::api::json(nlohmann::json(**variant));
+               });
              });
 
   // The descriptors a package must carry to fit this device, without a package to compare.
@@ -2145,7 +2136,7 @@ void HttpServer::run() {
                // DeviceParameter::encode, which refuses a value the type cannot hold. The write
                // returns the updated parameter, so the client gets the converted value and the
                // resulting syncState in the same round trip; that echo is memory-only, so timing
-               // the whole lambda still reports the write's wire cost.
+               // the whole lambda still reports the fieldbus time of the write.
                return mm::api::timed(
                    [&] {
                      return deviceManager_.writeDeviceParameter(*position, *index, *subindex,
@@ -2194,10 +2185,12 @@ void HttpServer::run() {
     if (auto valid = validateFieldbusConfig(fieldbus); !valid) {
       return mm::api::badRequest(valid.error());
     }
-    if (auto r = config_.initDeviceManager(fieldbus); !r) {
-      return mm::api::error("500 Internal Server Error", r.error());
-    }
-    return mm::api::json(nlohmann::json{{"ok", true}});
+    return mm::api::timedResponse([&]() -> mm::api::Response {
+      if (auto r = config_.initDeviceManager(fieldbus); !r) {
+        return mm::api::error("500 Internal Server Error", r.error());
+      }
+      return mm::api::json(nlohmann::json{{"ok", true}});
+    });
   });
 
   // Reads the bus, under the driver's control-plane lock, so it runs off the loop like the state
@@ -2207,16 +2200,20 @@ void HttpServer::run() {
   });
 
   router.post("/api/scan", [this](const mm::api::Request&) -> mm::api::Response {
-    auto slaves = deviceManager_.scan();
-    if (!slaves) {
-      return mm::api::error("500 Internal Server Error", slaves.error());
-    }
-    return mm::api::json(nlohmann::json{{"slaves", *slaves}});
+    return mm::api::timedResponse([&]() -> mm::api::Response {
+      auto slaves = deviceManager_.scan();
+      if (!slaves) {
+        return mm::api::error("500 Internal Server Error", slaves.error());
+      }
+      return mm::api::json(nlohmann::json{{"slaves", *slaves}});
+    });
   });
 
   router.post("/api/reset", [this](const mm::api::Request&) {
-    deviceManager_.reset();
-    return mm::api::json(nlohmann::json{{"ok", true}});
+    return mm::api::timedResponse([&]() -> mm::api::Response {
+      deviceManager_.reset();
+      return mm::api::json(nlohmann::json{{"ok", true}});
+    });
   });
 
   // ── Process data and AL state ───────────────────────────────────────────────────────────────
@@ -2269,9 +2266,14 @@ void HttpServer::run() {
     if (!config_.eniOptions) {
       return mm::api::error("501 Not Implemented", "this build serves no ENI options");
     }
+    // Only the read of the bus is timed. Writing the document is CPU.
+    const auto t0 = std::chrono::steady_clock::now();
     auto collected = mm::node::collectEni(deviceManager_, config_.eniOptions());
+    const auto fieldbusTime = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - t0);
     if (!collected) {
-      return mm::api::error("409 Conflict", collected.error());
+      return mm::api::withFieldbusTime(mm::api::error("409 Conflict", collected.error()),
+                                       fieldbusTime);
     }
     auto eni = mm::etg::writeEni(collected->network);
     if (!eni) {
@@ -2285,9 +2287,10 @@ void HttpServer::run() {
     }
     auto response = mm::api::bytes("application/xml", std::move(*eni));
     response.headers.emplace_back("X-Eni-Warnings", std::to_string(collected->warnings.size()));
+    response.headers.emplace_back("Access-Control-Expose-Headers", "X-Eni-Warnings");
     response.headers.emplace_back("Content-Disposition",
                                   R"(attachment; filename="motion-master-eni.xml")");
-    return response;
+    return mm::api::withFieldbusTime(std::move(response), fieldbusTime);
   });
 
   router.post("/api/process-data/outputs",
@@ -2317,30 +2320,35 @@ void HttpServer::run() {
     if (!request) {
       return request.error();
     }
-    auto states = deviceManager_.changeState(request->positions, request->state, request->timeout);
-    if (!states) {
-      const bool illegal =
-          states.error().kind == mm::node::StateChangeError::Kind::kIllegalTransition;
-      return mm::api::error(illegal ? "409 Conflict" : "500 Internal Server Error",
-                            states.error().message);
-    }
-    return mm::api::json(stateChangeResult(*states, request->state));
+    return mm::api::timedResponse([&]() -> mm::api::Response {
+      auto states =
+          deviceManager_.changeState(request->positions, request->state, request->timeout);
+      if (!states) {
+        const bool illegal =
+            states.error().kind == mm::node::StateChangeError::Kind::kIllegalTransition;
+        return mm::api::error(illegal ? "409 Conflict" : "500 Internal Server Error",
+                              states.error().message);
+      }
+      return mm::api::json(stateChangeResult(*states, request->state));
+    });
   });
 
   // The walk from the state each device is in, one legal AL transition at a time.
-  router.post(
-      "/api/devices/state/transition", [this](const mm::api::Request& req) -> mm::api::Response {
-        auto request = parseStateRequest(req, deviceManager_);
-        if (!request) {
-          return request.error();
-        }
-        auto states =
-            deviceManager_.transitionToState(request->positions, request->state, request->timeout);
-        if (!states) {
-          return mm::api::error("500 Internal Server Error", states.error());
-        }
-        return mm::api::json(stateChangeResult(*states, request->state));
-      });
+  router.post("/api/devices/state/transition",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto request = parseStateRequest(req, deviceManager_);
+                if (!request) {
+                  return request.error();
+                }
+                return mm::api::timedResponse([&]() -> mm::api::Response {
+                  auto states = deviceManager_.transitionToState(request->positions, request->state,
+                                                                 request->timeout);
+                  if (!states) {
+                    return mm::api::error("500 Internal Server Error", states.error());
+                  }
+                  return mm::api::json(stateChangeResult(*states, request->state));
+                });
+              });
 
   router.post(
       "/api/devices/state/restart", [this](const mm::api::Request& req) -> mm::api::Response {
@@ -2386,25 +2394,27 @@ void HttpServer::run() {
         if (auto refusal = deviceManager_.stateChangeRefusal(); refusal) {
           return mm::api::error("409 Conflict", *refusal);
         }
-        auto outcome = deviceManager_.restartToState(positions, static_cast<S>(target),
-                                                     std::chrono::milliseconds(timeoutMs));
-        if (!outcome) {
-          return mm::api::error("500 Internal Server Error", outcome.error());
-        }
-        // The same shape as POST /api/devices/state, plus the step the restart stopped at. "ok" is
-        // true only when that step is the target and every device reached it.
-        const auto step = static_cast<uint16_t>(outcome->step);
-        bool allReached = step == target;
-        nlohmann::json devices = nlohmann::json::array();
-        for (const auto& info : outcome->states) {
-          const bool reached = !info.error && info.alState == step;
-          allReached = allReached && reached;
-          nlohmann::json entry = info;
-          entry["reached"] = reached;
-          devices.push_back(std::move(entry));
-        }
-        return mm::api::json(
-            nlohmann::json{{"ok", allReached}, {"step", step}, {"devices", devices}});
+        return mm::api::timedResponse([&]() -> mm::api::Response {
+          auto outcome = deviceManager_.restartToState(positions, static_cast<S>(target),
+                                                       std::chrono::milliseconds(timeoutMs));
+          if (!outcome) {
+            return mm::api::error("500 Internal Server Error", outcome.error());
+          }
+          // The same shape as POST /api/devices/state, plus the step the restart stopped at. "ok"
+          // is true only when that step is the target and every device reached it.
+          const auto step = static_cast<uint16_t>(outcome->step);
+          bool allReached = step == target;
+          nlohmann::json devices = nlohmann::json::array();
+          for (const auto& info : outcome->states) {
+            const bool reached = !info.error && info.alState == step;
+            allReached = allReached && reached;
+            nlohmann::json entry = info;
+            entry["reached"] = reached;
+            devices.push_back(std::move(entry));
+          }
+          return mm::api::json(
+              nlohmann::json{{"ok", allReached}, {"step", step}, {"devices", devices}});
+        });
       });
 
   // ── Monitorings and the two file stores ─────────────────────────────────────────────────────
@@ -2484,21 +2494,16 @@ void HttpServer::run() {
   router.get("/api/user-cache", [this](const mm::api::Request&) {
     // The root is reported so the page can tell the user where the files actually live — it differs
     // per platform and is overridable in the config.
-    return mm::api::timed([this] {
-      return userCache_.list().transform([this](const auto& files) {
-        return nlohmann::json{{"root", userCache_.root().string()}, {"files", files}};
-      });
-    });
+    return mm::api::respond(userCache_.list().transform([this](const auto& files) {
+      return nlohmann::json{{"root", userCache_.root().string()}, {"files", files}};
+    }));
   });
 
   router.get("/api/user-cache/*", [this](const mm::api::Request& req) -> mm::api::Response {
     const std::string relPath = userCacheRelPath(req.url());
-    const auto t0 = std::chrono::steady_clock::now();
     auto data = userCache_.read(relPath);
-    const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - t0);
     if (!data) {
-      return mm::api::withWireTime(mm::api::error("404 Not Found", data.error()), wireUs);
+      return mm::api::error("404 Not Found", data.error());
     }
     // The headers that make a user-cache download inert in a browser.
     //
@@ -2521,22 +2526,17 @@ void HttpServer::run() {
     response.headers.emplace_back("Content-Disposition", "attachment");
     response.headers.emplace_back("X-Content-Type-Options", "nosniff");
     response.headers.emplace_back("Content-Security-Policy", "default-src 'none'; sandbox");
-    return mm::api::withWireTime(std::move(response), wireUs);
+    return response;
   });
 
   router.put("/api/user-cache/*", [this](const mm::api::Request& req) {
     const std::string relPath = userCacheRelPath(req.url());
-    // Only the write is timed — the body upload that precedes it is transport cost the client
-    // already sees in its own round-trip figure.
-    return mm::api::timed(
-        [this, &relPath, &req] {
-          std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(req.body().data()),
-                                        req.body().size()};
-          return userCache_.write(relPath, data).transform([&] {
-            return nlohmann::json{{"path", relPath}, {"size", req.body().size()}};
-          });
-        },
-        "400 Bad Request");
+    std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(req.body().data()),
+                                  req.body().size()};
+    return mm::api::respond(userCache_.write(relPath, data).transform([&] {
+      return nlohmann::json{{"path", relPath}, {"size", req.body().size()}};
+    }),
+                            "400 Bad Request");
   });
 
   router.del("/api/user-cache/*", [this](const mm::api::Request& req) -> mm::api::Response {
@@ -2550,17 +2550,11 @@ void HttpServer::run() {
                                 " is in use by Motion Master and cannot be deleted while it "
                                 "is running");
     }
-    const auto t0 = std::chrono::steady_clock::now();
     auto removed = userCache_.remove(relPath);
-    const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - t0);
     if (!removed) {
-      return mm::api::withWireTime(mm::api::error("400 Bad Request", removed.error()), wireUs);
+      return mm::api::error("400 Bad Request", removed.error());
     }
-    // A recursive directory delete is the one operation here that can take real time, so it is
-    // worth reporting even though the success response carries no body.
-    return mm::api::withWireTime(mm::api::statusOnly(*removed ? "204 No Content" : "404 Not Found"),
-                                 wireUs);
+    return mm::api::statusOnly(*removed ? "204 No Content" : "404 Not Found");
   });
 
   // ── end of Router registrations ─────────────────────────────────────────────────────────────

@@ -1,28 +1,44 @@
-// The server-measured wire time of a request.
+// The times that the server measured for a request, from the standard Server-Timing header.
 //
-// An endpoint that performs a fieldbus transaction (SDO, FoE, ...) reports the on-device cost —
-// control-plane lock acquire plus the mailbox/ESC round-trip — in the standard Server-Timing
-// header, as the metric `wire` in milliseconds: `Server-Timing: wire;dur=1.500`. A client subtracts
-// it from its own HTTP round-trip to separate the device cost from the browser and the transport.
-// A browser records the header per request in its Performance API, so a page reads the time of a
-// request that it made through any code; a program that holds the response reads it from there.
+// Every response carries the metric `server`, the time from the complete request to the response.
+// An endpoint that runs a fieldbus operation (SDO, FoE, an AL state change, ...) also carries
+// `fieldbus`, the time of that operation: the wait for the control-plane lock and every mailbox or
+// ESC transaction. Both are in milliseconds: `Server-Timing: server;dur=7.100, fieldbus;dur=6.200`.
+// A client subtracts them from its own round trip to see where the time went. A browser records the
+// header per request in its Performance API, so a page reads the times of a request that it made
+// through any code; a program that holds the response reads them from there.
 
-/** The name of the metric in `Server-Timing` that carries the wire time. */
-const WIRE_METRIC = 'wire';
+/** Where a time is read from: a response, or the entry of the request in the Performance API. */
+type TimingSource = Response | PerformanceResourceTiming;
 
 /**
- * Returns the wire time of a request in milliseconds, or `null` when the server reported none.
+ * Returns the time that the server spent on a request in milliseconds, the metric `server`, or
+ * `null` when the server reported none.
  *
  * `source` is the response, whose `Server-Timing` header holds the time, or the entry of the
  * request in the browser's Performance API, a `PerformanceResourceTiming`.
  */
-export function wireTimeMs(source: Response | PerformanceResourceTiming): number | null {
+export function serverTimeMs(source: TimingSource): number | null {
+  return metricMs(source, 'server');
+}
+
+/**
+ * Returns the time of the fieldbus operation of a request in milliseconds, the metric `fieldbus`,
+ * or `null` when the request ran none.
+ *
+ * `source` is the response, or the entry of the request in the browser's Performance API.
+ */
+export function fieldbusTimeMs(source: TimingSource): number | null {
+  return metricMs(source, 'fieldbus');
+}
+
+function metricMs(source: TimingSource, name: string): number | null {
   if ('serverTiming' in source) {
-    const metric = source.serverTiming.find((m) => m.name === WIRE_METRIC);
+    const metric = source.serverTiming.find((m) => m.name === name);
     return metric === undefined ? null : metric.duration;
   }
   const header = source.headers.get('Server-Timing');
-  return header === null ? null : serverTimingDuration(header, WIRE_METRIC);
+  return header === null ? null : serverTimingDuration(header, name);
 }
 
 /** Returns the `dur` of one metric of a `Server-Timing` value, or `null` when it has none. */

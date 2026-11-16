@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader';
 import ControlExplainer from '../components/ControlExplainer';
+import { RequestTiming, requestTiming, type RequestTimingValue } from '../components/RequestTiming';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection, type SpoeMode } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
@@ -9,7 +10,6 @@ import {
   AlState,
   alStateName,
   apiErrorMessage,
-  formatDuration,
   formatHex,
   HttpError,
   type TargetAlState,
@@ -219,7 +219,7 @@ export default function FieldbusControlPage() {
     mutationFn: async (state: TargetAlState) => {
       const start = performance.now();
       const res = await api.transitionToState({ state });
-      return { res, elapsedMs: performance.now() - start };
+      return { res, timing: requestTiming(res, start) };
     },
     // The transition blocks server-side until devices arrive (or time out), so
     // re-read states afterwards to show where each device actually landed.
@@ -235,7 +235,7 @@ export default function FieldbusControlPage() {
     alState: number;
     error: boolean;
     alStatusCode: number;
-    elapsedMs: number;
+    timing: RequestTimingValue | null;
     requestError?: string;
   };
   const [deviceTransitionResult, setDeviceTransitionResult] = useState<
@@ -246,7 +246,7 @@ export default function FieldbusControlPage() {
     mutationFn: async ({ position, state }: { position: number; state: TargetAlState }) => {
       const start = performance.now();
       const res = await api.transitionToState({ state, positions: [position] });
-      return { position, target: state, res, elapsedMs: performance.now() - start };
+      return { position, target: state, res, timing: requestTiming(res, start) };
     },
     // Clear the previous result for this row as soon as a new transition starts.
     onMutate: ({ position }) => {
@@ -256,7 +256,7 @@ export default function FieldbusControlPage() {
         return next;
       });
     },
-    onSuccess: ({ position, target, res, elapsedMs }) => {
+    onSuccess: ({ position, target, res, timing }) => {
       // Scoped to one slave, so the response carries exactly that device.
       const entry =
         res.data.devices.find((d) => d.slavePosition === position) ?? res.data.devices[0];
@@ -268,7 +268,7 @@ export default function FieldbusControlPage() {
             alState: entry.alState,
             error: entry.error,
             alStatusCode: entry.alStatusCode,
-            elapsedMs,
+            timing,
           },
         }));
       }
@@ -282,7 +282,7 @@ export default function FieldbusControlPage() {
           alState: AlState.UNKNOWN,
           error: true,
           alStatusCode: 0,
-          elapsedMs: 0,
+          timing: null,
           requestError: apiErrorMessage(err),
         },
       }));
@@ -296,7 +296,7 @@ export default function FieldbusControlPage() {
     mutationFn: async (target: TargetAlState) => {
       const start = performance.now();
       const res = await api.restartDevices({ target });
-      return { target, res, elapsedMs: performance.now() - start };
+      return { target, res, timing: requestTiming(res, start) };
     },
     onSuccess: () => refreshDevices(),
   });
@@ -570,9 +570,14 @@ export default function FieldbusControlPage() {
                   </div>
                   {restartMutation.isSuccess &&
                     (() => {
-                      const { target, res, elapsedMs } = restartMutation.data;
+                      const { target, res, timing } = restartMutation.data;
                       const body = res.data;
-                      const elapsed = ` in ${formatDuration(elapsedMs)}`;
+                      const elapsed = (
+                        <>
+                          {' — '}
+                          <RequestTiming timing={timing} className="" />
+                        </>
+                      );
                       if (body.ok) {
                         return (
                           <p className="text-status-good text-xs">
@@ -764,8 +769,16 @@ export default function FieldbusControlPage() {
                                         if (reached) {
                                           return (
                                             <span className="text-status-good">
-                                              → {alStateName(result.target)} ({result.target}) in{' '}
-                                              {formatDuration(result.elapsedMs)}
+                                              → {alStateName(result.target)} ({result.target})
+                                              {result.timing && (
+                                                <>
+                                                  {' — '}
+                                                  <RequestTiming
+                                                    timing={result.timing}
+                                                    className=""
+                                                  />
+                                                </>
+                                              )}
                                             </span>
                                           );
                                         }
@@ -852,7 +865,12 @@ export default function FieldbusControlPage() {
                   // branch on that here rather than treating any 200 as a successful transition.
                   const target = transitionMutation.variables;
                   const body = transitionMutation.data.res.data;
-                  const elapsed = ` in ${formatDuration(transitionMutation.data.elapsedMs)}`;
+                  const elapsed = (
+                    <>
+                      {' — '}
+                      <RequestTiming timing={transitionMutation.data.timing} className="" />
+                    </>
+                  );
                   if (body.ok) {
                     return (
                       <p className="text-status-good text-xs">

@@ -6,7 +6,7 @@ import FilePickerButton from '../components/FilePickerButton';
 import SiiExplainer from '../components/SiiExplainer';
 import SiiView from '../components/SiiView';
 import SiiRawView from '../components/SiiRawView';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { apiErrorMessage } from '@synapticon/motion-master-client';
 import { useConnection } from '../contexts/ConnectionContext';
 import { downloadBytes } from '../utils/download';
@@ -20,7 +20,7 @@ export default function DeviceSiiPage() {
   const { api, client } = useConnection();
   const queryClient = useQueryClient();
   const [showRaw, setShowRaw] = useState(false);
-  const { timing, measure } = useWireTiming();
+  const { timing, measure } = useRequestTiming();
   const [downloading, setDownloading] = useState(false);
   const [writing, setWriting] = useState(false);
   const [writeStatus, setWriteStatus] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -132,7 +132,7 @@ export default function DeviceSiiPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {!query.isFetching && <WireTiming label="SII" timing={timing} />}
+            {!query.isFetching && <RequestTiming timing={timing} />}
             <button
               onClick={() => query.refetch()}
               disabled={query.isFetching}

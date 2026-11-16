@@ -1,77 +1,74 @@
 import { useCallback, useState } from 'react';
-import { formatDuration, HttpError, wireTimeMs } from '@synapticon/motion-master-client';
+import {
+  fieldbusTimeMs,
+  formatTimes,
+  HttpError,
+  serverTimeMs,
+} from '@synapticon/motion-master-client';
 
-// Shared readout for the server-measured device wire time next to the browser-observed HTTP
-// round-trip, used by every page that performs a fieldbus operation. The gap between the two is
-// cross-origin/TLS and transport overhead, not device time. Mirrors the SDO/FoE readouts on the
-// Parameters and FoE pages, generalised over a `label` (the operation name shown to the user).
+// Shared readout of the times of one request: the round trip that the browser measured, then the
+// metrics `server` and `fieldbus` that the server reports in Server-Timing, as `formatTimes` of the
+// client writes them, so the Console reads the same as the debug log of the clients. Used by every
+// page that shows the time of a request.
 
-export interface WireTimingValue {
-  // Server-measured device time in ms, or null if the response carried no Server-Timing header.
-  wireMs: number | null;
+export interface RequestTimingValue {
+  // The time of the fieldbus operation in ms, or null when the request ran none.
+  fieldbusMs: number | null;
+  // The time the server spent on the request in ms, or null when the response did not say.
+  serverMs: number | null;
   // Browser-observed HTTP round-trip in ms (measured around the fetch).
   roundTripMs: number;
 }
 
-export function WireTiming({
-  label,
+const TITLE =
+  'round-trip: the time this browser measured around the HTTP request, with the upload, the download and the cross-origin and TLS overhead. server: the time the server spent on the request, which the server measured. fieldbus: the part of it on the fieldbus, the wait for the control-plane lock and every mailbox or ESC transaction. The debug log of the clients writes the same text.';
+
+export function RequestTiming({
   timing,
   className,
-  title,
 }: {
-  label: string;
-  timing: WireTimingValue | null;
+  timing: RequestTimingValue | null;
   className?: string;
-  /**
-   * Overrides the tooltip for the server-measured figure. The default describes a fieldbus
-   * transaction, which is what almost every caller is doing — but the same header carries the
-   * timing of a purely server-side operation too (parsing an uploaded ESI, say), and calling that
-   * "the true cost of talking to the device" would be a lie.
-   */
-  title?: string;
 }) {
   if (!timing) {
     return null;
   }
   return (
-    <span className={className ?? 'text-xs text-grey-500 font-mono whitespace-nowrap'}>
-      {timing.wireMs !== null && (
-        <span
-          className="cursor-help"
-          title={
-            title ??
-            `${label} — server-measured duration of the on-device operation itself (control-plane lock acquire + the mailbox/ESC wire transaction(s)), reported by the backend. This is the true cost of talking to the device.`
-          }
-        >
-          {label} {formatDuration(timing.wireMs)}
-        </span>
-      )}
-      <span
-        className="text-grey-400 cursor-help"
-        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the server-measured figure plus request upload, response download, and cross-origin/TLS overhead, so it is normally much larger and is not itself a measure of the operation."
-      >
-        {timing.wireMs !== null ? ' · round-trip ' : 'round-trip '}
-        {formatDuration(timing.roundTripMs)}
-      </span>
+    <span
+      className={className ?? 'text-xs text-grey-500 font-mono whitespace-nowrap cursor-help'}
+      title={TITLE}
+    >
+      {formatTimes(timing.roundTripMs, {
+        serverMs: timing.serverMs,
+        fieldbusMs: timing.fieldbusMs,
+      })}
     </span>
   );
 }
 
-// Captures both the server-measured wire time (Server-Timing) and the browser round-trip around an
-// API call, on both success and failure — the backend attaches Server-Timing to the error response
-// too, so a slow or failed operation still shows its device cost. Pass a thunk so timing starts
-// right before the request. Re-throws the error so react-query / callers still see it.
-export function useWireTiming() {
-  const [timing, setTiming] = useState<WireTimingValue | null>(null);
+/** Reads the times of a request from its response. */
+export function requestTiming(response: Response, startMs: number): RequestTimingValue {
+  return {
+    fieldbusMs: fieldbusTimeMs(response),
+    serverMs: serverTimeMs(response),
+    roundTripMs: performance.now() - startMs,
+  };
+}
+
+// Captures the times of an API call on both success and failure — the server sends Server-Timing
+// with the error response too, so a slow or failed operation still shows its cost. Pass a thunk so
+// timing starts right before the request. Re-throws the error so react-query / callers still see it.
+export function useRequestTiming() {
+  const [timing, setTiming] = useState<RequestTimingValue | null>(null);
   const measure = useCallback(async <T extends Response>(call: () => Promise<T>): Promise<T> => {
     const start = performance.now();
     try {
       const res = await call();
-      setTiming({ wireMs: wireTimeMs(res), roundTripMs: performance.now() - start });
+      setTiming(requestTiming(res, start));
       return res;
     } catch (err) {
       if (err instanceof HttpError) {
-        setTiming({ wireMs: wireTimeMs(err.response), roundTripMs: performance.now() - start });
+        setTiming(requestTiming(err.response, start));
       }
       throw err;
     }

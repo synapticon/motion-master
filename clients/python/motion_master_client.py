@@ -46,6 +46,7 @@ from __future__ import annotations
 import csv
 import decimal
 import enum
+import fnmatch
 import functools
 import io
 import json
@@ -79,6 +80,25 @@ _T = TypeVar("_T")
 _HTTP_METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
 
 log = logging.getLogger("motion_master_client")
+
+# One line for each request: the method, the path, the status, the round trip that the client
+# measured, and the times that the server reported in Server-Timing: server, and fieldbus for a
+# request that ran a fieldbus operation. Off by default. Turn it on
+# with logging.getLogger("motion_master_client.http").setLevel(logging.DEBUG), or with the
+# environment variable DEBUG=motion-master-client:http, the setting of the TypeScript client.
+http_log = logging.getLogger("motion_master_client.http")
+if any(
+    fnmatch.fnmatchcase("motion-master-client:http", pattern)
+    for pattern in re.split(r"[\s,]+", os.environ.get("DEBUG", ""))
+    if pattern
+):
+    # Turned on from the environment, the log writes to stderr itself, as the debug package of the
+    # TypeScript client does, so that a script with no logging setup shows it too.
+    _http_handler = logging.StreamHandler()
+    _http_handler.setFormatter(logging.Formatter("motion-master-client:http %(message)s"))
+    http_log.addHandler(_http_handler)
+    http_log.setLevel(logging.DEBUG)
+    http_log.propagate = False
 
 class AlState(enum.IntEnum):
     """An AL state, in the encoding of the AL control register that the API uses.
@@ -200,18 +220,35 @@ def _user_cache_path(path):
     return {"path": urllib.parse.quote(path, safe="/")}
 
 
-_FORMATS = ("bytes", "text", "json", "response")
+def _log_response(response, *args, **kwargs):
+    """Write the line of one request to the motion_master_client.http log."""
+    if not http_log.isEnabledFor(logging.DEBUG):
+        return
+    url = urllib.parse.urlsplit(response.url)
+    times = format_times(
+        response.elapsed.total_seconds() * 1000,
+        server_ms=server_time_ms(response),
+        fieldbus_ms=fieldbus_time_ms(response),
+    )
+    http_log.debug(
+        "%s %s %d %s",
+        response.request.method,
+        url.path + (f"?{url.query}" if url.query else ""),
+        response.status_code,
+        times,
+    )
+
+
+_FORMATS = ("bytes", "text", "json")
 
 
 def _check_format(format):
     if format not in _FORMATS:
-        raise ValueError(f"format must be bytes, text, json or response, not {format!r}")
+        raise ValueError(f"format must be bytes, text or json, not {format!r}")
 
 
 def _decode(response, format):
-    """Return the body of a file read in `format`: bytes, text, JSON, or the response itself."""
-    if format == "response":
-        return response
+    """Return the body of a file read in `format`: bytes, text or JSON."""
     if format == "text":
         return response.content.decode("utf-8")
     if format == "json":
@@ -457,18 +494,33 @@ def object_access(access):
     }
 
 
-def wire_time_ms(response):
-    """Return the wire time of a request in milliseconds, or None when the server reported none.
+def server_time_ms(response):
+    """Return the time that the server spent on a request in milliseconds, or None.
 
-    The server reports the time that a fieldbus operation spent on the device in the standard
-    Server-Timing header, as the metric wire: "Server-Timing: wire;dur=1.500" is 1.5 ms.
+    Every response carries it in the standard Server-Timing header, as the metric server: the time
+    from the complete request to the response. "Server-Timing: server;dur=7.100" is 7.1 ms.
     """
+    return _server_timing_ms(response, "server")
+
+
+def fieldbus_time_ms(response):
+    """Return the time of the fieldbus operation of a request in milliseconds, or None.
+
+    A response of an endpoint that runs a fieldbus operation carries it in the Server-Timing
+    header, as the metric fieldbus: the wait for the control-plane lock and every mailbox or ESC
+    transaction. "Server-Timing: server;dur=7.100, fieldbus;dur=6.200" gives 6.2 ms. None means
+    the request ran no fieldbus operation.
+    """
+    return _server_timing_ms(response, "fieldbus")
+
+
+def _server_timing_ms(response, name):
     header = response.headers.get("Server-Timing")
     if header is None:
         return None
     for entry in header.split(","):
         metric, *parameters = (part.strip() for part in entry.split(";"))
-        if metric != "wire":
+        if metric != name:
             continue
         for parameter in parameters:
             key, _, value = (part.strip() for part in parameter.partition("="))
@@ -546,6 +598,7 @@ class MotionMasterClient:
         self.ws_url = ws_url
         self._verify = verify
         self._session = requests.Session()
+        self._session.hooks["response"].append(_log_response)
 
         # A self-signed dev cert (verify=False) would otherwise spam a warning
         # on every request and drown the example output.
@@ -753,22 +806,17 @@ class MotionMasterClient:
         headers = {"Content-Type": "application/xml"}
         return self.call("parseEni", data=body, headers=headers).json()
 
-    def parse_esi(self, xml, modules=None, format="json"):
+    def parse_esi(self, xml, modules=None):
         """Read an ESI document (parseEsi) and return every device it describes.
 
         Each device comes with its own object table. No device is involved. `xml` is a str, or
         bytes, because an ESI may declare an encoding other than UTF-8. `modules` limits the merge
         to these ModuleIdent values, where a slot offers a choice; without it, every module that a
-        slot references is merged. `format` says what to return: "json", the parsed result (the
-        default), or "response", the requests.Response, for its headers, such as the time the
-        server spent, which wire_time_ms() reads.
+        slot references is merged.
         """
-        if format not in ("json", "response"):
-            raise ValueError(f"format must be json or response, not {format!r}")
         data = xml.encode("utf-8") if isinstance(xml, str) else xml
         query = {"modules": ",".join(str(m) for m in modules)} if modules else None
-        response = self._post_bytes("parseEsi", data, "application/xml", query=query)
-        return response if format == "response" else response.json()
+        return self._post_bytes("parseEsi", data, "application/xml", query=query).json()
 
     def parse_integro_variant(self, data):
         """Decode the .variant file of an Integro (parseIntegroVariant). No device is involved."""
@@ -794,8 +842,7 @@ class MotionMasterClient:
 
         `path` is relative to the root, with "/" between the folders, such as
         "dumps/recorder-1.mmpd". `format` says what to return, as for read_file(): "bytes" (the
-        default), "text", "json", or "response", the requests.Response, for its headers, such as
-        the time the server spent, which wire_time_ms() reads.
+        default), "text" or "json".
         """
         _check_format(format)
         return _decode(self.call("getUserCacheFile", path=_user_cache_path(path)), format)
@@ -804,10 +851,10 @@ class MotionMasterClient:
         """Write a file into the user cache (putUserCacheFile), and replace a file of the same path.
 
         The server creates the folders of the path. `content` is bytes, or a str, which is written as
-        UTF-8. Returns the requests.Response, for its headers.
+        UTF-8.
         """
         data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
-        return self.call(
+        self.call(
             "putUserCacheFile",
             path=_user_cache_path(path),
             data=data,
@@ -927,8 +974,7 @@ class MotionMasterClient:
         """Read a file from a device over FoE (foeReadFile).
 
         `format` says what to return: "bytes" (the default), "text", the file decoded as UTF-8, such
-        as a CSV, "json", the file parsed as JSON, or "response", the requests.Response, for its
-        headers, such as the wire time that wire_time_ms() reads.
+        as a CSV, or "json", the file parsed as JSON.
         """
         _check_format(format)
         return _decode(self.call("foeReadFile", path=_file_path(position, name)), format)
@@ -936,11 +982,10 @@ class MotionMasterClient:
     def write_file(self, position, name, content):
         """Write a file to a device over FoE (foeWriteFile), and replace a file of the same name.
 
-        `content` is bytes, or a str, which is written as UTF-8. Returns the requests.Response, for its
-        headers.
+        `content` is bytes, or a str, which is written as UTF-8.
         """
         data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
-        return self.call(
+        self.call(
             "foeWriteFile",
             path=_file_path(position, name),
             data=data,
@@ -1320,16 +1365,31 @@ def _fixed(value, digits):
 
 
 def format_duration(ms):
-    """Format a duration in milliseconds, such as 4.2 ms, 310 ms or 2.75 s.
+    """Format a duration in milliseconds with three decimals, such as 0.087 ms or 2.745 s.
 
-    Below 10 ms it keeps one decimal, so that a fast transaction does not show as 0 ms. From 1000 ms
-    it gives seconds with two decimals.
+    Milliseconds below one second, and seconds from one second. Three decimals of a millisecond are
+    the microseconds that the server measures. The debug log formats every time with it, as the
+    Console and the TypeScript client do.
     """
-    if ms < 10:
-        return f"{_fixed(ms, 1)} ms"
-    if ms < 1000:
-        return f"{_fixed(ms, 0)} ms"
-    return f"{_fixed(ms / 1000, 2)} s"
+    rounded = _fixed(ms, 3)
+    if float(rounded) < 1000:
+        return f"{rounded} ms"
+    return f"{_fixed(ms / 1000, 3)} s"
+
+
+def format_times(round_trip_ms, server_ms=None, fieldbus_ms=None):
+    """Format the times of one request, such as "round-trip 3.557 ms, server 1.416 ms".
+
+    The round trip that the client measured, then the metrics server and fieldbus that the server
+    reported in Server-Timing. A time that is None is left out. The debug log writes the times of a
+    request with it, as the Console and the TypeScript client do.
+    """
+    parts = [f"round-trip {format_duration(round_trip_ms)}"]
+    if server_ms is not None:
+        parts.append(f"server {format_duration(server_ms)}")
+    if fieldbus_ms is not None:
+        parts.append(f"fieldbus {format_duration(fieldbus_ms)}")
+    return ", ".join(parts)
 
 
 def format_bytes(count):

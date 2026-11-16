@@ -15,7 +15,7 @@ import {
 import Callout from '../components/Callout';
 import DevicePageHeader from '../components/DevicePageHeader';
 import ParameterPicker from '../components/ParameterPicker';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline, btnPrimary } from '../utils/styles';
 
@@ -375,8 +375,8 @@ export default function DevicePdoMappingPage() {
   const queryClient = useQueryClient();
   const slavePosition = Number(deviceId);
 
-  const readTiming = useWireTiming();
-  const writeTiming = useWireTiming();
+  const readTiming = useRequestTiming();
+  const writeTiming = useRequestTiming();
 
   const mappingKey = ['pdoMapping', slavePosition];
   const query = useQuery({
@@ -509,12 +509,12 @@ export default function DevicePdoMappingPage() {
             >
               {query.isFetching ? 'Loading…' : 'Reload from device'}
             </button>
-            <WireTiming label="Read" timing={readTiming.timing} />
+            <RequestTiming timing={readTiming.timing} />
           </div>
           <div className="flex items-center gap-3">
             {dirty && <span className="text-xs text-status-warn">Unsaved changes</span>}
             {!dirty && saved && <span className="text-xs text-status-good">Mapping written ✓</span>}
-            <WireTiming label="Write" timing={writeTiming.timing} />
+            <RequestTiming timing={writeTiming.timing} />
             <button
               className={btnPrimary}
               onClick={() => writeMutation.mutate()}

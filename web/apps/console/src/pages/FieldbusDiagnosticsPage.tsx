@@ -11,7 +11,7 @@ import { userCacheBasename } from '../utils/userCache';
 import PageHeader from '../components/PageHeader';
 import DiagnosticsExplainer from '../components/DiagnosticsExplainer';
 import SlavePositionBadge from '../components/SlavePositionBadge';
-import { WireTiming, useWireTiming } from '../components/WireTiming';
+import { RequestTiming, useRequestTiming } from '../components/RequestTiming';
 import { useConnection } from '../contexts/ConnectionContext';
 import { btnOutline } from '../utils/styles';
 import NoEscNotice from '../components/NoEscNotice';
@@ -193,7 +193,7 @@ function WatchdogControl({
 }) {
   const { api } = useConnection();
   const queryClient = useQueryClient();
-  const setTiming = useWireTiming();
+  const setTiming = useRequestTiming();
   // null = follow the fetched value; a string = the user is editing.
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -287,8 +287,7 @@ function WatchdogControl({
             >
               {mutation.isPending ? 'Setting…' : 'Set'}
             </button>
-            <WireTiming
-              label="Watchdog"
+            <RequestTiming
               timing={setTiming.timing}
               className="text-xs text-grey-500 font-mono whitespace-nowrap pb-2"
             />
@@ -621,7 +620,7 @@ function CaptureSection() {
 
 export default function FieldbusDiagnosticsPage() {
   const { api } = useConnection();
-  const { timing, measure } = useWireTiming();
+  const { timing, measure } = useRequestTiming();
 
   const supportsEsc = useSupportsEsc();
 
@@ -669,7 +668,7 @@ export default function FieldbusDiagnosticsPage() {
         <DiagnosticsExplainer />
 
         <div className="flex items-center justify-end gap-3">
-          <WireTiming label="Diagnostics" timing={timing} />
+          <RequestTiming timing={timing} />
           <button
             onClick={() => query.refetch()}
             disabled={query.isFetching}

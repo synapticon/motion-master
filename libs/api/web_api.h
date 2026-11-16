@@ -88,30 +88,20 @@ Res* setCorsOrigin(Res* res, std::string_view corsOrigin) {
       ->writeHeader("Timing-Allow-Origin", corsOrigin);
 }
 
-/// @brief Attaches the server-measured wire time to a response, as the standard `Server-Timing`
-/// header with the metric `wire`, in milliseconds: `Server-Timing: wire;dur=1.500`.
+/// @brief Attaches the time of a fieldbus operation to a response, as the metric `fieldbus` of the
+/// standard `Server-Timing` header, in milliseconds: `Server-Timing: fieldbus;dur=1.500`.
 ///
-/// @p wireUs is the server-measured time spent on the device-side operation itself — control-plane
-/// lock acquire plus the mailbox/ESC wire transaction(s) — *not* the end-to-end HTTP round-trip,
-/// which a cross-origin browser client observes as much larger (TLS + transport overhead).
-/// Reporting it lets the client attribute the device cost to the device and the remainder to the
-/// browser/transport. For a single-transaction endpoint (one SDO/FoE/register access) it is
-/// essentially the pure wire round-trip; for a multi-transaction one (object-dictionary
-/// enumeration, PDO-mapping read/write) it is the total across all of the operation's transactions.
-/// Because the value rides a header rather than the body, it is the one uniform timing channel that
-/// works for any response shape (JSON or raw octet-stream) without touching each endpoint's body
-/// schema. A browser records it per request in its Performance API, which `Timing-Allow-Origin`
-/// opens to the allowed origin, and the header is CORS-exposed too, so a client that holds the
-/// response reads it from there. Emitted on **both**
-/// success and failure — a failed operation still consumed device time (e.g. an SDO read that waits
-/// out the mailbox timeout), and the client shows it the same way; failures route through
-/// sendError()'s @c wireUs parameter so the header lands after writeStatus(). Call **before** the
-/// body/end() (uWS requires all headers written before the body). Returns @p res for chaining,
-/// mirroring setCorsOrigin.
+/// For a handler that writes its response with uWebSockets itself, outside the @c Router. The time
+/// covers the operation on the fieldbus: the wait for the control-plane lock and every mailbox or
+/// ESC transaction, with their retries. It is not the HTTP round trip, which a client measures as
+/// much longer. A response written here has no metric `server`, which only the @c Router adds. Set
+/// it on a failure too, because a failed operation still spent its time on the fieldbus. Call it
+/// **before** the body or end(), because uWS writes every header before the body. Returns @p res
+/// for chaining, as setCorsOrigin does.
 template <typename Res>
-Res* setWireTime(Res* res, std::chrono::microseconds wireUs) {
+Res* setFieldbusTime(Res* res, std::chrono::microseconds fieldbusTime) {
   return res->writeHeader("Access-Control-Expose-Headers", "Server-Timing")
-      ->writeHeader("Server-Timing", serverTimingWire(wireUs));
+      ->writeHeader("Server-Timing", serverTimingMetric("fieldbus", fieldbusTime));
 }
 
 /// @brief Writes @p body as a 200 application/json response with the CORS header.
@@ -143,18 +133,18 @@ void sendBytes(Res* res, std::string_view corsOrigin, std::string_view contentTy
 /// @brief Writes a @p status response carrying a `{"error": message}` JSON body and the CORS
 /// header.
 ///
-/// Pass @p wireUs to attach the `Server-Timing` timing header to the failure the same way a success
-/// carries it — a failed device transaction still consumed wire time (an SDO read that waits out
-/// the mailbox timeout, a partial FoE transfer), and the client renders it identically. The header
+/// Pass @p fieldbusTime to attach the metric `fieldbus` of `Server-Timing` to the failure the same
+/// way a success carries it, because a failed fieldbus operation still spent its time (an SDO read
+/// that waits out the mailbox timeout, a partial FoE transfer). The header
 /// is written after writeStatus() so uWS keeps the non-200 status (headers-before-status would
 /// force a default 200).
 template <typename Res>
 void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
                std::string_view message,
-               std::optional<std::chrono::microseconds> wireUs = std::nullopt) {
+               std::optional<std::chrono::microseconds> fieldbusTime = std::nullopt) {
   auto* r = setCorsOrigin(res->writeStatus(status), corsOrigin);
-  if (wireUs) {
-    r = setWireTime(r, *wireUs);
+  if (fieldbusTime) {
+    r = setFieldbusTime(r, *fieldbusTime);
   }
   r->writeHeader("Content-Type", "application/json")
       ->end(nlohmann::json{{"error", std::string(message)}}.dump());
@@ -162,15 +152,15 @@ void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
 
 /// @brief Writes a bare @p status response (no body) with the CORS header.
 ///
-/// @p wireUs optionally attaches the server-measured operation time, exactly as @c sendError does —
-/// an endpoint whose success case carries no body (a `204 No Content` delete) still spent time
-/// doing the work, and the client shows it the same way as for a body-bearing response.
+/// @p fieldbusTime optionally attaches the time of a fieldbus operation, exactly as @c sendError
+/// does — an endpoint whose success case carries no body (a `204 No Content` delete) still spent
+/// time doing the work, and the client shows it the same way as for a body-bearing response.
 template <typename Res>
 void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin,
-                std::optional<std::chrono::microseconds> wireUs = std::nullopt) {
+                std::optional<std::chrono::microseconds> fieldbusTime = std::nullopt) {
   auto* r = setCorsOrigin(res->writeStatus(status), corsOrigin);
-  if (wireUs) {
-    r = setWireTime(r, *wireUs);
+  if (fieldbusTime) {
+    r = setFieldbusTime(r, *fieldbusTime);
   }
   r->end();
 }

@@ -7,6 +7,7 @@
 #include <charconv>
 #include <chrono>
 #include <concepts>
+#include <expected>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -242,33 +243,70 @@ Response notFound(std::string_view message);
 /// name the neighbouring send* helpers already use for a status line.
 Response statusOnly(std::string status);
 
-/// @brief The value of the `Server-Timing` header for a device time: `wire;dur=` and the time in
-/// milliseconds, such as `wire;dur=1.500`.
-std::string serverTimingWire(std::chrono::microseconds wireUs);
+/// @brief One metric of the `Server-Timing` header: @p name, `;dur=` and the time in milliseconds
+/// with three decimals, such as `fieldbus;dur=1.500`.
+std::string serverTimingMetric(std::string_view name, std::chrono::microseconds time);
 
-/// @brief Attaches the server-measured device time (`Server-Timing`, metric `wire`) to @p response
-/// and returns it.
+/// @brief The value of the `Server-Timing` header of a response: the metric `server`, the time from
+/// the complete request to the response, then every metric that the route set itself in
+/// @p headers, such as `server;dur=7.100, fieldbus;dur=6.200`.
+std::string serverTimingHeader(std::chrono::microseconds serverTime,
+                               const std::vector<std::pair<std::string, std::string>>& headers);
+
+/// @brief Attaches the time of a fieldbus operation to @p response, as the metric `fieldbus` of
+/// `Server-Timing`, and returns it.
 ///
-/// The uniform timing channel: it rides a header rather than the body, so it works for any response
-/// shape, and it is emitted on failure as well as success because a failed device operation still
-/// consumed wire time. See the header's own documentation in @c web_api.h.
-Response withWireTime(Response response, std::chrono::microseconds wireUs);
+/// The time covers the operation of the route on the fieldbus: the wait for the control-plane lock
+/// and every mailbox or ESC transaction, with their retries. It rides a header rather than the
+/// body, so it works for any response shape, and it is set on a failure too, because a failed
+/// operation still spent its time on the fieldbus. Every response also carries the metric `server`,
+/// which the router adds.
+Response withFieldbusTime(Response response, std::chrono::microseconds fieldbusTime);
 
-/// @brief Runs a device operation, times it, and turns its @c std::expected into a timed response.
+/// @brief Runs a fieldbus operation, times it, and turns its @c std::expected into a response with
+/// the metric `fieldbus`.
 ///
 /// The shape of nearly every device endpoint, in one place: time the call, send the value as JSON
-/// with @c Server-Timing on success, or @p errorStatus with the same header on failure. Only @p op
-/// is timed, so body serialisation stays out of the figure.
+/// on success, or @p errorStatus on failure, both with the time. Only @p op is timed, so body
+/// serialisation stays out of the figure. A route that does not touch the fieldbus uses
+/// @c respond instead.
 template <typename Op>
 Response timed(Op&& op, std::string errorStatus = "500 Internal Server Error") {
   const auto t0 = std::chrono::steady_clock::now();
   auto result = std::forward<Op>(op)();
-  const auto wireUs =
+  const auto fieldbusTime =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0);
   if (!result) {
-    return withWireTime(error(std::move(errorStatus), result.error()), wireUs);
+    return withFieldbusTime(error(std::move(errorStatus), result.error()), fieldbusTime);
   }
-  return withWireTime(json(nlohmann::json(*result)), wireUs);
+  return withFieldbusTime(json(nlohmann::json(*result)), fieldbusTime);
+}
+
+/// @brief Runs @p op, a fieldbus operation that shapes its own response, and attaches its time as
+/// the metric `fieldbus`.
+///
+/// For a route whose outcomes are more than a value or one error status: a 204, a 404 for a file
+/// the device does not carry, several error statuses. Put the checks of the request before it, so
+/// only the operation is timed.
+template <typename Op>
+  requires std::same_as<std::invoke_result_t<Op&>, Response>
+Response timedResponse(Op&& op) {
+  const auto t0 = std::chrono::steady_clock::now();
+  Response response = std::forward<Op>(op)();
+  return withFieldbusTime(
+      std::move(response),
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0));
+}
+
+/// @brief Turns the @c std::expected of an operation that does not touch the fieldbus into a
+/// response: the value as JSON, or @p errorStatus with the error.
+template <typename T>
+Response respond(const std::expected<T, std::string>& result,
+                 std::string errorStatus = "500 Internal Server Error") {
+  if (!result) {
+    return error(std::move(errorStatus), result.error());
+  }
+  return json(nlohmann::json(*result));
 }
 
 /// @brief @c timed for an operation whose error carries its reason: @p statusOf picks the status
@@ -281,13 +319,13 @@ template <typename Op, typename StatusOf>
 Response timed(Op&& op, StatusOf&& statusOf) {
   const auto t0 = std::chrono::steady_clock::now();
   auto result = std::forward<Op>(op)();
-  const auto wireUs =
+  const auto fieldbusTime =
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0);
   if (!result) {
-    return withWireTime(error(std::string(statusOf(result.error())), result.error().message),
-                        wireUs);
+    return withFieldbusTime(error(std::string(statusOf(result.error())), result.error().message),
+                            fieldbusTime);
   }
-  return withWireTime(json(nlohmann::json(*result)), wireUs);
+  return withFieldbusTime(json(nlohmann::json(*result)), fieldbusTime);
 }
 
 /// @brief What a route does: a pure function from a snapshotted request to a response.

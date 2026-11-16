@@ -1149,13 +1149,27 @@ the same commit. A helper that belongs to one language gets a row with the other
 the reason. A Console function that is not about the UI belongs in the TypeScript client, and then
 under this rule.
 
-**A helper returns the decoded result, not the response.** A caller that needs the response, for a
-header such as the wire time in `Server-Timing`, calls the generated `client.api.<operationId>`,
-which returns the response, and reads a refusal's headers from `HttpError.response`.
-`wireTimeMs()` reads the wire time from either. A helper returns the response only where the
-Console shows the wire time of the request that the helper sends: `writeFile` and
-`writeUserCacheFile` return it, and `readFile`, `readUserCacheFile` and `parseEsi` offer it as
-`format: 'response'`. The Python twins return the `requests.Response` in the same places.
+**A helper returns the decoded result, never the response.** A caller that needs the response, for
+a header such as `Server-Timing`, calls the generated `client.api.<operationId>`, or
+`client.call(operation_id, …)` in Python, which returns it, and reads a refusal's headers from
+`HttpError.response`. `serverTimeMs()` and `fieldbusTimeMs()` read the times from either. The
+Console does this for each request whose time it shows. A program that wants the times of its
+requests turns on the http log: `DEBUG=motion-master-client:http` writes one line per request, with
+the round trip and the times of the server, in both clients.
+
+**Every response carries `Server-Timing`.** The router adds the metric `server` to every response,
+the time from the complete request to the response. A route that runs a fieldbus operation adds
+`fieldbus`, the time of that operation, with `mm::api::timed` or `mm::api::timedResponse`, on a
+failure too. A route that does not touch the fieldbus answers with `mm::api::respond` and sends no
+`fieldbus`. A new route that talks to a device is timed. In `swagger.yml`, a response that lists the
+`ServerTiming` header carries `fieldbus`.
+
+**Every operation can go through `client.api`.** The generator sends a JSON body as JSON and any
+other body as it is: a file as `application/octet-stream`, an XML document as `application/xml`.
+That rule is in the templates of `web/packages/motion-master-client/templates/`, copies of three
+templates of swagger-typescript-api with the changes its `README.md` lists. The version of the
+generator is pinned exactly, so after an upgrade, copy the templates of the new version again and
+make the same changes. A helper sends no request of its own with `fetch`.
 
 **The examples follow the same rule.** Each task has one example program in each client, with the
 same file name, the same options and the same output: `clients/python/examples/scan.py` and

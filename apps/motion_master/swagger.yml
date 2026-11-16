@@ -723,6 +723,9 @@ paths:
       responses:
         "200":
           description: Driver initialised successfully
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -851,6 +854,9 @@ paths:
       responses:
         "200":
           description: Scan successful; returns the number of slaves found (0 for an empty or unpowered bus)
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -876,6 +882,9 @@ paths:
       responses:
         "200":
           description: Reset completed successfully
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2074,6 +2083,9 @@ paths:
       responses:
         "200":
           description: The post-write CiA402 control snapshot
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2137,6 +2149,9 @@ paths:
       responses:
         "200":
           description: The CiA402 control snapshot after arriving
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2189,6 +2204,9 @@ paths:
       responses:
         "200":
           description: The post-command CiA402 control snapshot
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2240,6 +2258,9 @@ paths:
       responses:
         "204":
           description: The setpoint was written
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
         "400":
           description: slavePosition is invalid, the body is malformed, or the target kind is unknown
         "404":
@@ -2280,6 +2301,9 @@ paths:
       responses:
         "200":
           description: The target was written
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2490,6 +2514,9 @@ paths:
       responses:
         "200":
           description: The encoder records and the controller sources
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Encoders" }
@@ -2524,6 +2551,9 @@ paths:
       responses:
         "200":
           description: The brake's configuration and current state
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BrakeState" }
@@ -2954,6 +2984,9 @@ paths:
       responses:
         "200":
           description: The decoded file
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -2989,6 +3022,9 @@ paths:
       responses:
         "200":
           description: The decoded file
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3026,6 +3062,9 @@ paths:
       responses:
         "200":
           description: The file, row by row
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3714,9 +3753,6 @@ paths:
       responses:
         "200":
           description: The parsed ENI
-          headers:
-            Server-Timing:
-              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -3792,12 +3828,13 @@ paths:
           application/xml:
             schema:
               type: string
+              format: binary
+              description: >
+                The document as it is in its file, because an ESI may declare an encoding other
+                than UTF-8.
       responses:
         "200":
           description: The parsed ESI — every device with its assembled entry table
-          headers:
-            Server-Timing:
-              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4200,6 +4237,9 @@ paths:
       responses:
         "200":
           description: AL state snapshot for each queried device
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4314,6 +4354,9 @@ paths:
             Transition command completed and the settled state of each targeted device
             was read back. `ok` is true only when every device reached the target state
             within the timeout; otherwise inspect `devices` to see which fell short and why.
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4462,6 +4505,9 @@ paths:
             Transition command completed and the settled state of each targeted device
             was read back. `ok` is true only when every device reached the target state
             within the timeout; otherwise inspect `devices` to see which fell short and why.
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -4601,6 +4647,9 @@ paths:
             The restart ran and the settled state of each targeted device after its last step
             was read back. `ok` is true only when every device reached `target`; otherwise
             `step` says where the restart stopped and `devices` which device fell short and why.
+          headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -5282,6 +5331,8 @@ paths:
         "200":
           description: The ENI document
           headers:
+            Server-Timing:
+              $ref: "#/components/headers/ServerTiming"
             X-Eni-Warnings:
               description: Number of parts that could not be read; each is logged
               schema:
@@ -5533,9 +5584,6 @@ paths:
       responses:
         "200":
           description: The cache root and its files.
-          headers:
-            Server-Timing:
-              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -5577,9 +5625,6 @@ paths:
       responses:
         "200":
           description: The file's contents.
-          headers:
-            Server-Timing:
-              $ref: "#/components/headers/ServerTiming"
           content:
             application/octet-stream:
               schema:
@@ -5605,9 +5650,6 @@ paths:
       responses:
         "200":
           description: The file was written.
-          headers:
-            Server-Timing:
-              $ref: "#/components/headers/ServerTiming"
           content:
             application/json:
               schema:
@@ -5636,9 +5678,6 @@ paths:
       responses:
         "204":
           description: The file or directory was removed.
-          headers:
-            Server-Timing:
-              $ref: "#/components/headers/ServerTiming"
         "400":
           description: The path is invalid, or the removal failed.
         "404":
@@ -9605,37 +9644,35 @@ components:
   headers:
     ServerTiming:
       description: >
-        The server-measured duration of the on-device operation, as the standard `Server-Timing`
-        header with the metric `wire`, in milliseconds with three decimals: `wire;dur=1.500` is
-        1500 microseconds. It is the control-plane lock acquire plus the mailbox/ESC wire
-        transaction(s). For a single-transaction endpoint (one SDO/FoE/register/EEPROM access) this
-        is essentially the pure wire round-trip; for a multi-transaction one (object-dictionary
-        enumeration, bulk value read, PDO-mapping read/write) it is the total across all of the
-        operation's transactions. Either way it is far smaller than the end-to-end HTTP round-trip a
-        cross-origin browser client observes (which additionally includes TLS and transport
-        overhead), letting the client attribute the device cost to the device and the remainder to
-        the browser/transport. Present on **both** the success and the failure response
-        (driver-error 500, or 409 where applicable) of every endpoint that performs a fieldbus
-        operation — a failed operation still consumed device time (e.g. an SDO read that waits out
-        the mailbox timeout).
+        The times that the server measured, as the standard `Server-Timing` header, each in
+        milliseconds with three decimals: `server;dur=7.100, fieldbus;dur=6.200`.
 
 
-        A browser records the value per request in its Performance API
+        - `server` is on **every** response. It is the time from the complete request to the
+          response: the wait for a free worker, the handler, and the wait for the loop thread. It
+          does not include the upload of the body.
+
+        - `fieldbus` is on each response that lists this header, the endpoints that run a fieldbus
+          operation. It is the time of that operation: the wait for the control-plane lock and
+          every mailbox or ESC transaction, with their retries. For one SDO, FoE, register or
+          EEPROM access it is close to the transaction itself. For an operation of many
+          transactions, such as an object dictionary enumeration, a scan or an AL state walk, it is
+          the total. It is on a failure too, because a failed operation still spent its time, such
+          as an SDO read that waits out the mailbox timeout.
+
+
+        The round trip that a client measures is longer than `server`. The difference is the
+        network, TLS and the client. `server` minus `fieldbus` is the work of the server outside the
+        fieldbus, such as building the JSON.
+
+
+        A browser records the header per request in its Performance API
         (`PerformanceResourceTiming.serverTiming`), which every response opens to the allowed
-        origin with `Timing-Allow-Origin`. So a page reads the time of any request, also one it
-        made through code that does not hand it the response. The header is also CORS-exposed
+        origin with `Timing-Allow-Origin`. The header is also CORS-exposed
         (`Access-Control-Expose-Headers`), so a client that holds the response reads it there.
-
-
-        A few endpoints touch no device at all and report their **server-side** work on this same
-        header, because the client-side split it enables is the same one: the `/api/user-cache`
-        routes report the filesystem operation (path validation plus the read/write/list/remove),
-        so a slow large-file transfer is visibly transport cost rather than a slow server. Read the
-        figure as "time the server spent doing the work", of which a fieldbus transaction is the
-        usual — but not the only — case.
       schema:
         type: string
-      example: wire;dur=5.000
+      example: server;dur=7.100, fieldbus;dur=6.200
   responses:
     DriverError:
       description: Fieldbus driver returned an error

@@ -198,7 +198,7 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
           />
           <Field
             label="EEPROM size"
-            value={`${((info.size ?? 0) + 1) / 8} KB`}
+            value={`${((info.size ?? 0) + 1) / 8} KiB`}
             hint="Declared EEPROM size (the raw 'size' word is KiBit − 1)"
           />
         </div>

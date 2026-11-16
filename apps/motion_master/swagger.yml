@@ -777,7 +777,7 @@ paths:
         "200":
           description: Whether a scan is required, and the facts it is decided from
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1335,7 +1335,7 @@ paths:
         "200":
           description: Parameter list ordered by (index, subindex)
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1377,7 +1377,7 @@ paths:
         "200":
           description: Refreshed parameter list ordered by (index, subindex)
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1479,7 +1479,7 @@ paths:
         "200":
           description: The parameter (value plus metadata)
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1568,7 +1568,7 @@ paths:
         "200":
           description: The updated parameter (value plus metadata)
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1622,7 +1622,7 @@ paths:
         "200":
           description: Raw register bytes
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1701,7 +1701,7 @@ paths:
         "200":
           description: Write completed successfully
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1754,7 +1754,7 @@ paths:
         "200":
           description: Decoded watchdog configuration
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1815,7 +1815,7 @@ paths:
         "200":
           description: Watchdog configuration actually programmed (timeout rounded to the tick base)
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1869,7 +1869,7 @@ paths:
         "200":
           description: The device's grouped PDO mapping
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1882,7 +1882,7 @@ paths:
         "409":
           description: The device's mailbox is not active (it is in INIT or BOOT)
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
         "500":
           $ref: "#/components/responses/DriverError"
@@ -1930,7 +1930,7 @@ paths:
         "200":
           description: The device's grouped read-back mapping, verified equal to the request
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1945,7 +1945,7 @@ paths:
             The write was rejected — most often because the device is not in PREOP, but also a
             malformed mapping the device aborted, or a read-back that did not match the request
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
@@ -1970,7 +1970,7 @@ paths:
         "200":
           description: The device's CiA402 control snapshot
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -1983,7 +1983,7 @@ paths:
         "409":
           description: The device is not a CiA402 drive, or its object dictionary is not enumerated
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
   /api/devices/{slavePosition}/operation-modes:
     get:
@@ -2011,7 +2011,7 @@ paths:
         "200":
           description: The device's operation modes
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -2024,7 +2024,7 @@ paths:
         "409":
           description: The device is not a CiA402 drive, or its object dictionary is not enumerated
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
   /api/devices/{slavePosition}/cia402/mode:
     post:
@@ -2597,7 +2597,7 @@ paths:
         "200":
           description: The decoded recording
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -2662,7 +2662,7 @@ paths:
         "200":
           description: The brake state read back after the command
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -2702,7 +2702,7 @@ paths:
         "200":
           description: The brake state read back after the command
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -2753,7 +2753,7 @@ paths:
         "200":
           description: Raw object bytes from the device
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -2831,7 +2831,7 @@ paths:
         "200":
           description: Download completed successfully
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -2875,7 +2875,7 @@ paths:
         "200":
           description: The files the device reported, in the order it reported them
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -2917,7 +2917,7 @@ paths:
         "200":
           description: The decoded file
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3056,7 +3056,7 @@ paths:
         "200":
           description: The descriptors
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3103,7 +3103,7 @@ paths:
         "200":
           description: The verdict, compatible or not
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3161,7 +3161,7 @@ paths:
         "200":
           description: Raw file bytes from the device
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/octet-stream:
@@ -3214,7 +3214,7 @@ paths:
         "200":
           description: File written successfully
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3272,7 +3272,7 @@ paths:
         "200":
           description: The file is gone
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3331,7 +3331,7 @@ paths:
         "200":
           description: Parsed SII structure, or the raw EEPROM image
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3390,7 +3390,7 @@ paths:
         "200":
           description: SII image written successfully
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3707,7 +3707,7 @@ paths:
         "200":
           description: The parsed ENI
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3788,7 +3788,7 @@ paths:
         "200":
           description: The parsed ESI — every device with its assembled entry table
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3823,7 +3823,7 @@ paths:
         "200":
           description: Decoded ESC diagnostics for each queried device
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -3879,7 +3879,7 @@ paths:
         "200":
           description: Decoded DC sync status for each queried device
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -5526,7 +5526,7 @@ paths:
         "200":
           description: The cache root and its files.
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -5570,7 +5570,7 @@ paths:
         "200":
           description: The file's contents.
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/octet-stream:
@@ -5598,7 +5598,7 @@ paths:
         "200":
           description: The file was written.
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
           content:
             application/json:
@@ -5629,7 +5629,7 @@ paths:
         "204":
           description: The file or directory was removed.
           headers:
-            X-Wire-Us:
+            Server-Timing:
               $ref: "#/components/headers/WireTime"
         "400":
           description: The path is invalid, or the removal failed.
@@ -9438,18 +9438,26 @@ components:
   headers:
     WireTime:
       description: >
-        Server-measured duration of the on-device operation in microseconds — the control-plane
-        lock acquire plus the mailbox/ESC wire transaction(s). For a single-transaction endpoint
-        (one SDO/FoE/register/EEPROM access) this is essentially the pure wire round-trip; for a
-        multi-transaction one (object-dictionary enumeration, bulk value read, PDO-mapping
-        read/write) it is the total across all of the operation's transactions. Either way it is
-        far smaller than the end-to-end HTTP round-trip a cross-origin browser client observes
-        (which additionally includes TLS and transport overhead), letting the client attribute the
-        device cost to the device and the remainder to the browser/transport. Present on **both**
-        the success and the failure response (driver-error 500, or 409 where applicable) of every
-        endpoint that performs a fieldbus operation — a failed operation still consumed device time
-        (e.g. an SDO read that waits out the mailbox timeout). CORS-exposed
-        (`Access-Control-Expose-Headers`) so a cross-origin client may read it.
+        The server-measured duration of the on-device operation, as the standard `Server-Timing`
+        header with the metric `wire`, in milliseconds with three decimals: `wire;dur=1.500` is
+        1500 microseconds. It is the control-plane lock acquire plus the mailbox/ESC wire
+        transaction(s). For a single-transaction endpoint (one SDO/FoE/register/EEPROM access) this
+        is essentially the pure wire round-trip; for a multi-transaction one (object-dictionary
+        enumeration, bulk value read, PDO-mapping read/write) it is the total across all of the
+        operation's transactions. Either way it is far smaller than the end-to-end HTTP round-trip a
+        cross-origin browser client observes (which additionally includes TLS and transport
+        overhead), letting the client attribute the device cost to the device and the remainder to
+        the browser/transport. Present on **both** the success and the failure response
+        (driver-error 500, or 409 where applicable) of every endpoint that performs a fieldbus
+        operation — a failed operation still consumed device time (e.g. an SDO read that waits out
+        the mailbox timeout).
+
+
+        A browser records the value per request in its Performance API
+        (`PerformanceResourceTiming.serverTiming`), which every response opens to the allowed
+        origin with `Timing-Allow-Origin`. So a page reads the time of any request, also one it
+        made through code that does not hand it the response. The header is also CORS-exposed
+        (`Access-Control-Expose-Headers`), so a client that holds the response reads it there.
 
 
         A few endpoints touch no device at all and report their **server-side** work on this same
@@ -9459,9 +9467,8 @@ components:
         figure as "time the server spent doing the work", of which a fieldbus transaction is the
         usual — but not the only — case.
       schema:
-        type: integer
-        minimum: 0
-      example: 5000
+        type: string
+      example: wire;dur=5.000
   responses:
     DriverError:
       description: Fieldbus driver returned an error
@@ -9478,10 +9485,10 @@ components:
     DriverErrorTimed:
       description: >
         Fieldbus driver returned an error. Same body as `DriverError`, but carries the
-        `X-Wire-Us` timing header because the failing endpoint performed (or attempted) a
-        fieldbus transaction — the failure still consumed wire time.
+        `Server-Timing` header because the failing endpoint performed (or attempted) a fieldbus
+        transaction — the failure still consumed wire time.
       headers:
-        X-Wire-Us:
+        Server-Timing:
           $ref: "#/components/headers/WireTime"
       content:
         application/json:

@@ -48,8 +48,9 @@ sed -i "s/version: \"${OLD_ESC}\"/version: \"${NEW_VERSION}\"/" \
 sed -i "s/kVersion, \"${OLD_ESC}\"/kVersion, \"${NEW_VERSION}\"/" \
   "$ROOT/libs/core/tests/version_test.cc"
 
-# 6. UI sidebar version badge
-sed -i "s/>v${OLD_ESC}</>v${NEW_VERSION}</" \
+# 6. UI sidebar version badge. Prettier puts the text of the badge on a line of its own, so the
+# version is matched as a word, not between the > and < of its element.
+sed -i "s/\bv${OLD_ESC}\b/v${NEW_VERSION}/" \
   "$ROOT/web/apps/console/src/layouts/RootLayout.tsx"
 
 # 7. Release the Raspberry Pi appliance installs. Not an artifact that carries the version, but a
@@ -58,6 +59,30 @@ sed -i "s/>v${OLD_ESC}</>v${NEW_VERSION}</" \
 # had fallen several releases behind once already, and unsticking it cost a release of its own.
 sed -i "s/motion_master_version: ${OLD_ESC}/motion_master_version: ${NEW_VERSION}/" \
   "$ROOT/rt/provision/ansible/roles/motion-master/defaults/main.yml"
+
+# Every file above must now carry the new version. A sed that matches nothing changes nothing and
+# reports no error, so a file whose layout changed would otherwise keep the old version unnoticed.
+missing=0
+for f in \
+  "$ROOT/vcpkg.json" \
+  "$ROOT/package.json" \
+  "$ROOT/web/apps/console/package.json" \
+  "$ROOT/web/apps/example/package.json" \
+  "$ROOT/web/packages/motion-master-client/package.json" \
+  "$ROOT/web/packages/ui/package.json" \
+  "$ROOT/clients/python/pyproject.toml" \
+  "$ROOT/apps/motion_master/swagger.yml" \
+  "$ROOT/libs/core/tests/version_test.cc" \
+  "$ROOT/web/apps/console/src/layouts/RootLayout.tsx" \
+  "$ROOT/rt/provision/ansible/roles/motion-master/defaults/main.yml"; do
+  if ! grep -qF "$NEW_VERSION" "$f"; then
+    echo "error: ${f#"$ROOT"/} does not carry $NEW_VERSION; update it by hand" >&2
+    missing=1
+  fi
+done
+if [[ $missing -ne 0 ]]; then
+  exit 1
+fi
 
 echo "Done — review with: git diff"
 echo

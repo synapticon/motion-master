@@ -1,0 +1,111 @@
+---
+- name: Install the build toolchain and the base tools
+  ansible.builtin.apt:
+    name: "{{ base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# gh in Debian 13 is older than the release GitHub supports. GitHub's own repository keeps it
+# current.
+- name: Add GitHub's apt repository
+  ansible.builtin.deb822_repository:
+    name: github-cli
+    types: deb
+    uris: https://cli.github.com/packages
+    suites: stable
+    components: main
+    architectures: amd64
+    signed_by: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    state: present
+
+- name: Install gh
+  ansible.builtin.apt:
+    name: gh
+    state: present
+    update_cache: true
+
+- name: Check for CMake {{ base_cmake_version }}
+  ansible.builtin.stat:
+    path: "{{ base_cmake_prefix }}/bin/cmake"
+  register: base_cmake
+
+- name: Install CMake {{ base_cmake_version }}
+  when: not base_cmake.stat.exists
+  block:
+    - name: Create the CMake folder
+      ansible.builtin.file:
+        path: "{{ base_cmake_prefix }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download the CMake installer
+      ansible.builtin.get_url:
+        url: "{{ base_cmake_url }}"
+        dest: /tmp/cmake-install.sh
+        mode: "0644"
+
+    - name: Run the CMake installer
+      ansible.builtin.command:
+        cmd: bash /tmp/cmake-install.sh --skip-license --prefix={{ base_cmake_prefix }}
+        creates: "{{ base_cmake_prefix }}/bin/cmake"
+
+  always:
+    - name: Remove the CMake installer
+      ansible.builtin.file:
+        path: /tmp/cmake-install.sh
+        state: absent
+
+# In a dry run CMake is not installed, so the links have no target yet.
+- name: Put CMake on the PATH
+  when: not ansible_check_mode
+  ansible.builtin.file:
+    src: "{{ base_cmake_prefix }}/bin/{{ item }}"
+    dest: /usr/local/bin/{{ item }}
+    state: link
+  loop:
+    - cmake
+    - ctest
+    - cpack
+
+- name: Set the git identity of the bench user
+  become: true
+  become_user: "{{ bench_user }}"
+  community.general.git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: global
+  loop:
+    - { name: user.name, value: "{{ bench_git_name }}" }
+    - { name: user.email, value: "{{ bench_git_email }}" }
+    - { name: pull.ff, value: only }
+
+# A key must be in place before password login goes, or the machine is reachable only at the desk.
+- name: Check that the bench user has an SSH key
+  ansible.builtin.stat:
+    path: ~{{ bench_user }}/.ssh/authorized_keys
+  register: base_authorized_keys
+
+- name: Refuse to turn off password login without a key
+  ansible.builtin.assert:
+    that: base_authorized_keys.stat.exists and base_authorized_keys.stat.size > 0
+    fail_msg: "~{{ bench_user }}/.ssh/authorized_keys is missing or empty. Run ssh-copy-id first."
+
+- name: Allow SSH login with a key only
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-keys-only.conf
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+    owner: root
+    group: root
+    mode: "0644"
+    validate: sshd -t -f %s
+  notify: Reload ssh
+
+# journalctl shows the whole journal, such as the runner service, only to this group.
+- name: Let the bench user read the system journal
+  ansible.builtin.user:
+    name: "{{ bench_user }}"
+    groups: systemd-journal
+    append: true

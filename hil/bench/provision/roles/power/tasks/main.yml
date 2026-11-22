@@ -1,0 +1,76 @@
+---
+# A machine that suspends drops its network, so an Ansible run, a runner job and a RustDesk
+# session all fail. GNOME suspends after 15 minutes idle, also on AC power.
+- name: Mask the sleep targets
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: true
+  loop:
+    - sleep.target
+    - suspend.target
+    - hibernate.target
+    - hybrid-sleep.target
+    - suspend-then-hibernate.target
+
+# With the targets masked, GNOME still tries to suspend and logs a failure. This setting stops
+# the attempt. The lock keeps a user from setting it back in GNOME Settings.
+- name: Read the system dconf database in every user session
+  ansible.builtin.copy:
+    dest: /etc/dconf/profile/user
+    content: |
+      user-db:user
+      system-db:local
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update dconf
+
+- name: Create the folders of the system dconf database
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/dconf/db/local.d
+    - /etc/dconf/db/local.d/locks
+
+# The screen stays on, so a look at the bench shows what it does without a key press.
+- name: Turn off the GNOME suspend and screen blank on idle
+  ansible.builtin.copy:
+    dest: /etc/dconf/db/local.d/00-power
+    content: |
+      [org/gnome/settings-daemon/plugins/power]
+      sleep-inactive-ac-type='nothing'
+      sleep-inactive-battery-type='nothing'
+
+      [org/gnome/desktop/session]
+      idle-delay=uint32 0
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update dconf
+
+- name: Lock the GNOME suspend and screen blank settings
+  ansible.builtin.copy:
+    dest: /etc/dconf/db/local.d/locks/00-power
+    content: |
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-type
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-type
+      /org/gnome/desktop/session/idle-delay
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update dconf
+
+# power-profiles-daemon stores the profile and sets it again at boot.
+- name: Read the power profile
+  ansible.builtin.command: powerprofilesctl get
+  register: power_profile
+  changed_when: false
+
+- name: Select the performance power profile
+  ansible.builtin.command: powerprofilesctl set performance
+  when: power_profile.stdout != 'performance'
+  changed_when: true

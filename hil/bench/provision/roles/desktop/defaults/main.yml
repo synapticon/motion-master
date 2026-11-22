@@ -1,0 +1,4 @@
+---
+# The permanent password of RustDesk. Set it in inventory.yml, which git ignores. The role sets
+# it only when it installs RustDesk, so a later change in the RustDesk window stays.
+desktop_rustdesk_password: ""

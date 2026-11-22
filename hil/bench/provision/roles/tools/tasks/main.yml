@@ -1,0 +1,43 @@
+---
+# VHS records hil/bench/demo.gif from hil/bench/demo.tape. It renders the terminal in a headless
+# Chromium, and without one installed it downloads its own on the first run.
+- name: Install ffmpeg and Chromium for VHS
+  ansible.builtin.apt:
+    name:
+      - ffmpeg
+      - chromium
+    state: present
+
+- name: Install ttyd {{ tools_ttyd_version }}
+  ansible.builtin.get_url:
+    url: "{{ tools_ttyd_url }}"
+    dest: /usr/local/bin/ttyd
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Add Charm's apt repository
+  ansible.builtin.deb822_repository:
+    name: charm
+    types: deb
+    uris: https://repo.charm.sh/apt/
+    suites: "*"
+    components: "*"
+    signed_by: https://repo.charm.sh/apt/gpg.key
+    state: present
+
+- name: Install VHS
+  ansible.builtin.apt:
+    name: vhs
+    state: present
+    update_cache: true
+
+# The installer puts claude in ~/.local/bin of the user who runs it, and Claude Code updates
+# itself from there.
+- name: Install Claude Code for the bench user
+  become: true
+  become_user: "{{ bench_user }}"
+  ansible.builtin.shell:
+    cmd: set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash
+    executable: /bin/bash
+    creates: /home/{{ bench_user }}/.local/bin/claude

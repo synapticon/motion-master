@@ -1,0 +1,141 @@
+---
+# Every gh call runs as the bench user over the SSH login, with no sudo. gh reads its token from
+# the user's session, and sudo would start it without that session.
+- name: Refuse to run gh as another user than the bench user
+  ansible.builtin.assert:
+    that: ansible_user == bench_user
+    fail_msg: >-
+      The actions_runner role logs in as the bench user. Set ansible_user to
+      {{ bench_user }} in the inventory.
+
+- name: Read the gh login
+  become: false
+  ansible.builtin.command: gh auth status
+  register: actions_runner_gh_status
+  changed_when: false
+  failed_when: false
+
+- name: Refuse to register without a gh login with the admin:org scope
+  ansible.builtin.assert:
+    that:
+      - actions_runner_gh_status.rc == 0
+      - "'admin:org' in actions_runner_gh_status.stdout"
+    fail_msg: >-
+      gh on the bench machine cannot read a login with the admin:org scope. Log in to the
+      desktop of the bench once after a boot, which opens the keyring. If gh has no login,
+      run gh auth login --scopes admin:org on the bench.
+
+# The group belongs to the organisation and other machines use it, so the role only checks that
+# it exists.
+- name: Look up the runner group
+  become: false
+  ansible.builtin.command:
+    argv:
+      - gh
+      - api
+      - /orgs/{{ actions_runner_org }}/actions/runner-groups
+      - --jq
+      - .runner_groups[] | select(.name == "{{ actions_runner_group }}") | .id
+  register: actions_runner_group_id
+  changed_when: false
+
+- name: Refuse to register without the runner group
+  ansible.builtin.assert:
+    that: actions_runner_group_id.stdout | length > 0
+    fail_msg: >-
+      The organisation {{ actions_runner_org }} has no runner group
+      {{ actions_runner_group }}.
+
+- name: Check whether the runner is registered on this machine
+  ansible.builtin.stat:
+    path: "{{ actions_runner_dir }}/.runner"
+  register: actions_runner_registered
+
+- name: Register the runner
+  when: not actions_runner_registered.stat.exists
+  block:
+    - name: Create the runner folder
+      ansible.builtin.file:
+        path: "{{ actions_runner_dir }}"
+        state: directory
+        owner: "{{ bench_user }}"
+        group: "{{ bench_user }}"
+        mode: "0755"
+
+    # The runner updates itself after the first start, so the role fetches the newest release
+    # once and never again.
+    - name: Read the newest runner release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/actions/runner/releases/latest
+        return_content: true
+      register: actions_runner_release
+
+    - name: Download and unpack the runner
+      vars:
+        actions_runner_version: >-
+          {{ actions_runner_release.json.tag_name | regex_replace('^v', '') }}
+      ansible.builtin.unarchive:
+        src: >-
+          https://github.com/actions/runner/releases/download/v{{ actions_runner_version
+          }}/actions-runner-linux-x64-{{ actions_runner_version }}.tar.gz
+        dest: "{{ actions_runner_dir }}"
+        owner: "{{ bench_user }}"
+        group: "{{ bench_user }}"
+        remote_src: true
+
+    - name: Install the libraries the runner needs
+      ansible.builtin.command:
+        cmd: ./bin/installdependencies.sh
+        chdir: "{{ actions_runner_dir }}"
+      changed_when: true
+
+    - name: Get a registration token
+      become: false
+      ansible.builtin.command:
+        argv:
+          - gh
+          - api
+          - -X
+          - POST
+          - /orgs/{{ actions_runner_org }}/actions/runners/registration-token
+          - --jq
+          - .token
+      register: actions_runner_token
+      changed_when: false
+      no_log: true
+
+    # --replace takes over the name from an earlier registration, such as the one of a previous
+    # install of this machine.
+    - name: Configure the runner
+      become: false
+      ansible.builtin.command:
+        argv:
+          - ./config.sh
+          - --url
+          - https://github.com/{{ actions_runner_org }}
+          - --token
+          - "{{ actions_runner_token.stdout }}"
+          - --name
+          - "{{ actions_runner_name }}"
+          - --runnergroup
+          - "{{ actions_runner_group }}"
+          - --labels
+          - "{{ actions_runner_labels | join(',') }}"
+          - --unattended
+          - --replace
+        chdir: "{{ actions_runner_dir }}"
+        creates: "{{ actions_runner_dir }}/.runner"
+      no_log: true
+
+- name: Install the runner service
+  ansible.builtin.command:
+    cmd: ./svc.sh install {{ bench_user }}
+    chdir: "{{ actions_runner_dir }}"
+    creates: /etc/systemd/system/{{ actions_runner_service }}
+
+- name: Start the runner service at boot
+  ansible.builtin.systemd_service:
+    name: "{{ actions_runner_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true

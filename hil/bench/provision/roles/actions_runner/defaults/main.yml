@@ -1,0 +1,10 @@
+---
+actions_runner_org: synapticon
+actions_runner_name: ci-belgrade-linux
+actions_runner_group: Belgrade
+# The runner adds the labels self-hosted, Linux and X64 by itself.
+actions_runner_labels:
+  - ci-belgrade-linux
+actions_runner_dir: /home/{{ bench_user }}/actions-runner
+# The name svc.sh gives the service.
+actions_runner_service: actions.runner.{{ actions_runner_org }}.{{ actions_runner_name }}.service

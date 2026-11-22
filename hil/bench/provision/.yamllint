@@ -1,0 +1,14 @@
+---
+# The settings ansible-lint asks for, and the 100 columns of the rest of the repository.
+extends: default
+rules:
+  line-length:
+    max: 100
+  braces:
+    max-spaces-inside: 1
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

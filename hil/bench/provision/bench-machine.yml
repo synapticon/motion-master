@@ -1,0 +1,12 @@
+---
+- name: Provision the bench machine
+  hosts: bench
+  become: true
+  roles:
+    - { role: base, tags: base }
+    - { role: power, tags: power }
+    - { role: docker, tags: docker }
+    - { role: bench_host, tags: bench_host }
+    - { role: actions_runner, tags: actions_runner }
+    - { role: desktop, tags: desktop }
+    - { role: tools, tags: tools }

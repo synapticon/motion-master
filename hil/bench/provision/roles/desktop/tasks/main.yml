@@ -1,0 +1,91 @@
+---
+# The power role creates the dconf profile that makes every session read this database.
+# A default, not a lock, so a user can still change the theme in GNOME Settings.
+- name: Select the dark GNOME theme by default
+  ansible.builtin.copy:
+    dest: /etc/dconf/db/local.d/00-desktop
+    content: |
+      [org/gnome/desktop/interface]
+      color-scheme='prefer-dark'
+      gtk-theme='Adwaita-dark'
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update dconf
+
+# RustDesk on Wayland asks for permission on the machine at each connection, and nobody is at
+# the bench. On X11 it reaches the login screen and the session with no question. GDM reads this
+# at its start, so the change takes effect at the next boot.
+- name: Start GDM and GNOME on X11
+  community.general.ini_file:
+    path: /etc/gdm3/daemon.conf
+    section: daemon
+    option: WaylandEnable
+    value: "false"
+    no_extra_spaces: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Report that GDM needs a reboot
+
+- name: Check whether RustDesk is installed
+  ansible.builtin.command: dpkg-query -W rustdesk
+  register: desktop_rustdesk_installed
+  changed_when: false
+  failed_when: false
+
+# RustDesk publishes no apt repository, so the role installs the newest release once. RustDesk
+# offers its own updates after that.
+- name: Install RustDesk
+  when: desktop_rustdesk_installed.rc != 0
+  block:
+    - name: Read the newest RustDesk release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/rustdesk/rustdesk/releases/latest
+        return_content: true
+      register: desktop_rustdesk_release
+
+    - name: Download the RustDesk package
+      ansible.builtin.get_url:
+        url: >-
+          {{ desktop_rustdesk_release.json.assets
+             | selectattr('name', 'match', '.*x86_64\.deb$')
+             | map(attribute='browser_download_url')
+             | first }}
+        dest: /tmp/rustdesk.deb
+        mode: "0644"
+
+    - name: Install the RustDesk package
+      ansible.builtin.apt:
+        deb: /tmp/rustdesk.deb
+
+    - name: Set the permanent RustDesk password
+      when: desktop_rustdesk_password | length > 0
+      ansible.builtin.command:
+        argv:
+          - rustdesk
+          - --password
+          - "{{ desktop_rustdesk_password }}"
+      changed_when: true
+      no_log: true
+
+  always:
+    - name: Remove the RustDesk package file
+      ansible.builtin.file:
+        path: /tmp/rustdesk.deb
+        state: absent
+
+- name: Start RustDesk at boot
+  ansible.builtin.systemd_service:
+    name: rustdesk
+    enabled: true
+    state: started
+
+- name: Read the RustDesk ID
+  ansible.builtin.command: rustdesk --get-id
+  register: desktop_rustdesk_id
+  changed_when: false
+
+- name: Show the RustDesk ID
+  ansible.builtin.debug:
+    msg: "RustDesk ID: {{ desktop_rustdesk_id.stdout | trim }}"

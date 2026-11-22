@@ -232,3 +232,9 @@ The run page shows two tables below the job graph, in the job summary: the bench
 row for each test with its result and its message.
 
 Only one run uses the bench at a time. A second run waits.
+
+## The machine of the bench
+
+An Ansible playbook in [`provision/`](provision/README.md) sets up `ci-belgrade-linux` from a fresh
+Debian 13 install: the Actions runner, Docker, the EtherCAT interface, `sudo` for `tc`, RustDesk
+and the tools. Its README says how to install Debian and run the playbook.

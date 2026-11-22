@@ -1,0 +1,5 @@
+---
+# Debian 13 has no ttyd package. VHS needs ttyd 1.7.2 or newer.
+tools_ttyd_version: 1.7.7
+tools_ttyd_url: >-
+  https://github.com/tsl0922/ttyd/releases/download/{{ tools_ttyd_version }}/ttyd.x86_64

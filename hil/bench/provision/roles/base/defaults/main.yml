@@ -1,0 +1,38 @@
+---
+# The project requires CMake 4.0 or newer, and Debian 13 ships 3.31. The Dockerfile
+# installs the same version from the same source.
+base_cmake_version: 4.0.0
+base_cmake_prefix: /opt/cmake-{{ base_cmake_version }}
+base_cmake_url: >-
+  https://github.com/Kitware/CMake/releases/download/v{{ base_cmake_version }}/cmake-{{
+  base_cmake_version }}-linux-x86_64.sh
+
+base_packages:
+  # C++23 toolchain. Debian 13 ships GCC 14 behind build-essential.
+  - build-essential
+  - ninja-build
+  - pkg-config
+  # What vcpkg needs to build the dependencies from source.
+  - git
+  - curl
+  - zip
+  - unzip
+  - tar
+  - xz-utils
+  - autoconf
+  - automake
+  - libtool
+  - perl
+  # tools/check.sh and tools/tidy.sh.
+  - clang
+  - clang-format
+  - clang-tidy
+  - clang-tools
+  - cppcheck
+  - shellcheck
+  # gh's apt repository and scripts in CI.
+  - ca-certificates
+  - jq
+  # The Bench Tests workflow runs the tests in a venv of the system Python.
+  - python3
+  - python3-venv

@@ -1,0 +1,12 @@
+# The EtherCAT interface of the bench. Ansible writes this file (hil/bench/provision, role
+# bench_host).
+#
+# SOEM expects every frame on the wire exactly as it wrote it. Segmentation and receive offload
+# batch and reshape frames in the driver.
+[Match]
+OriginalName={{ bench_host_ethercat_interface }}
+
+[Link]
+GenericSegmentationOffload=no
+GenericReceiveOffload=no
+TCPSegmentationOffload=no

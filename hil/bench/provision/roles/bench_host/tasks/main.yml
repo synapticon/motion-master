@@ -1,0 +1,76 @@
+---
+# ethtool reads and sets the offloads and the interrupt coalescing of the EtherCAT interface,
+# which decide how late a frame returns to SOEM.
+- name: Install ethtool
+  ansible.builtin.apt:
+    name: ethtool
+    state: present
+
+# The playbook and the netem leg of the bench (tools/flaky-bus.sh, tools/install-loop.sh) run
+# sudo with nobody to type a password. The install guide writes the same file by hand, because
+# the first playbook run needs it.
+- name: Allow the bench user sudo without a password
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/{{ bench_user }}
+    content: "{{ bench_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+
+# Without a profile for a wired interface, NetworkManager creates "Wired connection 1" and runs
+# DHCP on it. On the EtherCAT bus nothing answers, and its frames reach the drives.
+- name: Stop NetworkManager from creating a default wired profile
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/90-no-auto-default.conf
+    content: |
+      [main]
+      no-auto-default=*
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart NetworkManager
+
+# The setting above works from the next boot. A profile NetworkManager created at this boot
+# matches the EtherCAT interface too, and could win over the one below.
+- name: Remove the default wired profile
+  community.general.nmcli:
+    conn_name: Wired connection 1
+    state: absent
+
+# NetworkManager brings the link up, which SOEM needs, and sends nothing on it: no IPv4, no IPv6
+# and so no IPv6 link-local address.
+- name: Bring the EtherCAT interface up with no address
+  community.general.nmcli:
+    conn_name: ethercat
+    ifname: "{{ bench_host_ethercat_interface }}"
+    type: ethernet
+    method4: disabled
+    method6: disabled
+    autoconnect: true
+    state: present
+
+- name: Install the EtherCAT link configuration
+  ansible.builtin.template:
+    src: 90-ethercat.link.j2
+    dest: /etc/systemd/network/90-ethercat.link
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply the EtherCAT link configuration
+
+# The P 1535 can be switched off at its own switch, so an unreachable ESP32 is a warning, not a
+# failure. A ping, because each HTTP endpoint of the ESP32 switches the output.
+- name: Check that the ESP32 of the P 1535 answers
+  ansible.builtin.command: ping -c 1 -W 2 {{ bench_host_psu_address }}
+  register: bench_host_psu_ping
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Warn when the ESP32 of the P 1535 does not answer
+  when: bench_host_psu_ping.rc != 0
+  ansible.builtin.debug:
+    msg: >-
+      {{ bench_host_psu_address }} does not answer. Bench Tests cannot switch the drives
+      until it does.

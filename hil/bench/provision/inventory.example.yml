@@ -1,0 +1,16 @@
+---
+# Copy to inventory.yml (gitignored) and edit.
+bench:
+  hosts:
+    ci-belgrade-linux:
+      ansible_host: 192.0.2.10
+      ansible_user: bench
+  vars:
+    # The one account on the machine. The desktop session, the Actions runner, gh, git and
+    # Claude Code all use it.
+    bench_user: bench
+    bench_git_name: Bench User
+    bench_git_email: bench@example.com
+    # The interface of the EtherCAT bus and the address of the ESP32 of the P 1535.
+    bench_host_ethercat_interface: enp2s0
+    bench_host_psu_address: 10.10.1.250

@@ -88,10 +88,13 @@ jobs:
             --cap-add NET_RAW --cap-add NET_ADMIN --cap-add SYS_NICE --cap-add IPC_LOCK \
             --ulimit memlock=-1 "$IMAGE"
 
+      # The system Python of the bench in a venv, the same way as setup.sh. actions/setup-python has
+      # no Python build for Debian, the OS of the bench. The Python client needs 3.12 or newer, and
+      # Debian 13 ships 3.13. The venv puts python on the PATH of every later step.
       - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
       - name: Install the test dependencies
         working-directory: hil/bench

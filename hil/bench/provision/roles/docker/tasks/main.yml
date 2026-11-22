@@ -1,0 +1,49 @@
+---
+# Docker's own repository, because the Dockerfile uses BuildKit features and `docker build`
+# runs BuildKit through the buildx plugin. Docker's packages conflict with Debian's docker.io.
+- name: Remove Debian's Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - docker-buildx
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+
+- name: Add Docker's apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/debian
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components: stable
+    architectures: amd64
+    signed_by: https://download.docker.com/linux/debian/gpg
+    state: present
+
+- name: Install Docker
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Start Docker at boot
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+
+# The runner runs as the bench user, and the workflow calls docker without sudo. The group
+# takes effect at the next login of the user, and at the next start of the runner service.
+- name: Add the bench user to the docker group
+  ansible.builtin.user:
+    name: "{{ bench_user }}"
+    groups: docker
+    append: true

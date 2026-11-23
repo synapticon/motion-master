@@ -143,7 +143,9 @@ host ◀──DCP answer (to the host MAC)── each device
 The request is a raw Ethernet frame to `01:0e:cf:00:00:00`, the multicast address that every
 PROFINET device listens to. It carries a transaction identifier, a response delay factor, and the
 "all" selector, which every device matches. A response delay factor of 1 asks every device to
-answer at once.
+answer at once. A larger factor spreads the answers over a longer time, like the answer delay of
+ListIdentity. Its unit is not checked against the PROFINET standard, IEC 61158-6-10, so the design
+below does not set a value yet.
 
 The answer is a raw Ethernet frame to the MAC address of the host. It carries the same transaction
 identifier and a list of blocks. The blocks that matter here:
@@ -183,6 +185,12 @@ random delay spreads their answers so that they do not arrive at the same moment
 measurement, the sender context held text that reads as 28787 ms, and the drive answered after
 13.2 s. With 500 ms, five answers arrived after 64, 137, 146, 287 and 410 ms. So the request must
 set this field on purpose.
+
+The answer delay must be shorter than the time that the host listens, or a late answer is missed.
+A longer delay spreads the answers of many drives over a longer time, so fewer arrive at the same
+moment. The cost is a longer wait for the user. The design below uses the listen time minus
+500 ms. The 500 ms margin covers the trip back and the time that the drive needs to handle the
+request. Whether a shorter delay is enough for a long chain is not measured.
 
 **Both ends need an IP address.** The answer is a UDP datagram to the IP address of the host. A
 drive without an IP address cannot send it. A host without an IP address on the adapter cannot
@@ -350,19 +358,32 @@ is not measured.
 
 This is the design in issue #58. It is not built.
 
-1. In the Console, the user selects an adapter and clicks **Discover**.
+1. In the Console, the user selects an adapter, sets the discovery time, and clicks **Discover**.
 2. The Console calls `GET /api/ethernet/discovery?adapter=<name>&durationMs=<ms>`.
 3. Motion Master sends DCP Identify All and ListIdentity at the same time and collects the answers
-   for `durationMs`. With a `durationMs` long enough for LLDP, it also listens for LLDP.
+   for `durationMs`. The ListIdentity request sets the answer delay to `durationMs` minus 500 ms.
+   With a `durationMs` long enough for LLDP, it also listens for LLDP.
 4. Motion Master merges the answers into one row per drive.
 5. The user selects drives. For SPoE, the Console puts their addresses into
    `fieldbus.ipAddresses` and starts SPoE with `POST /api/init`.
 
-The Console offers **Discover** with `durationMs=1000`, and **Deep search** with
+`durationMs` is the one value that sets the timing. It sets how long Motion Master listens, and the
+answer delay of ListIdentity follows from it. A user who knows that a chain has many drives sets a
+longer time, and the drives spread their answers over a longer time. The answer delay is always
+shorter than the listen time, so no request can miss answers through its own settings.
+`durationMs` must be more than 500 ms. The server refuses a smaller value with 400.
+
+The Console shows the discovery time in a field next to **Discover**, with 2000 ms as the
+default. The help text of the field says to raise it for a long chain. So **Discover** takes 2 s by
+default, and its ListIdentity answers spread over up to 1500 ms. **Deep search** sends
 `durationMs=35000`, which includes LLDP.
+
+The response states the values that the request used, so the user sees what it did.
 
 ```json
 {
+  "durationMs": 2000,
+  "answerDelayMs": 1500,
   "devices": [
     {
       "ipAddress": "192.168.100.17",
@@ -401,6 +422,8 @@ Decisions still to make:
 2. Whether Motion Master also assigns addresses with DCP Set and the CIP write, or only with DHCP.
 3. Whether the LLDP listener runs only during a request or in the background.
 4. Discovery on macOS.
+5. The response delay factor of DCP Identify All, after its unit is checked.
+6. The largest `durationMs` that the server accepts.
 
 ## References
 

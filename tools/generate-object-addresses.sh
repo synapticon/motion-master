@@ -32,7 +32,7 @@ if [[ ! -x "$binary" ]]; then
 fi
 
 if [[ "$check" == false ]]; then
-  "$binary" generate-object-addresses --esi "$esi" --out "$root/libs/node" \
+  "$binary" generate-object-addresses --esi "$esi" --cpp-dir "$root/libs/node" \
     --python "$root/$python" --typescript "$root/$typescript"
   for header in "${headers[@]}"; do
     clang-format -i "$root/libs/node/$header"
@@ -43,7 +43,7 @@ fi
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 # The ESI warnings are the same on every run, so the check prints them only when the run fails.
-if ! "$binary" generate-object-addresses --esi "$esi" --out "$out" \
+if ! "$binary" generate-object-addresses --esi "$esi" --cpp-dir "$out" \
   --python "$out/$(basename "$python")" --typescript "$out/$(basename "$typescript")" \
   >"$out/log" 2>&1; then
   cat "$out/log" >&2

@@ -49,14 +49,14 @@ Options parseOptions(int argc, char** argv) {
   // very ESI parser the server already links, and a second binary to carry one function is a
   // second binary to build, package and keep in step.
   std::string esiPath;
-  std::string outDir;
+  std::string cppDir;
   auto* generate =
       app.add_subcommand("generate-object-addresses",
                          "Generate the ObjectAddress headers from a vendor's ESI file and exit");
   generate->add_option("--esi", esiPath, "Path to the ESI XML to read")
       ->required()
       ->check(CLI::ExistingFile);
-  generate->add_option("--out", outDir, "Directory to write the headers into")
+  generate->add_option("--cpp-dir", cppDir, "Directory to write the C++ headers into")
       ->required()
       ->check(CLI::ExistingDirectory);
   // Required, so one run writes all five files and the three languages hold one list.
@@ -85,7 +85,7 @@ Options parseOptions(int argc, char** argv) {
   }
 
   if (*generate) {
-    const auto result = mm::generateObjectAddresses(esiPath, outDir, pythonPath, typescriptPath);
+    const auto result = mm::generateObjectAddresses(esiPath, cppDir, pythonPath, typescriptPath);
     if (!result) {
       std::cerr << result.error() << "\n";
       // NOLINTNEXTLINE(concurrency-mt-unsafe)

@@ -19,6 +19,15 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- On Linux x86-64, the binary of the deb and rpm packages starts again on a machine without OBLAC
+  Drives. Started by a user other than root, it stopped with "error while loading shared libraries:
+  libMU_3SL_interface.so.3". The binary has file capabilities, so the Linux loader ignored the
+  directory of the binary. The binary now names `/opt/motion-master` as a second place to find the
+  library. On a machine with OBLAC Drives, the binary now loads its own copy of the library instead
+  of the copy of OBLAC Drives.
+
 ## [6.0.0-alpha.127] - 2026-11-16
 
 ### Added

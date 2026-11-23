@@ -92,6 +92,8 @@ Run `setup.sh` as yourself. Do not use `sudo`. The script calls `sudo` itself fo
 
 Alongside the binary the tarball carries `motion-master-capture`, `setup.sh` and `install-auto-tuning.sh`, a `SETUP.md` with the same first-run notes, the bundled `cert.pem`/`key.pem`, and the annotated `motion-master.example.jsonc`.
 
+On Linux x86-64, put the files of the unpacked directory into `/opt/motion-master`, then run `setup.sh` there. The binary needs the library `libMU_3SL_interface.so.3`, which the tarball carries beside it. After `setup.sh` sets the capabilities, a user other than root starts the binary in secure-execution mode. In that mode the Linux loader does not search the directory of the binary. It searches `/opt/motion-master`, because the binary names that directory. In any other directory, the binary does not start, or it loads another copy of the library that the loader finds in its cache.
+
 ## Linux capabilities
 
 On Linux the binary needs four capabilities. All three Linux install paths apply the same set — the deb `postinst`, the rpm `%post` scriptlet, and the tarball's `setup.sh` all run:

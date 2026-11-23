@@ -3,8 +3,8 @@
 # platform this file defines no target, and MM_HAVE_MU_3SL stays off.
 #
 # Linux loads the library by its soname, libMU_3SL_interface.so.3. The build copies the file next to
-# each executable under that name, and the executable finds it through an $ORIGIN run path. So a
-# package carries one file and no symlink.
+# each executable under that name, and the executable finds it through its run path. So a package
+# carries one file and no symlink.
 
 set(MU_3SL_DIR "${CMAKE_SOURCE_DIR}/extern/MU_3SL-3.4.2")
 set(MM_HAVE_MU_3SL OFF)
@@ -48,7 +48,15 @@ function(mm_link_mu_3sl target)
     VERBATIM)
   # The packages ship the executable from the build tree, so the build tree run path is the one that
   # ships. BUILD_WITH_INSTALL_RPATH keeps the absolute path of extern/ out of it.
+  #
+  # An executable with file capabilities runs in secure-execution mode when a user other than root
+  # starts it. In that mode the loader expands $ORIGIN only to a trusted system directory, so it
+  # skips the $ORIGIN entry for /opt/motion-master. It keeps an absolute entry. The deb and rpm
+  # packages install to /opt/motion-master and set file capabilities, so that path is the second
+  # entry. Without it the loader falls back to its cache, which holds no copy of the library on most
+  # machines, and the copy of OBLAC Drives on a machine where that program is installed.
   if(NOT WIN32)
-    set_target_properties(${target} PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN")
+    set_target_properties(${target} PROPERTIES BUILD_WITH_INSTALL_RPATH ON
+                                               INSTALL_RPATH "$ORIGIN;/opt/motion-master")
   endif()
 endfunction()

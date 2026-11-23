@@ -12,6 +12,8 @@ const DEEP_SEARCH_DURATION_MS = 35000;
 
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide';
 const fieldCls = 'border border-grey-300 px-3 h-[38px] text-sm bg-white';
+// A fixed minimum width on the two discovery buttons keeps them from moving while their label
+// says that a discovery runs.
 const btnCls =
   'inline-flex items-center justify-center border border-grey-300 text-grey-700 px-4 h-[38px] text-xs hover:border-syn-red hover:text-syn-red disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors';
 
@@ -140,7 +142,7 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
         <button
           onClick={() => discovery.mutate(duration)}
           disabled={!canDiscover || !durationValid}
-          className={btnCls}
+          className={`${btnCls} min-w-[9rem]`}
           title="Send PROFINET DCP Identify All and EtherNet/IP ListIdentity, and collect the answers and any LLDP frame for the discovery time. Opens no connection to a drive."
         >
           {discovery.isPending && discovery.variables !== DEEP_SEARCH_DURATION_MS
@@ -150,7 +152,7 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
         <button
           onClick={() => discovery.mutate(DEEP_SEARCH_DURATION_MS)}
           disabled={!canDiscover}
-          className={btnCls}
+          className={`${btnCls} min-w-[12rem]`}
           title="The same requests as Discover, but listen for 35 s, longer than the LLDP interval of about 30 s. Also finds a drive that only LLDP finds, such as one without an IP address."
         >
           {discovery.isPending && discovery.variables === DEEP_SEARCH_DURATION_MS

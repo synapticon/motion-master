@@ -9,7 +9,7 @@
 
 ## Terms
 
-- **SPoE** (Synapticon Protocol over Ethernet). The protocol over TCP that Motion Master uses to
+- **SPoE** (SOMANET Protocol over Ethernet). The protocol over TCP that Motion Master uses to
   talk to a SOMANET drive that runs an Ethernet fieldbus other than EtherCAT. The SPoE fieldbus
   driver connects to TCP port 8080 of each drive (`libs/comm/spoe_fieldbus_driver.h`).
 - **netX**. The Hilscher communication chip of an Integro. It runs the fieldbus stack and the SPoE
@@ -33,7 +33,12 @@
 
 ## Which devices this concerns
 
-Only an Integro runs a fieldbus other than EtherCAT. Node and Circulo run EtherCAT only.
+Only an Integro runs a fieldbus other than EtherCAT. An ACTILINK-S is an Integro, so the same holds
+for it. Node and Circulo run EtherCAT only.
+
+SPoE runs only on an Integro. A Jasper-based drive runs EtherCAT only. The Jasper firmware has SPoE
+in its simulator, which runs the firmware on a PC, and nowhere else. The firmware team does not plan
+SPoE for the firmware of a real Jasper-based drive.
 
 An Integro runs one fieldbus protocol at a time. The `.variant` file on the device selects it. The
 protocols exclude each other. Motion Master reads the file and decodes it in

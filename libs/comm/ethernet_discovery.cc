@@ -1,6 +1,7 @@
 #include "comm/ethernet_discovery.h"
 
 #include <algorithm>
+#include <iterator>
 #include <format>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -272,10 +273,9 @@ std::string_view toString(EthernetFirmware firmware) {
 }
 
 void to_json(nlohmann::json& j, const DiscoveredEthernetDevice& device) {
-  nlohmann::json foundBy = nlohmann::json::array();
-  for (const auto method : device.foundBy) {
-    foundBy.push_back(toString(method));
-  }
+  std::vector<std::string_view> foundBy;
+  std::ranges::transform(device.foundBy, std::back_inserter(foundBy),
+                         [](DiscoveryMethod method) { return toString(method); });
   j = nlohmann::json{
       {"ipAddress",
        device.ipAddress ? nlohmann::json(formatIpv4(*device.ipAddress)) : nlohmann::json(nullptr)},

@@ -52,9 +52,10 @@ std::optional<Ipv4Interface> readIpv4(const std::string& adapter) {
       // missing bytes meaning zero. So the family is not checked, and only sa_len bytes are read.
       if (entry->netmask != nullptr) {
         sockaddr_in mask{};
-        size_t length = sizeof(mask);
 #ifdef __APPLE__
-        length = std::min<size_t>(entry->netmask->sa_len, sizeof(mask));
+        const size_t length = std::min<size_t>(entry->netmask->sa_len, sizeof(mask));
+#else
+        const size_t length = sizeof(mask);
 #endif
         std::memcpy(&mask, entry->netmask, length);
         std::memcpy(ipv4.netmask.data(), &mask.sin_addr, ipv4.netmask.size());

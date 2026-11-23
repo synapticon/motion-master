@@ -27,6 +27,7 @@
 #include "comm/al_status_codes.h"
 #include "comm/base.h"
 #include "comm/esc_registers.h"
+#include "comm/ethernet_discovery.h"
 #include "comm/fieldbus_driver.h"
 #include "comm/foe_error_codes.h"
 #include "comm/mailbox_error_codes.h"
@@ -669,6 +670,31 @@ void HttpServer::run() {
 
   router.get("/api/adapters", [](const mm::api::Request&) {
     return mm::api::json(nlohmann::json(mm::comm::enumerateNetworkAdapters()));
+  });
+
+  // Waits for the whole discovery time, up to a minute, on a pool thread. It opens no connection to
+  // a device and takes no lock of the fieldbus, so it runs beside a SPoE or SOEM driver on the same
+  // adapter.
+  router.get("/api/ethernet/discovery", [](const mm::api::Request& req) {
+    const auto adapter = req.query("adapter");
+    if (!adapter || adapter->empty()) {
+      return mm::api::badRequest("'adapter' is required");
+    }
+    auto duration = mm::comm::kDefaultDiscoveryDuration;
+    if (req.query("durationMs")) {
+      const auto durationMs = req.queryAs<uint32_t>("durationMs");
+      if (!durationMs) {
+        return mm::api::badRequest("'durationMs' must be a number of milliseconds");
+      }
+      duration = std::chrono::milliseconds(*durationMs);
+    }
+    if (auto why = mm::comm::checkDiscoveryDuration(duration)) {
+      return mm::api::badRequest(*why);
+    }
+    if (auto resolved = mm::comm::resolveNetworkAdapter(*adapter); !resolved) {
+      return mm::api::notFound(resolved.error());
+    }
+    return mm::api::respond(mm::comm::discoverEthernetDevices(*adapter, duration));
   });
 
   router.get("/api/version", [this](const mm::api::Request&) {

@@ -694,6 +694,21 @@ class MotionMasterClient:
         log.info("found %d device(s)", found)
         return found
 
+    def discover_ethernet_devices(self, adapter, duration_ms=None):
+        """Find the drives on an Ethernet adapter of the server (discoverEthernetDevices).
+
+        `adapter` is the name or the MAC address of the adapter. `duration_ms` is how long the
+        server collects answers, 2000 when not given; 35000 also catches every drive that only
+        sends LLDP. The result has one row per drive, with its IP address, which
+        `fieldbus.ipAddresses` of a SPoE driver takes.
+        """
+        query = {"adapter": adapter}
+        if duration_ms is not None:
+            query["durationMs"] = duration_ms
+        result = self.call("discoverEthernetDevices", query=query).json()
+        log.info("found %d device(s) on %s", len(result["devices"]), result["adapter"])
+        return result
+
     def start_capture(self, adapter=None, seconds=None):
         """Start a capture of the EtherCAT frames that runs until stop_capture() (startCapture).
 

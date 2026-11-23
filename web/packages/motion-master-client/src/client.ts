@@ -25,6 +25,7 @@ import type {
   Cia402Status,
   DeviceFile,
   EsiParseResult,
+  EthernetDiscovery,
   HrdRecording,
   IcMuRestoreFile,
   IntegroVariant,
@@ -1137,6 +1138,24 @@ export class MotionMasterClient {
     options: { signal?: AbortSignal } = {},
   ): Promise<IcMuRestoreFile> {
     return (await this.api.parseIcMuRestoreFile(bytes, { signal: options.signal })).data;
+  }
+
+  /**
+   * Finds the drives on an Ethernet adapter of the server (`discoverEthernetDevices`). `adapter` is
+   * the name or the MAC address of the adapter. `durationMs` is how long the server collects
+   * answers, 2000 when not given; 35000 also catches every drive that only sends LLDP. The result
+   * has one row per drive, with its IP address, which `fieldbus.ipAddresses` of a SPoE driver
+   * takes.
+   */
+  async discoverEthernetDevices(
+    adapter: string,
+    options: { durationMs?: number; signal?: AbortSignal } = {},
+  ): Promise<EthernetDiscovery> {
+    const { durationMs, signal } = options;
+    const result = (await this.api.discoverEthernetDevices({ adapter, durationMs }, { signal }))
+      .data;
+    log('found %d device(s) on %s', result.devices.length, result.adapter);
+    return result;
   }
 
   /**

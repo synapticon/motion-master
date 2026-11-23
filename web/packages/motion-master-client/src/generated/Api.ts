@@ -27,6 +27,7 @@ import {
   Encoders,
   EscRegister,
   EsiParseResult,
+  EthernetDiscovery,
   FirmwareCompatibility,
   FirmwarePackageEntry,
   FirmwarePackageName,
@@ -100,6 +101,37 @@ export class Api<
     >({
       path: `/api/adapters`,
       method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity request on the adapter at the same time, collects the answers for `durationMs`, and listens for LLDP during that time. Answers the drives found, one row per drive. The discovery opens no connection to a drive, so it does not disturb a client that works with one, for example over SPoE. DCP finds a drive with PROFINET firmware, also one without an IP address. ListIdentity finds a drive with EtherNet/IP firmware that has an IP address. It needs an IPv4 address on the adapter, and it is not sent without one; `warnings` says so. LLDP finds a drive with either firmware, but a drive sends its LLDP frame by itself, about every 30 s. A `durationMs` of 35000 catches it for sure, and a shorter one only by chance. The ListIdentity request asks every drive to answer within `durationMs` minus 500 ms, at a random time. A longer `durationMs` spreads the answers of a long chain over a longer time, so fewer of them arrive at the same moment. The answers of one drive are merged by its IP address or by its MAC address. The MAC address of an LLDP answer is its chassis ID, not the source address of the frame, because a drive sends LLDP from another MAC address. The discovery needs raw access to the adapter: `CAP_NET_RAW` on Linux, which the packages grant at install, Npcap on Windows, and read and write access to `/dev/bpf*` on macOS.
+   *
+   * @name DiscoverEthernetDevices
+   * @summary Find the drives on an Ethernet adapter
+   * @request GET:/api/ethernet/discovery
+   */
+  discoverEthernetDevices = (
+    query: {
+      /**
+       * The name or the MAC address of the adapter, as `GET /api/adapters` lists it
+       * @example "spoe0"
+       */
+      adapter: string;
+      /**
+       * How long to collect answers, in ms. More than 500 and at most 60000. 35000 includes every drive that sends LLDP.
+       * @min 501
+       * @max 60000
+       * @default 2000
+       */
+      durationMs?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<EthernetDiscovery, void>({
+      path: `/api/ethernet/discovery`,
+      method: "GET",
+      query: query,
       format: "json",
       ...params,
     });

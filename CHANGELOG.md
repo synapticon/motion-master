@@ -19,6 +19,17 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- Motion Master finds the drives on an Ethernet adapter and their IP addresses, so a user does not
+  type them for SPoE. It sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity request,
+  and listens for LLDP. It opens no connection to a drive. Three ways reach it:
+  `GET /api/ethernet/discovery?adapter=<name>&durationMs=<ms>`, the command
+  `motion-master discover-ethernet --adapter <name>`, and the Console Fieldbus page, which adds the
+  selected addresses to the IP address list. A discovery takes 2 s by default. A discovery of 35 s
+  also finds a drive that only sends LLDP. Both clients have `discoverEthernetDevices`. Linux,
+  Windows and macOS (#254).
+
 ### Changed
 
 - `--list-adapters` and `--update-cert` are now the subcommands `list-adapters` and `update-cert`, like

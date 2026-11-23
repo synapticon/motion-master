@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import PageHeader from '../components/PageHeader';
 import ControlExplainer from '../components/ControlExplainer';
+import EthernetDiscovery from '../components/EthernetDiscovery';
 import { RequestTiming, requestTiming, type RequestTimingValue } from '../components/RequestTiming';
 import SlavePositionBadge from '../components/SlavePositionBadge';
 import { useConnection, type SpoeMode } from '../contexts/ConnectionContext';
@@ -156,6 +157,12 @@ export default function FieldbusControlPage() {
     .map((a) => a.trim())
     .filter((a) => a.length > 0);
   const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : adapter.trim().length > 0;
+
+  // Appends the addresses that discovery found and the user selected, after the ones in the list.
+  function addIpAddresses(found: string[]) {
+    const added = found.filter((a) => !spoeAddresses.includes(a));
+    setIpAddresses([...spoeAddresses, ...added].join('\n'));
+  }
 
   const initMutation = useMutation({
     mutationFn: () =>
@@ -396,6 +403,7 @@ export default function FieldbusControlPage() {
                         answer from it.
                       </p>
                     </div>
+                    <EthernetDiscovery onAdd={addIpAddresses} />
                     <div>
                       <label className={labelCls}>Port</label>
                       <input

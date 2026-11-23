@@ -21,7 +21,7 @@
 // Every std::exit below carries a NOLINT for concurrency-mt-unsafe. The call is unsafe only
 // against other threads running during teardown, and this function runs before main starts any:
 // it is the argument parser, and each exit is the CLI refusing to start (a parse error,
-// --list-adapters, an unreadable config).
+// list-adapters, an unreadable config).
 Options parseOptions(int argc, char** argv) {
   Options opts;
   opts.certUrl = mm::defaultCertUrl();
@@ -32,10 +32,6 @@ Options parseOptions(int argc, char** argv) {
   CLI::App app{"Motion Master", "motion-master"};
   app.set_version_flag("--version", std::string{mm::core::kVersion});
 
-  bool listAdapters = false;
-  app.add_flag("--list-adapters", listAdapters,
-               "Print network adapters (MAC -> interface) and exit");
-
   app.add_option("-c,--config", opts.configPath,
                  "Path to a JSONC config file — ports, fieldbus, log level, and TLS live only in "
                  "such a file (see motion-master.example.jsonc). Overrides the motion-master.jsonc "
@@ -43,9 +39,6 @@ Options parseOptions(int argc, char** argv) {
       ->check(CLI::ExistingFile);
   app.add_flag("--open", opts.openBrowser,
                "Open https://motion-master.synapticon.com/apps/console/ in the default browser");
-  app.add_flag("--update-cert", opts.updateCert,
-               "Download a fresh TLS cert/key, install them at the configured (or default) path, "
-               "and exit");
   app.add_option("--cert-url", opts.certUrl, "Source URL for the TLS certificate")
       ->capture_default_str();
   app.add_option("--key-url", opts.keyUrl, "Source URL for the TLS private key")
@@ -73,6 +66,17 @@ Options parseOptions(int argc, char** argv) {
   generate->add_option("--typescript", typescriptPath, "Path of the TypeScript module to write")
       ->required();
 
+  // Actions, so subcommands like every other action that does one job and exits.
+  auto* listAdapters =
+      app.add_subcommand("list-adapters", "Print network adapters (MAC -> interface) and exit");
+  // Falls through to the top-level options, so --config, --cert-url and --key-url may follow it.
+  // The startup self-heal reads the two URLs too, which is why they are not options of this
+  // subcommand alone.
+  auto* updateCert = app.add_subcommand(
+      "update-cert",
+      "Download a fresh TLS cert/key, install them at the configured (or default) path, and exit");
+  updateCert->fallthrough();
+
   try {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
@@ -98,7 +102,9 @@ Options parseOptions(int argc, char** argv) {
     std::exit(0);
   }
 
-  if (listAdapters) {
+  opts.updateCert = static_cast<bool>(*updateCert);
+
+  if (*listAdapters) {
     for (const auto& adapter : mm::comm::enumerateNetworkAdapters()) {
       std::cout << adapter.macLinux << "  " << adapter.name;
       if (!adapter.description.empty()) {

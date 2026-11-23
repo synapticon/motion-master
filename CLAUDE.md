@@ -713,7 +713,7 @@ downloads a pair, validates it (parses, covers every name we serve via `X509_che
 expired, key matches cert), and installs atomically. At startup a missing, expired, or
 expiring-soon cert (within 7 days) triggers a fetch before binding TLS. Missing plus
 fetch-failure is fatal; a present cert that fails to refresh is still served.
-`tls.autoUpdate: false` opts out. `--update-cert` fetches and exits. `GET /api/cert` reports
+`tls.autoUpdate: false` opts out. `update-cert` fetches and exits. `GET /api/cert` reports
 validity for the UI banner; `POST /api/cert/refresh` is the manual button.
 
 `tools/run.sh` finds a cert in this order: next to the binary → `~/.acme.sh/…` → self-signed.

@@ -47,7 +47,7 @@ It serves two ports, both bound to `127.0.0.1` and each on its own event loop an
 The fieldbus does **not** come up on its own unless you configure it to. Either bring it up from the console, or do it over the API:
 
 ```bash
-motion-master --list-adapters   # find your NIC
+motion-master list-adapters   # find your NIC
 
 base=https://local.motion-master.synapticon.com:61447
 curl "$base/api/version"
@@ -117,23 +117,26 @@ Requirements for running a release binary (building from source has its own — 
 The command line carries only *actions* and the cert-fetch source URLs. Every tunable **setting** — ports, fieldbus driver/adapter, log level, CORS origin, TLS cert/key paths, and cert auto-update — lives in a JSONC config file (see [`motion-master.example.jsonc`](apps/motion_master/motion-master.example.jsonc)). Motion Master loads that file from one of two places: the path you pass with `-c`/`--config`, or, absent that, a `motion-master.jsonc` sitting next to the executable (auto-discovered — `--config` wins over it). With neither, all built-in defaults apply. The Windows release ships such a `motion-master.jsonc` preconfigured to a 4 ms real-time cycle (robust on stock Windows timers); Linux and macOS keep the 1 ms default and ship only the annotated example.
 
 ```text
-motion-master [OPTIONS]
+motion-master [OPTIONS] [SUBCOMMANDS]
 
 OPTIONS:
   -h, --help              Print this help message and exit
       --version           Display program version information and exit
-      --list-adapters     Print network adapters (MAC -> interface) and exit
   -c, --config TEXT:FILE  Path to a JSONC config file — ports, fieldbus, log level,
                           and TLS live only in such a file (see motion-master.example.jsonc).
                           Overrides the motion-master.jsonc auto-discovered next to the executable
       --open              Open https://motion-master.synapticon.com/apps/console/ in the
                           default browser
-      --update-cert       Download a fresh TLS cert/key, install them at the configured
-                          (or default) path, and exit
       --cert-url TEXT     Source URL for the TLS certificate
                           [default: .../releases/download/tls-cert/cert.pem]
       --key-url TEXT      Source URL for the TLS private key
                           [default: .../releases/download/tls-cert/key.pem]
+
+SUBCOMMANDS:
+  generate-object-addresses  Generate the ObjectAddress headers from a vendor's ESI file and exit
+  list-adapters              Print network adapters (MAC -> interface) and exit
+  update-cert                Download a fresh TLS cert/key, install them at the configured
+                             (or default) path, and exit
 ```
 
 On Linux, `motion-master` requires raw socket and RT scheduling capabilities. Release packages set all four automatically (deb `postinst`, rpm `%post`, tarball `setup.sh`) — see [Linux capabilities](docs/INSTALLATION.md#linux-capabilities). Without them the binary still runs and serves the API, but EtherCAT initialisation fails and the game loop cannot go real-time.

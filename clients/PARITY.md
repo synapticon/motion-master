@@ -167,6 +167,7 @@ A row with a name in one column only belongs to that language. Its reason says w
 | `stream_monitoring` | `streamMonitoring` | |
 | `notifications` | `notifications` | |
 | `start_capture` | `startCapture` | |
+| `discover_ethernet_devices` | `discoverEthernetDevices` | |
 | `export_eni` | `exportEni` | |
 | `parse_eni` | `parseEni` | |
 | `parse_esi` | `parseEsi` | |
@@ -205,6 +206,7 @@ read `DEBUG=motion-master-client:http`, the convention of the `debug` package of
 | `check-firmware-compatibility.py` | `check-firmware-compatibility.ts` | |
 | `cia402-state.py` | `cia402-state.ts` | |
 | `delete-file.py` | `delete-file.ts` | |
+| `discover-ethernet.py` | `discover-ethernet.ts` | |
 | `device-locate.py` | `device-locate.ts` | |
 | `diagnostics.py` | `diagnostics.ts` | |
 | `dump-process-data.py` | `dump-process-data.ts` | |

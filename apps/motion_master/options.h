@@ -29,7 +29,7 @@ struct Options {
 /// @param argc Argument count forwarded from main().
 /// @param argv Argument vector forwarded from main().
 /// @return Fully populated Options.
-/// @note Never returns on --help, --version, --list-adapters, a CLI parse error, or a config parse
-///       or validation failure (config failures exit 1). The configured adapter is resolved later,
-///       at driver init, not here.
+/// @note Never returns on --help, --version, --list-adapters, discover-ethernet, a CLI parse
+///       error, or a config parse or validation failure (config failures exit 1). The configured
+///       adapter is resolved later, at driver init, not here.
 Options parseOptions(int argc, char** argv);

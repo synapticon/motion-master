@@ -5,6 +5,7 @@ add_library(
   control_plane_locks.cc
   esc_names.cc
   esc_registers.cc
+  ethernet_discovery.cc
   fieldbus_driver.cc
   foe_error.cc
   foe_error_codes.cc
@@ -20,6 +21,18 @@ add_library(
   spoe_frame.cc
   spoe_process_data.cc)
 add_library(mm::comm ALIAS comm)
+
+# Ethernet discovery sends and receives whole frames. Linux uses a raw socket. Windows and macOS use
+# pcap: the Npcap SDK the build vendors for SOEM, and the libpcap macOS ships.
+if(WIN32 OR APPLE)
+  target_sources(comm PRIVATE ethernet_socket_pcap.cc)
+else()
+  target_sources(comm PRIVATE ethernet_socket_linux.cc)
+endif()
+if(APPLE)
+  find_library(PCAP_LIBRARY pcap REQUIRED)
+  target_link_libraries(comm PRIVATE ${PCAP_LIBRARY})
+endif()
 
 target_include_directories(comm PUBLIC ${CMAKE_SOURCE_DIR}/libs)
 

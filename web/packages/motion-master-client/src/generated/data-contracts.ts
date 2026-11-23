@@ -12,6 +12,68 @@
 
 type UtilRequiredKeys<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>;
 
+export interface EthernetDiscovery {
+  /**
+   * The name of the adapter the discovery ran on
+   * @example "spoe0"
+   */
+  adapter: string;
+  /**
+   * How long the discovery collected answers, in ms
+   * @example 2000
+   */
+  durationMs: number;
+  /**
+   * The longest answer delay the ListIdentity request asked for, in ms
+   * @example 1500
+   */
+  answerDelayMs: number;
+  devices: DiscoveredEthernetDevice[];
+  /** What the discovery could not do, such as a request it could not send */
+  warnings: string[];
+}
+
+export interface DiscoveredEthernetDevice {
+  /**
+   * The IPv4 address of the drive. Null when the drive has none.
+   * @example "192.168.100.17"
+   */
+  ipAddress: string | null;
+  /**
+   * The MAC address of the drive, in lowercase with colons
+   * @example "40:49:8a:01:29:3c"
+   */
+  macAddress: string | null;
+  /**
+   * The product name from ListIdentity, the name of station from DCP, or the system name from LLDP. Empty when no answer carries one.
+   * @example "Actilink"
+   */
+  name: string;
+  /** The fieldbus firmware of the drive. Null when only LLDP found it. */
+  firmware: "ethernet-ip" | "profinet" | null;
+  /**
+   * The vendor ID from ListIdentity or DCP
+   * @example 1783
+   */
+  vendorId: number | null;
+  /** The device ID from DCP */
+  deviceId: number | null;
+  /**
+   * The product code from ListIdentity
+   * @example 1025
+   */
+  productCode: number | null;
+  /**
+   * The serial number from ListIdentity
+   * @example 1938
+   */
+  serialNumber: number | null;
+  /** Whether the drive is on the subnet of the adapter. Null when the drive or the adapter has no IPv4 address. */
+  sameSubnet: boolean | null;
+  /** Every method that found the drive */
+  foundBy: ("dcp" | "list-identity" | "lldp")[];
+}
+
 /** A CiA402 drive's control snapshot — its state machine, control words, and mode. */
 export interface Cia402Status {
   /**

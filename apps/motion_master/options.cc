@@ -3,8 +3,10 @@
 #include <spdlog/spdlog.h>
 
 #include <CLI/CLI.hpp>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -13,15 +15,54 @@
 
 #include "cert_updater.h"
 #include "comm/base.h"
+#include "comm/ethernet_discovery.h"
 #include "config.h"
 #include "core/platform.h"
 #include "core/version.h"
 #include "object_address_generator.h"
 
+namespace {
+
+// One line per device, so a reader can copy an address. --json prints the body of the route
+// instead.
+void printDiscovery(const mm::comm::EthernetDiscoveryResult& result) {
+  std::cout << std::format("adapter {}, {} ms, answer delay {} ms\n", result.adapter,
+                           result.durationMs, result.answerDelayMs);
+  for (const auto& device : result.devices) {
+    // The JSON of the route, so the CLI prints every field the way the API spells it.
+    const nlohmann::json j = device;
+    std::string line;
+    // The order of the JSON object is alphabetical, so the address comes first by this list.
+    for (const std::string key :
+         {"ipAddress", "macAddress", "firmware", "name", "vendorId", "deviceId", "productCode",
+          "serialNumber", "sameSubnet", "foundBy"}) {
+      const auto& value = j.at(key);
+      std::string text = value.is_null() ? "-" : value.dump();
+      if (key == "foundBy") {
+        text.clear();
+        for (const auto& method : value) {
+          text += (text.empty() ? "" : ",") + method.get<std::string>();
+        }
+      }
+      if (!line.empty()) {
+        line += "  ";
+      }
+      line.append(key).append("=").append(text);
+    }
+    std::cout << line << "\n";
+  }
+  for (const auto& warning : result.warnings) {
+    std::cerr << "warning: " << warning << "\n";
+  }
+  std::cout << result.devices.size() << " device(s)\n";
+}
+
+}  // namespace
+
 // Every std::exit below carries a NOLINT for concurrency-mt-unsafe. The call is unsafe only
 // against other threads running during teardown, and this function runs before main starts any:
 // it is the argument parser, and each exit is the CLI refusing to start (a parse error,
-// --list-adapters, an unreadable config).
+// --list-adapters, discover-ethernet, an unreadable config).
 Options parseOptions(int argc, char** argv) {
   Options opts;
   opts.certUrl = mm::defaultCertUrl();
@@ -73,6 +114,25 @@ Options parseOptions(int argc, char** argv) {
   generate->add_option("--typescript", typescriptPath, "Path of the TypeScript module to write")
       ->required();
 
+  // An action rather than a setting: it finds the drives on an Ethernet adapter and exits. The same
+  // discovery as GET /api/ethernet/discovery, for a host where no server runs. Deep search is a
+  // longer --duration-ms, such as 35000, which outlasts the LLDP interval of a drive.
+  std::string discoveryAdapter;
+  int64_t discoveryDurationMs = mm::comm::kDefaultDiscoveryDuration.count();
+  bool discoveryJson = false;
+  auto* discover = app.add_subcommand(
+      "discover-ethernet", "Find the drives on an Ethernet adapter, print them, and exit");
+  discover
+      ->add_option("--adapter", discoveryAdapter,
+                   "Name or MAC address of the adapter, as --list-adapters prints it")
+      ->required();
+  discover
+      ->add_option("--duration-ms", discoveryDurationMs,
+                   "How long to collect answers. 35000 also catches every drive that only sends "
+                   "LLDP")
+      ->capture_default_str();
+  discover->add_flag("--json", discoveryJson, "Print the result as JSON");
+
   try {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
@@ -94,6 +154,23 @@ Options parseOptions(int argc, char** argv) {
       std::cout << path << "\n";
     }
     std::cout << result->rows << " object addresses from " << esiPath << "\n";
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    std::exit(0);
+  }
+
+  if (*discover) {
+    const auto result = mm::comm::discoverEthernetDevices(
+        discoveryAdapter, std::chrono::milliseconds{discoveryDurationMs});
+    if (!result) {
+      std::cerr << result.error() << "\n";
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
+      std::exit(1);
+    }
+    if (discoveryJson) {
+      std::cout << nlohmann::json(*result).dump(2) << "\n";
+    } else {
+      printDiscovery(*result);
+    }
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(0);
   }

@@ -1321,6 +1321,15 @@ Wedges the file system of a Circulo on purpose, which is the reproduction of syn
 sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interface> [--slave 1]   [--file config.csv] [--packets 2] [--pause 200] [--no-abort]
 ```
 
+### ethernet_discovery
+
+Shows which discovery methods find a drive with EtherNet/IP or PROFINET firmware, for #58. On one adapter it sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity broadcast, and listens for LLDP. It prints every answer with its arrival time, MAC address, IP address and name, and then a summary per IP address that says which method found it. It marks an address on another subnet than the adapter. Every frame goes through a raw socket, so it also sees an answer that the kernel drops. It never opens a TCP connection, so it does not disturb a SPoE client. ListIdentity needs an IPv4 source address: the adapter's own, or `--source-ip`. LLDP needs a listen window longer than the interval at which a drive sends it. Linux only. It needs raw socket access.
+
+```bash
+sudo ./build/x64-linux-debug/hil/ethernet_discovery/ethernet_discovery --ifname <interface> [--duration 35] \
+  [--source-ip <ipv4>] [--methods dcp,eip,lldp]
+```
+
 ### p1535
 
 ESP32 firmware that switches the output of the PeakTech P 1535 bench power supply over HTTP:

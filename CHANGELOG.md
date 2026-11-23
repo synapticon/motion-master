@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.129] - 2026-11-23
+
 ### Added
 
 - Motion Master finds the drives on an Ethernet adapter and their IP addresses, so a user does not
@@ -1432,7 +1434,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.128...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.129...HEAD
+[6.0.0-alpha.129]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.128...v6.0.0-alpha.129
 [6.0.0-alpha.128]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.127...v6.0.0-alpha.128
 [6.0.0-alpha.127]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.126...v6.0.0-alpha.127
 [6.0.0-alpha.126]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.125...v6.0.0-alpha.126

@@ -83,7 +83,7 @@ It looks for a certificate in this order:
 2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/` — if you have `acme.sh` installed locally with the Let's Encrypt cert (no browser warning)
 3. Self-signed fallback — generated on the fly; requires accepting a browser security exception once per server restart
 
-If the cert is missing, expired, or expiring soon at startup, the binary fetches a fresh one from the rolling release and installs it before serving (disable by setting `tls.autoUpdate` to `false` in the config). You can also refresh on demand — `motion-master --update-cert` (terminal) or the **Refresh certificate** button on the PWA's Connection page (`POST /api/cert/refresh`). The cert is rotated monthly and published at a stable URL, decoupled from app releases:
+If the cert is missing, expired, or expiring soon at startup, the binary fetches a fresh one from the rolling release and installs it before serving (disable by setting `tls.autoUpdate` to `false` in the config). You can also refresh on demand — `motion-master update-cert` (terminal) or the **Refresh certificate** button on the PWA's Connection page (`POST /api/cert/refresh`). The cert is rotated monthly and published at a stable URL, decoupled from app releases:
 
 ```text
 https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem

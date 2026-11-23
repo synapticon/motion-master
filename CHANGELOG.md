@@ -30,6 +30,13 @@ the HTTP/WebSocket API may break between any two alphas.
   also finds a drive that only sends LLDP. Both clients have `discoverEthernetDevices`. Linux,
   Windows and macOS (#254).
 
+### Changed
+
+- `--list-adapters` and `--update-cert` are now the subcommands `list-adapters` and `update-cert`, like
+  every other command that does one job and exits. Run `motion-master list-adapters` and
+  `motion-master update-cert`. The old flags are refused. `update-cert` still takes `--config`,
+  `--cert-url` and `--key-url`.
+
 ## [6.0.0-alpha.128] - 2026-11-23
 
 ### Fixed

@@ -14,7 +14,7 @@ struct Options {
                            ///< motion-master.jsonc next to the executable; empty if neither exists.
   Config config;           ///< Settings: built-in defaults overlaid by the config file.
   bool openBrowser{false};  ///< Open the PWA in the default browser on start (--open).
-  bool updateCert{false};   ///< Fetch a fresh cert/key, install them, and exit (--update-cert).
+  bool updateCert{false};   ///< Fetch a fresh cert/key, install them, and exit (update-cert).
   std::string certUrl;      ///< --cert-url (CLI-only; defaults to the rolling release).
   std::string keyUrl;       ///< --key-url (CLI-only; defaults to the rolling release).
 };
@@ -24,12 +24,12 @@ struct Options {
 ///          the built-in defaults; the settings themselves have no command-line flags — the CLI
 ///          carries only actions and cert-fetch sources. The config file is either the explicit
 ///          @c --config path or, absent that, a @c motion-master.jsonc auto-discovered next to the
-///          executable (--config wins over it). On --list-adapters the adapters are printed and the
+///          executable (--config wins over it). On list-adapters the adapters are printed and the
 ///          process exits 0.
 /// @param argc Argument count forwarded from main().
 /// @param argv Argument vector forwarded from main().
 /// @return Fully populated Options.
-/// @note Never returns on --help, --version, --list-adapters, discover-ethernet, a CLI parse
-///       error, or a config parse or validation failure (config failures exit 1). The configured
-///       adapter is resolved later, at driver init, not here.
+/// @note Never returns on --help, --version, list-adapters, discover-ethernet, a CLI parse error,
+///       or a config parse or validation failure (config failures exit 1). The configured adapter
+///       is resolved later, at driver init, not here.
 Options parseOptions(int argc, char** argv);

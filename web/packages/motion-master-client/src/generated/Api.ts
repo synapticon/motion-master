@@ -259,7 +259,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reports the validity window and identity of the certificate the server is currently serving. `expiresSoon` trips within 7 days of `notAfter`, so the PWA can prompt the user to refresh. Note that an already-expired certificate blocks the browser from reaching this endpoint at all; the binary self-heals an expired/missing certificate at startup (fetching from the rolling release) and exposes `--update-cert` for manual refresh. Returns 500 if the certificate file cannot be read or parsed.
+   * @description Reports the validity window and identity of the certificate the server is currently serving. `expiresSoon` trips within 7 days of `notAfter`, so the PWA can prompt the user to refresh. Note that an already-expired certificate blocks the browser from reaching this endpoint at all; the binary self-heals an expired/missing certificate at startup (fetching from the rolling release) and exposes `motion-master update-cert` for manual refresh. Returns 500 if the certificate file cannot be read or parsed.
    *
    * @name GetCert
    * @summary Get the TLS certificate validity window

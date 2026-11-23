@@ -158,7 +158,7 @@ export default function ConnectionExplainer() {
               Once a certificate has actually expired, the button can no longer help — this page
               cannot reach the backend over a trusted connection to ask. Restart the server and its
               startup fetch will heal it; with auto-update disabled, run{' '}
-              <code>motion-master --update-cert</code> first.
+              <code>motion-master update-cert</code> first.
             </p>
             <p className="mt-2">
               None of this matters if you only drive Motion Master over the API. Scripts skip

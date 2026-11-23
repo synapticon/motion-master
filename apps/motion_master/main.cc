@@ -225,7 +225,7 @@ int main(int argc, char** argv) {
   }
 
   // The install-dir cert/key — both the default served location and the target the self-heal and
-  // --update-cert paths fetch into (it is writable by the same privileges that installed the
+  // update-cert paths fetch into (it is writable by the same privileges that installed the
   // binary).
   const auto defaultCertPath = mm::core::exeDir() / "cert.pem";
   const auto defaultKeyPath = mm::core::exeDir() / "key.pem";
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
     spdlog::info("TLS: {}", resolvedCert.source);
   }
 
-  // --update-cert: fetch a fresh cert/key into the resolved path, then exit without serving. The
+  // update-cert: fetch a fresh cert/key into the resolved path, then exit without serving. The
   // explicit path for terminal/headless use.
   if (opts.updateCert) {
     spdlog::info("Fetching TLS certificate from {}", opts.certUrl);

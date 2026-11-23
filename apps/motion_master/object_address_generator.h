@@ -47,7 +47,7 @@ std::string clientIdentifier(std::string_view cxxIdentifier);
 ///
 /// Parses @p esiPath and merges every device's dictionary — the profile dictionary plus each
 /// module's, by the ETG.2000 rules @c mm::etg implements — then writes one header per index range
-/// into @p outDir: @c profile_device_objects.h (0x1xxx plus the standard MDP objects),
+/// into @p cppDir: @c profile_device_objects.h (0x1xxx plus the standard MDP objects),
 /// @c cia402_drive_objects.h (0x6xxx), and @c somanet_drive_objects.h (everything else).
 ///
 /// **The union of every device in the file is emitted, deliberately.** Which module is fitted is
@@ -76,12 +76,12 @@ std::string clientIdentifier(std::string_view cxxIdentifier);
 /// cannot hold different lists.
 ///
 /// @param esiPath         Path to the vendor's ESI XML.
-/// @param outDir          Directory to write the headers into; must exist.
+/// @param cppDir          Directory to write the C++ headers into; must exist.
 /// @param pythonPath      Path of the Python module to write.
 /// @param typescriptPath  Path of the TypeScript module to write.
 /// @return A summary, or an error string if the ESI cannot be parsed or a file cannot be written.
 std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresses(
-    const std::string& esiPath, const std::string& outDir, const std::string& pythonPath,
+    const std::string& esiPath, const std::string& cppDir, const std::string& pythonPath,
     const std::string& typescriptPath);
 
 }  // namespace mm

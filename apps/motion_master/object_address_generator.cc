@@ -267,7 +267,7 @@ std::string objectIdentifier(std::string_view objectName, std::string_view entry
 }
 
 std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresses(
-    const std::string& esiPath, const std::string& outDir, const std::string& pythonPath,
+    const std::string& esiPath, const std::string& cppDir, const std::string& pythonPath,
     const std::string& typescriptPath) {
   auto file = mm::etg::parseEsiFile(esiPath);
   if (!file) {
@@ -374,7 +374,7 @@ std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresse
       ++summary.rows;
     }
 
-    const std::filesystem::path path = std::filesystem::path(outDir) / bucket.fileName;
+    const std::filesystem::path path = std::filesystem::path(cppDir) / bucket.fileName;
     auto written = writeFile(
         path,
         std::format(

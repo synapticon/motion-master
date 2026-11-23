@@ -1126,6 +1126,20 @@ of the union is the same text merged with itself. The generator warns when two d
 different types for one address and keeps the first. What it cannot see is one index reused for
 a different quantity of the same type. If that appears, the family needs a header per device.
 
+## What a Feature Includes
+
+Every feature in Motion Master includes these parts:
+
+- An HTTP API endpoint, documented in `apps/motion_master/swagger.yml`, with the generated
+  TypeScript client regenerated.
+- A helper with the same name in the Python and the TypeScript client, and an example program in
+  each. See *Client Parity*.
+- A page or a panel in the Motion Master Console.
+- A `motion-master` subcommand, when the feature is useful without a running server.
+  `discover-ethernet` is one. A feature that needs the open bus, such as an SDO read, is not.
+- Unit tests, and a bench test when the feature touches a drive.
+- An entry in `CHANGELOG.md`.
+
 ## Client Parity
 
 **The Python client and the TypeScript client offer the same helpers.** A helper has the same name

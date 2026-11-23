@@ -1,8 +1,8 @@
 #include "comm/ethernet_discovery.h"
 
 #include <algorithm>
-#include <iterator>
 #include <format>
+#include <iterator>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <utility>

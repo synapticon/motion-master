@@ -451,6 +451,7 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
     // the count when it reads that slave. A slave the map does not read keeps its count, so start
     // every count here.
     ctx_->slavelist[i].pdomapreadfails = 0;
+    ctx_->slavelist[i].pdomapabsent = 0;
     // Reset each slave's FMMU bookkeeping before the map. ecx_config_create_{output,input}_mappings
     // and the mailbox-status mapper all begin at `FMMUunused` and append, relying on
     // ecx_config_init having memset the slavelist (FMMUunused=0, FMMU[] cleared) — which a re-map
@@ -492,6 +493,15 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
           std::format("slave {}: {} read(s) of its PDO mapping got no usable answer, so the map "
                       "is short",
                       i, fails));
+    }
+    // A PDO that the assignment lists and the slave says does not exist is mapped with no bits
+    // (#257). The log line is what explains a refused SAFEOP when another master wrote a padding
+    // size for such a PDO.
+    if (const uint32_t absent = ctx_->slavelist[i].pdomapabsent; absent > 0) {
+      spdlog::info(
+          "Slave {}: {} PDO(s) in its PDO assignment do not exist in its object dictionary (SDO "
+          "abort 0x06020000), so the map gives them no bits",
+          i, absent);
     }
   }
   if (usedSize <= 0) {

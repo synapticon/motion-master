@@ -5389,3 +5389,41 @@ prefix, so every offset a version 1 reader knows stays where it was. The parser 
 
 **A dump never holds two layouts.** One ring is one layout, and a span is read from the current ring
 only. So a mark from before a re-map gives the cycles after the re-map, with the flag set.
+
+## Session 2026-11-24 — An alignment PDO that the drive does not have (#257)
+
+**The problem.** A Circulo with a Safe Motion Module lists 0x1701 in 0x1C12:05 and 0x1B01 in
+0x1C13:06. These are the alignment PDOs of the FSoE module group in its ESI. The drive has neither
+object in its dictionary, so a read of 0x1701:00 or 0x1B01:00 aborts with 0x06020000. The check of
+Session 2026-10-22 counts that read as a failure, so every map of the bus fails and the drive stays
+in PREOP. The firmware issue is synapticon/somanet_software#5862.
+
+**What the specifications say.** ETG.1000.6 Table 77 makes each entry of 0x1C12 and 0x1C13 the index
+of a PDO mapping object. Table 74 makes subindex 0 of a PDO mapping object mandatory and readable.
+ETG.5001.1 4.2.1.3 applies that to the whole range 0x1600 to 0x17FF and 0x1A00 to 0x1BFF, and
+4.2.3.4 calls the alignment "the PDO containing the mapping alignment". No text says in words that an
+alignment PDO must be readable, but none exempts it.
+
+**What the firmware does.** A download to subindex 1 or higher stores the low byte as the padding
+size, in RAM. The size starts at 0 after a power cycle and only grows, because each write is ORed
+into the old value. The process data uses that size. With 0, the padding has no bytes.
+
+**The decisions.**
+
+- **The abort is an answer, not a lost read.** `ecx_poppdomappingabsent` in `ports/soem` matches a
+  working counter of 0 and a newest error entry that is abort 0x06020000 on `Index:00` of the same
+  slave. It takes that entry off the list, and the read counts in `pdomapabsent` instead of
+  `pdomapreadfails`. A read with no answer returns a negative value, so an abort that an older read
+  left on the list cannot explain it.
+- **Only subindex 0 of an assigned PDO.** A failed read of 0x1C00, of 0x1C12 or 0x1C13, or of a
+  mapping entry still fails the map. Those objects must exist on every drive that maps.
+- **The PDO gets no bits.** SOEM already leaves a failed read at zero, so the change is in the count
+  only. That matches the drive while no master wrote a padding size, and Motion Master writes none.
+- **The driver logs the count at INFO on every map.** A drive that another master configured since
+  its last power cycle keeps that master's padding size. The map is then short, and the drive
+  refuses SAFEOP. The log line is what connects that refusal to this rule. A power cycle of the
+  drive clears it. Motion Master cannot clear it: a write of 0 changes nothing.
+
+**What this does not cover.** A firmware that uses a non-zero padding size from power-on and still
+aborts the read. The map is then short in the same way. The fix of #5862 removes both cases, because
+the drive then reports the size it uses.

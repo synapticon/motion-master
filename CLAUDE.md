@@ -601,6 +601,12 @@ pauses the whole bus, which is the accepted cost.
    `remapProcessImage` makes up to `kProcessDataMapAttempts` attempts, because one frame that
    comes back late or not at all fails a read inside the map. A bus that answers pays nothing
    for the attempts it does not need. See `NEXTGEN.md`, Session 2026-10-22.
+   **One answer is not a failure: abort 0x06020000 on subindex 0 of a PDO that the assignment
+   lists.** A Circulo with a Safe Motion Module lists its alignment PDOs 0x1701 and 0x1B01 and
+   does not have them (#257, synapticon/somanet_software#5862). The port maps such a PDO with no
+   bits, which is the size the firmware uses until a master writes a padding size. A padding size
+   that another master wrote since the last power cycle makes the map short, and the drive then
+   refuses SAFEOP. See `NEXTGEN.md`, Session 2026-11-24.
 
 ### Procedures
 

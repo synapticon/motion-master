@@ -125,4 +125,107 @@ TEST(SoemErrorList, TwoThreadsEachFindTheirOwnSlave) {
   EXPECT_FALSE(ecx_iserror(list.ctx.get()));
 }
 
+// ecx_poppdomappingabsent takes the abort of a PDO mapping object that the slave does not have,
+// and nothing else (#257).
+constexpr int32_t kObjectDoesNotExist = 0x06020000;
+constexpr uint16_t kAlignmentPdo = 0x1701;
+
+void pushSdoAbort(ErrorList& list, uint16_t slave, uint16_t index, uint8_t subIndex,
+                  int32_t abortCode) {
+  ec_errort err{};
+  err.Slave = slave;
+  err.Index = index;
+  err.SubIdx = subIndex;
+  err.Etype = EC_ERR_TYPE_SDO_ERROR;
+  err.AbortCode = abortCode;
+  ecx_pusherror(list.ctx.get(), &err);
+}
+
+TEST(SoemErrorList, TakesTheAbortOfAnAbsentPdoMapping) {
+  ErrorList list;
+  list.push(2, 21);
+  pushSdoAbort(list, 1, kAlignmentPdo, 0, kObjectDoesNotExist);
+
+  EXPECT_TRUE(ecx_poppdomappingabsent(list.ctx.get(), 1, kAlignmentPdo, 0));
+
+  ec_errort err{};
+  EXPECT_FALSE(ecx_popslaveerror(list.ctx.get(), 1, &err));
+  ASSERT_TRUE(ecx_popslaveerror(list.ctx.get(), 2, &err));
+  EXPECT_EQ(err.AbortCode, 21);
+  EXPECT_FALSE(ecx_iserror(list.ctx.get()));
+}
+
+TEST(SoemErrorList, ClearsTheErrorFlagWhenTheAbortWasTheOnlyEntry) {
+  ErrorList list;
+  pushSdoAbort(list, 1, kAlignmentPdo, 0, kObjectDoesNotExist);
+
+  EXPECT_TRUE(ecx_poppdomappingabsent(list.ctx.get(), 1, kAlignmentPdo, 0));
+  EXPECT_FALSE(ecx_iserror(list.ctx.get()));
+}
+
+// A read with no answer returns a negative value and pushes nothing, so an older abort on the list
+// must not explain it.
+TEST(SoemErrorList, LeavesAReadWithoutAnAnswerCounted) {
+  ErrorList list;
+  pushSdoAbort(list, 1, kAlignmentPdo, 0, kObjectDoesNotExist);
+
+  EXPECT_FALSE(ecx_poppdomappingabsent(list.ctx.get(), 1, kAlignmentPdo, EC_TIMEOUT));
+  EXPECT_TRUE(ecx_iserror(list.ctx.get()));
+}
+
+TEST(SoemErrorList, LeavesEveryOtherNewestEntry) {
+  struct Case {
+    const char* name;
+    uint16_t slave;
+    uint16_t index;
+    uint8_t subIndex;
+    int32_t abortCode;
+  };
+  const Case cases[] = {
+      {"another abort code", 1, kAlignmentPdo, 0, 0x06010000},
+      {"another object", 1, 0x1600, 0, kObjectDoesNotExist},
+      {"another subindex", 1, kAlignmentPdo, 1, kObjectDoesNotExist},
+      {"another slave", 2, kAlignmentPdo, 0, kObjectDoesNotExist},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    ErrorList list;
+    pushSdoAbort(list, c.slave, c.index, c.subIndex, c.abortCode);
+
+    EXPECT_FALSE(ecx_poppdomappingabsent(list.ctx.get(), 1, kAlignmentPdo, 0));
+    ec_errort err{};
+    EXPECT_TRUE(ecx_popslaveerror(list.ctx.get(), c.slave, &err));
+  }
+}
+
+TEST(SoemErrorList, FindsNothingOnAnEmptyList) {
+  ErrorList list;
+  EXPECT_FALSE(ecx_poppdomappingabsent(list.ctx.get(), 1, kAlignmentPdo, 0));
+}
+
+// The abort must be the newest entry. One that an older transfer left behind explains nothing.
+TEST(SoemErrorList, LeavesAnAbortThatIsNotTheNewestEntry) {
+  ErrorList list;
+  pushSdoAbort(list, 1, kAlignmentPdo, 0, kObjectDoesNotExist);
+  list.push(1, 12);
+
+  EXPECT_FALSE(ecx_poppdomappingabsent(list.ctx.get(), 1, kAlignmentPdo, 0));
+}
+
+// The list is a ring. The newest entry sits in the last slot when head has wrapped to 0.
+// ecx_poperror moves the tail, so pushing and popping walks both ends round the ring.
+TEST(SoemErrorList, TakesTheAbortWhenTheRingHasWrapped) {
+  ErrorList list;
+  for (int32_t i = 0; i < EC_MAXELIST; ++i) {
+    list.push(2, i);
+    ec_errort err{};
+    ASSERT_TRUE(ecx_poperror(list.ctx.get(), &err));
+  }
+  pushSdoAbort(list, 1, kAlignmentPdo, 0, kObjectDoesNotExist);
+  ASSERT_EQ(list.ctx->elist.head, 0);
+
+  EXPECT_TRUE(ecx_poppdomappingabsent(list.ctx.get(), 1, kAlignmentPdo, 0));
+  EXPECT_FALSE(ecx_iserror(list.ctx.get()));
+}
+
 }  // namespace

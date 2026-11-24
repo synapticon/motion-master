@@ -206,7 +206,7 @@ read `DEBUG=motion-master-client:http`, the convention of the `debug` package of
 | `check-firmware-compatibility.py` | `check-firmware-compatibility.ts` | |
 | `cia402-state.py` | `cia402-state.ts` | |
 | `delete-file.py` | `delete-file.ts` | |
-| `discover-ethernet.py` | `discover-ethernet.ts` | |
+| `discover-ethernet-devices.py` | `discover-ethernet-devices.ts` | |
 | `device-locate.py` | `device-locate.ts` | |
 | `diagnostics.py` | `diagnostics.ts` | |
 | `dump-process-data.py` | `dump-process-data.ts` | |

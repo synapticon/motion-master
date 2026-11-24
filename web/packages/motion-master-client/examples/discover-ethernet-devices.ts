@@ -5,8 +5,8 @@
 // drive. A drive sends LLDP only about every 30 s, so --duration-ms 35000 also finds every drive that
 // only LLDP finds. The discovery needs no open fieldbus driver.
 //
-//     pnpm example examples/discover-ethernet.ts --adapter spoe0
-//     pnpm example examples/discover-ethernet.ts --adapter spoe0 --duration-ms 35000
+//     pnpm example examples/discover-ethernet-devices.ts --adapter spoe0
+//     pnpm example examples/discover-ethernet-devices.ts --adapter spoe0 --duration-ms 35000
 
 import { MotionMasterClient, run } from '@synapticon/motion-master-client';
 import { cli, integer } from './options';

@@ -1136,7 +1136,7 @@ Every feature in Motion Master includes these parts:
   each. See *Client Parity*.
 - A page or a panel in the Motion Master Console.
 - A `motion-master` subcommand, when the feature is useful without a running server.
-  `discover-ethernet` is one. A feature that needs the open bus, such as an SDO read, is not.
+  `discover-ethernet-devices` is one. A feature that needs the open bus, such as an SDO read, is not.
 - Unit tests, and a bench test when the feature touches a drive.
 - An entry in `CHANGELOG.md`.
 

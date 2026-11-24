@@ -6,8 +6,8 @@ adapter, collects the answers, and listens for LLDP during that time. It opens n
 drive. A drive sends LLDP only about every 30 s, so --duration-ms 35000 also finds every drive that
 only LLDP finds. The discovery needs no open fieldbus driver.
 
-    python discover-ethernet.py --adapter spoe0
-    python discover-ethernet.py --adapter spoe0 --duration-ms 35000
+    python discover-ethernet-devices.py --adapter spoe0
+    python discover-ethernet-devices.py --adapter spoe0 --duration-ms 35000
 """
 
 import logging

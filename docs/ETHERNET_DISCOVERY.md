@@ -191,6 +191,13 @@ measurement, the sender context held text that reads as 28787 ms, and the drive 
 13.2 s. With 500 ms, five answers arrived after 64, 137, 146, 287 and 410 ms. So the request must
 set this field on purpose.
 
+**Why the answers are spread.** A broadcast reaches every drive at the same moment. If every drive
+answered at once, all answers would arrive at the host together. The switch port to the host and
+the receive buffer of the host hold a limited number of frames, and they drop the frames that do
+not fit. The answer is a UDP datagram, and UDP does not send a lost datagram again. So a dropped
+answer is a drive that the discovery does not find. The random delay spreads the answers over
+time, so the buffers empty between them.
+
 The answer delay must be shorter than the time that the host listens, or a late answer is missed.
 A longer delay spreads the answers of many drives over a longer time, so fewer arrive at the same
 moment. The cost is a longer wait for the user. The design below uses the listen time minus

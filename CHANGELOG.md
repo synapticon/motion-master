@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the subcommand `discover-ethernet` is now `discover-ethernet-devices`, the same name
+  as the HTTP route and the client helpers. The example programs are now
+  `discover-ethernet-devices.py` and `discover-ethernet-devices.ts`.
+
 ## [6.0.0-alpha.129] - 2026-11-23
 
 ### Added

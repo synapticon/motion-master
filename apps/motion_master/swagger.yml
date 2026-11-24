@@ -220,8 +220,11 @@ paths:
 
 
         The ListIdentity request asks every drive to answer within `durationMs` minus 500 ms, at a
-        random time. A longer `durationMs` spreads the answers of a long chain over a longer time,
-        so fewer of them arrive at the same moment. The answers of one drive are merged by its IP
+        random time. The broadcast reaches every drive at the same moment, and answers that arrive
+        together can overflow the switch port or the receive buffer of the host. The answers are UDP
+        datagrams, and UDP does not send a lost one again, so a lost answer is a drive that is not
+        found. A longer `durationMs` spreads the answers of a long chain over a longer time, so
+        fewer of them arrive at the same moment. The answers of one drive are merged by its IP
         address or by its MAC address. The MAC address of an LLDP answer is its chassis ID, not
         the source address of the frame, because a drive sends LLDP from another MAC address.
 

@@ -62,7 +62,7 @@ void printDiscovery(const mm::comm::EthernetDiscoveryResult& result) {
 // Every std::exit below carries a NOLINT for concurrency-mt-unsafe. The call is unsafe only
 // against other threads running during teardown, and this function runs before main starts any:
 // it is the argument parser, and each exit is the CLI refusing to start (a parse error,
-// list-adapters, discover-ethernet, an unreadable config).
+// list-adapters, discover-ethernet-devices, an unreadable config).
 Options parseOptions(int argc, char** argv) {
   Options opts;
   opts.certUrl = mm::defaultCertUrl();
@@ -125,7 +125,7 @@ Options parseOptions(int argc, char** argv) {
   int64_t discoveryDurationMs = mm::comm::kDefaultDiscoveryDuration.count();
   bool discoveryJson = false;
   auto* discover = app.add_subcommand(
-      "discover-ethernet", "Find the drives on an Ethernet adapter, print them, and exit");
+      "discover-ethernet-devices", "Find the drives on an Ethernet adapter, print them, and exit");
   discover
       ->add_option("--adapter", discoveryAdapter,
                    "Name or MAC address of the adapter, as list-adapters prints it")

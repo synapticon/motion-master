@@ -730,23 +730,16 @@ std::expected<std::vector<PdoMappingObject>, std::string> Device::readPdoAssignm
     // Subindex 0 of the mapping object is the count of mapped entries.
     auto entryCountBytes = readSdo(mappingIndex, 0);
     if (!entryCountBytes) {
-      // An assignment slot may point at a mapping object the firmware does not implement in its
-      // CoE dictionary. TwinCAT-generated ESIs append an alignment-padding PDO (e.g. 0x1701) to
-      // round a SyncManager's PDO set up to a 32-bit boundary and describe it only in the ESI's
-      // MDP section — never as a real object — so an SDO upload aborts with "object does not
-      // exist" (0x06020000). That is a legitimate, ESI-configured padding reference, not a fault:
-      // an ESI-driven master takes the mapping from the XML and never reads the pad over CoE. Skip
-      // it. SOEM already accounts for the pad bytes in the SM window length (it falls back to the
-      // SII/SM-register size when its own CoE mapping read fails), and buildProcessImage derives
-      // byte boundaries from that driver layout, so the padding needs no entry in our logical view.
+      // A Circulo with a Safe Motion Module lists its alignment PDOs 0x1701 and 0x1B01 in 0x1C12
+      // and 0x1C13, and has neither object in its dictionary, so the read aborts with 0x06020000
+      // (#257, synapticon/somanet_software#5862). The PDO has no bits until a master writes a
+      // padding size, and Motion Master writes none. The SOEM port maps it with no bits by the
+      // same rule, so skipping it here keeps this view and the driver's layout equal, wherever
+      // the PDO sits in the assignment.
       //
-      // This skip is correct only because such padding is *trailing* — the last assignment slot,
-      // as 0x1C12:05 is here — so dropping it shifts no real object's bit offset. If a future
-      // (modular) device ever placed an alignment pad *between* real PDOs, skipping it without
-      // advancing `totalBits` would shift every later entry's offset; handling that would mean
-      // reconciling our summed bits against SOEM's per-slave Obits/Ibits (the true mapped totals)
-      // or reading the pad's bit size from the SII PDO category (parseSii decodes it). Neither is
-      // needed today, so we deliberately do not implement it.
+      // A padding size that another master wrote since the last power cycle is not 0. This view
+      // and the driver's map then still agree with each other, and both are shorter than what
+      // the drive uses.
       if (isObjectDoesNotExistAbort(entryCountBytes.error())) {
         spdlog::debug(
             "Device {}: PDO assignment 0x{:04X}:{:02X} references mapping object 0x{:04X} which "

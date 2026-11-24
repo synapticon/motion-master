@@ -948,6 +948,16 @@ endforeach()
 # the count at zero, so a Complete Access read that failed and fell back to the plain read does not
 # count against a plain read that succeeded. The driver checks the count after the map and maps
 # again when it is not zero.
+#
+# One answer is not a failure: SDO abort 0x06020000, "object does not exist", on the read of
+# subindex 0 of a PDO that the assignment lists. A Circulo with a Safe Motion Module lists its
+# alignment PDOs 0x1701 and 0x1B01 in 0x1C12 and 0x1C13, and has neither object in its dictionary
+# (issue #257, synapticon/somanet_software#5862). The drive answers, so no frame is lost, and the
+# read leaves the PDO at no bits. That is the size the drive uses until a master writes a padding
+# size, and Motion Master writes none. ecx_poppdomappingabsent takes the abort off the error list,
+# and the read counts in pdomapabsent instead. The driver logs the count. A padding size that
+# another master wrote since the last power cycle makes the map short, and the drive then refuses
+# SAFEOP.
 vcpkg_replace_string(
     "${SOURCE_PATH}/include/soem/ec_main.h"
 "   /** input bits */
@@ -955,7 +965,64 @@ vcpkg_replace_string(
 "   /** input bits */
    uint16 Ibits;
    /** SDO reads that failed in the last read of the PDO mapping for the map */
-   uint32 pdomapreadfails;")
+   uint32 pdomapreadfails;
+   /** PDOs in the last read of the PDO assignment that the slave says do not exist */
+   uint32 pdomapabsent;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_coe.h"
+"int ecx_readPDOmap(ecx_contextt *context, uint16 Slave, uint32 *Osize, uint32 *Isize);"
+"int ecx_readPDOmap(ecx_contextt *context, uint16 Slave, uint32 *Osize, uint32 *Isize);
+boolean ecx_poppdomappingabsent(ecx_contextt *context, uint16 Slave, uint16 Index, int wkc);")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"/** Read PDO assign structure
+"
+"/** Takes the answer to a read of subindex 0 of a PDO mapping object that the slave lacks.
+ *
+ * A read that the slave answers with an SDO abort returns a working counter of 0, and the abort is
+ * the newest entry on the error list. When that entry is abort 0x06020000 for Index:00 of this
+ * slave, the function takes it off the list. The map holds the bus, so no other transfer pushes an
+ * entry between the read and this call.
+ *
+ * @param[in]  context  context struct
+ * @param[in]  Slave    Slave number
+ * @param[in]  Index    index of the PDO mapping object that was read
+ * @param[in]  wkc      return value of the read
+ * @return TRUE if the slave answered that the object does not exist.
+ */
+boolean ecx_poppdomappingabsent(ecx_contextt *context, uint16 Slave, uint16 Index, int wkc)
+{
+   const int16 size = EC_MAXELIST + 1;
+   boolean absent = FALSE;
+   int16 newest;
+   ec_errort *Ec;
+
+   if (wkc != 0)
+   {
+      return FALSE;
+   }
+   osal_mutex_lock(context->elistmutex);
+   if (context->elist.head != context->elist.tail)
+   {
+      newest = (int16)((context->elist.head + size - 1) % size);
+      Ec = &(context->elist.Error[newest]);
+      if ((Ec->Etype == EC_ERR_TYPE_SDO_ERROR) && (Ec->Slave == Slave) && (Ec->Index == Index) &&
+          (Ec->SubIdx == 0) && ((uint32)Ec->AbortCode == 0x06020000))
+      {
+         Ec->Signal = FALSE;
+         context->elist.head = newest;
+         context->ecaterror = (context->elist.head != context->elist.tail);
+         absent = TRUE;
+      }
+   }
+   osal_mutex_unlock(context->elistmutex);
+   return absent;
+}
+
+/** Read PDO assign structure
+")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_coe.c"
@@ -963,7 +1030,8 @@ vcpkg_replace_string(
    *Osize = 0;"
 "   *Isize = 0;
    *Osize = 0;
-   context->slavelist[Slave].pdomapreadfails = 0;")
+   context->slavelist[Slave].pdomapreadfails = 0;
+   context->slavelist[Slave].pdomapabsent = 0;")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_coe.c"
@@ -983,7 +1051,14 @@ vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_coe.c"
 "            wkc = ecx_SDOread(context, Slave, idx, 0x00, FALSE, &rdl, &subcnt, EC_TIMEOUTRXM);"
 "            wkc = ecx_SDOread(context, Slave, idx, 0x00, FALSE, &rdl, &subcnt, EC_TIMEOUTRXM);
-            if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+            if (ecx_poppdomappingabsent(context, Slave, idx, wkc))
+            {
+               context->slavelist[Slave].pdomapabsent++;
+            }
+            else if (wkc <= 0)
+            {
+               context->slavelist[Slave].pdomapreadfails++;
+            }")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_coe.c"
@@ -1005,7 +1080,14 @@ vcpkg_replace_string(
                               &(context->PDOdesc[Thread_n]), EC_TIMEOUTRXM);"
 "            wkc = ecx_SDOread(context, Slave, idx, 0x00, TRUE, &rdl,
                               &(context->PDOdesc[Thread_n]), EC_TIMEOUTRXM);
-            if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+            if (ecx_poppdomappingabsent(context, Slave, idx, wkc))
+            {
+               context->slavelist[Slave].pdomapabsent++;
+            }
+            else if (wkc <= 0)
+            {
+               context->slavelist[Slave].pdomapreadfails++;
+            }")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_coe.c"

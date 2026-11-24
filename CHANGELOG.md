@@ -19,6 +19,15 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- A Circulo with a Safe Motion Module reaches SAFEOP and OP again. Its PDO assignment lists the
+  alignment PDOs 0x1701 and 0x1B01, which are not in its object dictionary, and every map of the bus
+  failed since 6.0.0-alpha.97 (#257). Such a PDO is now mapped with no bits, and the server log says
+  so. A drive that another master, such as TwinCAT, configured since its last power cycle keeps that
+  master's padding size and refuses SAFEOP. Switch the drive off and on to clear it. The firmware
+  issue is synapticon/somanet_software#5862.
+
 ## [6.0.0-alpha.130] - 2026-11-24
 
 ### Changed

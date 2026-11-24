@@ -117,8 +117,8 @@ std::vector<uint8_t> lldpFrame(Ipv4Address management) {
 }
 
 TEST(EthernetDiscoveryTest, DurationMustLeaveTimeForTheAnswerDelay) {
-  EXPECT_TRUE(mm::comm::checkDiscoveryDuration(milliseconds(500)));
-  EXPECT_FALSE(mm::comm::checkDiscoveryDuration(milliseconds(501)));
+  EXPECT_TRUE(mm::comm::checkDiscoveryDuration(milliseconds(999)));
+  EXPECT_FALSE(mm::comm::checkDiscoveryDuration(milliseconds(1000)));
   EXPECT_FALSE(mm::comm::checkDiscoveryDuration(milliseconds(60000)));
   EXPECT_TRUE(mm::comm::checkDiscoveryDuration(milliseconds(60001)));
   EXPECT_EQ(mm::comm::listIdentityAnswerDelay(milliseconds(2000)), milliseconds(1500));

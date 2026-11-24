@@ -386,7 +386,11 @@ This is the design in issue #58. It is not built.
 answer delay of ListIdentity follows from it. A user who knows that a chain has many drives sets a
 longer time, and the drives spread their answers over a longer time. The answer delay is always
 shorter than the listen time, so no request can miss answers through its own settings.
-`durationMs` must be more than 500 ms. The server refuses a smaller value with 400.
+`durationMs` must be at least 1000 ms. The server refuses a smaller value with 400. An EtherNet/IP
+stack can raise an answer delay below 500 ms to 500 ms. OpENer, the open-source stack, does, and
+its source names the EtherNet/IP specification as the reason. So the shortest delay that a drive
+surely keeps is 500 ms, and the shortest listen time is that delay plus the 500 ms margin. Whether
+the netX stack of a drive raises the delay is not measured.
 
 The Console shows the discovery time in a field next to **Discover**, with 2000 ms as the
 default. The help text of the field says to raise it for a long chain. So **Discover** takes 2 s by

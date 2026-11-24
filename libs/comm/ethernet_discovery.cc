@@ -305,9 +305,9 @@ void to_json(nlohmann::json& j, const EthernetDiscoveryResult& result) {
 }
 
 std::optional<std::string> checkDiscoveryDuration(std::chrono::milliseconds duration) {
-  if (duration <= kDiscoveryAnswerMargin || duration > kMaxDiscoveryDuration) {
-    return std::format("the discovery time must be more than {} ms and at most {} ms",
-                       kDiscoveryAnswerMargin.count(), kMaxDiscoveryDuration.count());
+  if (duration < kMinDiscoveryDuration || duration > kMaxDiscoveryDuration) {
+    return std::format("the discovery time must be at least {} ms and at most {} ms",
+                       kMinDiscoveryDuration.count(), kMaxDiscoveryDuration.count());
   }
   return std::nullopt;
 }

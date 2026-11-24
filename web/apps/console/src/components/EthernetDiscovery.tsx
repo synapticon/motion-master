@@ -63,7 +63,7 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
   });
 
   const duration = Number(durationMs);
-  const durationValid = Number.isInteger(duration) && duration > 500 && duration <= 60000;
+  const durationValid = Number.isInteger(duration) && duration >= 1000 && duration <= 60000;
   const canDiscover = networkAdapter.length > 0 && !discovery.isPending;
   const devices: DiscoveredEthernetDevice[] = discovery.data?.result.devices ?? [];
   const selectable = devices.filter((d) => d.ipAddress !== null);
@@ -138,7 +138,7 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
       </div>
       <p className="text-xs text-grey-600">
         The drives answer at a random time within the discovery time minus 500 ms, so their answers
-        do not arrive at once. Raise the time for a long chain of drives. It must be more than 500
+        do not arrive at once. Raise the time for a long chain of drives. It must be at least 1000
         and at most 60000 ms.
       </p>
       <div className="flex flex-wrap items-center gap-3">

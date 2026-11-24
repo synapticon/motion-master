@@ -91,9 +91,13 @@ struct EthernetDiscoveryResult {
 void to_json(nlohmann::json& j, const DiscoveredEthernetDevice& device);
 void to_json(nlohmann::json& j, const EthernetDiscoveryResult& result);
 
-/// The shortest discovery time, exclusive. The answer delay of ListIdentity is the discovery time
-/// minus this margin, which covers the trip back and the time the device needs for the request.
+/// The answer delay of ListIdentity is the discovery time minus this margin, which covers the trip
+/// back and the time the device needs for the request.
 inline constexpr std::chrono::milliseconds kDiscoveryAnswerMargin{500};
+/// The shortest discovery time. OpENer, the open-source EtherNet/IP stack, raises an answer delay
+/// from 1 to 499 ms to 500 ms. So the shortest delay that a device surely keeps is 500 ms, and the
+/// discovery listens for that delay plus the margin.
+inline constexpr std::chrono::milliseconds kMinDiscoveryDuration{1000};
 /// The longest discovery time. The answer delay of ListIdentity is a 16-bit number of ms.
 inline constexpr std::chrono::milliseconds kMaxDiscoveryDuration{60000};
 /// The discovery time of a request that does not set one.

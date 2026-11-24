@@ -32,6 +32,8 @@ the HTTP/WebSocket API may break between any two alphas.
   `--network-adapter`. The Python helpers take `network_adapter`, and the TypeScript helpers take
   `networkAdapter`. A config file with the old key `adapter` starts with no network adapter.
 - `tools/adapter-report.sh` is now `tools/network-adapter-report.sh`.
+- The shortest Ethernet discovery time is 1000 ms, up from 501 ms. An EtherNet/IP stack can raise
+  an answer delay below 500 ms to 500 ms, so a shorter discovery could stop before the answer came.
 
 ## [6.0.0-alpha.129] - 2026-11-23
 

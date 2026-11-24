@@ -243,11 +243,11 @@ paths:
           in: query
           required: false
           description: >
-            How long to collect answers, in ms. More than 500 and at most 60000. 35000 includes
+            How long to collect answers, in ms. At least 1000 and at most 60000. 35000 includes
             every drive that sends LLDP.
           schema:
             type: integer
-            minimum: 501
+            minimum: 1000
             maximum: 60000
             default: 2000
       responses:

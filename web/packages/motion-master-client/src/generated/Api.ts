@@ -119,8 +119,8 @@ export class Api<
        */
       networkAdapter: string;
       /**
-       * How long to collect answers, in ms. More than 500 and at most 60000. 35000 includes every drive that sends LLDP.
-       * @min 501
+       * How long to collect answers, in ms. At least 1000 and at most 60000. 35000 includes every drive that sends LLDP.
+       * @min 1000
        * @max 60000
        * @default 2000
        */

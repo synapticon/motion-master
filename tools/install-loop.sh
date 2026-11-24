@@ -2,8 +2,8 @@
 # Runs the firmware-installation procedure on one device again and again, against a running Motion
 # Master, and records every run: status, duration, the firmware version from 0x100A before and
 # after, the AL state after, and the error text. Two packages are written in turn when PKG_B is
-# given, so the build changes on every run. With NETEM set, netem makes the bus adapter drop or
-# delay frames during each install, and the rule is off for the recovery.
+# given, so the build changes on every run. With NETEM set, netem makes the network adapter of the
+# bus drop or delay frames during each install, and the rule is off for the recovery.
 #
 # One run is: reset, init, scan, PREOP, then N installs with finalState PREOP, which is what MMAF
 # asks for. A failed install is followed by one PREOP request with a 30 s timeout. The loop stops
@@ -22,14 +22,14 @@
 #   marko ALL=(root) NOPASSWD: /usr/sbin/tc
 #
 # usage: NETEM="<netem parameters>" PKG_A=<zip> [PKG_B=<zip>] \
-#          tools/install-loop.sh <label> [rounds] [adapter] [position]
+#          tools/install-loop.sh <label> [rounds] [network-adapter] [position]
 #
 # Results go to out/install-loop/<label>/: results.csv, loop.log, and the final snapshot of every
 # run as round-<n>.json.
 set -u
-label="${1:?usage: NETEM=\"...\" PKG_A=<zip> [PKG_B=<zip>] tools/install-loop.sh <label> [rounds] [adapter] [position]}"
+label="${1:?usage: NETEM=\"...\" PKG_A=<zip> [PKG_B=<zip>] tools/install-loop.sh <label> [rounds] [network-adapter] [position]}"
 rounds="${2:-10}"
-adapter="${3:-enp0s13f0u1u4u2}"
+network_adapter="${3:-enp0s13f0u1u4u2}"
 position="${4:-1}"
 netem="${NETEM:-}"
 pkg_a="${PKG_A:?set PKG_A to the file name of a package in the firmware cache}"
@@ -39,11 +39,11 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="$repo/out/install-loop/$label"
 mkdir -p "$out"
 
-netem_off() { sudo tc qdisc del dev "$adapter" root 2>/dev/null; }
+netem_off() { sudo tc qdisc del dev "$network_adapter" root 2>/dev/null; }
 netem_on() {
   if [[ -n "$netem" ]]; then
     # shellcheck disable=SC2086  # the parameters are several words on purpose
-    sudo tc qdisc add dev "$adapter" root netem $netem
+    sudo tc qdisc add dev "$network_adapter" root netem $netem
   fi
 }
 trap netem_off EXIT
@@ -65,9 +65,9 @@ state() {
 }
 
 netem_off
-log "== $label: reset, init, scan, PREOP on $adapter"
+log "== $label: reset, init, scan, PREOP on $network_adapter"
 post /api/reset > /dev/null
-post /api/init "{\"adapter\":\"$adapter\"}" | head -c 200
+post /api/init "{\"networkAdapter\":\"$network_adapter\"}" | head -c 200
 echo
 post /api/scan | head -c 200
 echo
@@ -79,12 +79,13 @@ log "== $label: $rounds rounds on device $position, packages $pkg_a / $pkg_b${ne
 log "device before: fw=$(fw) state=$(state)"
 
 
-# CAPTURE=<seconds> records the bus adapter with motion-master-capture while the rounds run, into
-# $out/capture.pcap, and prints its summary at the end. The program needs CAP_NET_RAW.
+# CAPTURE=<seconds> records the network adapter of the bus with motion-master-capture while the
+# rounds run, into $out/capture.pcap, and prints its summary at the end. The program needs
+# CAP_NET_RAW.
 capture_bin="${MM_CAPTURE_BIN:-$repo/build/x64-linux-debug/apps/motion_master/motion-master-capture}"
 capture_pid=""
 if [[ -n "${CAPTURE:-}" ]]; then
-  "$capture_bin" --ifname "$adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
+  "$capture_bin" --ifname "$network_adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
     > "$out/capture-summary.json" 2> "$out/capture.log" &
   capture_pid=$!
 fi

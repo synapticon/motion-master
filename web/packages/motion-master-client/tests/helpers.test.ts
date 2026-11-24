@@ -5,7 +5,7 @@ import { type Answer, fakeServer } from './fakes';
 function client(routes: Record<string, (body: unknown) => Answer>, fieldbus = true) {
   const server = fakeServer(
     routes,
-    fieldbus ? { fieldbus: { driver: 'soem' as const, adapter: 'eth0' } } : {},
+    fieldbus ? { fieldbus: { driver: 'soem' as const, networkAdapter: 'eth0' } } : {},
   );
   return { client: server.client, server };
 }
@@ -18,7 +18,7 @@ describe('init', () => {
   it('sends the fieldbus settings of the client', async () => {
     const { client: c, server } = client({ 'POST /api/init': () => [200, { ok: true }] });
     await c.init();
-    expect(server.requests[0].body).toEqual({ driver: 'soem', adapter: 'eth0' });
+    expect(server.requests[0].body).toEqual({ driver: 'soem', networkAdapter: 'eth0' });
   });
 
   it('takes a driver that is open already, 409, as success', async () => {
@@ -27,7 +27,9 @@ describe('init', () => {
   });
 
   it('throws on any other refusal', async () => {
-    const { client: c } = client({ 'POST /api/init': () => [400, { error: 'bad adapter' }] });
+    const { client: c } = client({
+      'POST /api/init': () => [400, { error: 'bad network adapter' }],
+    });
     await expect(c.init()).rejects.toMatchObject({ status: 400 });
   });
 

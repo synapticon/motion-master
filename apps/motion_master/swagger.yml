@@ -13,11 +13,11 @@ info:
 
     The fieldbus is controlled through an explicit lifecycle — the driver is not
     created until you ask for it, so a fresh instance has no open network
-    interface:
+    adapter:
 
     1. **Init** — `POST /api/init` constructs a fieldbus driver, `soem` or `spoe`.
-       SOEM opens the network interface. It has no adapter auto-detect, so an
-       adapter name or MAC address is required. SPoE takes one IP address per
+       SOEM opens the network adapter. It has no network adapter auto-detect, so the
+       name or MAC address of a network adapter is required. SPoE takes one IP address per
        drive and connects at scan time. `init` is one-shot: a second call returns
        `409` until you reset.
     2. **Scan** — `POST /api/scan` discovers the slaves on the bus and configures
@@ -28,8 +28,8 @@ info:
     4. **Reset** — `POST /api/reset` tears the driver down and clears the device
        list. `init` must be called again afterwards.
 
-    `GET /api/adapters` lists the network interfaces available on the host, to
-    help pick the adapter for step 1.
+    `GET /api/network-adapters` lists the network adapters of the host, to help
+    pick the network adapter for step 1.
 
     ## Working with devices
 
@@ -166,10 +166,10 @@ servers:
   - url: https://local.motion-master.synapticon.com:61447
     description: Local Motion Master instance
 paths:
-  /api/adapters:
+  /api/network-adapters:
     get:
-      summary: List network adapters on the host
-      operationId: getAdapters
+      summary: List the network adapters of the host
+      operationId: getNetworkAdapters
       responses:
         "200":
           description: Array of network adapters available on the host machine
@@ -203,18 +203,18 @@ paths:
                       example: "Realtek USB GbE Family Controller"
   /api/ethernet/discovery:
     get:
-      summary: Find the drives on an Ethernet adapter
+      summary: Find the drives on a network adapter
       operationId: discoverEthernetDevices
       description: >
-        Sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity request on the adapter at
-        the same time, collects the answers for `durationMs`, and listens for LLDP during that
-        time. Answers the drives found, one row per drive. The discovery opens no connection to a
-        drive, so it does not disturb a client that works with one, for example over SPoE.
+        Sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity request on the network
+        adapter at the same time, collects the answers for `durationMs`, and listens for LLDP during
+        that time. Answers the drives found, one row per drive. The discovery opens no connection to
+        a drive, so it does not disturb a client that works with one, for example over SPoE.
 
 
-        DCP finds a drive with PROFINET firmware, also one without an IP address. ListIdentity
-        finds a drive with EtherNet/IP firmware that has an IP address. It needs an IPv4 address on
-        the adapter, and it is not sent without one; `warnings` says so. LLDP finds a drive with
+        DCP finds a drive with PROFINET firmware, also one without an IP address. ListIdentity finds
+        a drive with EtherNet/IP firmware that has an IP address. It needs an IPv4 address on the
+        network adapter, and it is not sent without one; `warnings` says so. LLDP finds a drive with
         either firmware, but a drive sends its LLDP frame by itself, about every 30 s. A
         `durationMs` of 35000 catches it for sure, and a shorter one only by chance.
 
@@ -229,13 +229,13 @@ paths:
         the source address of the frame, because a drive sends LLDP from another MAC address.
 
 
-        The discovery needs raw access to the adapter: `CAP_NET_RAW` on Linux, which the packages
+        The discovery needs raw access to the network adapter: `CAP_NET_RAW` on Linux, which the packages
         grant at install, Npcap on Windows, and read and write access to `/dev/bpf*` on macOS.
       parameters:
-        - name: adapter
+        - name: networkAdapter
           in: query
           required: true
-          description: The name or the MAC address of the adapter, as `GET /api/adapters` lists it
+          description: The name or the MAC address of the network adapter, as `GET /api/network-adapters` lists it
           schema:
             type: string
           example: "spoe0"
@@ -258,13 +258,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/EthernetDiscovery"
         "400":
-          description: "`adapter` is missing, or `durationMs` is not a number in range"
+          description: "`networkAdapter` is missing, or `durationMs` is not a number in range"
         "404":
-          description: No adapter with that name or MAC address
+          description: No network adapter with that name or MAC address
         "500":
           description: >
-            The adapter cannot be opened for raw access, for example without `CAP_NET_RAW`, or a
-            receive failed
+            The network adapter cannot be opened for raw access, for example without `CAP_NET_RAW`,
+            or a receive failed
   /api/version:
     get:
       summary: Get Motion Master version
@@ -318,7 +318,7 @@ paths:
                 additionalProperties: true
                 example:
                   server: { bindAddress: "127.0.0.1", httpPort: 61447, wsPort: 62281, corsOrigin: "https://motion-master.synapticon.com" }
-                  fieldbus: { driver: "", adapter: "", mailboxStatusFmmu: false }
+                  fieldbus: { driver: "", networkAdapter: "", mailboxStatusFmmu: false }
                   logging: { level: "info", file: { enabled: true, level: "debug", directory: "", maxSizeMb: 10, maxFiles: 5 } }
                   tls: { certPath: "", keyPath: "", autoUpdate: true }
                   gameLoop: { periodUs: 1000 }
@@ -727,7 +727,7 @@ paths:
         Constructs the requested fieldbus driver and makes it available for subsequent
         calls to /api/scan. The body is the `fieldbus` block of the config file, and the
         same rules check it. The driver defaults to SOEM when omitted.
-        SOEM opens the network interface. It has no adapter auto-detect: a network
+        SOEM opens the network adapter. It has no network adapter auto-detect: a network
         adapter must be supplied, otherwise init fails.
         SPoE connects to each drive at scan time. It needs `ipAddresses`, one address
         per drive, and the list order is the position order.
@@ -744,10 +744,10 @@ paths:
                   enum: [soem, spoe]
                   default: soem
                   example: "soem"
-                adapter:
+                networkAdapter:
                   type: string
                   description: >
-                    SOEM only. Network interface name or MAC address. Required for SOEM — there
+                    SOEM only. Name or MAC address of the network adapter. Required for SOEM — there
                     is no auto-detect, so an empty value makes init fail.
                   example: "eth0"
                 ipAddresses:
@@ -4017,14 +4017,14 @@ paths:
 
   /api/captures:
     post:
-      summary: Record the EtherCAT frames of the bus adapter for a number of seconds
+      summary: Record the EtherCAT frames of the network adapter of the bus for a number of seconds
       operationId: runCapture
       description: >
-        Runs the capture program `motion-master-capture`, which ships beside the server binary,
-        on the adapter the bus is on, waits for it to exit, and answers the summary. The program
-        records every EtherCAT frame that leaves or enters the adapter with a kernel timestamp and
-        writes them as a pcap file under `captures/` in the user cache, so the file is listed,
-        downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark.
+        Runs the capture program `motion-master-capture`, which ships beside the server binary, on
+        the network adapter the bus is on, waits for it to exit, and answers the summary. The
+        program records every EtherCAT frame that leaves or enters the network adapter with a kernel
+        timestamp and writes them as a pcap file under `captures/` in the user cache, so the file is
+        listed, downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark.
 
         The summary matches each frame the master sent to the frame that came back for it, by
         the index and the header of its first datagram, and reports per kind of frame how late the
@@ -4058,10 +4058,11 @@ paths:
                   maximum: 300
                   default: 30
                   description: How long to record. A capture is a measurement a person starts.
-                adapter:
+                networkAdapter:
                   type: string
                   description: >
-                    The adapter to record, when no bus is up. Defaults to the adapter of the bus.
+                    The network adapter to record, when no bus is up. Defaults to the network
+                    adapter of the bus.
                   example: "enp0s13f0u1u2"
       responses:
         "200":
@@ -4070,13 +4071,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [path, adapter, seconds, summary]
+                required: [path, networkAdapter, seconds, summary]
                 properties:
                   path:
                     type: string
                     description: The pcap file, relative to the user-cache root
                     example: "captures/capture-20261022-143005-enp0s13f0u1u2.pcap"
-                  adapter:
+                  networkAdapter:
                     type: string
                     example: "enp0s13f0u1u2"
                   seconds:
@@ -4088,8 +4089,8 @@ paths:
           description: "`seconds` is out of range, or the body is not a JSON object"
         "409":
           description: >
-            No adapter to capture on (no bus is up and none was named, or the transport is SPoE),
-            or a capture is already running.
+            No network adapter to capture on (no bus is up and none was named, or the transport is
+            SPoE), or a capture is already running.
           content:
             application/json:
               schema:
@@ -4099,7 +4100,7 @@ paths:
                   error:
                     type: string
         "500":
-          description: The capture program is not installed, could not open the adapter, or failed
+          description: The capture program is not installed, could not open the network adapter, or failed
           content:
             application/json:
               schema:
@@ -4115,15 +4116,15 @@ paths:
       summary: Start a capture of the EtherCAT frames that runs until it is stopped
       operationId: startCapture
       description: >
-        Starts the capture program `motion-master-capture` on an adapter and answers once it
+        Starts the capture program `motion-master-capture` on a network adapter and answers once it
         records, so that a client can record exactly a span of work: start the capture, do the
         work, stop it with `POST /api/captures/stop`. The bench tests record one capture per test
         this way.
 
-        The capture runs as a program of its own, so nothing the server does to the bus ends it:
-        a reset, an init, a scan or an AL state change in between is recorded, not interrupted.
-        Name the adapter when the bus is not up yet, because with no bus there is no adapter to
-        default to.
+        The capture runs as a program of its own, so nothing the server does to the bus ends it: a
+        reset, an init, a scan or an AL state change in between is recorded, not interrupted. Name
+        the network adapter when the bus is not up yet, because with no bus there is no network
+        adapter to default to.
 
         `seconds` is an upper limit, for a client that never stops the capture. The program then
         ends by itself, and its file stays under `captures/` in the user cache. A start after that
@@ -4140,9 +4141,9 @@ paths:
             schema:
               type: object
               properties:
-                adapter:
+                networkAdapter:
                   type: string
-                  description: The adapter to record. Defaults to the adapter of the bus.
+                  description: The network adapter to record. Defaults to the network adapter of the bus.
                 seconds:
                   type: integer
                   minimum: 1
@@ -4156,12 +4157,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [path, adapter, seconds]
+                required: [path, networkAdapter, seconds]
                 properties:
                   path:
                     type: string
                     description: The pcap file the capture writes, relative to the user-cache root
-                  adapter:
+                  networkAdapter:
                     type: string
                   seconds:
                     type: integer
@@ -4170,8 +4171,8 @@ paths:
           description: "`seconds` is out of range, or the body is not a JSON object"
         "409":
           description: >
-            No adapter to capture on (no bus is up and none was named, or the transport is SPoE),
-            or a capture is already running.
+            No network adapter to capture on (no bus is up and none was named, or the transport is
+            SPoE), or a capture is already running.
           content:
             application/json:
               schema:
@@ -4181,7 +4182,7 @@ paths:
                   error:
                     type: string
         "500":
-          description: The capture program is not installed, could not open the adapter, or did not start
+          description: The capture program is not installed, could not open the network adapter, or did not start
           content:
             application/json:
               schema:
@@ -5755,11 +5756,11 @@ components:
   schemas:
     EthernetDiscovery:
       type: object
-      required: [adapter, durationMs, answerDelayMs, devices, warnings]
+      required: [networkAdapter, durationMs, answerDelayMs, devices, warnings]
       properties:
-        adapter:
+        networkAdapter:
           type: string
-          description: The name of the adapter the discovery ran on
+          description: The name of the network adapter the discovery ran on
           example: "spoe0"
         durationMs:
           type: integer
@@ -5828,8 +5829,8 @@ components:
           type: boolean
           nullable: true
           description: >
-            Whether the drive is on the subnet of the adapter. Null when the drive or the adapter
-            has no IPv4 address.
+            Whether the drive is on the subnet of the network adapter. Null when the drive or the
+            network adapter has no IPv4 address.
         foundBy:
           type: array
           description: Every method that found the drive

@@ -3,7 +3,7 @@
 // Copy this file to config.jsonc and edit it for your setup:
 //     cp config.example.jsonc config.jsonc
 //
-// config.jsonc is git-ignored so your local adapter/MAC never gets committed.
+// config.jsonc is git-ignored so your local network adapter never gets committed.
 {
   // Host running Motion Master. The default resolves to 127.0.0.1 and matches the bundled TLS cert.
   // Motion Master is TLS-only, so both ports below are secure (https:// for the API, wss:// for the
@@ -25,11 +25,11 @@
   // driver is open already, the program uses it and ignores this object.
   "fieldbus": {
     "driver": "soem", // soem or spoe
-    // SOEM: the network interface name (for example "eth0") or its MAC address. SOEM has no adapter
-    // auto-detect, so this is required.
-    "adapter": "aa:bb:cc:dd:ee:ff",
-    // SPoE: set "driver": "spoe" and give one IP address per drive in place of adapter. The list
-    // order is the position order.
+    // SOEM: the interface name of the network adapter (for example "eth0") or its MAC address.
+    // SOEM does not find the network adapter by itself, so this is required.
+    "networkAdapter": "aa:bb:cc:dd:ee:ff",
+    // SPoE: set "driver": "spoe" and give one IP address per drive in place of networkAdapter. The
+    // list order is the position order.
     // "ipAddresses": ["192.168.0.10"],
   },
 }

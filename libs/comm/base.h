@@ -12,10 +12,10 @@ namespace mm::comm {
 
 /// Network adapter identity with all three representations populated.
 ///
-/// Constructed by @c resolveNetworkAdapter() from a @c --adapter CLI argument
+/// Constructed by @c resolveNetworkAdapter() from a @c --network-adapter CLI argument
 /// that may be given as a MAC address (either Linux colon-separated or Windows
 /// dash-separated format) or as an OS interface name.  All three fields are
-/// always populated — the adapter map is consulted to resolve the missing form.
+/// always populated — the network adapter map is consulted to resolve the missing form.
 struct NetworkAdapter {
   std::string macLinux;    ///< Colon-separated uppercase MAC, e.g. @c "AA:BB:CC:DD:EE:FF".
   std::string macWindows;  ///< Dash-separated uppercase MAC, e.g. @c "AA-BB-CC-DD-EE-FF".
@@ -24,7 +24,7 @@ struct NetworkAdapter {
   ///
   /// Populated on Windows, where @c name is an NPF device path built from a GUID and identifies
   /// nothing to a reader. Empty on Linux and macOS, where the interface name is the identification
-  /// (SOEM fills its own adapter description with the interface name there, so it carries nothing
+  /// (SOEM fills its own description with the interface name there, so it carries nothing
   /// extra) — so a consumer must treat this as optional and fall back to @c name.
   std::string description;
 };
@@ -32,10 +32,10 @@ struct NetworkAdapter {
 /// @brief Serialises a NetworkAdapter to JSON.
 ///
 /// Produces an object with keys @c macLinux, @c macWindows, @c name, @c description.
-/// Participates in nlohmann ADL so that @c nlohmann::json(adapters) serialises a
+/// Participates in nlohmann ADL so that @c nlohmann::json(networkAdapters) serialises a
 /// @c std::vector<NetworkAdapter> automatically.
 /// @param j  Output JSON value.
-/// @param a  Adapter to serialise.
+/// @param a  Network adapter to serialise.
 void to_json(nlohmann::json& j, const NetworkAdapter& a);
 
 /// @brief Returns true if @p s is a MAC address in either Linux (@c :) or
@@ -61,9 +61,9 @@ std::string normalizeMac(const std::string& raw, char sep);
 
 /// @brief Decodes a MAC address string into its six bytes, in wire order.
 ///
-/// The string form is what an adapter carries and what a human types; a protocol that puts a MAC on
-/// the wire — an ENI @c Source, an EoE frame — needs the bytes. @c isMacAddress decides what is
-/// acceptable, so both separators and either case are.
+/// The string form is what a network adapter carries and what a human types; a protocol that puts a
+/// MAC on the wire — an ENI @c Source, an EoE frame — needs the bytes. @c isMacAddress decides what
+/// is acceptable, so both separators and either case are.
 ///
 /// @param s  Source MAC string.
 /// @return The six bytes, most significant first, or @c std::nullopt when @p s is not a MAC
@@ -78,25 +78,25 @@ std::optional<std::array<uint8_t, 6>> parseMac(const std::string& s);
 /// updates.  All three representations are populated at enumeration time.
 ///
 /// **Platform behaviour**
-/// - **Linux** — iterates the adapter list returned by SOEM's
+/// - **Linux** — iterates the network adapter list returned by SOEM's
 ///   @c ec_find_adapters() and queries each interface with @c SIOCGIFHWADDR
-///   via a temporary @c SOCK_DGRAM socket.  Adapters for which the @c ioctl
+///   via a temporary @c SOCK_DGRAM socket.  Network adapters for which the @c ioctl
 ///   call fails are silently skipped.
 /// - **macOS** — reads link-layer (@c AF_LINK) addresses from @c getifaddrs().
 /// - **Windows** — calls @c GetAdaptersAddresses() (IPHLPAPI) to enumerate
-///   adapters.  Interface names are formatted as WinPcap/Npcap NPF paths:
+///   network adapters.  Interface names are formatted as WinPcap/Npcap NPF paths:
 ///   @c "\\Device\\NPF_<AdapterName>".
 ///
 /// **MAC address format** — @c macLinux is uppercase colon-separated hex
 /// octets, e.g. @c "AA:BB:CC:DD:EE:FF"; @c macWindows is the dash-separated
 /// equivalent.  Both are consistent across platforms.
 ///
-/// Returns an empty vector if adapter enumeration fails (e.g. insufficient
-/// privileges or no adapters present).
+/// Returns an empty vector if network adapter enumeration fails (e.g. insufficient
+/// privileges or no network adapters present).
 ///
 /// @note Call once at startup to resolve a configured MAC address to the
 ///       interface name required by a fieldbus driver.  Do not call in a
-///       tight loop — OS adapter enumeration is slow.
+///       tight loop — OS network adapter enumeration is slow.
 std::vector<NetworkAdapter> enumerateNetworkAdapters();
 
 /// @brief Resolves a network adapter specifier to a fully populated @c NetworkAdapter.
@@ -108,9 +108,9 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters();
 ///
 /// Calls @c enumerateNetworkAdapters() once to resolve the form that was
 /// not supplied.
-/// @param input  User-supplied adapter specifier string.
-/// @return Fully populated @c NetworkAdapter, or an error string if the adapter
-///         cannot be found in the OS adapter map.
+/// @param input  User-supplied network adapter specifier string.
+/// @return Fully populated @c NetworkAdapter, or an error string if the network
+///         adapter cannot be found in the OS network adapter map.
 std::expected<NetworkAdapter, std::string> resolveNetworkAdapter(const std::string& input);
 
 }  // namespace mm::comm

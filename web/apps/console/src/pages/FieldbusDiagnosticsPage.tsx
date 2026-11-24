@@ -362,12 +362,12 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
   );
 }
 
-// A capture is about the PC, not about a device: it records every EtherCAT frame on the bus
-// adapter with the kernel's timestamp and says how late each one came back. It tells a slow PC
-// from a bad cable, which the per-device counters below cannot. The server runs the capture
-// program once, on request, and the file lands in the user cache under captures/, where the
-// Storage page lists it and this card links it. A pcap from tcpdump on another PC gets the same
-// summary once it is uploaded there.
+// A capture is about the PC, not about a device: it records every EtherCAT frame on the network
+// adapter of the bus with the kernel's timestamp and says how late each one came back. It tells a
+// slow PC from a bad cable, which the per-device counters below cannot. The server runs the capture
+// program once, on request, and the file lands in the user cache under captures/, where the Storage
+// page lists it and this card links it. A pcap from tcpdump on another PC gets the same summary
+// once it is uploaded there.
 const CAPTURES_FOLDER = 'captures';
 
 function KindRow({ label, k }: { label: string; k: CaptureSummary['control'] }) {
@@ -514,17 +514,17 @@ function CaptureSection() {
       <div className="px-4 py-3 border-b border-grey-200">
         <h3 className="font-display uppercase text-sm">Capture</h3>
         <p className="text-xs text-grey-600 mt-0.5">
-          Record every EtherCAT frame on the bus adapter and see how late each one came back. This
-          is about the PC, not about a device.
+          Record every EtherCAT frame on the network adapter of the bus and see how late each one
+          came back. This is about the PC, not about a device.
         </p>
       </div>
       <div className="p-4 space-y-4">
         <p className="text-xs text-grey-600 leading-relaxed">
-          Start runs the capture program on the adapter the bus is on, and Stop ends it and shows
-          the summary, so the capture holds exactly what happened in between. If you never press
-          Stop, the capture ends by itself after the seconds you choose. The program runs on its
-          own, so a reset, a scan or an AL state change in between is recorded, not interrupted. It
-          records with the kernel&apos;s timestamps, adds no frame to the bus, and writes a pcap
+          Start runs the capture program on the network adapter the bus is on, and Stop ends it and
+          shows the summary, so the capture holds exactly what happened in between. If you never
+          press Stop, the capture ends by itself after the seconds you choose. The program runs on
+          its own, so a reset, a scan or an AL state change in between is recorded, not interrupted.
+          It records with the kernel&apos;s timestamps, adds no frame to the bus, and writes a pcap
           file under <span className="font-mono">captures/</span> in the user cache, so the Storage
           page lists it and Wireshark opens it. The summary matches each frame the master sent to
           the one that came back, per kind: the cyclic process-data frame, and the control plane,

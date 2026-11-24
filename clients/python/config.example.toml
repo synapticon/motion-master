@@ -3,7 +3,7 @@
 # Copy this file to config.toml and edit it for your setup:
 #     cp config.example.toml config.toml
 #
-# config.toml is git-ignored so your local adapter/MAC never gets committed.
+# config.toml is git-ignored so your local network adapter never gets committed.
 
 # Host running Motion Master. The default resolves to 127.0.0.1 and matches the
 # bundled TLS cert. Motion Master is TLS-only, so both ports below are secure
@@ -25,9 +25,10 @@ verify = false
 # open. When a driver is open already, the script uses it and ignores this table.
 [fieldbus]
 driver = "soem"                 # soem or spoe
-# SOEM: the network interface name (for example "eth0") or its MAC address.
-# SOEM has no adapter auto-detect, so this is required.
-adapter = "aa:bb:cc:dd:ee:ff"
+# SOEM: the interface name of the network adapter (for example "eth0") or its
+# MAC address. SOEM does not find the network adapter by itself, so this is
+# required.
+networkAdapter = "aa:bb:cc:dd:ee:ff"
 # SPoE: set driver = "spoe" and give one IP address per drive in place of
-# adapter. The list order is the position order.
+# networkAdapter. The list order is the position order.
 # ipAddresses = ["192.168.0.10"]

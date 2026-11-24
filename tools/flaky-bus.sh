@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs a mailbox workload against a running Motion Master while netem makes the bus adapter drop
-# or delay frames. It counts the mailbox warnings and the failed requests in the server log.
+# Runs a mailbox workload against a running Motion Master while netem makes the network adapter of
+# the bus drop or delay frames. It counts the mailbox warnings and the failed requests in the server log.
 #
 # One run is: reset, init, scan, PREOP, then N rounds of a full parameter read
 # (POST /api/devices/<position>/parameters/read) and one FoE file read
@@ -21,14 +21,14 @@
 # rotation during a run leaves them at zero. A zero count of "SDO abort" on a SOMANET drive, which
 # refuses its write-only objects on every full read, shows that this happened.
 #
-# usage: NETEM="<netem parameters>" tools/flaky-bus.sh <label> [rounds] [adapter] [position] [file]
+# usage: NETEM="<netem parameters>" tools/flaky-bus.sh <label> [rounds] [network-adapter] [position] [file]
 #
 # Results go to out/flaky-bus/<label>/: the parameter lists, the files, and the server log lines.
 set -u
 
-label="${1:?usage: NETEM=\"...\" tools/flaky-bus.sh <label> [rounds] [adapter] [position] [file]}"
+label="${1:?usage: NETEM=\"...\" tools/flaky-bus.sh <label> [rounds] [network-adapter] [position] [file]}"
 rounds="${2:-10}"
-adapter="${3:-enp0s13f0u1u4u2}"
+network_adapter="${3:-enp0s13f0u1u4u2}"
 position="${4:-1}"
 file="${5:-config.csv}"
 netem="${NETEM:-}"
@@ -38,11 +38,11 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="$repo/out/flaky-bus/$label"
 mkdir -p "$out"
 
-netem_off() { sudo tc qdisc del dev "$adapter" root 2>/dev/null; }
+netem_off() { sudo tc qdisc del dev "$network_adapter" root 2>/dev/null; }
 netem_on() {
   if [[ -n "$netem" ]]; then
     # shellcheck disable=SC2086  # the parameters are several words on purpose
-    sudo tc qdisc add dev "$adapter" root netem $netem
+    sudo tc qdisc add dev "$network_adapter" root netem $netem
   fi
 }
 
@@ -57,7 +57,7 @@ post() {
 netem_off
 echo "== $label: reset, init, scan, PREOP"
 post /api/reset > /dev/null
-post /api/init "{\"adapter\":\"$adapter\"}" | head -c 200
+post /api/init "{\"networkAdapter\":\"$network_adapter\"}" | head -c 200
 echo
 post /api/scan | head -c 200
 echo
@@ -66,17 +66,18 @@ echo
 sleep 1
 
 
-# CAPTURE=<seconds> records the bus adapter with motion-master-capture while the rounds run, into
-# $out/capture.pcap, and prints its summary at the end. The program needs CAP_NET_RAW.
+# CAPTURE=<seconds> records the network adapter of the bus with motion-master-capture while the
+# rounds run, into $out/capture.pcap, and prints its summary at the end. The program needs
+# CAP_NET_RAW.
 capture_bin="${MM_CAPTURE_BIN:-$repo/build/x64-linux-debug/apps/motion_master/motion-master-capture}"
 capture_pid=""
 if [[ -n "${CAPTURE:-}" ]]; then
-  "$capture_bin" --ifname "$adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
+  "$capture_bin" --ifname "$network_adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
     > "$out/capture-summary.json" 2> "$out/capture.log" &
   capture_pid=$!
 fi
 netem_on
-echo "== $label: netem: $(tc qdisc show dev "$adapter" | head -1)"
+echo "== $label: netem: $(tc qdisc show dev "$network_adapter" | head -1)"
 start_line=$(wc -l < "$log")
 echo "== $label: $rounds rounds (log from line $start_line)"
 first_md5=""

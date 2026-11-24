@@ -20,7 +20,7 @@ The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/l
 Every artefact carries two programs:
 
 - `motion-master` is the server.
-- `motion-master-capture` records the EtherCAT frames on a network adapter to a pcap file, and prints how late each frame came back. The server runs it for `POST /api/captures`, and you can run it on its own: `motion-master-capture --ifname <adapter> --seconds 30 --out frames.pcap`.
+- `motion-master-capture` records the EtherCAT frames on a network adapter to a pcap file, and prints how late each frame came back. The server runs it for `POST /api/captures`, and you can run it on its own: `motion-master-capture --ifname <network-adapter> --seconds 30 --out frames.pcap`.
 
 The Linux x86-64 and Windows artefacts also carry the iC-Haus MU_3SL library, which the iC-MU calibration needs. iC-Haus builds that library for Linux x86-64 and Windows x64 only. So the aarch64 and macOS artefacts have no iC-MU calibration.
 
@@ -116,7 +116,7 @@ The `=eip` suffix puts each capability in the file's **e**ffective, **i**nherita
 - Capabilities live in an extended attribute on the *file*, so they are lost whenever the file is replaced — a rebuild, a `cp`, or a manual binary swap. Re-run `setup.sh` (or `./tools/build.sh --setcap`) afterwards. Package upgrades handle this themselves.
 - They require a filesystem with extended-attribute support, mounted without `nosuid`. On a `nosuid` mount, or over NFS without xattrs, `setcap` succeeds but the kernel ignores the capabilities at exec time — run the binary from local storage instead.
 
-The capture program opens a raw socket on the adapter and needs nothing else. The server starts it as a child process, and a child gets no capability from the server, so the program needs its own. All three Linux install paths also run:
+The capture program opens a raw socket on the network adapter and needs nothing else. The server starts it as a child process, and a child gets no capability from the server, so the program needs its own. All three Linux install paths also run:
 
 ```bash
 setcap cap_net_raw=eip <install-dir>/motion-master-capture
@@ -201,7 +201,7 @@ See [Linux capabilities](#linux-capabilities) for what each one actually does an
 
 `--ulimit memlock=-1` is also required alongside `CAP_IPC_LOCK` — without it the kernel rejects `mlockall()` even when the capability is present.
 
-To auto-initialise the fieldbus in a container, mount a JSONC config with a `fieldbus` block (`{ "driver": "soem", "adapter": "eth0" }`) and name it in the `MM_CONFIG` environment variable. There are no `--driver`/`--adapter` flags. Do not pass `--config` after the image name: the entrypoint passes that flag itself, and the binary refuses a second one. Omit the config to defer initialisation to `POST /api/init` at runtime.
+To auto-initialise the fieldbus in a container, mount a JSONC config with a `fieldbus` block (`{ "driver": "soem", "networkAdapter": "eth0" }`) and name it in the `MM_CONFIG` environment variable. There are no `--driver`/`--network-adapter` flags. Do not pass `--config` after the image name: the entrypoint passes that flag itself, and the binary refuses a second one. Omit the config to defer initialisation to `POST /api/init` at runtime.
 
 ```bash
 # EtherCAT only (no RT requirement on the host kernel)

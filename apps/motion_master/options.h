@@ -24,12 +24,12 @@ struct Options {
 ///          the built-in defaults; the settings themselves have no command-line flags — the CLI
 ///          carries only actions and cert-fetch sources. The config file is either the explicit
 ///          @c --config path or, absent that, a @c motion-master.jsonc auto-discovered next to the
-///          executable (--config wins over it). On list-adapters the adapters are printed and the
-///          process exits 0.
+///          executable (--config wins over it). On list-network-adapters the network adapters are
+///          printed and the process exits 0.
 /// @param argc Argument count forwarded from main().
 /// @param argv Argument vector forwarded from main().
 /// @return Fully populated Options.
-/// @note Never returns on --help, --version, list-adapters, discover-ethernet-devices, a CLI parse
-///       error, or a config parse or validation failure (config failures exit 1). The configured
-///       adapter is resolved later, at driver init, not here.
+/// @note Never returns on --help, --version, list-network-adapters, discover-ethernet-devices, a
+///       CLI parse error, or a config parse or validation failure (config failures exit 1). The
+///       configured network adapter is resolved later, at driver init, not here.
 Options parseOptions(int argc, char** argv);

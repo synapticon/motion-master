@@ -15,8 +15,8 @@
 
 {% if motion_master_fieldbus_driver | length > 0 %}
   "fieldbus": {
-    "driver": "{{ motion_master_fieldbus_driver }}"{% if motion_master_fieldbus_adapter | length > 0 %},
-    "adapter": "{{ motion_master_fieldbus_adapter }}"{% endif %}
+    "driver": "{{ motion_master_fieldbus_driver }}"{% if motion_master_fieldbus_network_adapter | length > 0 %},
+    "networkAdapter": "{{ motion_master_fieldbus_network_adapter }}"{% endif %}
 
   },
 

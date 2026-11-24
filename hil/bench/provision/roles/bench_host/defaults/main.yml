@@ -1,6 +1,6 @@
 ---
-# The network interface of the EtherCAT bus. hil/bench/bench.description.toml names the same
-# interface as adapter.
+# The network adapter of the EtherCAT bus. hil/bench/bench.description.toml names the same
+# network adapter as networkAdapter.
 bench_host_ethercat_interface: enp2s0
 # The ESP32 that switches the P 1535, which supplies the drives (hil/p1535).
 bench_host_psu_address: 10.10.1.250

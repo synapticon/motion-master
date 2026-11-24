@@ -69,11 +69,11 @@ export class Api<
   /**
    * No description
    *
-   * @name GetAdapters
-   * @summary List network adapters on the host
-   * @request GET:/api/adapters
+   * @name GetNetworkAdapters
+   * @summary List the network adapters of the host
+   * @request GET:/api/network-adapters
    */
-  getAdapters = (params: RequestParams = {}) =>
+  getNetworkAdapters = (params: RequestParams = {}) =>
     this.request<
       {
         /**
@@ -99,25 +99,25 @@ export class Api<
       }[],
       any
     >({
-      path: `/api/adapters`,
+      path: `/api/network-adapters`,
       method: "GET",
       format: "json",
       ...params,
     });
   /**
-   * @description Sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity request on the adapter at the same time, collects the answers for `durationMs`, and listens for LLDP during that time. Answers the drives found, one row per drive. The discovery opens no connection to a drive, so it does not disturb a client that works with one, for example over SPoE. DCP finds a drive with PROFINET firmware, also one without an IP address. ListIdentity finds a drive with EtherNet/IP firmware that has an IP address. It needs an IPv4 address on the adapter, and it is not sent without one; `warnings` says so. LLDP finds a drive with either firmware, but a drive sends its LLDP frame by itself, about every 30 s. A `durationMs` of 35000 catches it for sure, and a shorter one only by chance. The ListIdentity request asks every drive to answer within `durationMs` minus 500 ms, at a random time. The broadcast reaches every drive at the same moment, and answers that arrive together can overflow the switch port or the receive buffer of the host. The answers are UDP datagrams, and UDP does not send a lost one again, so a lost answer is a drive that is not found. A longer `durationMs` spreads the answers of a long chain over a longer time, so fewer of them arrive at the same moment. The answers of one drive are merged by its IP address or by its MAC address. The MAC address of an LLDP answer is its chassis ID, not the source address of the frame, because a drive sends LLDP from another MAC address. The discovery needs raw access to the adapter: `CAP_NET_RAW` on Linux, which the packages grant at install, Npcap on Windows, and read and write access to `/dev/bpf*` on macOS.
+   * @description Sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity request on the network adapter at the same time, collects the answers for `durationMs`, and listens for LLDP during that time. Answers the drives found, one row per drive. The discovery opens no connection to a drive, so it does not disturb a client that works with one, for example over SPoE. DCP finds a drive with PROFINET firmware, also one without an IP address. ListIdentity finds a drive with EtherNet/IP firmware that has an IP address. It needs an IPv4 address on the network adapter, and it is not sent without one; `warnings` says so. LLDP finds a drive with either firmware, but a drive sends its LLDP frame by itself, about every 30 s. A `durationMs` of 35000 catches it for sure, and a shorter one only by chance. The ListIdentity request asks every drive to answer within `durationMs` minus 500 ms, at a random time. The broadcast reaches every drive at the same moment, and answers that arrive together can overflow the switch port or the receive buffer of the host. The answers are UDP datagrams, and UDP does not send a lost one again, so a lost answer is a drive that is not found. A longer `durationMs` spreads the answers of a long chain over a longer time, so fewer of them arrive at the same moment. The answers of one drive are merged by its IP address or by its MAC address. The MAC address of an LLDP answer is its chassis ID, not the source address of the frame, because a drive sends LLDP from another MAC address. The discovery needs raw access to the network adapter: `CAP_NET_RAW` on Linux, which the packages grant at install, Npcap on Windows, and read and write access to `/dev/bpf*` on macOS.
    *
    * @name DiscoverEthernetDevices
-   * @summary Find the drives on an Ethernet adapter
+   * @summary Find the drives on a network adapter
    * @request GET:/api/ethernet/discovery
    */
   discoverEthernetDevices = (
     query: {
       /**
-       * The name or the MAC address of the adapter, as `GET /api/adapters` lists it
+       * The name or the MAC address of the network adapter, as `GET /api/network-adapters` lists it
        * @example "spoe0"
        */
-      adapter: string;
+      networkAdapter: string;
       /**
        * How long to collect answers, in ms. More than 500 and at most 60000. 35000 includes every drive that sends LLDP.
        * @min 501
@@ -492,7 +492,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Constructs the requested fieldbus driver and makes it available for subsequent calls to /api/scan. The body is the `fieldbus` block of the config file, and the same rules check it. The driver defaults to SOEM when omitted. SOEM opens the network interface. It has no adapter auto-detect: a network adapter must be supplied, otherwise init fails. SPoE connects to each drive at scan time. It needs `ipAddresses`, one address per drive, and the list order is the position order.
+   * @description Constructs the requested fieldbus driver and makes it available for subsequent calls to /api/scan. The body is the `fieldbus` block of the config file, and the same rules check it. The driver defaults to SOEM when omitted. SOEM opens the network adapter. It has no network adapter auto-detect: a network adapter must be supplied, otherwise init fails. SPoE connects to each drive at scan time. It needs `ipAddresses`, one address per drive, and the list order is the position order.
    *
    * @name Init
    * @summary Initialise the fieldbus driver
@@ -507,10 +507,10 @@ export class Api<
        */
       driver?: "soem" | "spoe";
       /**
-       * SOEM only. Network interface name or MAC address. Required for SOEM — there is no auto-detect, so an empty value makes init fail.
+       * SOEM only. Name or MAC address of the network adapter. Required for SOEM — there is no auto-detect, so an empty value makes init fail.
        * @example "eth0"
        */
-      adapter?: string;
+      networkAdapter?: string;
       /**
        * SPoE only. One IP address per drive, at least one. The list order is the position order, and a drive that does not answer keeps its position.
        * @example ["192.168.0.10"]
@@ -2264,10 +2264,10 @@ export class Api<
       ...params,
     });
   /**
-   * @description Runs the capture program `motion-master-capture`, which ships beside the server binary, on the adapter the bus is on, waits for it to exit, and answers the summary. The program records every EtherCAT frame that leaves or enters the adapter with a kernel timestamp and writes them as a pcap file under `captures/` in the user cache, so the file is listed, downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark. The summary matches each frame the master sent to the frame that came back for it, by the index and the header of its first datagram, and reports per kind of frame how late the returns were. The cyclic process-data frame is one kind; mailbox and register datagrams, the control plane, are the other. The bands are the three waits the driver uses, 2 ms, 20 ms and 100 ms, and they are cumulative: a frame later than 100 ms counts in all three. A frame sent again with the same index and header while its first copy had no answer counts once, as `resent`, and its return is timed from the first copy. The time is the kernel's, taken at the boundary to the NIC driver on both sides: when the frame is handed to the driver, and when the driver hands its return back. So the number covers the NIC, the wire and the device, and not the host's own queues and scheduling between that boundary and Motion Master. A capture that shows late frames puts the delay on the wire or in the device. A clean capture beside the server's own warnings, "mailbox write(s) got no frame back", puts it inside the host. Read the two together. One capture at a time, including one started with `POST /api/captures/start`. The capture adds no frame to the bus and runs on a thread of its own, so the bus is not touched. The program needs `CAP_NET_RAW`, which the packages grant it at install.
+   * @description Runs the capture program `motion-master-capture`, which ships beside the server binary, on the network adapter the bus is on, waits for it to exit, and answers the summary. The program records every EtherCAT frame that leaves or enters the network adapter with a kernel timestamp and writes them as a pcap file under `captures/` in the user cache, so the file is listed, downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark. The summary matches each frame the master sent to the frame that came back for it, by the index and the header of its first datagram, and reports per kind of frame how late the returns were. The cyclic process-data frame is one kind; mailbox and register datagrams, the control plane, are the other. The bands are the three waits the driver uses, 2 ms, 20 ms and 100 ms, and they are cumulative: a frame later than 100 ms counts in all three. A frame sent again with the same index and header while its first copy had no answer counts once, as `resent`, and its return is timed from the first copy. The time is the kernel's, taken at the boundary to the NIC driver on both sides: when the frame is handed to the driver, and when the driver hands its return back. So the number covers the NIC, the wire and the device, and not the host's own queues and scheduling between that boundary and Motion Master. A capture that shows late frames puts the delay on the wire or in the device. A clean capture beside the server's own warnings, "mailbox write(s) got no frame back", puts it inside the host. Read the two together. One capture at a time, including one started with `POST /api/captures/start`. The capture adds no frame to the bus and runs on a thread of its own, so the bus is not touched. The program needs `CAP_NET_RAW`, which the packages grant it at install.
    *
    * @name RunCapture
-   * @summary Record the EtherCAT frames of the bus adapter for a number of seconds
+   * @summary Record the EtherCAT frames of the network adapter of the bus for a number of seconds
    * @request POST:/api/captures
    */
   runCapture = (
@@ -2280,10 +2280,10 @@ export class Api<
        */
       seconds?: number;
       /**
-       * The adapter to record, when no bus is up. Defaults to the adapter of the bus.
+       * The network adapter to record, when no bus is up. Defaults to the network adapter of the bus.
        * @example "enp0s13f0u1u2"
        */
-      adapter?: string;
+      networkAdapter?: string;
     },
     params: RequestParams = {},
   ) =>
@@ -2295,7 +2295,7 @@ export class Api<
          */
         path: string;
         /** @example "enp0s13f0u1u2" */
-        adapter: string;
+        networkAdapter: string;
         /** @example 30 */
         seconds: number;
         /** How late the frames of a capture came back. See `POST /api/captures`. */
@@ -2313,7 +2313,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Starts the capture program `motion-master-capture` on an adapter and answers once it records, so that a client can record exactly a span of work: start the capture, do the work, stop it with `POST /api/captures/stop`. The bench tests record one capture per test this way. The capture runs as a program of its own, so nothing the server does to the bus ends it: a reset, an init, a scan or an AL state change in between is recorded, not interrupted. Name the adapter when the bus is not up yet, because with no bus there is no adapter to default to. `seconds` is an upper limit, for a client that never stops the capture. The program then ends by itself, and its file stays under `captures/` in the user cache. A start after that is not refused. One capture at a time: this answers 409 while a capture runs, whether it was started here or by `POST /api/captures`. Linux and macOS only. Windows has no signal that ends a program without a console, so this answers 501 there; use `POST /api/captures` with a number of seconds instead.
+   * @description Starts the capture program `motion-master-capture` on a network adapter and answers once it records, so that a client can record exactly a span of work: start the capture, do the work, stop it with `POST /api/captures/stop`. The bench tests record one capture per test this way. The capture runs as a program of its own, so nothing the server does to the bus ends it: a reset, an init, a scan or an AL state change in between is recorded, not interrupted. Name the network adapter when the bus is not up yet, because with no bus there is no network adapter to default to. `seconds` is an upper limit, for a client that never stops the capture. The program then ends by itself, and its file stays under `captures/` in the user cache. A start after that is not refused. One capture at a time: this answers 409 while a capture runs, whether it was started here or by `POST /api/captures`. Linux and macOS only. Windows has no signal that ends a program without a console, so this answers 501 there; use `POST /api/captures` with a number of seconds instead.
    *
    * @name StartCapture
    * @summary Start a capture of the EtherCAT frames that runs until it is stopped
@@ -2321,8 +2321,8 @@ export class Api<
    */
   startCapture = (
     data?: {
-      /** The adapter to record. Defaults to the adapter of the bus. */
-      adapter?: string;
+      /** The network adapter to record. Defaults to the network adapter of the bus. */
+      networkAdapter?: string;
       /**
        * The longest the capture runs when nobody stops it.
        * @min 1
@@ -2337,7 +2337,7 @@ export class Api<
       {
         /** The pcap file the capture writes, relative to the user-cache root */
         path: string;
-        adapter: string;
+        networkAdapter: string;
         /** The upper limit of the capture */
         seconds: number;
       },

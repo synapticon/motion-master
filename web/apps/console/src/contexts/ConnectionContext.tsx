@@ -21,7 +21,7 @@ interface Endpoint {
   // Init form — connection *state* (initialized / scanned) is derived from the server on
   // open (see ServerStateProbe), never from storage.
   driver: Driver;
-  adapter: string;
+  networkAdapter: string;
   // SPoE only: one IP address per line, in position order, the mode and the drive's port.
   ipAddresses: string;
   spoeMode: SpoeMode;
@@ -35,7 +35,7 @@ function readEndpoint(): Endpoint {
     httpPort: String(DEFAULT_HTTP_PORT),
     wsPort: String(DEFAULT_WS_PORT),
     driver: 'soem',
-    adapter: '',
+    networkAdapter: '',
     ipAddresses: '',
     spoeMode: 'monitor',
     spoePort: '8080',
@@ -85,8 +85,8 @@ interface ConnectionContextValue {
   online: boolean;
   driver: Driver;
   setDriver: (d: Driver) => void;
-  adapter: string;
-  setAdapter: (a: string) => void;
+  networkAdapter: string;
+  setNetworkAdapter: (a: string) => void;
   ipAddresses: string;
   setIpAddresses: (a: string) => void;
   spoeMode: SpoeMode;
@@ -119,7 +119,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [httpPort, setHttpPort] = useState(endpoint.httpPort);
   const [wsPort, setWsPort] = useState(endpoint.wsPort);
   const [driver, setDriver] = useState<Driver>(endpoint.driver);
-  const [adapter, setAdapter] = useState(endpoint.adapter);
+  const [networkAdapter, setNetworkAdapter] = useState(endpoint.networkAdapter);
   const [ipAddresses, setIpAddresses] = useState(endpoint.ipAddresses);
   const [spoeMode, setSpoeMode] = useState<SpoeMode>(endpoint.spoeMode);
   const [spoePort, setSpoePort] = useState(endpoint.spoePort);
@@ -131,8 +131,17 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   // so it survives reloads. This is a convenience default only; connection *state* is
   // derived from the server on open (see ServerStateProbe), never from storage.
   useEffect(() => {
-    writeEndpoint({ host, httpPort, wsPort, driver, adapter, ipAddresses, spoeMode, spoePort });
-  }, [host, httpPort, wsPort, driver, adapter, ipAddresses, spoeMode, spoePort]);
+    writeEndpoint({
+      host,
+      httpPort,
+      wsPort,
+      driver,
+      networkAdapter,
+      ipAddresses,
+      spoeMode,
+      spoePort,
+    });
+  }, [host, httpPort, wsPort, driver, networkAdapter, ipAddresses, spoeMode, spoePort]);
 
   const resetEndpoint = useCallback(() => {
     setHost(DEFAULT_HOST);
@@ -170,8 +179,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
         online,
         driver,
         setDriver,
-        adapter,
-        setAdapter,
+        networkAdapter,
+        setNetworkAdapter,
         ipAddresses,
         setIpAddresses,
         spoeMode,

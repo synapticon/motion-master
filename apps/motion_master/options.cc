@@ -26,7 +26,7 @@ namespace {
 // One line per device, so a reader can copy an address. --json prints the body of the route
 // instead.
 void printDiscovery(const mm::comm::EthernetDiscoveryResult& result) {
-  std::cout << std::format("adapter {}, {} ms, answer delay {} ms\n", result.adapter,
+  std::cout << std::format("network adapter {}, {} ms, answer delay {} ms\n", result.networkAdapter,
                            result.durationMs, result.answerDelayMs);
   for (const auto& device : result.devices) {
     // The JSON of the route, so the CLI prints every field the way the API spells it.
@@ -62,7 +62,7 @@ void printDiscovery(const mm::comm::EthernetDiscoveryResult& result) {
 // Every std::exit below carries a NOLINT for concurrency-mt-unsafe. The call is unsafe only
 // against other threads running during teardown, and this function runs before main starts any:
 // it is the argument parser, and each exit is the CLI refusing to start (a parse error,
-// list-adapters, discover-ethernet-devices, an unreadable config).
+// list-network-adapters, discover-ethernet-devices, an unreadable config).
 Options parseOptions(int argc, char** argv) {
   Options opts;
   opts.certUrl = mm::defaultCertUrl();
@@ -108,8 +108,8 @@ Options parseOptions(int argc, char** argv) {
       ->required();
 
   // Actions, so subcommands like every other action that does one job and exits.
-  auto* listAdapters =
-      app.add_subcommand("list-adapters", "Print network adapters (MAC -> interface) and exit");
+  auto* listNetworkAdapters = app.add_subcommand(
+      "list-network-adapters", "Print the network adapters (MAC address, name) and exit");
   // Falls through to the top-level options, so --config, --cert-url and --key-url may follow it.
   // The startup self-heal reads the two URLs too, which is why they are not options of this
   // subcommand alone.
@@ -118,17 +118,17 @@ Options parseOptions(int argc, char** argv) {
       "Download a fresh TLS cert/key, install them at the configured (or default) path, and exit");
   updateCert->fallthrough();
 
-  // An action rather than a setting: it finds the drives on an Ethernet adapter and exits. The same
+  // An action rather than a setting: it finds the drives on a network adapter and exits. The same
   // discovery as GET /api/ethernet/discovery, for a host where no server runs. Deep search is a
   // longer --duration-ms, such as 35000, which outlasts the LLDP interval of a drive.
-  std::string discoveryAdapter;
+  std::string discoveryNetworkAdapter;
   int64_t discoveryDurationMs = mm::comm::kDefaultDiscoveryDuration.count();
   bool discoveryJson = false;
-  auto* discover = app.add_subcommand(
-      "discover-ethernet-devices", "Find the drives on an Ethernet adapter, print them, and exit");
+  auto* discover = app.add_subcommand("discover-ethernet-devices",
+                                      "Find the drives on a network adapter, print them, and exit");
   discover
-      ->add_option("--adapter", discoveryAdapter,
-                   "Name or MAC address of the adapter, as list-adapters prints it")
+      ->add_option("--network-adapter", discoveryNetworkAdapter,
+                   "Name or MAC address of the network adapter, as list-network-adapters prints it")
       ->required();
   discover
       ->add_option("--duration-ms", discoveryDurationMs,
@@ -164,7 +164,7 @@ Options parseOptions(int argc, char** argv) {
 
   if (*discover) {
     const auto result = mm::comm::discoverEthernetDevices(
-        discoveryAdapter, std::chrono::milliseconds{discoveryDurationMs});
+        discoveryNetworkAdapter, std::chrono::milliseconds{discoveryDurationMs});
     if (!result) {
       std::cerr << result.error() << "\n";
       // NOLINTNEXTLINE(concurrency-mt-unsafe)
@@ -181,11 +181,11 @@ Options parseOptions(int argc, char** argv) {
 
   opts.updateCert = static_cast<bool>(*updateCert);
 
-  if (*listAdapters) {
-    for (const auto& adapter : mm::comm::enumerateNetworkAdapters()) {
-      std::cout << adapter.macLinux << "  " << adapter.name;
-      if (!adapter.description.empty()) {
-        std::cout << "  " << adapter.description;
+  if (*listNetworkAdapters) {
+    for (const auto& networkAdapter : mm::comm::enumerateNetworkAdapters()) {
+      std::cout << networkAdapter.macLinux << "  " << networkAdapter.name;
+      if (!networkAdapter.description.empty()) {
+        std::cout << "  " << networkAdapter.description;
       }
       std::cout << "\n";
     }

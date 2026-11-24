@@ -585,10 +585,10 @@ check "motion-master enabled"        "systemctl is-enabled motion-master"
 check "growroot enabled"             "systemctl is-enabled growroot"
 check "growroot tooling present"     "command -v growpart && command -v sgdisk"
 check "cpuAffinity configured"       "grep -q '\"cpuAffinity\"' /opt/motion-master/motion-master.jsonc"
-# A driver without an adapter is a config the binary refuses to start on, and
+# A driver without a network adapter is a config the binary refuses to start on, and
 # systemd then retries it every five seconds for as long as the board is powered.
 # The image shipped that way once; this is what stops it shipping that way again.
-check "fieldbus adapter configured"  "grep -q '\"adapter\"' /opt/motion-master/motion-master.jsonc"
+check "fieldbus network adapter configured"  "grep -q '\"networkAdapter\"' /opt/motion-master/motion-master.jsonc"
 check "EtherCAT offloads turned off" "test -f /etc/systemd/network/90-ethercat.link"
 # Asks netplan what it will do rather than reading the file back, because the
 # question is whether the base image's eth* glob still claims the port.

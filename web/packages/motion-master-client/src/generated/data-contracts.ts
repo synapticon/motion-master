@@ -14,10 +14,10 @@ type UtilRequiredKeys<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>;
 
 export interface EthernetDiscovery {
   /**
-   * The name of the adapter the discovery ran on
+   * The name of the network adapter the discovery ran on
    * @example "spoe0"
    */
-  adapter: string;
+  networkAdapter: string;
   /**
    * How long the discovery collected answers, in ms
    * @example 2000
@@ -68,7 +68,7 @@ export interface DiscoveredEthernetDevice {
    * @example 1938
    */
   serialNumber: number | null;
-  /** Whether the drive is on the subnet of the adapter. Null when the drive or the adapter has no IPv4 address. */
+  /** Whether the drive is on the subnet of the network adapter. Null when the drive or the network adapter has no IPv4 address. */
   sameSubnet: boolean | null;
   /** Every method that found the drive */
   foundBy: ("dcp" | "list-identity" | "lldp")[];

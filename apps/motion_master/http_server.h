@@ -48,7 +48,7 @@ class HttpServer {
   /// @brief Callback type for `POST /api/init`.
   ///
   /// Receives the requested @c "fieldbus" block, already validated: the driver name and the
-  /// settings of that driver (the adapter for SOEM, the addresses and mode for SPoE). The
+  /// settings of that driver (the network adapter for SOEM, the addresses and mode for SPoE). The
   /// callback is responsible for constructing the concrete @c FieldbusDriver and calling
   /// @c DeviceManager::init().  Lives in the composition root (main.cc) so that
   /// concrete driver types are never referenced inside the server.
@@ -113,22 +113,24 @@ class HttpServer {
   ///        name, the MAC of the interface the bus runs on, and the RT loop period.
   ///
   /// A callback rather than three config fields, because two of the three change after start-up —
-  /// `POST /api/init` can move the bus to another adapter, and `PUT /api/game-loop` retimes the
-  /// loop — so a value copied at construction would go stale. Same pattern as
+  /// `POST /api/init` can move the bus to another network adapter, and `PUT /api/game-loop` retimes
+  /// the loop — so a value copied at construction would go stale. Same pattern as
   /// @c GetGameLoopHealthFn.
   using EniOptionsFn = std::function<mm::node::EniCollectorOptions()>;
 
   /// @brief Callback type for `POST /api/captures`.
   ///
-  /// Runs the capture program on @p adapter for @p seconds and returns the pcap file it wrote,
-  /// under the user cache. Lives in main.cc so the server never names the program or its path.
+  /// Runs the capture program on @p networkAdapter for @p seconds and returns the pcap file it
+  /// wrote, under the user cache. Lives in main.cc so the server never names the program or its
+  /// path.
   using RunCaptureFn = std::function<std::expected<std::filesystem::path, mm::CaptureError>(
-      const std::string& adapter, int seconds)>;
+      const std::string& networkAdapter, int seconds)>;
 
-  /// @brief Callback type for `POST /api/captures/start`: starts a capture of @p adapter that runs
+  /// @brief Callback type for `POST /api/captures/start`: starts a capture of @p networkAdapter
+  /// that runs
   ///        until it is stopped, and at most @p maxSeconds. Returns the file it writes.
   using StartCaptureFn = std::function<std::expected<std::filesystem::path, mm::CaptureError>(
-      const std::string& adapter, int maxSeconds)>;
+      const std::string& networkAdapter, int maxSeconds)>;
 
   /// @brief Callback type for `POST /api/captures/stop`: ends the started capture and returns its
   ///        file.
@@ -225,8 +227,8 @@ class HttpServer {
   /// Read only by the Router, also on that thread. See @c mm::api::Router::stopping_ for why the
   /// drain alone is not enough and why the store has to happen there rather than here.
   std::atomic<bool> stopping_{false};
-  /// One capture at a time: a second raw socket on the adapter would record every frame twice.
-  /// Workers for handlers that would otherwise block the event loop.
+  /// One capture at a time: a second raw socket on the network adapter would record every frame
+  /// twice. Workers for handlers that would otherwise block the event loop.
   ///
   /// uWebSockets runs every handler on the app's single loop thread, so a handler that blocks
   /// blocks the *whole* HTTP API rather than just its own endpoint. Several of Motion Master's

@@ -28,29 +28,30 @@ const FIRMWARE_NAMES: Record<string, string> = {
   profinet: 'PROFINET',
 };
 
-// Finds the drives on an Ethernet adapter of the server, so the user picks their IP addresses
+// Finds the drives on a network adapter of the server, so the user picks their IP addresses
 // instead of typing them. The server decides everything; this lists what it found.
 export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string[]) => void }) {
   const { api } = useConnection();
-  const [adapter, setAdapter] = useState('');
+  const [networkAdapter, setNetworkAdapter] = useState('');
   const [durationMs, setDurationMs] = useState(String(DEFAULT_DURATION_MS));
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const adaptersQuery = useQuery({
-    // Its own key, so the adapter list of the SOEM driver stays closed until its button reads it.
-    queryKey: ['adapters', 'ethernet-discovery'],
-    queryFn: () => api.getAdapters(),
+  const networkAdaptersQuery = useQuery({
+    // Its own key, so the network adapter list of the SOEM driver stays closed until its button
+    // reads it.
+    queryKey: ['network-adapters', 'ethernet-discovery'],
+    queryFn: () => api.getNetworkAdapters(),
   });
 
   const discovery = useMutation({
     mutationFn: async (ms: number) => {
       const start = performance.now();
-      const res = await api.discoverEthernetDevices({ adapter, durationMs: ms });
+      const res = await api.discoverEthernetDevices({ networkAdapter, durationMs: ms });
       return { result: res.data, timing: requestTiming(res, start) };
     },
     onSuccess: ({ result }) => {
-      // Every drive with an address on the subnet of the adapter is preselected. A drive on
-      // another subnet cannot be reached until its address or the adapter changes.
+      // Every drive with an address on the subnet of the network adapter is preselected. A drive on
+      // another subnet cannot be reached until its address or the network adapter changes.
       setSelected(
         new Set(
           result.devices
@@ -63,7 +64,7 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
 
   const duration = Number(durationMs);
   const durationValid = Number.isInteger(duration) && duration > 500 && duration <= 60000;
-  const canDiscover = adapter.length > 0 && !discovery.isPending;
+  const canDiscover = networkAdapter.length > 0 && !discovery.isPending;
   const devices: DiscoveredEthernetDevice[] = discovery.data?.result.devices ?? [];
   const selectable = devices.filter((d) => d.ipAddress !== null);
 
@@ -83,13 +84,13 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
     <div className="border border-grey-200 p-4 space-y-3">
       <p className={labelCls}>Discover Ethernet devices</p>
       <p className="text-xs text-grey-600">
-        Finds the drives on an Ethernet adapter of the server and their IP addresses. The server
-        opens no connection to a drive, so it does not disturb a client that works with one. Both
-        buttons do the same on the network and differ only in how long the server listens.
+        Finds the drives on a network adapter of the server and their IP addresses. The server opens
+        no connection to a drive, so it does not disturb a client that works with one. Both buttons
+        do the same on the network and differ only in how long the server listens.
       </p>
       <ul className="text-xs text-grey-600 list-disc pl-5 space-y-1">
         <li>
-          <span className="font-medium">Discover</span> sends two requests on the adapter: a
+          <span className="font-medium">Discover</span> sends two requests on the network adapter: a
           PROFINET DCP Identify All, which a drive with PROFINET firmware answers at once, and an
           EtherNet/IP ListIdentity, which a drive with EtherNet/IP firmware and an IP address
           answers at a random time within the discovery time minus 500 ms. The server then listens
@@ -106,16 +107,18 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
       </ul>
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_10rem] gap-3">
         <div>
-          <label className={labelCls}>Adapter</label>
+          <label className={labelCls}>Network adapter</label>
           <select
-            value={adapter}
-            onChange={(e) => setAdapter(e.target.value)}
+            value={networkAdapter}
+            onChange={(e) => setNetworkAdapter(e.target.value)}
             className={`${fieldCls} w-full`}
           >
             <option value="">
-              {adaptersQuery.isFetching ? 'Reading adapters…' : 'Select an adapter'}
+              {networkAdaptersQuery.isFetching
+                ? 'Reading network adapters…'
+                : 'Select a network adapter'}
             </option>
-            {(adaptersQuery.data?.data ?? []).map((a) => (
+            {(networkAdaptersQuery.data?.data ?? []).map((a) => (
               <option key={a.macLinux} value={a.name}>
                 {a.description || a.name} ({a.macLinux})
               </option>
@@ -219,7 +222,7 @@ export default function EthernetDiscovery({ onAdd }: { onAdd: (addresses: string
                       {d.sameSubnet === false && (
                         <span
                           className="ml-2 text-status-warn cursor-help"
-                          title="The drive is on another subnet than the adapter. Motion Master reaches it only after its address or the address of the adapter changes."
+                          title="The drive is on another subnet than the network adapter. Motion Master reaches it only after its address or the address of the network adapter changes."
                         >
                           other subnet
                         </span>

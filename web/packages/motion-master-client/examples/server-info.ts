@@ -1,7 +1,7 @@
 // Print the server version, the host, the network adapters and the game loop health.
 //
-// Reads GET /api/version, GET /api/system-info, GET /api/adapters and GET /api/game-loop. The
-// program needs no fieldbus driver, so it opens none and leaves the server as it is.
+// Reads GET /api/version, GET /api/system-info, GET /api/network-adapters and GET /api/game-loop.
+// The program needs no fieldbus driver, so it opens none and leaves the server as it is.
 //
 //     pnpm example examples/server-info.ts
 
@@ -24,8 +24,8 @@ async function main(): Promise<void> {
   console.log(`  cpu      ${info.cpuModel}, ${info.cpuCores} cores, ${info.architecture}`);
   console.log(`  memory   ${(info.totalMemoryBytes / 2 ** 30).toFixed(1)} GiB`);
 
-  console.log('adapters:');
-  for (const a of (await client.api.getAdapters()).data) {
+  console.log('network adapters:');
+  for (const a of (await client.api.getNetworkAdapters()).data) {
     console.log(`  ${a.name.padEnd(20)} ${a.macLinux}  ${a.description}`);
   }
 

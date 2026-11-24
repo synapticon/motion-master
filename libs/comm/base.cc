@@ -122,7 +122,7 @@ std::optional<std::array<uint8_t, 6>> parseMac(const std::string& s) {
 }
 
 std::vector<NetworkAdapter> enumerateNetworkAdapters() {
-  std::vector<NetworkAdapter> adapters;
+  std::vector<NetworkAdapter> networkAdapters;
 #ifdef _WIN32
   {
     ULONG ulFlags = GAA_FLAG_INCLUDE_ALL_COMPARTMENTS;
@@ -135,7 +135,7 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
 
     pAddresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(HeapAlloc(hHeap, 0x00, ulBufLen));
     if (pAddresses == nullptr) {
-      return adapters;
+      return networkAdapters;
     }
 
     dwRetVal = GetAdaptersAddresses(ulFamily, ulFlags, nullptr, pAddresses, &ulBufLen);
@@ -145,7 +145,7 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
     }
 
     if (pAddresses == nullptr) {
-      return adapters;
+      return networkAdapters;
     }
 
     dwRetVal = GetAdaptersAddresses(ulFamily, ulFlags, nullptr, pAddresses, &ulBufLen);
@@ -165,12 +165,12 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
         std::string mac = ss.str();
         std::string name = "\\Device\\NPF_" + std::string(pCurrAddresses->AdapterName);
         // Description, not FriendlyName: the former names the hardware ("Realtek USB GbE Family
-        // Controller"), which is what identifies an adapter in a fault report, while the latter is
-        // whatever the user called the connection ("Ethernet 2").
-        adapters.push_back({.macLinux = mac,
-                            .macWindows = normalizeMac(mac, '-'),
-                            .name = name,
-                            .description = toUtf8(pCurrAddresses->Description)});
+        // Controller"), which is what identifies a network adapter in a fault report, while the
+        // latter is whatever the user called the connection ("Ethernet 2").
+        networkAdapters.push_back({.macLinux = mac,
+                                   .macWindows = normalizeMac(mac, '-'),
+                                   .name = name,
+                                   .description = toUtf8(pCurrAddresses->Description)});
         pCurrAddresses = pCurrAddresses->Next;
       }
     }
@@ -197,10 +197,10 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
       snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
                hw[5]);
       // No description: the interface name is the identification here (see NetworkAdapter).
-      adapters.push_back({.macLinux = mac,
-                          .macWindows = normalizeMac(mac, '-'),
-                          .name = ifa->ifa_name,
-                          .description = {}});
+      networkAdapters.push_back({.macLinux = mac,
+                                 .macWindows = normalizeMac(mac, '-'),
+                                 .name = ifa->ifa_name,
+                                 .description = {}});
     }
     freeifaddrs(ifaddr);
   }
@@ -229,35 +229,35 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
              hw[5]);
     // SOEM fills adapter->desc with the interface name on Linux, so it would only repeat `name`.
-    adapters.push_back({.macLinux = mac,
-                        .macWindows = normalizeMac(mac, '-'),
-                        .name = adapter->name,
-                        .description = {}});
+    networkAdapters.push_back({.macLinux = mac,
+                               .macWindows = normalizeMac(mac, '-'),
+                               .name = adapter->name,
+                               .description = {}});
 
     adapter = adapter->next;
   }
   ec_free_adapters(adaptersHead);
 #endif
-  return adapters;
+  return networkAdapters;
 }
 
 std::expected<NetworkAdapter, std::string> resolveNetworkAdapter(const std::string& input) {
-  auto adapters = enumerateNetworkAdapters();
+  auto networkAdapters = enumerateNetworkAdapters();
 
   if (isMacAddress(input)) {
     std::string macLinux = normalizeMac(input, ':');
-    auto it = std::find_if(adapters.begin(), adapters.end(),
+    auto it = std::find_if(networkAdapters.begin(), networkAdapters.end(),
                            [&](const NetworkAdapter& a) { return a.macLinux == macLinux; });
-    if (it == adapters.end()) {
+    if (it == networkAdapters.end()) {
       return std::unexpected("no network adapter found with MAC " + macLinux);
     }
     return *it;
   }
 
   // Reverse lookup by interface name.
-  auto it = std::find_if(adapters.begin(), adapters.end(),
+  auto it = std::find_if(networkAdapters.begin(), networkAdapters.end(),
                          [&](const NetworkAdapter& a) { return a.name == input; });
-  if (it == adapters.end()) {
+  if (it == networkAdapters.end()) {
     return std::unexpected("network adapter '" + input + "' not found");
   }
   return *it;

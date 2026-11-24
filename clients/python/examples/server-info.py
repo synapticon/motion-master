@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the server version, the host, the network adapters and the game loop health.
 
-Reads GET /api/version, GET /api/system-info, GET /api/adapters and GET /api/game-loop. The
+Reads GET /api/version, GET /api/system-info, GET /api/network-adapters and GET /api/game-loop. The
 script needs no fieldbus driver, so it opens none and leaves the server as it is.
 
     python server-info.py
@@ -27,8 +27,8 @@ def main():
     print(f"  cpu      {info['cpuModel']}, {info['cpuCores']} cores, {info['architecture']}")
     print(f"  memory   {info['totalMemoryBytes'] / 2**30:.1f} GiB")
 
-    print("adapters:")
-    for a in client.call("getAdapters").json():
+    print("network adapters:")
+    for a in client.call("getNetworkAdapters").json():
         print(f"  {a['name']:<20} {a['macLinux']}  {a['description']}")
 
     # The skipped cycles count since start. A count that climbs steadily means that the period is

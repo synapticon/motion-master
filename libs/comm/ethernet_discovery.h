@@ -16,7 +16,7 @@ namespace mm::comm {
 using MacAddress = std::array<uint8_t, 6>;
 using Ipv4Address = std::array<uint8_t, 4>;
 
-/// @brief A way to find a device on an Ethernet adapter without a connection to it.
+/// @brief A way to find a device on a network adapter without a connection to it.
 enum class DiscoveryMethod : uint8_t {
   kDcp,           ///< PROFINET DCP Identify All. The device answers with a raw Ethernet frame.
   kListIdentity,  ///< EtherNet/IP ListIdentity. The device answers over UDP.
@@ -36,7 +36,7 @@ enum class EthernetFirmware : uint8_t {
 /// @brief The name of @p firmware in the API: `ethernet-ip` or `profinet`. Empty for kUnknown.
 std::string_view toString(EthernetFirmware firmware);
 
-/// @brief The IPv4 address and network mask of an adapter.
+/// @brief The IPv4 address and network mask of a network adapter.
 struct Ipv4Interface {
   Ipv4Address address{};
   Ipv4Address netmask{};
@@ -71,20 +71,20 @@ struct DiscoveredEthernetDevice {
   std::optional<uint16_t> deviceId;
   std::optional<uint16_t> productCode;
   std::optional<uint32_t> serialNumber;
-  /// Whether the device is on the subnet of the adapter. Empty when the device or the adapter has
-  /// no IP address.
+  /// Whether the device is on the subnet of the network adapter. Empty when the device or the
+  /// network adapter has no IP address.
   std::optional<bool> sameSubnet;
   std::vector<DiscoveryMethod> foundBy;  ///< Every method that found the device, without repeats.
 };
 
-/// @brief The result of one discovery on one adapter.
+/// @brief The result of one discovery on one network adapter.
 struct EthernetDiscoveryResult {
-  std::string adapter;
+  std::string networkAdapter;
   int64_t durationMs = 0;
   int64_t answerDelayMs = 0;
   std::vector<DiscoveredEthernetDevice> devices;
   /// What the discovery could not do, such as a ListIdentity request that was not sent because the
-  /// adapter has no IPv4 address.
+  /// network adapter has no IPv4 address.
   std::vector<std::string> warnings;
 };
 
@@ -111,8 +111,8 @@ std::vector<uint8_t> makeDcpIdentifyAll(const MacAddress& source);
 /// @brief A ListIdentity request as a whole Ethernet frame: a UDP broadcast from @p sourceIp to
 /// port 44818, which asks every device to answer within @p answerDelay.
 ///
-/// The frame is built by hand, so it leaves through this adapter only, whatever the routing table
-/// says about 255.255.255.255.
+/// The frame is built by hand, so it leaves through this network adapter only, whatever the routing
+/// table says about 255.255.255.255.
 std::vector<uint8_t> makeListIdentity(const MacAddress& source, const Ipv4Address& sourceIp,
                                       std::chrono::milliseconds answerDelay);
 
@@ -125,17 +125,18 @@ std::optional<DiscoveryAnswer> parseDiscoveryFrame(std::span<const uint8_t> fram
 /// Two answers belong to one device when they carry the same IP address, other than 0.0.0.0, or
 /// the same MAC address. The rows keep the order in which their devices first answered.
 std::vector<DiscoveredEthernetDevice> mergeDiscoveryAnswers(
-    std::span<const DiscoveryAnswer> answers, const std::optional<Ipv4Interface>& adapter);
+    std::span<const DiscoveryAnswer> answers, const std::optional<Ipv4Interface>& networkAdapter);
 
-/// @brief Finds the devices on @p adapter.
+/// @brief Finds the devices on @p networkAdapter.
 ///
 /// Sends DCP Identify All and ListIdentity at the same time, collects the answers for
 /// @p duration, and listens for LLDP during that time. Opens no connection to a device. Needs raw
-/// access to the adapter: CAP_NET_RAW on Linux, Npcap on Windows, and read and write access to
-/// /dev/bpf* on macOS.
-/// @param adapter  The name of the adapter, or its MAC address, as for the SOEM driver.
+/// access to the network adapter: CAP_NET_RAW on Linux, Npcap on Windows, and read and write access
+/// to /dev/bpf* on macOS.
+/// @param networkAdapter  The name of the network adapter, or its MAC address, as for the SOEM
+///                        driver.
 /// @param duration How long to collect answers. See checkDiscoveryDuration.
 std::expected<EthernetDiscoveryResult, std::string> discoverEthernetDevices(
-    const std::string& adapter, std::chrono::milliseconds duration);
+    const std::string& networkAdapter, std::chrono::milliseconds duration);
 
 }  // namespace mm::comm

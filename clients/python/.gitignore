@@ -1,4 +1,4 @@
-# Local config with your adapter/MAC -- never commit it.
+# Local config with your network adapter -- never commit it.
 config.toml
 
 # Python

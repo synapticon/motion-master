@@ -15,7 +15,7 @@ def _found(names: list[str]) -> str:
 
 def test_init_opens_the_driver_once(bench: Bench, record_property):
     bench.client.reset()
-    body = {"driver": "soem", "adapter": bench.description.adapter}
+    body = {"driver": "soem", "networkAdapter": bench.description.network_adapter}
 
     first = bench.client.call("init", body=body, check=False)
     second = bench.client.call("init", body=body, check=False)

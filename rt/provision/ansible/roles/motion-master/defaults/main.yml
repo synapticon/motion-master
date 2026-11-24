@@ -46,7 +46,7 @@ motion_master_log_level: info
 
 # Fieldbus to bring up at startup. Empty waits for POST /api/init instead.
 motion_master_fieldbus_driver: soem
-motion_master_fieldbus_adapter: ""
+motion_master_fieldbus_network_adapter: ""
 
 motion_master_period_us: 1000
 

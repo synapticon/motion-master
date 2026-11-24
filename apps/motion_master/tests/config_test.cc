@@ -27,7 +27,7 @@ TEST(ConfigTest, EmptyObjectYieldsDefaults) {
   EXPECT_TRUE(r->tls.certPath.empty());
   EXPECT_TRUE(r->tls.keyPath.empty());
   EXPECT_TRUE(r->fieldbus.driver.empty());
-  EXPECT_TRUE(r->fieldbus.adapter.empty());
+  EXPECT_TRUE(r->fieldbus.networkAdapter.empty());
   EXPECT_EQ(r->gameLoop.periodUs, 1000u);
   EXPECT_TRUE(r->esiCache.enabled);
   EXPECT_TRUE(r->esiCache.directory.empty());
@@ -79,7 +79,7 @@ TEST(ConfigTest, NestedPartialFieldbus) {
   auto r = parseConfig(json::parse(R"({"fieldbus": {"driver": "soem"}})"));
   ASSERT_TRUE(r.has_value()) << r.error();
   EXPECT_EQ(r->fieldbus.driver, "soem");
-  EXPECT_TRUE(r->fieldbus.adapter.empty());
+  EXPECT_TRUE(r->fieldbus.networkAdapter.empty());
 }
 
 TEST(ConfigTest, TlsBlockParsed) {

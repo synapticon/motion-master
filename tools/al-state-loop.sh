@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Walks one drive INIT, PREOP, SAFEOP, OP, INIT for N rounds against a running Motion Master,
-# with a netem rule on the bus adapter during the rounds, and counts in the server log how often
-# the step to SAFEOP mapped the process data short or had to map again.
+# with a netem rule on the network adapter of the bus during the rounds, and counts in the server
+# log how often the step to SAFEOP mapped the process data short or had to map again.
 #
 # One run is: reset, init, scan, PREOP, then N rounds of the five state requests. The netem rule
 # is removed for the bring-up, added for the rounds, and removed at the end. See NEXTGEN.md,
@@ -18,14 +18,14 @@
 # The server log rotates at 10 MB. The counts come from the lines written during the rounds, and a
 # rotation during a run leaves them at zero.
 #
-# usage: NETEM="<netem parameters>" tools/al-state-loop.sh <label> [rounds] [adapter]
+# usage: NETEM="<netem parameters>" tools/al-state-loop.sh <label> [rounds] [network-adapter]
 #
 # Results go to out/al-state-loop/<label>/: the server log lines written during the rounds.
 set -u
 
-label="${1:?usage: NETEM=\"...\" tools/al-state-loop.sh <label> [rounds] [adapter]}"
+label="${1:?usage: NETEM=\"...\" tools/al-state-loop.sh <label> [rounds] [network-adapter]}"
 rounds="${2:-30}"
-adapter="${3:-enp0s13f0u1u4u2}"
+network_adapter="${3:-enp0s13f0u1u4u2}"
 netem="${NETEM:-}"
 base="${MM_BASE_URL:-https://local.motion-master.synapticon.com:61447}"
 log="${MM_LOG:-$HOME/.cache/motion-master/logs/motion-master.log}"
@@ -33,11 +33,11 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="$repo/out/al-state-loop/$label"
 mkdir -p "$out"
 
-netem_off() { sudo tc qdisc del dev "$adapter" root 2>/dev/null; }
+netem_off() { sudo tc qdisc del dev "$network_adapter" root 2>/dev/null; }
 netem_on() {
   if [[ -n "$netem" ]]; then
     # shellcheck disable=SC2086  # the parameters are several words on purpose
-    sudo tc qdisc add dev "$adapter" root netem $netem
+    sudo tc qdisc add dev "$network_adapter" root netem $netem
   fi
 }
 
@@ -53,7 +53,7 @@ post() {
 netem_off
 echo "== $label: reset, init, scan, PREOP"
 post /api/reset > /dev/null
-post /api/init "{\"adapter\":\"$adapter\"}" | head -c 200
+post /api/init "{\"networkAdapter\":\"$network_adapter\"}" | head -c 200
 echo
 post /api/scan | head -c 200
 echo
@@ -61,12 +61,13 @@ post /api/devices/state '{"state":2,"timeoutMs":15000}' | head -c 300
 echo
 
 
-# CAPTURE=<seconds> records the bus adapter with motion-master-capture while the rounds run, into
-# $out/capture.pcap, and prints its summary at the end. The program needs CAP_NET_RAW.
+# CAPTURE=<seconds> records the network adapter of the bus with motion-master-capture while the
+# rounds run, into $out/capture.pcap, and prints its summary at the end. The program needs
+# CAP_NET_RAW.
 capture_bin="${MM_CAPTURE_BIN:-$repo/build/x64-linux-debug/apps/motion_master/motion-master-capture}"
 capture_pid=""
 if [[ -n "${CAPTURE:-}" ]]; then
-  "$capture_bin" --ifname "$adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
+  "$capture_bin" --ifname "$network_adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
     > "$out/capture-summary.json" 2> "$out/capture.log" &
   capture_pid=$!
 fi

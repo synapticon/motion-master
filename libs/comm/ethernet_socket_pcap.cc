@@ -29,7 +29,7 @@ constexpr int kReadTimeoutMs = 50;
 constexpr const char* kFilter =
     "ether proto 0x8892 or ether proto 0x88cc or udp src port 44818 or vlan";
 
-std::optional<Ipv4Interface> readIpv4(const std::string& adapter) {
+std::optional<Ipv4Interface> readIpv4(const std::string& networkAdapter) {
   std::array<char, PCAP_ERRBUF_SIZE> error{};
   pcap_if_t* devices = nullptr;
   if (pcap_findalldevs(&devices, error.data()) != 0) {
@@ -37,7 +37,7 @@ std::optional<Ipv4Interface> readIpv4(const std::string& adapter) {
   }
   std::optional<Ipv4Interface> result;
   for (const pcap_if_t* device = devices; device != nullptr && !result; device = device->next) {
-    if (adapter != device->name) {
+    if (networkAdapter != device->name) {
       continue;
     }
     for (const pcap_addr_t* entry = device->addresses; entry != nullptr; entry = entry->next) {
@@ -87,16 +87,16 @@ EthernetSocket::EthernetSocket(EthernetSocket&& other) noexcept = default;
 EthernetSocket& EthernetSocket::operator=(EthernetSocket&& other) noexcept = default;
 EthernetSocket::~EthernetSocket() = default;
 
-std::expected<EthernetSocket, std::string> EthernetSocket::open(const std::string& adapter) {
+std::expected<EthernetSocket, std::string> EthernetSocket::open(const std::string& networkAdapter) {
   std::array<char, PCAP_ERRBUF_SIZE> error{};
   auto handle = std::make_unique<Handle>();
-  handle->pcap = pcap_create(adapter.c_str(), error.data());
+  handle->pcap = pcap_create(networkAdapter.c_str(), error.data());
   if (handle->pcap == nullptr) {
-    return std::unexpected("cannot open " + adapter + ": " + error.data());
+    return std::unexpected("cannot open " + networkAdapter + ": " + error.data());
   }
   pcap_set_snaplen(handle->pcap, 2048);
-  // Promiscuous, because an adapter can filter multicast addresses that nobody joined, and LLDP
-  // goes to one. The filter below keeps every other frame out.
+  // Promiscuous, because a network adapter can filter multicast addresses that nobody joined, and
+  // LLDP goes to one. The filter below keeps every other frame out.
   pcap_set_promisc(handle->pcap, 1);
   pcap_set_timeout(handle->pcap, kReadTimeoutMs);
   pcap_set_immediate_mode(handle->pcap, 1);
@@ -107,14 +107,14 @@ std::expected<EthernetSocket, std::string> EthernetSocket::open(const std::strin
       why += " (read and write access to /dev/bpf* is needed)";
     }
 #endif
-    return std::unexpected("cannot open " + adapter + ": " + why);
+    return std::unexpected("cannot open " + networkAdapter + ": " + why);
   }
   bpf_program program{};
   if (pcap_compile(handle->pcap, &program, kFilter, 1, PCAP_NETMASK_UNKNOWN) == 0) {
     pcap_setfilter(handle->pcap, &program);
     pcap_freecode(&program);
   }
-  return EthernetSocket(std::move(handle), readIpv4(adapter));
+  return EthernetSocket(std::move(handle), readIpv4(networkAdapter));
 }
 
 std::expected<void, std::string> EthernetSocket::send(std::span<const uint8_t> frame) {

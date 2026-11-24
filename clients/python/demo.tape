@@ -48,7 +48,7 @@ Show
 Type "cp config.example.toml config.toml" Sleep 500ms Enter
 Sleep 500ms
 
-# Find the example MAC address in nano and replace it with the name of the adapter.
+# Find the example MAC address in nano and replace it with the name of the network adapter.
 Type "nano config.toml" Sleep 500ms Enter
 Sleep 1s
 Ctrl+W
@@ -66,7 +66,7 @@ Sleep 500ms
 Ctrl+X
 Sleep 500ms
 
-Type "grep '^adapter' config.toml" Sleep 500ms Enter
+Type "grep '^networkAdapter' config.toml" Sleep 500ms Enter
 Sleep 1.5s
 
 # The startup log prints after the prompt, so Enter gives the next command a clean prompt.

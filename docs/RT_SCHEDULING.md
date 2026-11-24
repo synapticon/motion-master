@@ -73,7 +73,7 @@ Motion Master requests **80** for the game loop and for `jitter_bench`
 
 That second relation needs a check on each target. On a stock kernel a soft interrupt runs in
 interrupt context, and it preempts a `SCHED_FIFO` thread at any priority. So the number cannot
-starve the network interface. Under `PREEMPT_RT` this thread does outrank the interface's
+starve the network adapter. Under `PREEMPT_RT` this thread does outrank the network adapter's
 interrupt thread. Confirm it against the target machine:
 
 ```bash

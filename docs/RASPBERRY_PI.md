@@ -306,8 +306,8 @@ update-motion-master 6.0.0-alpha.85
 ```
 
 It downloads that release, installs it, and restarts the service. Your configuration is untouched,
-so the board keeps its adapter, its cycle period and its pinned core. Released versions are listed
-at [the releases page](https://github.com/synapticon/motion-master/releases).
+so the board keeps its network adapter, its cycle period and its pinned core. Released versions are
+listed at [the releases page](https://github.com/synapticon/motion-master/releases).
 
 The version is named rather than picked up automatically. A board driving hardware should move when
 you decide it moves, not because a release happened.

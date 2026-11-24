@@ -668,17 +668,17 @@ void HttpServer::run() {
     return response;
   });
 
-  router.get("/api/adapters", [](const mm::api::Request&) {
+  router.get("/api/network-adapters", [](const mm::api::Request&) {
     return mm::api::json(nlohmann::json(mm::comm::enumerateNetworkAdapters()));
   });
 
   // Waits for the whole discovery time, up to a minute, on a pool thread. It opens no connection to
   // a device and takes no lock of the fieldbus, so it runs beside a SPoE or SOEM driver on the same
-  // adapter.
+  // network adapter.
   router.get("/api/ethernet/discovery", [](const mm::api::Request& req) {
-    const auto adapter = req.query("adapter");
-    if (!adapter || adapter->empty()) {
-      return mm::api::badRequest("'adapter' is required");
+    const auto networkAdapter = req.query("networkAdapter");
+    if (!networkAdapter || networkAdapter->empty()) {
+      return mm::api::badRequest("'networkAdapter' is required");
     }
     auto duration = mm::comm::kDefaultDiscoveryDuration;
     if (req.query("durationMs")) {
@@ -691,10 +691,10 @@ void HttpServer::run() {
     if (auto why = mm::comm::checkDiscoveryDuration(duration)) {
       return mm::api::badRequest(*why);
     }
-    if (auto resolved = mm::comm::resolveNetworkAdapter(*adapter); !resolved) {
+    if (auto resolved = mm::comm::resolveNetworkAdapter(*networkAdapter); !resolved) {
       return mm::api::notFound(resolved.error());
     }
-    return mm::api::respond(mm::comm::discoverEthernetDevices(*adapter, duration));
+    return mm::api::respond(mm::comm::discoverEthernetDevices(*networkAdapter, duration));
   });
 
   router.get("/api/version", [this](const mm::api::Request&) {
@@ -859,14 +859,14 @@ void HttpServer::run() {
   });
 
   // ── Captures ─────────────────────────────────────────────────────────────────────────────────
-  // A capture is the capture program run once, by the server, on the adapter the bus is on. The
+  // A capture is the capture program run once, by the server, on the network adapter the bus is on.
   // file lands in the user cache under captures/, so the user-cache routes list, download and
   // delete it, and the summary is computed here from the file, which is also how a pcap that a
   // user put into captures/ by hand gets its summary.
-  // The capture body: an optional JSON object with an `adapter` and a number of `seconds`, where
-  // the adapter defaults to the adapter of the bus.
+  // The capture body: an optional JSON object with a `networkAdapter` and a number of `seconds`,
+  // where the network adapter defaults to the network adapter of the bus.
   struct CaptureRequest {
-    std::string adapter;
+    std::string networkAdapter;
     int seconds = 0;
   };
   const auto readCaptureRequest =
@@ -879,21 +879,21 @@ void HttpServer::run() {
         return std::unexpected(mm::api::badRequest("body must be a JSON object"));
       }
     }
-    CaptureRequest request{body.value("adapter", std::string{}),
+    CaptureRequest request{body.value("networkAdapter", std::string{}),
                            body.value("seconds", defaultSeconds)};
     if (request.seconds < 1 || request.seconds > maxSeconds) {
       return std::unexpected(mm::api::badRequest(
           std::format("seconds must be between 1 and {}; {}", maxSeconds, why)));
     }
-    if (request.adapter.empty()) {
-      request.adapter = deviceManager_.adapter();
+    if (request.networkAdapter.empty()) {
+      request.networkAdapter = deviceManager_.networkAdapter();
     }
-    if (request.adapter.empty()) {
-      return std::unexpected(
-          mm::api::error("409 Conflict",
-                         "no adapter to capture on: bring a bus up with POST /api/init, or "
-                         "name one in the body as `adapter`. SPoE sends no EtherCAT frames, "
-                         "so there is nothing to capture over it"));
+    if (request.networkAdapter.empty()) {
+      return std::unexpected(mm::api::error(
+          "409 Conflict",
+          "no network adapter to capture on: bring a bus up with POST /api/init, "
+          "or name one in the body as `networkAdapter`. SPoE sends no EtherCAT frames, "
+          "so there is nothing to capture over it"));
     }
     return request;
   };
@@ -935,7 +935,7 @@ void HttpServer::run() {
                 if (!request) {
                   return request.error();
                 }
-                auto file = config_.runCapture(request->adapter, request->seconds);
+                auto file = config_.runCapture(request->networkAdapter, request->seconds);
                 if (!file) {
                   return captureError(file.error());
                 }
@@ -943,7 +943,7 @@ void HttpServer::run() {
                 if (!body) {
                   return body.error();
                 }
-                (*body)["adapter"] = request->adapter;
+                (*body)["networkAdapter"] = request->networkAdapter;
                 (*body)["seconds"] = request->seconds;
                 return mm::api::json(*body);
               });
@@ -962,7 +962,7 @@ void HttpServer::run() {
         if (!request) {
           return request.error();
         }
-        auto file = config_.startCapture(request->adapter, request->seconds);
+        auto file = config_.startCapture(request->networkAdapter, request->seconds);
         if (!file) {
           return captureError(file.error());
         }
@@ -970,7 +970,7 @@ void HttpServer::run() {
         const auto rel = std::filesystem::relative(*file, userCache_.root(), ec);
         return mm::api::json(
             nlohmann::json{{"path", ec ? file->generic_string() : rel.generic_string()},
-                           {"adapter", request->adapter},
+                           {"networkAdapter", request->networkAdapter},
                            {"seconds", request->seconds}});
       });
 

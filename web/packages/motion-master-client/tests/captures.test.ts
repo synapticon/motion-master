@@ -9,19 +9,19 @@ describe('startCapture and stopCapture', () => {
     const server = fakeServer({
       'POST /api/captures/start': () => [
         200,
-        { path: 'captures/a.pcap', adapter: 'eth0', seconds: 600 },
+        { path: 'captures/a.pcap', networkAdapter: 'eth0', seconds: 600 },
       ],
       'POST /api/captures/stop': () => [200, { path: 'captures/a.pcap', summary: SUMMARY }],
     });
     expect(await server.client.startCapture()).toBe('captures/a.pcap');
-    await server.client.startCapture({ adapter: 'eth1', seconds: 5 });
+    await server.client.startCapture({ networkAdapter: 'eth1', seconds: 5 });
     expect(await server.client.stopCapture()).toEqual({
       path: 'captures/a.pcap',
       summary: SUMMARY,
     });
     expect(server.requests.map((r) => r.body)).toEqual([
       {},
-      { adapter: 'eth1', seconds: 5 },
+      { networkAdapter: 'eth1', seconds: 5 },
       undefined,
     ]);
   });

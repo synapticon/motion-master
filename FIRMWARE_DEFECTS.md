@@ -6,7 +6,7 @@ A master that works on every SOMANET device in every setup is hard to keep worki
 
 - **Three EtherCAT slave stacks.** A Circulo and a Node run Synapticon's own stack on an XMOS processor, `sc_somanet_ip/module_ethercat`. The ESC (EtherCAT Slave Controller) of a Node is an ET1100, and the ESC of a Circulo reports type 0xC0. An Integro runs the Hilscher stack on a netX processor, ESC type 0x85, with its application on a separate SoC. A Jasper-based drive, such as the C021, runs the Beckhoff slave stack code on a TI AM2612, whose ESC is a PRU-ICSS, type 0x90. The three stacks answer the same request in different ways.
 - **Many firmware versions.** A rule can hold from one version on and not before it. For example, firmware v5.6.0 and newer resets the mailbox counter on INIT, and older firmware does not.
-- **Network adapters.** Some adapters hold a frame before they send it. On Linux, a USB adapter on the `cdc_ncm` driver holds each frame for up to three times `tx_timer_usecs`, by default 1.2 ms (#154). The master then sees a late frame or a lost frame.
+- **Network adapters.** Some network adapters hold a frame before they send it. On Linux, a USB network adapter on the `cdc_ncm` driver holds each frame for up to three times `tx_timer_usecs`, by default 1.2 ms (#154). The master then sees a late frame or a lost frame.
 - **Operating systems.** On Linux the master sends frames through a raw socket (`AF_PACKET`). On Windows it uses Npcap, and on macOS a BPF device.
 - **Two transports.** SOEM sends EtherCAT frames to the ESC of each device. SPoE (SOMANET Protocol over Ethernet) reaches the netX of each Integro over its own TCP connection, and there is no ESC.
 
@@ -159,7 +159,7 @@ A number in brackets is an issue or pull request in `synapticon/motion-master`, 
 - 5.8.7, FW: `0x2110:0A` is missing on an NGC with Jasper v10.0.4, and narrow angle calibration crashed. The encoder counts as singleturn.
 - 5.8.6, FW (#5809): firmware installation on a drive with no valid firmware stopped at about 85 %. The read timeout is 6 s, with three attempts and an FoE ERROR request after each failure.
 - 5.8.5, FW (#5811, after a reconnect): a SensoJoint on v5.1.0 locked its mailbox. The master sends counter 0 after each scan.
-- 5.8.4, MM: a device that stopped answering held init for minutes. Init now stops, and the port is opened again. A second master (IgH `ec_master`) on the same adapter is detected.
+- 5.8.4, MM: a device that stopped answering held init for minutes. Init now stops, and the port is opened again. A second master (IgH `ec_master`) on the same network adapter is detected.
 - 5.8.2, SOEM: `ecx_readOE` hid lost and late answers, so `0x2011:04` on a Circulo NG read as REAL32. Each subindex is checked on its own.
 - 5.7.0, FW: the Integro does not answer `0xF050:02`, which cost about 8 s per device. The master reads it only when the dictionary lists it.
 - 5.6.4, SOEM: a 20 ms timeout counted too few devices. It is 100 ms.

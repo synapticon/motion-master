@@ -37,8 +37,8 @@
   // Omit this whole block (or leave "driver" empty) to NOT auto-init — the fieldbus then
   // waits to be initialised from the client via POST /api/init.
   "fieldbus": {
-    "driver": "soem",   // soem | spoe
-    "adapter": "eth0",  // soem: NIC MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF) or interface name
+    "driver": "soem",          // soem | spoe
+    "networkAdapter": "eth0",  // soem: interface name or MAC address (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF)
 
     // spoe only. One IP address per drive. The list order is the position order.
     // "ipAddresses": ["192.168.0.10"],

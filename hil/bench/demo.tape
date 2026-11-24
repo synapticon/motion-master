@@ -69,7 +69,7 @@ Hide
 Type "clear" Enter
 Show
 
-Type "grep -E '^(adapter|productName|folder)' bench.description.toml" Sleep 500ms Enter
+Type "grep -E '^(networkAdapter|productName|folder)' bench.description.toml" Sleep 500ms Enter
 Sleep 3s
 
 # The run starts with a power cycle and takes minutes, so the GIF shows the end of the output.

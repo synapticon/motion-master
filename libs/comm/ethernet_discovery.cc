@@ -296,7 +296,7 @@ void to_json(nlohmann::json& j, const DiscoveredEthernetDevice& device) {
 
 void to_json(nlohmann::json& j, const EthernetDiscoveryResult& result) {
   j = nlohmann::json{
-      {"adapter", result.adapter},
+      {"networkAdapter", result.networkAdapter},
       {"durationMs", result.durationMs},
       {"answerDelayMs", result.answerDelayMs},
       {"devices", result.devices},
@@ -401,7 +401,7 @@ std::optional<DiscoveryAnswer> parseDiscoveryFrame(std::span<const uint8_t> fram
 }
 
 std::vector<DiscoveredEthernetDevice> mergeDiscoveryAnswers(
-    std::span<const DiscoveryAnswer> answers, const std::optional<Ipv4Interface>& adapter) {
+    std::span<const DiscoveryAnswer> answers, const std::optional<Ipv4Interface>& networkAdapter) {
   std::vector<DiscoveredEthernetDevice> devices;
   for (const auto& answer : answers) {
     std::optional<Ipv4Address> ip;
@@ -434,13 +434,13 @@ std::vector<DiscoveredEthernetDevice> mergeDiscoveryAnswers(
     }
   }
   for (auto& device : devices) {
-    if (!device.ipAddress || !adapter || isZero(adapter->netmask)) {
+    if (!device.ipAddress || !networkAdapter || isZero(networkAdapter->netmask)) {
       continue;
     }
     bool same = true;
     for (size_t i = 0; i < 4; ++i) {
-      same = same && (((*device.ipAddress)[i] & adapter->netmask[i]) ==
-                      (adapter->address[i] & adapter->netmask[i]));
+      same = same && (((*device.ipAddress)[i] & networkAdapter->netmask[i]) ==
+                      (networkAdapter->address[i] & networkAdapter->netmask[i]));
     }
     device.sameSubnet = same;
   }
@@ -448,17 +448,17 @@ std::vector<DiscoveredEthernetDevice> mergeDiscoveryAnswers(
 }
 
 std::expected<EthernetDiscoveryResult, std::string> discoverEthernetDevices(
-    const std::string& adapter, std::chrono::milliseconds duration) {
+    const std::string& networkAdapter, std::chrono::milliseconds duration) {
   if (auto why = checkDiscoveryDuration(duration)) {
     return std::unexpected(*why);
   }
-  auto resolved = resolveNetworkAdapter(adapter);
+  auto resolved = resolveNetworkAdapter(networkAdapter);
   if (!resolved) {
     return std::unexpected(resolved.error());
   }
   const auto mac = parseMac(resolved->macLinux);
   if (!mac) {
-    return std::unexpected("the adapter " + resolved->name + " has no MAC address");
+    return std::unexpected("the network adapter " + resolved->name + " has no MAC address");
   }
   auto socket = EthernetSocket::open(resolved->name);
   if (!socket) {
@@ -466,7 +466,7 @@ std::expected<EthernetDiscoveryResult, std::string> discoverEthernetDevices(
   }
 
   EthernetDiscoveryResult result;
-  result.adapter = resolved->name;
+  result.networkAdapter = resolved->name;
   result.durationMs = duration.count();
   result.answerDelayMs = listIdentityAnswerDelay(duration).count();
 
@@ -476,7 +476,7 @@ std::expected<EthernetDiscoveryResult, std::string> discoverEthernetDevices(
   }
   if (!socket->ipv4()) {
     result.warnings.emplace_back(
-        "ListIdentity was not sent, because the adapter has no IPv4 address. A drive with "
+        "ListIdentity was not sent, because the network adapter has no IPv4 address. A drive with "
         "EtherNet/IP firmware answers only over IP.");
   } else if (auto sent = socket->send(makeListIdentity(*mac, socket->ipv4()->address,
                                                        listIdentityAnswerDelay(duration)));

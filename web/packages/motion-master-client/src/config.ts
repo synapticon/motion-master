@@ -9,7 +9,7 @@ interface NodeProcess {
   env: Record<string, string | undefined>;
 }
 
-/** The body of `POST /api/init`, for example `{ driver: 'soem', adapter: 'eth0' }`. */
+/** The body of `POST /api/init`, for example `{ driver: 'soem', networkAdapter: 'eth0' }`. */
 export type FieldbusSettings = NonNullable<Parameters<Api['init']>[0]>;
 
 /** The keys of config.jsonc: the keys of config.toml of the Python client, in camelCase. */

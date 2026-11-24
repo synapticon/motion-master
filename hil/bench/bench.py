@@ -41,7 +41,7 @@ class BenchDevice:
 class BenchDescription:
     """The contents of bench.description.toml, with the folder of each device in devices/."""
 
-    adapter: str
+    network_adapter: str
     psu_host: str
     psu_off_seconds: float
     boot_timeout_seconds: float
@@ -52,7 +52,7 @@ class BenchDescription:
         with open(_HERE / "bench.description.toml", "rb") as f:
             data = tomllib.load(f)
         return cls(
-            adapter=data["adapter"],
+            network_adapter=data["networkAdapter"],
             psu_host=data["psu"]["host"],
             psu_off_seconds=data["psu"]["off_seconds"],
             boot_timeout_seconds=data["psu"]["boot_timeout_seconds"],
@@ -95,7 +95,7 @@ class Bench:
             http_url,
             ws_url=ws_url,
             verify=False,
-            fieldbus={"driver": "soem", "adapter": description.adapter},
+            fieldbus={"driver": "soem", "networkAdapter": description.network_adapter},
         )
 
     @classmethod

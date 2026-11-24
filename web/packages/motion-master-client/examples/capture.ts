@@ -1,12 +1,12 @@
-// Record the EtherCAT frames on the bus adapter for some seconds, and print the summary.
+// Record the EtherCAT frames on the network adapter of the bus, and print the summary.
 //
-// POST /api/captures runs motion-master-capture on the adapter that the bus is on, waits for it to
-// end, and answers with the path of the pcap file and its summary. The summary counts, for each kind
-// of frame, how many came back later than 2 ms, 20 ms and 100 ms. The request blocks for the whole
-// capture. The server runs one capture at a time.
+// POST /api/captures runs motion-master-capture on the network adapter that the bus is on, waits
+// for it to end, and answers with the path of the pcap file and its summary. The summary counts,
+// for each kind of frame, how many came back later than 2 ms, 20 ms and 100 ms. The request blocks
+// for the whole capture. The server runs one capture at a time.
 //
-// Opens the fieldbus driver first when none is open, because the server records the adapter of the
-// open driver. It scans nothing and moves no device.
+// Opens the fieldbus driver first when none is open, because the server records the network adapter
+// of the open driver. It scans nothing and moves no device.
 //
 //     pnpm example examples/capture.ts
 //     pnpm example examples/capture.ts --seconds 30
@@ -17,7 +17,7 @@ import { cli, integer } from './options';
 async function main(): Promise<void> {
   const { seconds } = cli()
     .description(
-      'Record the EtherCAT frames on the bus adapter for some seconds, and print the summary.',
+      'Record the EtherCAT frames on the network adapter of the bus, and print the summary.',
     )
     .option('--seconds <n>', 'capture length, 1 to 300', integer, 10)
     .parse()

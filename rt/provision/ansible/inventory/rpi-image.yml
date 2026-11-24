@@ -35,11 +35,11 @@ rt_targets:
     motion_master_install: true
     motion_master_fieldbus_driver: soem
 
-    # Without this the config carries a driver and no adapter, the binary
+    # Without this the config carries a driver and no network adapter, the binary
     # refuses to start, and systemd restarts it every five seconds forever. The
     # board has one wired port and net.ifnames=0 fixes its name, so eth0 is not
     # a guess — it is the same fact the wifi role relies on for wlan0.
-    motion_master_fieldbus_adapter: eth0
+    motion_master_fieldbus_network_adapter: eth0
 
     # Same port, named again for rt-tuning, which installs the .link file that
     # turns segmentation and receive offload off. SOEM writes raw frames and

@@ -128,8 +128,8 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::expected<std::vector<DcSyncDiagnostics>, std::string> readDcSync(
       const std::vector<uint16_t>& positions) override;
 
-  /// @copydoc FieldbusDriver::adapter
-  std::string adapter() const override { return ifname_; }
+  /// @copydoc FieldbusDriver::networkAdapter
+  std::string networkAdapter() const override { return ifname_; }
 
   /// @copydoc FieldbusDriver::readSdo
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slavePosition, uint16_t index,

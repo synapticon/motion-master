@@ -81,7 +81,7 @@ CaptureRunner::~CaptureRunner() {
 }
 
 std::expected<CaptureRunner::Started, CaptureError> CaptureRunner::prepare(
-    const std::string& adapter) const {
+    const std::string& networkAdapter) const {
   if (!std::filesystem::exists(binary_)) {
     return std::unexpected(failed("the capture program is not installed at " + binary_.string()));
   }
@@ -93,12 +93,12 @@ std::expected<CaptureRunner::Started, CaptureError> CaptureRunner::prepare(
   const std::time_t now = std::time(nullptr);
   char stamp[32];
   std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&now));
-  const std::string stem = std::string("capture-") + stamp + "-" + safeForFileName(adapter);
+  const std::string stem = std::string("capture-") + stamp + "-" + safeForFileName(networkAdapter);
   return Started{{}, dir_ / (stem + ".pcap"), dir_ / (stem + ".log")};
 }
 
-std::expected<std::filesystem::path, CaptureError> CaptureRunner::run(const std::string& adapter,
-                                                                      int seconds) {
+std::expected<std::filesystem::path, CaptureError> CaptureRunner::run(
+    const std::string& networkAdapter, int seconds) {
   Started capture;
   {
     const std::scoped_lock lock(mutex_);
@@ -107,7 +107,7 @@ std::expected<std::filesystem::path, CaptureError> CaptureRunner::run(const std:
           CaptureError{CaptureError::Kind::kBusy, "a capture is running; wait for it to finish"});
     }
     started_.reset();  // a started capture that ended by itself
-    auto prepared = prepare(adapter);
+    auto prepared = prepare(networkAdapter);
     if (!prepared) {
       return std::unexpected(prepared.error());
     }
@@ -123,10 +123,11 @@ std::expected<std::filesystem::path, CaptureError> CaptureRunner::run(const std:
     }
   } clearOnExit{*this};
 
-  const std::vector<std::string> args = {
-      "--ifname", adapter, "--seconds", std::to_string(seconds), "--out", capture.file.string()};
-  spdlog::info("Capture: {} on {} for {} s into {}", binary_.filename().string(), adapter, seconds,
-               capture.file.string());
+  const std::vector<std::string> args = {"--ifname",  networkAdapter,
+                                         "--seconds", std::to_string(seconds),
+                                         "--out",     capture.file.string()};
+  spdlog::info("Capture: {} on {} for {} s into {}", binary_.filename().string(), networkAdapter,
+               seconds, capture.file.string());
   auto child = mm::core::spawnChild(binary_, args, capture.log);
   if (!child) {
     return std::unexpected(failed("cannot start the capture program: " + child.error()));
@@ -139,10 +140,10 @@ std::expected<std::filesystem::path, CaptureError> CaptureRunner::run(const std:
   return result(capture.file, capture.log, *exit == 0);
 }
 
-std::expected<std::filesystem::path, CaptureError> CaptureRunner::start(const std::string& adapter,
-                                                                        int maxSeconds) {
+std::expected<std::filesystem::path, CaptureError> CaptureRunner::start(
+    const std::string& networkAdapter, int maxSeconds) {
 #ifdef _WIN32
-  (void)adapter;
+  (void)networkAdapter;
   (void)maxSeconds;
   return std::unexpected(CaptureError{
       CaptureError::Kind::kNotSupported,
@@ -159,21 +160,22 @@ std::expected<std::filesystem::path, CaptureError> CaptureRunner::start(const st
                  started_->file.string());
     started_.reset();
   }
-  auto capture = prepare(adapter);
+  auto capture = prepare(networkAdapter);
   if (!capture) {
     return std::unexpected(capture.error());
   }
-  const std::vector<std::string> args = {"--ifname",  adapter,
+  const std::vector<std::string> args = {"--ifname",  networkAdapter,
                                          "--seconds", std::to_string(maxSeconds),
                                          "--out",     capture->file.string()};
   spdlog::info("Capture: {} on {} until stopped, at most {} s, into {}",
-               binary_.filename().string(), adapter, maxSeconds, capture->file.string());
+               binary_.filename().string(), networkAdapter, maxSeconds, capture->file.string());
   auto child = mm::core::spawnChild(binary_, args, capture->log);
   if (!child) {
     return std::unexpected(failed("cannot start the capture program: " + child.error()));
   }
-  // The program creates its file once the adapter is open and it handles SIGTERM, so a stop
-  // after this point always gets a complete file. One that exits first refused the adapter.
+  // The program creates its file once the network adapter is open and it handles SIGTERM, so a
+  // stop after this point always gets a complete file. One that exits first refused the network
+  // adapter.
   constexpr auto kStartTimeout = std::chrono::seconds{5};
   const auto deadline = std::chrono::steady_clock::now() + kStartTimeout;
   std::error_code ec;

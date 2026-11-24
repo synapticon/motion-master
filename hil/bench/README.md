@@ -10,8 +10,8 @@ also checks that client.
 
 The recording below shows a run by hand on the computer of the bench. It clones the repository,
 builds Motion Master in Docker and starts it, prepares the Python environment with
-`source setup.sh`, shows the adapter and the devices of the bench, and runs `pytest`. The steps are in
-[Run the tests](#run-the-tests). To run the tests from GitHub Actions instead, see
+`source setup.sh`, shows the network adapter and the devices of the bench, and runs `pytest`. The
+steps are in [Run the tests](#run-the-tests). To run the tests from GitHub Actions instead, see
 [Run the tests in GitHub Actions](#run-the-tests-in-github-actions). The workflow does these steps
 itself.
 
@@ -23,7 +23,7 @@ This folder describes one bench: the bench of the self-hosted runner `ci-belgrad
 
 `bench.description.toml` describes the bench. Every value must match the hardware:
 
-- `adapter` is the network interface of the EtherCAT bus.
+- `networkAdapter` is the network adapter of the EtherCAT bus.
 - `[psu]` gives the address of the P 1535, the time the output stays off in a power cycle, and the
   time the drives get to boot.
 - `[[devices]]` lists the devices in bus order. `productName` is the value that
@@ -91,14 +91,14 @@ turns the option on, and the workflow uploads every dump with `report.xml`.
 ## Packet captures
 
 With `pytest --packet-captures`, a test marked with `@pytest.mark.usefixtures("packet_capture")`
-gets every EtherCAT frame on the adapter of the bench, from the start of the test to its end, as a
-file: `captures/<test name>.pcap`. It gets the file also when it fails. Open the file in Wireshark,
-or read the summary of late frames with `GET /api/captures/{name}` once the file is in `captures/`
+gets every EtherCAT frame on the network adapter of the bench, from the start of the test to its
+end, as a file: `captures/<test name>.pcap`. It gets the file also when it fails. Open the file in
+Wireshark, or read the summary of late frames with `GET /api/captures/{name}` once the file is in `captures/`
 of the user cache of a server. The option is off by default, because a capture of a motion test is
 large: it holds every cyclic frame.
 
-The fixture starts the capture with `POST /api/captures/start` before the test, on the adapter that
-`bench.description.toml` names, and stops it with `POST /api/captures/stop` after the test. The
+The fixture starts the capture with `POST /api/captures/start` before the test, on the network
+adapter that `bench.description.toml` names, and stops it with `POST /api/captures/stop` after the test. The
 server runs the capture as a program of its own, so the reset at the start of the test is recorded
 and does not end it. The fixture then downloads the file and deletes it from the server. A capture
 that the server refuses to start, for example because another capture runs, fails the setup of

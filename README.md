@@ -47,13 +47,13 @@ It serves two ports, both bound to `127.0.0.1` and each on its own event loop an
 The fieldbus does **not** come up on its own unless you configure it to. Either bring it up from the console, or do it over the API:
 
 ```bash
-motion-master list-adapters   # find your NIC
+motion-master list-network-adapters   # find your NIC
 
 base=https://local.motion-master.synapticon.com:61447
 curl "$base/api/version"
 curl -X POST "$base/api/init" \
   -H 'Content-Type: application/json' \
-  -d '{"driver":"soem","adapter":"eth0"}'   # then POST /api/scan to discover drives
+  -d '{"driver":"soem","networkAdapter":"eth0"}'   # then POST /api/scan to discover drives
 ```
 
 Use the `local.motion-master.synapticon.com` name rather than `localhost` — it resolves to `127.0.0.1` all the same, but it is the name the bundled certificate is issued for, so TLS verification passes. Against `https://localhost` the same request fails on a hostname mismatch unless you add `-k`.
@@ -114,7 +114,7 @@ Requirements for running a release binary (building from source has its own — 
 
 ### Command-line options
 
-The command line carries only *actions* and the cert-fetch source URLs. Every tunable **setting** — ports, fieldbus driver/adapter, log level, CORS origin, TLS cert/key paths, and cert auto-update — lives in a JSONC config file (see [`motion-master.example.jsonc`](apps/motion_master/motion-master.example.jsonc)). Motion Master loads that file from one of two places: the path you pass with `-c`/`--config`, or, absent that, a `motion-master.jsonc` sitting next to the executable (auto-discovered — `--config` wins over it). With neither, all built-in defaults apply. The Windows release ships such a `motion-master.jsonc` preconfigured to a 4 ms real-time cycle (robust on stock Windows timers); Linux and macOS keep the 1 ms default and ship only the annotated example.
+The command line carries only *actions* and the cert-fetch source URLs. Every tunable **setting** — ports, fieldbus driver and network adapter, log level, CORS origin, TLS cert/key paths, and cert auto-update — lives in a JSONC config file (see [`motion-master.example.jsonc`](apps/motion_master/motion-master.example.jsonc)). Motion Master loads that file from one of two places: the path you pass with `-c`/`--config`, or, absent that, a `motion-master.jsonc` sitting next to the executable (auto-discovered — `--config` wins over it). With neither, all built-in defaults apply. The Windows release ships such a `motion-master.jsonc` preconfigured to a 4 ms real-time cycle (robust on stock Windows timers); Linux and macOS keep the 1 ms default and ship only the annotated example.
 
 ```text
 motion-master [OPTIONS] [SUBCOMMANDS]
@@ -134,7 +134,8 @@ OPTIONS:
 
 SUBCOMMANDS:
   generate-object-addresses  Generate the ObjectAddress headers from a vendor's ESI file and exit
-  list-adapters              Print network adapters (MAC -> interface) and exit
+  list-network-adapters      Print network adapters (MAC -> interface) and exit
+  discover-ethernet-devices  Find the drives on a network adapter, print them, and exit
   update-cert                Download a fresh TLS cert/key, install them at the configured
                              (or default) path, and exit
 ```
@@ -148,7 +149,7 @@ Every setting lives in a JSONC config file — comments are allowed, all keys ar
 | Block | What it covers |
 | --- | --- |
 | `server` | `httpPort` (61447), `wsPort` (62281), `corsOrigin` |
-| `fieldbus` | `driver` + `adapter` to initialise at startup — omit the block to wait for `POST /api/init` instead. Also `mailboxStatusFmmu`, which must stay `false` on TI PRU-ICSS ESCs |
+| `fieldbus` | `driver` + `networkAdapter` to initialise at startup — omit the block to wait for `POST /api/init` instead. Also `mailboxStatusFmmu`, which must stay `false` on TI PRU-ICSS ESCs |
 | `logging` | `level` for the console and `GET /api/log` (`trace` … `critical` \| `off`, default `info`), and `file` — the rotating log file that outlives the process: `enabled`, its own `level` (default `debug`, so the terminal stays readable while the file keeps the detail), `directory` (default: a `logs` subdirectory of the user-cache root, so it is downloadable from the Console), `maxSizeMb` and `maxFiles` |
 | `gameLoop` | `periodUs` — the real-time cycle period (1000 = 1 ms; the Windows release ships 4000) |
 | `recorder` | `capacity` of the lossless process-data ring in cycles (default 300000 ≈ 5 min at 1 ms for one drive, ≈ 38 MB) and `dumpDir` for `.mmpd` dumps |

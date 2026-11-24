@@ -25,13 +25,13 @@ namespace {
 
 constexpr std::array<uint8_t, 6> kLldpMulticast = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
 
-std::optional<Ipv4Interface> readIpv4(const std::string& adapter) {
+std::optional<Ipv4Interface> readIpv4(const std::string& networkAdapter) {
   const int fd = socket(AF_INET, SOCK_DGRAM, 0);
   if (fd < 0) {
     return std::nullopt;
   }
   ifreq request{};
-  std::strncpy(request.ifr_name, adapter.c_str(), IFNAMSIZ - 1);
+  std::strncpy(request.ifr_name, networkAdapter.c_str(), IFNAMSIZ - 1);
   std::optional<Ipv4Interface> result;
   if (ioctl(fd, SIOCGIFADDR, &request) == 0) {
     sockaddr_in address{};
@@ -69,11 +69,11 @@ EthernetSocket::EthernetSocket(EthernetSocket&& other) noexcept = default;
 EthernetSocket& EthernetSocket::operator=(EthernetSocket&& other) noexcept = default;
 EthernetSocket::~EthernetSocket() = default;
 
-std::expected<EthernetSocket, std::string> EthernetSocket::open(const std::string& adapter) {
+std::expected<EthernetSocket, std::string> EthernetSocket::open(const std::string& networkAdapter) {
   auto handle = std::make_unique<Handle>();
-  handle->ifindex = static_cast<int>(if_nametoindex(adapter.c_str()));
+  handle->ifindex = static_cast<int>(if_nametoindex(networkAdapter.c_str()));
   if (handle->ifindex == 0) {
-    return std::unexpected("no adapter named " + adapter);
+    return std::unexpected("no network adapter named " + networkAdapter);
   }
   // A socket for every Ethernet type, because the answers come in three types: PROFINET, IPv4 and
   // LLDP.
@@ -87,17 +87,18 @@ std::expected<EthernetSocket, std::string> EthernetSocket::open(const std::strin
   address.sll_protocol = htons(ETH_P_ALL);
   address.sll_ifindex = handle->ifindex;
   if (bind(handle->fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
-    return std::unexpected("cannot bind to " + adapter + ": " + mm::core::errnoMessage(errno));
+    return std::unexpected("cannot bind to " + networkAdapter + ": " +
+                           mm::core::errnoMessage(errno));
   }
-  // An adapter can filter multicast addresses that nobody joined, and LLDP goes to one. A failure
-  // costs the LLDP answers only, so the discovery goes on without them.
+  // A network adapter can filter multicast addresses that nobody joined, and LLDP goes to one. A
+  // failure costs the LLDP answers only, so the discovery goes on without them.
   packet_mreq membership{};
   membership.mr_ifindex = handle->ifindex;
   membership.mr_type = PACKET_MR_MULTICAST;
   membership.mr_alen = kLldpMulticast.size();
   std::memcpy(membership.mr_address, kLldpMulticast.data(), kLldpMulticast.size());
   setsockopt(handle->fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &membership, sizeof(membership));
-  return EthernetSocket(std::move(handle), readIpv4(adapter));
+  return EthernetSocket(std::move(handle), readIpv4(networkAdapter));
 }
 
 std::expected<void, std::string> EthernetSocket::send(std::span<const uint8_t> frame) {

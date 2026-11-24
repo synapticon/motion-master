@@ -75,21 +75,21 @@ export interface MotionMasterClientOptions {
   webSocketOptions?: unknown;
   /** Custom `fetch` forwarded to the HTTP client (e.g. request logging in tests). */
   customFetch?: ApiConfig['customFetch'];
-  /** The body of `POST /api/init`, for example `{ driver: 'soem', adapter: 'eth0' }`. */
+  /** The body of `POST /api/init`, for example `{ driver: 'soem', networkAdapter: 'eth0' }`. */
   fieldbus?: FieldbusSettings;
 }
 
 export type { FieldbusSettings };
 
-// One line for each step a helper takes, such as "found 1 device(s)". Off by default. Turn it on with
-// DEBUG=motion-master-client in Node.js, or localStorage.debug = 'motion-master-client' in a
+// One line for each step a helper takes, such as "found 1 device(s)". Off by default. Turn it on
+// with DEBUG=motion-master-client in Node.js, or localStorage.debug = 'motion-master-client' in a
 // browser.
 const log = createDebug('motion-master-client');
 
 // One line for each request: the method, the path, the status, the round trip that the client
 // measured, and the times that the server reported in Server-Timing: `server`, and `fieldbus` for a
-// request that ran a fieldbus operation. Off by default. Turn it on
-// with DEBUG=motion-master-client:http, or with DEBUG=motion-master-client* together with the steps.
+// request that ran a fieldbus operation. Off by default. Turn it on with
+// DEBUG=motion-master-client:http, or with DEBUG=motion-master-client* together with the steps.
 const logHttp = createDebug('motion-master-client:http');
 
 /** Writes the line of one request to the `motion-master-client:http` log. */
@@ -173,8 +173,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-// How long monitoring() waits for the first row. After the span it waits two flush intervals for the
-// last rows, and this margin on top.
+// How long monitoring() waits for the first row. After the span it waits two flush intervals for
+// the last rows, and this margin on top.
 const FIRST_ROW_TIMEOUT_MS = 5000;
 const LAST_FLUSH_MARGIN_MS = 2000;
 
@@ -288,8 +288,8 @@ export class MotionMasterClient {
     checkUrl('baseUrl', this.httpBaseUrl, ['http:', 'https:']);
     checkUrl('wsUrl', wsUrl, ['ws:', 'wss:']);
     this.fieldbus = options.fieldbus;
-    // Every request goes through throwingFetch, client.api included, so each refusal is an HttpError
-    // and each request has its line in the http log.
+    // Every request goes through throwingFetch, client.api included, so each refusal is an
+    // HttpError and each request has its line in the http log.
     this.api = new Api({
       baseUrl: this.httpBaseUrl,
       customFetch: throwingFetch(options.customFetch),
@@ -815,7 +815,8 @@ export class MotionMasterClient {
     } finally {
       if (snapshot.status === 'running') {
         log('cancelling %s on device %d', name, slavePosition);
-        // A failed cancel has nothing to add to the error or the early exit that brought the run here.
+        // A failed cancel has nothing to add to the error or the early exit that brought the run
+        // here.
         await this.api.cancelProcedure(slavePosition, name).catch(() => {});
       }
     }
@@ -979,21 +980,21 @@ export class MotionMasterClient {
    *
    * Returns once the capture records, with the path of its pcap file in the user cache. The capture
    * runs as a program of its own, so a reset, an init or a scan in between does not end it.
-   * `adapter` defaults to the adapter of the bus, so name it when no bus is up. `seconds` is the
-   * upper limit for a capture that is never stopped, 600 when not given.
+   * `networkAdapter` defaults to the network adapter of the bus, so name it when no bus is up.
+   * `seconds` is the upper limit for a capture that is never stopped, 600 when not given.
    *
    * Throws a `CaptureError` with the server's reason when it refuses, for example while another
    * capture runs (409) or on Windows (501).
    */
-  async startCapture(options: { adapter?: string; seconds?: number } = {}): Promise<string> {
-    const { adapter, seconds } = options;
+  async startCapture(options: { networkAdapter?: string; seconds?: number } = {}): Promise<string> {
+    const { networkAdapter, seconds } = options;
     const body = {
-      ...(adapter ? { adapter } : {}),
+      ...(networkAdapter ? { networkAdapter } : {}),
       ...(seconds === undefined ? {} : { seconds }),
     };
     try {
       const started = (await this.api.startCapture(body)).data;
-      log('capturing on %s into %s', started.adapter, started.path);
+      log('capturing on %s into %s', started.networkAdapter, started.path);
       return started.path;
     } catch (error) {
       if (!(error instanceof HttpError)) {
@@ -1141,20 +1142,21 @@ export class MotionMasterClient {
   }
 
   /**
-   * Finds the drives on an Ethernet adapter of the server (`discoverEthernetDevices`). `adapter` is
-   * the name or the MAC address of the adapter. `durationMs` is how long the server collects
-   * answers, 2000 when not given; 35000 also catches every drive that only sends LLDP. The result
-   * has one row per drive, with its IP address, which `fieldbus.ipAddresses` of a SPoE driver
-   * takes.
+   * Finds the drives on a network adapter of the server (`discoverEthernetDevices`).
+   * `networkAdapter` is the name or the MAC address of the network adapter. `durationMs` is how
+   * long the server collects answers, 2000 when not given; 35000 also catches every drive that only
+   * sends LLDP. The result has one row per drive, with its IP address, which `fieldbus.ipAddresses`
+   * of a SPoE driver takes.
    */
   async discoverEthernetDevices(
-    adapter: string,
+    networkAdapter: string,
     options: { durationMs?: number; signal?: AbortSignal } = {},
   ): Promise<EthernetDiscovery> {
     const { durationMs, signal } = options;
-    const result = (await this.api.discoverEthernetDevices({ adapter, durationMs }, { signal }))
-      .data;
-    log('found %d device(s) on %s', result.devices.length, result.adapter);
+    const result = (
+      await this.api.discoverEthernetDevices({ networkAdapter, durationMs }, { signal })
+    ).data;
+    log('found %d device(s) on %s', result.devices.length, result.networkAdapter);
     return result;
   }
 

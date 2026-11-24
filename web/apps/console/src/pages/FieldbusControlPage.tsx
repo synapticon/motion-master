@@ -90,8 +90,8 @@ export default function FieldbusControlPage() {
     api,
     driver,
     setDriver,
-    adapter,
-    setAdapter,
+    networkAdapter,
+    setNetworkAdapter,
     ipAddresses,
     setIpAddresses,
     spoeMode,
@@ -156,7 +156,7 @@ export default function FieldbusControlPage() {
     .split(/[\s,]+/)
     .map((a) => a.trim())
     .filter((a) => a.length > 0);
-  const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : adapter.trim().length > 0;
+  const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : networkAdapter.trim().length > 0;
 
   // Appends the addresses that discovery found and the user selected, after the ones in the list.
   function addIpAddresses(found: string[]) {
@@ -172,7 +172,7 @@ export default function FieldbusControlPage() {
             ipAddresses: spoeAddresses,
             spoe: { mode: spoeMode, port: Number(spoePort) || 8080 },
           })
-        : api.init({ driver, adapter }),
+        : api.init({ driver, networkAdapter }),
     onSuccess: () => {
       setAlreadyInitialized(false);
       setIsInitialized(true);
@@ -213,9 +213,9 @@ export default function FieldbusControlPage() {
     enabled: hasScanned,
   });
 
-  const adaptersQuery = useQuery({
-    queryKey: ['adapters'],
-    queryFn: () => api.getAdapters(),
+  const networkAdaptersQuery = useQuery({
+    queryKey: ['network-adapters'],
+    queryFn: () => api.getNetworkAdapters(),
     enabled: false,
   });
 
@@ -344,7 +344,7 @@ export default function FieldbusControlPage() {
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
               <h3 className="text-sm font-display uppercase">Init</h3>
               <p className="text-xs text-grey-600">
-                Initialize the fieldbus driver with the selected protocol: SOEM on a network
+                Initialize the fieldbus driver with the selected protocol: SOEM on a network network
                 adapter, or SPoE to drives at IP addresses. Must be called before scanning.
               </p>
               <div className="space-y-3">
@@ -418,42 +418,44 @@ export default function FieldbusControlPage() {
                 )}
                 {driver === 'soem' && (
                   <div>
-                    <label className={labelCls}>Adapter</label>
+                    <label className={labelCls}>Network adapter</label>
                     <input
                       type="text"
-                      value={adapter}
-                      onChange={(e) => setAdapter(e.target.value)}
+                      value={networkAdapter}
+                      onChange={(e) => setNetworkAdapter(e.target.value)}
                       placeholder="network adapter name or MAC address"
                       className={inputCls}
                     />
                     <button
-                      onClick={() => adaptersQuery.refetch()}
-                      disabled={adaptersQuery.isFetching}
+                      onClick={() => networkAdaptersQuery.refetch()}
+                      disabled={networkAdaptersQuery.isFetching}
                       className={`${btnOutline} w-full mt-2`}
                     >
-                      {adaptersQuery.isFetching ? 'Reading…' : 'Read Adapters'}
+                      {networkAdaptersQuery.isFetching ? 'Reading…' : 'Read Network Adapters'}
                     </button>
-                    {adaptersQuery.isSuccess && adaptersQuery.data.data.length === 0 && (
-                      <p className="text-xs text-grey-600 mt-2">No adapters found.</p>
-                    )}
-                    {adaptersQuery.isSuccess && adaptersQuery.data.data.length > 0 && (
-                      <ul className="border border-grey-200 divide-y divide-grey-100 mt-2">
-                        {adaptersQuery.data.data.map((a) => (
-                          <li key={a.macLinux}>
-                            <button
-                              onClick={() => setAdapter(a.name)}
-                              className="w-full text-left px-3 py-2 text-xs hover:bg-grey-50 transition-colors"
-                            >
-                              <span>{a.description || a.name}</span>
-                              <span className="text-grey-500 ml-2 font-mono">{a.macLinux}</span>
-                              {a.description && (
-                                <span className="block text-grey-500 font-mono">{a.name}</span>
-                              )}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    {networkAdaptersQuery.isSuccess &&
+                      networkAdaptersQuery.data.data.length === 0 && (
+                        <p className="text-xs text-grey-600 mt-2">No network adapters found.</p>
+                      )}
+                    {networkAdaptersQuery.isSuccess &&
+                      networkAdaptersQuery.data.data.length > 0 && (
+                        <ul className="border border-grey-200 divide-y divide-grey-100 mt-2">
+                          {networkAdaptersQuery.data.data.map((a) => (
+                            <li key={a.macLinux}>
+                              <button
+                                onClick={() => setNetworkAdapter(a.name)}
+                                className="w-full text-left px-3 py-2 text-xs hover:bg-grey-50 transition-colors"
+                              >
+                                <span>{a.description || a.name}</span>
+                                <span className="text-grey-500 ml-2 font-mono">{a.macLinux}</span>
+                                {a.description && (
+                                  <span className="block text-grey-500 font-mono">{a.name}</span>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                   </div>
                 )}
               </div>
@@ -737,7 +739,8 @@ export default function FieldbusControlPage() {
                                         const state = Number(
                                           e.currentTarget.value,
                                         ) as TargetAlState;
-                                        // Reset to the placeholder so re-selecting the same target re-fires.
+                                        // Reset to the placeholder so re-selecting the same target
+                                        // re-fires.
                                         e.currentTarget.value = '';
                                         if (state) {
                                           deviceTransitionMutation.mutate({ position: pos, state });
@@ -799,8 +802,9 @@ export default function FieldbusControlPage() {
                                         const code = result.error
                                           ? ` — ${formatHex(result.alStatusCode)}${codeEntry ? ` ${codeEntry.name}` : ''}`
                                           : '';
-                                        // Stuck in INIT with no error reported: usually a drive carried over from
-                                        // another master that needs a power-cycle (same case the bus-wide panel explains).
+                                        // Stuck in INIT with no error reported: usually a drive
+                                        // carried over from another master that needs a power-cycle
+                                        // (same case the bus-wide panel explains).
                                         const silentInit =
                                           result.target !== 1 &&
                                           result.alState === AlState.INIT &&
@@ -868,9 +872,10 @@ export default function FieldbusControlPage() {
                 transitionMutation.data &&
                 (() => {
                   // The request returns HTTP 200 whenever the bus was commanded — it does NOT mean
-                  // the devices arrived. The server reports per-device truth in `ok` / `devices[].reached`
-                  // (a device commanded to PREOP can stay in INIT with AL status code "No error"), so
-                  // branch on that here rather than treating any 200 as a successful transition.
+                  // the devices arrived. The server reports per-device truth in `ok` /
+                  // `devices[].reached` (a device commanded to PREOP can stay in INIT with AL
+                  // status code "No error"), so branch on that here rather than treating any 200 as
+                  // a successful transition.
                   const target = transitionMutation.variables;
                   const body = transitionMutation.data.res.data;
                   const elapsed = (
@@ -897,12 +902,12 @@ export default function FieldbusControlPage() {
                       return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`;
                     })
                     .join('; ');
-                  // A device that stays in Init (1) after being asked to leave it, with the error bit
-                  // clear and AL status code 0x0000 ("No error"), is not reporting a fault — its
-                  // firmware silently isn't servicing the transition. The usual cause is a drive that
-                  // was last run by a different EtherCAT master and moved over without a power-cycle;
-                  // the firmware latches state that only cutting power clears. Surface that, since the
-                  // silent no-error failure is otherwise baffling.
+                  // A device that stays in Init (1) after being asked to leave it, with the error
+                  // bit clear and AL status code 0x0000 ("No error"), is not reporting a fault —
+                  // its firmware silently isn't servicing the transition. The usual cause is a
+                  // drive that was last run by a different EtherCAT master and moved over without a
+                  // power-cycle; the firmware latches state that only cutting power clears. Surface
+                  // that, since the silent no-error failure is otherwise baffling.
                   const silentlyStuckInInit =
                     target !== 1 &&
                     failed.some(

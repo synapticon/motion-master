@@ -35,7 +35,7 @@ pip installs a pre-release when no final release exists, so `pip install` needs 
 
 The package holds the two modules, `motion_master_client` and `motion_master_objects`. It does not
 hold the example scripts. Write `config.toml` in the directory that your program runs from. Take
-the content from [`config.example.toml`](https://github.com/synapticon/motion-master/blob/main/clients/python/config.example.toml), and set `adapter` as [Setup](#setup) says. Then:
+the content from [`config.example.toml`](https://github.com/synapticon/motion-master/blob/main/clients/python/config.example.toml), and set `networkAdapter` as [Setup](#setup) says. Then:
 
 ```python
 from motion_master_client import AlState, MotionMasterClient, run
@@ -81,8 +81,8 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Then edit `config.toml`. Set `adapter` in the `[fieldbus]` table to the network interface that
-the drives are connected to. Give an interface name, such as `eth0`, or a MAC address.
+Then edit `config.toml`. Set `networkAdapter` in the `[fieldbus]` table to the network adapter
+that the drives are connected to. Give an interface name, such as `eth0`, or a MAC address.
 `python examples/server-info.py` lists the network adapters of the host when the server runs.
 
 ## Run
@@ -141,7 +141,7 @@ Three values in that column are not states:
 | `restart-devices.py` | Restarts devices through INIT up to an AL state. An enabled drive is disabled. | Scanned |
 | `reset.py` | Closes the fieldbus driver and clears the device list. | No bus |
 | `diagnostics.py` | Prints the ESC (EtherCAT Slave Controller) error counters and the distributed clock sync of the devices. | Scanned |
-| `capture.py` | Records the EtherCAT frames on the bus adapter for some seconds, and prints how late the frames came back. | Driver open |
+| `capture.py` | Records the EtherCAT frames on the network adapter of the bus for some seconds, and prints how late the frames came back. | Driver open |
 
 ### Parameters
 
@@ -229,7 +229,7 @@ Every request goes through one method, `MotionMasterClient.call(operationId, ...
 the path parameters as `path`, a JSON body as `body`, and the query string as `query`:
 
 ```python
-client.call("init", body={"driver": "soem", "adapter": "eth0"})
+client.call("init", body={"driver": "soem", "networkAdapter": "eth0"})
 client.call("sdoUpload", path={"slavePosition": 1, "index": 0x6041, "subindex": 0})
 ```
 
@@ -324,9 +324,9 @@ client.ensure_state(AlState.PREOP, positions=[1])  # scans when needed, then mov
   the start.
 - `export_eni()` returns the bus as an ENI document, `{"xml": ..., "warnings": ...}`.
   `parse_eni(xml)` reads an ENI document and returns its network with each datagram annotated.
-- `start_capture(adapter=None, seconds=None)` starts a capture of the EtherCAT frames that runs
-  until `stop_capture()`, which returns the path of the pcap file in the user cache and the summary
-  of late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
+- `start_capture(network_adapter=None, seconds=None)` starts a capture of the EtherCAT frames that
+  runs until `stop_capture()`, which returns the path of the pcap file in the user cache and the
+  summary of late frames. Linux and macOS servers only. Both raise `CaptureError` with the server's reason.
 - `step_changes(run)` yields each snapshot of a run as `(snapshot, changed)`, where `changed` lists
   the steps whose status changed. `format_step(step)` turns a step into one line.
 - `step_value(snapshot, step_id)` returns what one step of a run produced, and

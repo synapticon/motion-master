@@ -818,8 +818,8 @@ class DeviceManager {
       const std::vector<uint16_t>& positions);
 
   /// @brief The network adapter the bus is on, or empty when no driver is held or the transport
-  ///        sends no EtherCAT frames. Forwards to @c FieldbusDriver::adapter. No bus I/O.
-  std::string adapter() const;
+  ///        sends no EtherCAT frames. Forwards to @c FieldbusDriver::networkAdapter. No bus I/O.
+  std::string networkAdapter() const;
 
   /// @brief Reads the process-data (sync-manager) watchdog configuration of one device.
   ///

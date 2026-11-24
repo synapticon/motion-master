@@ -13,17 +13,17 @@
 
 namespace mm::comm {
 
-/// @brief Raw access to one Ethernet adapter: send a whole frame, receive whole frames.
+/// @brief Raw access to one network adapter: send a whole frame, receive whole frames.
 ///
 /// Linux uses an AF_PACKET socket, which needs CAP_NET_RAW. Windows and macOS use pcap: Npcap on
 /// Windows, and the libpcap of macOS, which needs read and write access to /dev/bpf*. The socket
-/// receives every frame on the adapter, also one that the operating system would drop, such as a
-/// UDP answer from a device on another subnet. Move-only.
+/// receives every frame on the network adapter, also one that the operating system would drop, such
+/// as a UDP answer from a device on another subnet. Move-only.
 class EthernetSocket {
  public:
-  /// @brief Opens @p adapter, an interface name as SOEM takes it: `eth0` on Linux, `en5` on macOS,
-  /// `\Device\NPF_{GUID}` on Windows.
-  static std::expected<EthernetSocket, std::string> open(const std::string& adapter);
+  /// @brief Opens @p networkAdapter, an interface name as SOEM takes it: `eth0` on Linux, `en5` on
+  /// macOS, `\Device\NPF_{GUID}` on Windows.
+  static std::expected<EthernetSocket, std::string> open(const std::string& networkAdapter);
 
   EthernetSocket(EthernetSocket&& other) noexcept;
   EthernetSocket& operator=(EthernetSocket&& other) noexcept;
@@ -38,7 +38,8 @@ class EthernetSocket {
   std::expected<std::optional<std::vector<uint8_t>>, std::string> receive(
       std::chrono::milliseconds timeout);
 
-  /// @brief The IPv4 address and mask of the adapter, or nothing when it has no IPv4 address.
+  /// @brief The IPv4 address and mask of the network adapter, or nothing when it has no IPv4
+  /// address.
   const std::optional<Ipv4Interface>& ipv4() const { return ipv4_; }
 
  private:

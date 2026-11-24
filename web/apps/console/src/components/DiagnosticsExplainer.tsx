@@ -154,11 +154,11 @@ export default function DiagnosticsExplainer() {
         <strong>Capture</strong> is about the PC, not about a device. Every request Motion Master
         sends to a device goes out as one EtherCAT frame and comes back as the same frame, in well
         under a millisecond on a good host. The capture program records every frame on the bus
-        adapter for the seconds you choose, with the time the kernel gave it, and writes a pcap file
-        under <code>captures/</code> in the user cache. The summary matches each frame the master
-        sent to the one that came back, by the index and the header of its first datagram, and tells
-        a slow PC from a bad cable: a bad cable shows in the port counters above, a slow PC shows
-        here and nowhere else.
+        network adapter for the seconds you choose, with the time the kernel gave it, and writes a
+        pcap file under <code>captures/</code> in the user cache. The summary matches each frame the
+        master sent to the one that came back, by the index and the header of its first datagram,
+        and tells a slow PC from a bad cable: a bad cable shows in the port counters above, a slow
+        PC shows here and nowhere else.
       </p>
       <ul className="list-disc pl-5 space-y-1">
         <li>
@@ -197,7 +197,9 @@ export default function DiagnosticsExplainer() {
         beside &ldquo;mailbox write(s) got no frame back&rdquo; warnings puts it inside the PC. A
         pcap from <code>tcpdump</code> on another PC gets the same summary once it is in{' '}
         <code>captures/</code>: pick the file with <strong>Summarise a pcap</strong>, or run{' '}
-        <code>motion-master-capture --ifname &lt;adapter&gt; --seconds 30 --out frames.pcap</code>{' '}
+        <code>
+          motion-master-capture --ifname &lt;network-adapter&gt; --seconds 30 --out frames.pcap
+        </code>{' '}
         on that PC, which ships beside the Motion Master binary and prints the summary itself.
       </p>
 

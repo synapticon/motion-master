@@ -76,7 +76,7 @@ Without `path`, `fromConfig({ path })` reads `config.jsonc` in the current direc
 | `verify` | `true` checks the certificate of the server. `false` turns off the check for the whole process, because the built-in `fetch` and `WebSocket` of Node.js take no TLS option. |
 | `fieldbus` | The body of `POST /api/init`: the driver, and the network adapter for SOEM or the IP addresses for SPoE. |
 
-`config.jsonc` is ignored by git, so your adapter never gets committed. In a browser, pass the options to `new MotionMasterClient()` instead.
+`config.jsonc` is ignored by git, so your network adapter never gets committed. In a browser, pass the options to `new MotionMasterClient()` instead.
 
 ## Examples
 
@@ -119,7 +119,7 @@ The programs are the same as the Python examples, with the same names, options a
 | `restart-devices.ts` | Restarts devices through INIT up to an AL state. An enabled drive is disabled. | Scanned |
 | `reset.ts` | Closes the fieldbus driver and clears the device list. | No bus |
 | `diagnostics.ts` | Prints the ESC (EtherCAT Slave Controller) error counters and the distributed clock sync of the devices. | Scanned |
-| `capture.ts` | Records the EtherCAT frames on the bus adapter for some seconds, and prints how late the frames came back. | Driver open |
+| `capture.ts` | Records the EtherCAT frames on the network adapter of the bus for some seconds, and prints how late the frames came back. | Driver open |
 
 ### Parameters
 
@@ -224,7 +224,7 @@ The client has helpers for the steps that most programs take. They have the same
 - `runProcedure(slavePosition, name, { params, pollIntervalMs, signal })` starts a procedure and yields its snapshot at every poll, 500 ms apart by default, until the run ends. Leaving the loop early, or an abort of `signal`, cancels the run. It throws a `ProcedureError` when the server refuses the start.
 - `processDataMark()` returns the recorder clock of the server, in epoch microseconds. `processDataDump({ fromUs, toUs })` returns the `.mmpd` dump of the cycles between two marks as bytes, or of the whole recorder without them, and `parseMmpd()` decodes it. `processDataDump` returns `null` when the server has no cycle to dump, and throws a `ProcessDataDumpError` for any other refusal. `parseMmpd(bytes).header.flags` has `MMPD_FLAG_INCOMPLETE_START` set when the server no longer held every cycle right after `fromUs`.
 - `exportEni()` returns the bus as an ENI document, `{ xml, warnings }`. `parseEni(xml)` reads an ENI document and returns its network with each datagram annotated.
-- `startCapture({ adapter, seconds })` starts a capture of the EtherCAT frames that runs until `stopCapture()`, which returns the path of the pcap file in the user cache and the summary of late frames. Linux and macOS servers only. Both throw a `CaptureError` with the server's reason.
+- `startCapture({ networkAdapter, seconds })` starts a capture of the EtherCAT frames that runs until `stopCapture()`, which returns the path of the pcap file in the user cache and the summary of late frames. Linux and macOS servers only. Both throw a `CaptureError` with the server's reason.
 - `streamMonitoring(topic)`, `monitoring(parameters, span)` and `notifications()` read from the WebSocket. [Monitoring](#monitoring) and [Notifications](#notifications) describe them.
 - `stepChanges(run)` yields each snapshot of a run as `[snapshot, changed]`, where `changed` lists the steps whose status changed. `formatStep(step)` turns a step into one line.
 - `stepValue(snapshot, id)` returns what one step of a run produced, and `procedureFailure(snapshot)` why a run failed or was cancelled. `procedureParameterValue(parameter, text)` converts the text of one parameter by the type that the descriptor of the procedure declares, and throws an `Error` that says what is wrong with it. A list splits on commas and line breaks.

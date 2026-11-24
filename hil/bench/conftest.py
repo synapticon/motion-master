@@ -144,9 +144,9 @@ def _message(report: pytest.TestReport) -> str:
 def packet_capture(bench: Bench, request: pytest.FixtureRequest) -> Iterator[None]:
     """Save the EtherCAT frames of the test to captures/<test>.pcap.
 
-    Only with --packet-captures. The capture starts before the test, on the adapter of the bench
-    description, and runs as a program of its own on the server, so the reset at the start of the
-    test is recorded and does not end it. A test that asks for this fixture gets the file also when
+    Only with --packet-captures. The capture starts before the test, on the network adapter of the
+    bench description, and runs as a program of its own on the server, so the reset at the start of
+    the test is recorded and does not end it. A test that asks for this fixture gets the file also when
     it fails: the teardown runs after the finally of the test. A capture the server refuses to
     start, for example because another one runs, fails the setup of the test with the server's
     reason. A failed stop or download is logged and does not change the result of the test. The
@@ -157,7 +157,7 @@ def packet_capture(bench: Bench, request: pytest.FixtureRequest) -> Iterator[Non
         yield
         return
     name = request.node.name
-    bench.client.start_capture(adapter=bench.description.adapter)
+    bench.client.start_capture(network_adapter=bench.description.network_adapter)
     try:
         yield
     finally:

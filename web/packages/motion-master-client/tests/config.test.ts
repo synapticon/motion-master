@@ -17,10 +17,10 @@ describe('fromConfig', () => {
       // The host and the two ports.
       "host": "local.example", "httpPort": 1, "wsPort": 2,
       "verify": true,
-      "fieldbus": { "driver": "soem", "adapter": "eth0", },
+      "fieldbus": { "driver": "soem", "networkAdapter": "eth0", },
     }`);
     const client = await MotionMasterClient.fromConfig({ path });
-    expect(client.fieldbus).toEqual({ driver: 'soem', adapter: 'eth0' });
+    expect(client.fieldbus).toEqual({ driver: 'soem', networkAdapter: 'eth0' });
   });
 
   it('reads the template of the package', async () => {

@@ -131,7 +131,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
   // Installed once, for the life of the context: the only window onto what a slave is doing during
   // a multi-second file transfer.
   ecx_FOEdefinehook(ctx_.get(), reinterpret_cast<void*>(&foeProgressHook));
-  spdlog::debug("SOEM init on adapter '{}'", ifname_);
+  spdlog::debug("SOEM init on network adapter '{}'", ifname_);
   return {};
 }
 

@@ -24,6 +24,14 @@ the HTTP/WebSocket API may break between any two alphas.
 - **Breaking:** the subcommand `discover-ethernet` is now `discover-ethernet-devices`, the same name
   as the HTTP route and the client helpers. The example programs are now
   `discover-ethernet-devices.py` and `discover-ethernet-devices.ts`.
+- **Breaking:** "adapter" is now "network adapter" everywhere, because in EtherNet/IP an adapter is
+  a device on the network. `GET /api/adapters` is `GET /api/network-adapters`, and the subcommand
+  `list-adapters` is `list-network-adapters`. The config key `fieldbus.adapter`, the `adapter` field
+  of `POST /api/init` and of the capture routes, and the `adapter` query parameter and result field
+  of the Ethernet discovery are all `networkAdapter`. The CLI option `--adapter` is
+  `--network-adapter`. The Python helpers take `network_adapter`, and the TypeScript helpers take
+  `networkAdapter`. A config file with the old key `adapter` starts with no network adapter.
+- `tools/adapter-report.sh` is now `tools/network-adapter-report.sh`.
 
 ## [6.0.0-alpha.129] - 2026-11-23
 

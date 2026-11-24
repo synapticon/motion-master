@@ -23,7 +23,7 @@ Configuration page of [#31](https://github.com/synapticon/motion-master/issues/3
 
 1. Set up the Python client as [the client README](../../README.md#setup) says.
 2. Start the Motion Master server.
-3. Connect the drive to the bus adapter that `config.toml` names.
+3. Connect the drive to the network adapter that `config.toml` names.
 
 ## Files the script reads
 

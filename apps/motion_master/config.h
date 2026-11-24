@@ -48,8 +48,9 @@ struct SpoeConfig {
 /// @brief @c "fieldbus" block — the driver to auto-init at startup.
 /// An empty @c driver means "do not auto-init"; the fieldbus then waits for @c POST @c /api/init.
 struct FieldbusConfig {
-  std::string driver;   ///< "" | "soem" | "spoe".
-  std::string adapter;  ///< SOEM NIC: MAC or interface name. "" = none.
+  std::string driver;  ///< "" | "soem" | "spoe".
+  std::string
+      networkAdapter;  ///< SOEM only. Name or MAC address of the network adapter. "" = none.
   /// SPoE only. One IP address per drive. The list order is the position order.
   std::vector<std::string> ipAddresses;
   SpoeConfig spoe;  ///< SPoE only.
@@ -239,8 +240,8 @@ struct Config {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, bindAddress, httpPort, wsPort,
                                                 corsOrigin)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SpoeConfig, mode, watchdogMs, port)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter, ipAddresses, spoe,
-                                                mailboxStatusFmmu)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, networkAdapter, ipAddresses,
+                                                spoe, mailboxStatusFmmu)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs, cpuAffinity)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, capacity, dumpDir)

@@ -67,8 +67,8 @@ the host reaches. Today the user must find the address with another tool and typ
 
 Two features address this. Both work on the Ethernet layer, before any IP protocol runs:
 
-1. **Discovery.** Motion Master lists the devices on one adapter, with their MAC addresses, their
-   IP addresses and what they are.
+1. **Discovery.** Motion Master lists the devices on one network adapter, with their MAC
+   addresses, their IP addresses and what they are.
 2. **Address assignment.** Motion Master gives a device an IP address, for example with a DHCP
    server.
 
@@ -205,8 +205,8 @@ moment. The cost is a longer wait for the user. The design below uses the listen
 request. Whether a shorter delay is enough for a long chain is not measured.
 
 **Both ends need an IP address.** The answer is a UDP datagram to the IP address of the host. A
-drive without an IP address cannot send it. A host without an IP address on the adapter cannot
-give one.
+drive without an IP address cannot send it. A host without an IP address on the network adapter
+cannot give one.
 
 **A drive on another subnet may not deliver its answer.** The drive sends its answer to the host
 address. If that address is not on the subnet of the drive, the drive may send the answer to its
@@ -237,9 +237,9 @@ the source MAC address of a frame lists one drive twice.
 
 ## Measurements
 
-All measurements used `hil/ethernet_discovery` on the adapter `spoe0` (192.168.100.1/24) on
+All measurements used `hil/ethernet_discovery` on the network adapter `spoe0` (192.168.100.1/24) on
 2026-11-23. The drive was an ACTILINK-S with EtherNet/IP firmware at 192.168.100.17, alone on the
-adapter. The firmware version was not recorded.
+network adapter. The firmware version was not recorded.
 
 | Method | Result |
 | --- | --- |
@@ -295,7 +295,8 @@ The automation framework writes attribute 3 with 0, then attribute 5 with the ne
 sends a reset of the CIP Identity object, class 0x01. The drive restarts with the new address
 (`mmaf/network/cip_assign_ip.py`). The write needs a connection to port 44818 of the drive, so the
 drive must already have an address that the host can reach. The framework adds a second address on
-the subnet of the drive to the host adapter for the time of the write (`mmaf/network/nic_alias.py`).
+the subnet of the drive to the network adapter of the host for the time of the write
+(`mmaf/network/nic_alias.py`).
 
 ### DHCP
 
@@ -316,29 +317,30 @@ DHCP client (`mmaf/network/dcp_assign_ip.py`). This is not checked either.
 The framework has two DHCP mechanisms:
 
 1. **A system DHCP server.** It writes `/etc/dhcp/dhcpd.conf` for `isc-dhcp-server` with a pool,
-   by default 192.168.2.100 to 192.168.2.120, and starts the server on the bench adapter. It then
-   pings every address of the pool to find the drives (`mmaf/network/dhcp.py`, `mmaf/fleet.py`).
+   by default 192.168.2.100 to 192.168.2.120, and starts the server on the network adapter of the
+   bench. It then pings every address of the pool to find the drives (`mmaf/network/dhcp.py`,
+   `mmaf/fleet.py`).
 2. **A one-shot responder.** It answers one DHCP request from one MAC address, once, and exits. It
    exists because the framework must also run inside OBLAC Drives on customer machines, where it
    must not change the network configuration of the host (`mmaf/network/dhcp_responder.py`).
 
 #### Who the server answers
 
-A DHCP server answers every DISCOVER it receives. On an adapter that only connects drives, that is
-correct. On an adapter that also connects an office network, the server can give an address to a
-PC or a printer, and the address can conflict with the real DHCP server of that network. So the
-choice of whom the server answers is the main decision of the feature.
+A DHCP server answers every DISCOVER it receives. On a network adapter that only connects drives,
+that is correct. On a network adapter that also connects an office network, the server can give an
+address to a PC or a printer, and the address can conflict with the real DHCP server of that
+network. So the choice of whom the server answers is the main decision of the feature.
 
 | Option | The server answers | Risk |
 | --- | --- | --- |
-| A. Pool | Every DHCP request on the adapter | It can give an address to a device that is not a drive |
+| A. Pool | Every DHCP request on the network adapter | It can give an address to a device that is not a drive |
 | B. Reservations | Only the MAC addresses in a list | The user must know each MAC address first. Discovery gives it |
 | C. One-shot | One MAC address, once, when the user asks | Each new drive needs one action of the user |
 
 Whatever the option, three rules hold:
 
-- The server is off by default. The user turns it on for one named adapter.
-- The server never answers on another adapter.
+- The server is off by default. The user turns it on for one named network adapter.
+- The server never answers on another network adapter.
 - The server needs a privilege: `CAP_NET_RAW` for a raw socket, or `CAP_NET_BIND_SERVICE` for UDP
   port 67.
 
@@ -357,10 +359,10 @@ LLDP and DCP use raw Ethernet frames, so a normal socket cannot send or receive 
 | macOS | BPF through libpcap, with root or access to `/dev/bpf*` | Not decided |
 
 ListIdentity works over a normal UDP socket on every platform, without a privilege. A normal
-socket has two limits: the adapter needs an IPv4 address, and the socket does not see an answer
-that the operating system drops. A broadcast to `255.255.255.255` can leave on another adapter than
-the one the user selected. A broadcast to the subnet of the adapter, such as 192.168.100.255, does
-not. Neither is measured on Windows or macOS.
+socket has two limits: the network adapter needs an IPv4 address, and the socket does not see an
+answer that the operating system drops. A broadcast to `255.255.255.255` can leave on another
+network adapter than the one the user selected. A broadcast to the subnet of the network adapter,
+such as 192.168.100.255, does not. Neither is measured on Windows or macOS.
 
 Some network adapters handle LLDP in their own firmware and do not pass the frames to the
 operating system. Windows also has its own LLDP driver. Whether Npcap sees LLDP frames on Windows
@@ -370,8 +372,9 @@ is not measured.
 
 This is the design in issue #58. It is not built.
 
-1. In the Console, the user selects an adapter, sets the discovery time, and clicks **Discover**.
-2. The Console calls `GET /api/ethernet/discovery?adapter=<name>&durationMs=<ms>`.
+1. In the Console, the user selects a network adapter, sets the discovery time, and clicks
+   **Discover**.
+2. The Console calls `GET /api/ethernet/discovery?networkAdapter=<name>&durationMs=<ms>`.
 3. Motion Master sends DCP Identify All and ListIdentity at the same time and collects the answers
    for `durationMs`. The ListIdentity request sets the answer delay to `durationMs` minus 500 ms.
    With a `durationMs` long enough for LLDP, it also listens for LLDP.

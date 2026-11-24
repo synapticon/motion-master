@@ -55,8 +55,8 @@
 #     CAP_SYS_NICE   SCHED_FIFO scheduling — RT game loop
 #     CAP_IPC_LOCK   mlockall() — pin memory for RT (also needs --ulimit memlock=-1)
 #
-#   The fieldbus driver/adapter are set in the mounted config's "fieldbus" block, e.g.
-#   { "fieldbus": { "driver": "soem", "adapter": "eth0" } }.
+#   The fieldbus driver and network adapter are set in the mounted config's "fieldbus" block,
+#   e.g. { "fieldbus": { "driver": "soem", "networkAdapter": "eth0" } }.
 #
 #   EtherCAT only (config sets fieldbus):
 #     docker run --cap-add NET_ADMIN --cap-add NET_RAW --network host \

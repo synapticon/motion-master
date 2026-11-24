@@ -138,10 +138,10 @@ int main(int argc, char** argv) {
                                                               : opts.config.recorder.dumpDir,
       .recorderCapacity = opts.config.recorder.capacity};
 
-  // The MAC of the interface the bus runs on, which an ENI export writes as the source address of
-  // the cyclic frames. Recorded here rather than read back later because only adapter resolution
-  // knows it, and POST /api/init can move the bus to another interface. Shared so the HTTP thread
-  // reads whatever the last successful init wrote.
+  // The MAC of the network adapter the bus runs on, which an ENI export writes as the source
+  // address of the cyclic frames. Recorded here rather than read back later because only network
+  // adapter resolution knows it, and POST /api/init can move the bus to another network adapter.
+  // Shared so the HTTP thread reads whatever the last successful init wrote.
   //
   // Packed into the low six bytes of a uint64_t, first byte first. A std::atomic over the six-byte
   // array is not lock-free on any platform, so the compiler emits libatomic calls for it and the
@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
   // everywhere, and a MAC has room to spare in them.
   static_assert(std::atomic<uint64_t>::is_always_lock_free,
                 "a non-lock-free atomic needs libatomic, which is not linked on every target");
-  auto busAdapterMac = std::make_shared<std::atomic<uint64_t>>(0);
+  auto busNetworkAdapterMac = std::make_shared<std::atomic<uint64_t>>(0);
   const auto packMac = [](const std::array<uint8_t, 6>& mac) {
     uint64_t packed = 0;
     for (size_t i = 0; i < mac.size(); ++i) {
@@ -158,11 +158,11 @@ int main(int argc, char** argv) {
     return packed;
   };
 
-  // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used
-  // both for the optional eager init below and as the POST /api/init callback, so the two paths
-  // share one set of driver-creation and adapter-resolution rules. main.cc is the only place that
-  // names concrete driver types (the composition root).
-  auto initDeviceManager = [&deviceManager, deviceManagerConfig, busAdapterMac, packMac,
+  // Resolve the network adapter, construct the concrete driver, and hand it to DeviceManager::init.
+  // Used both for the optional eager init below and as the POST /api/init callback, so the two
+  // paths share one set of driver-creation and network-adapter-resolution rules. main.cc is the
+  // only place that names concrete driver types (the composition root).
+  auto initDeviceManager = [&deviceManager, deviceManagerConfig, busNetworkAdapterMac, packMac,
                             mailboxStatusFmmu = opts.config.fieldbus.mailboxStatusFmmu](
                                const FieldbusConfig& fieldbus) -> std::expected<void, std::string> {
     if (fieldbus.driver == "spoe") {
@@ -180,30 +180,30 @@ int main(int argc, char** argv) {
                   .connectTimeout = std::chrono::milliseconds{1000}}),
           deviceManagerConfig);
     }
-    const std::string& adapter = fieldbus.adapter;
+    const std::string& networkAdapter = fieldbus.networkAdapter;
     std::string ifname;
-    if (!adapter.empty()) {
-      auto resolved = mm::comm::resolveNetworkAdapter(adapter);
+    if (!networkAdapter.empty()) {
+      auto resolved = mm::comm::resolveNetworkAdapter(networkAdapter);
       if (!resolved) {
-        // Log the failures this lambda originates (adapter resolution, unsupported driver) so they
-        // are recorded once on both the startup and POST /api/init paths. DeviceManager::init logs
-        // its own driver-init failures, so those are not re-logged here.
-        spdlog::error("Adapter resolution failed: {}", resolved.error());
+        // Log the failures this lambda originates (network adapter resolution, unsupported driver)
+        // so they are recorded once on both the startup and POST /api/init paths.
+        // DeviceManager::init logs its own driver-init failures, so those are not re-logged here.
+        spdlog::error("Network adapter resolution failed: {}", resolved.error());
         return std::unexpected(resolved.error());
       }
       ifname = resolved->name;
       if (const auto mac = mm::comm::parseMac(resolved->macLinux); mac) {
-        busAdapterMac->store(packMac(*mac), std::memory_order_relaxed);
+        busNetworkAdapterMac->store(packMac(*mac), std::memory_order_relaxed);
       }
-      // Recorded on every init, because a support log that never names the adapter cannot answer
-      // the first question any fieldbus fault raises — and on Windows the interface name is an NPF
-      // GUID path, so the description and the MAC (whose OUI names the vendor) are what identify
-      // the hardware. The description is empty where the interface name already does that.
+      // Recorded on every init, because a support log that never names the network adapter cannot
+      // answer the first question any fieldbus fault raises — and on Windows the interface name is
+      // an NPF GUID path, so the description and the MAC (whose OUI names the vendor) are what
+      // identify the hardware. The description is empty where the interface name already does that.
       if (resolved->description.empty()) {
-        spdlog::info("Fieldbus adapter: {} [{}]", resolved->name, resolved->macLinux);
+        spdlog::info("Fieldbus network adapter: {} [{}]", resolved->name, resolved->macLinux);
       } else {
-        spdlog::info("Fieldbus adapter: {} — {} [{}]", resolved->name, resolved->description,
-                     resolved->macLinux);
+        spdlog::info("Fieldbus network adapter: {} — {} [{}]", resolved->name,
+                     resolved->description, resolved->macLinux);
       }
     }
     return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(
@@ -401,8 +401,8 @@ int main(int argc, char** argv) {
           }}
                                              : HttpServer::AutoTuningSpecFn{},
           .eniOptions =
-              [&gameLoop, busAdapterMac, name = std::string{"Motion Master"}] {
-                const uint64_t packed = busAdapterMac->load(std::memory_order_relaxed);
+              [&gameLoop, busNetworkAdapterMac, name = std::string{"Motion Master"}] {
+                const uint64_t packed = busNetworkAdapterMac->load(std::memory_order_relaxed);
                 mm::node::EniCollectorOptions options;
                 options.masterName = name;
                 options.sourceMac.resize(6);
@@ -413,11 +413,12 @@ int main(int argc, char** argv) {
                 return options;
               },
           .runCapture = [&captureRunner](
-                            const std::string& adapter,
-                            int seconds) { return captureRunner.run(adapter, seconds); },
-          .startCapture = [&captureRunner](
-                              const std::string& adapter,
-                              int maxSeconds) { return captureRunner.start(adapter, maxSeconds); },
+                            const std::string& networkAdapter,
+                            int seconds) { return captureRunner.run(networkAdapter, seconds); },
+          .startCapture =
+              [&captureRunner](const std::string& networkAdapter, int maxSeconds) {
+                return captureRunner.start(networkAdapter, maxSeconds);
+              },
           .stopCapture = [&captureRunner]() { return captureRunner.stop(); },
           .corsOrigin = opts.config.server.corsOrigin,
       },

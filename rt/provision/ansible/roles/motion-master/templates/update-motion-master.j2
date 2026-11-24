@@ -67,7 +67,7 @@ apt-get install -y --allow-downgrades "$scratch/$package"
 
 # Restarted rather than left to the next boot: somebody running this over SSH
 # means to be running the new version when the command returns. The config file
-# is untouched, so the board keeps its adapter, its cycle and its core.
+# is untouched, so the board keeps its network adapter, its cycle and its core.
 if systemctl is-enabled "$SERVICE" >/dev/null 2>&1; then
     echo "Restarting $SERVICE"
     systemctl restart "$SERVICE"

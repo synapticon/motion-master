@@ -173,11 +173,12 @@ export default function ConnectionExplainer() {
           <dd>
             <strong>Started configuration</strong> is the fully-resolved configuration the server
             booted with: a JSONC config file overlaid on the built-in defaults. That file is the
-            only way to set ports, the fieldbus driver and adapter, log level, the recorder and TLS
-            — there are no command-line flags for them. It is captured at startup and never re-read,
-            so changing a value means editing the file and restarting. <strong>System</strong> is a
-            live snapshot of the OS and hardware the backend runs on, which is mostly useful when
-            that is a different machine; fields the platform cannot report show as <code>—</code>.
+            only way to set ports, the fieldbus driver and network adapter, log level, the recorder
+            and TLS — there are no command-line flags for them. It is captured at startup and never
+            re-read, so changing a value means editing the file and restarting.{' '}
+            <strong>System</strong> is a live snapshot of the OS and hardware the backend runs on,
+            which is mostly useful when that is a different machine; fields the platform cannot
+            report show as <code>—</code>.
           </dd>
         </div>
       </dl>

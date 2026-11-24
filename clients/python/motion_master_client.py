@@ -6,7 +6,7 @@ the HTTP method + URL path template from that spec at call time. Example scripts
 therefore never hardcode a URL or verb -- they name the operationId straight out
 of the spec the server itself is serving:
 
-    client.call("init", body={"driver": "soem", "adapter": "eth0"})
+    client.call("init", body={"driver": "soem", "networkAdapter": "eth0"})
     client.call("sdoUpload", path={"slavePosition": 1, "index": 0x6041, "subindex": 0})
 
 Reading the spec from the live server (rather than a file in this repo) means
@@ -578,7 +578,7 @@ class MotionMasterClient:
         config file, because an installed module can sit in a directory nobody may write.
         """
         self._http_url = http_url.rstrip("/")
-        # The body of POST /api/init, for example {"driver": "soem", "adapter": "eth0"}.
+        # The body of POST /api/init, for example {"driver": "soem", "networkAdapter": "eth0"}.
         self.fieldbus = fieldbus
         # The WebSocket endpoint. stream_monitoring(), notifications() and monitoring() connect to
         # it, so a script needs no second connection object.
@@ -694,42 +694,42 @@ class MotionMasterClient:
         log.info("found %d device(s)", found)
         return found
 
-    def discover_ethernet_devices(self, adapter, duration_ms=None):
-        """Find the drives on an Ethernet adapter of the server (discoverEthernetDevices).
+    def discover_ethernet_devices(self, network_adapter, duration_ms=None):
+        """Find the drives on a network adapter of the server (discoverEthernetDevices).
 
-        `adapter` is the name or the MAC address of the adapter. `duration_ms` is how long the
-        server collects answers, 2000 when not given; 35000 also catches every drive that only
-        sends LLDP. The result has one row per drive, with its IP address, which
+        `network_adapter` is the name or the MAC address of the network adapter. `duration_ms` is
+        how long the server collects answers, 2000 when not given; 35000 also catches every drive
+        that only sends LLDP. The result has one row per drive, with its IP address, which
         `fieldbus.ipAddresses` of a SPoE driver takes.
         """
-        query = {"adapter": adapter}
+        query = {"networkAdapter": network_adapter}
         if duration_ms is not None:
             query["durationMs"] = duration_ms
         result = self.call("discoverEthernetDevices", query=query).json()
-        log.info("found %d device(s) on %s", len(result["devices"]), result["adapter"])
+        log.info("found %d device(s) on %s", len(result["devices"]), result["networkAdapter"])
         return result
 
-    def start_capture(self, adapter=None, seconds=None):
+    def start_capture(self, network_adapter=None, seconds=None):
         """Start a capture of the EtherCAT frames that runs until stop_capture() (startCapture).
 
         Returns once the capture records, with the path of its pcap file in the user cache. The
         capture runs as a program of its own, so a reset, an init or a scan in between does not end
-        it. `adapter` defaults to the adapter of the bus, so name it when no bus is up. `seconds`
-        is the upper limit for a capture that is never stopped, 600 when not given.
+        it. `network_adapter` defaults to the network adapter of the bus, so name it when no bus is
+        up. `seconds` is the upper limit for a capture that is never stopped, 600 when not given.
 
         Raises CaptureError with the server's reason when it refuses, for example while another
         capture runs (409) or on Windows (501).
         """
         body = {}
-        if adapter:
-            body["adapter"] = adapter
+        if network_adapter:
+            body["networkAdapter"] = network_adapter
         if seconds is not None:
             body["seconds"] = seconds
         r = self.call("startCapture", body=body, check=False)
         if not r.ok:
             raise CaptureError(f"the capture did not start: {_reason(r)} (HTTP {r.status_code})")
         started = r.json()
-        log.info("capturing on %s into %s", started["adapter"], started["path"])
+        log.info("capturing on %s into %s", started["networkAdapter"], started["path"])
         return started["path"]
 
     def stop_capture(self):

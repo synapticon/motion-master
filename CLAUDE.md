@@ -64,10 +64,10 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `tidy.sh` | clang-tidy, bug-finding checks only |
 | `shellcheck.sh` | shellcheck every tracked shell script |
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
-| `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
-| `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc`. `CAPTURE=<seconds>` records the adapter with `motion-master-capture` beside the runs, as do `flaky-bus.sh` and `al-state-loop.sh`. |
+| `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the network adapter of the bus. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
+| `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc`. `CAPTURE=<seconds>` records the network adapter with `motion-master-capture` beside the runs, as do `flaky-bus.sh` and `al-state-loop.sh`. |
 | `al-state-loop.sh` | Walk one drive INIT, PREOP, SAFEOP, OP, INIT again and again against a running server, with an optional `netem` rule during the rounds, and count the short maps and the map attempts in the server log. The loop of `NEXTGEN.md` Session 2026-10-22. Needs passwordless `sudo tc` |
-| `adapter-report.sh` | Print the settings of a Linux bus adapter and its host that can hold a frame: qdisc, coalescing, offloads, EEE, `cdc_ncm`, USB path and power management. Read-only, no root. For #138 |
+| `network-adapter-report.sh` | Print the settings of a Linux network adapter and its host that can hold a frame: qdisc, coalescing, offloads, EEE, `cdc_ncm`, USB path and power management. Read-only, no root. For #138 |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
 
@@ -776,33 +776,33 @@ from `ParameterRefresher`'s cache, one value per flush.
 
 **Bus-level:** AL state control, static configuration (SM/FMMU/DC/mailbox/addresses), process
 image and WKC health, `.mmpd` recorder dump, live ESC diagnostics (error counters, link
-state, watchdog), DC sync deviation (0x092C), and a capture of the frames on the adapter
-(`POST /api/captures`).
+state, watchdog), DC sync deviation (0x092C), and a capture of the frames on the network
+adapter (`POST /api/captures`).
 
 **How late the frames of a host come back is measured with a capture, never inside SOEM.**
 `motion-master-capture` (`apps/capture/`) is a one-shot program beside the server binary. It
-records every EtherCAT frame on an adapter with the kernel's timestamp, writes a pcap, and prints
-a summary: per kind of frame, cyclic and control plane, how many returns were later than 2 ms,
-20 ms and 100 ms, the three waits of the port, cumulative. `libs/capture` holds the parser, the
+records every EtherCAT frame on a network adapter with the kernel's timestamp, writes a pcap, and
+prints a summary: per kind of frame, cyclic and control plane, how many returns were later than
+2 ms, 20 ms and 100 ms, the three waits of the port, cumulative. `libs/capture` holds the parser, the
 pcap code and the summary as pure functions, so the same summary runs over a `tcpdump` file from
 a customer PC through `GET /api/captures/{name}` once the file is in `captures/` of the user
 cache. A frame from the master and the same frame on its way back are told apart by the locally
 administered bit of the source MAC, which every ESC sets on a frame it processed. The match of a
 return to its send is the port's rule: index, command, offset, length, and the position for every
 command the slaves do not count up. `CaptureRunner` (`capture_runner.{h,cc}`) runs the program
-through `mm::core::spawnChild`, one capture at a time, on the adapter the bus is on or on one the
-request names. `POST /api/captures` records for a fixed time. `POST /api/captures/start` and
-`/stop` record a span: SIGTERM ends the program within 100 ms with a complete file and summary, and
-the program creates its file only once the adapter is open, which is how the start knows the
-capture runs. Linux and macOS only, because Windows has no signal for a program without a console.
-The bench records one capture per test that asks for it (`--packet-captures`). **A packet tap sits at the
-driver boundary on both sides**, so a capture covers the NIC, the wire and the device, and not the
-host's queues and scheduling between that boundary and SOEM. `netem` is such a queue: under
-`delay 150ms` the server logs writes with no frame back while the capture beside it reads 0.6 ms.
-So the capture and the server's warnings are read together: late frames in the capture put the
-delay on the wire or in the device, a clean capture beside the warnings puts it inside the host.
-`EC_TIMEOUTLATE` is set from those two together and from nothing else. See `NEXTGEN.md`, Session
-2026-10-22.
+through `mm::core::spawnChild`, one capture at a time, on the network adapter the bus is on or on
+one the request names. `POST /api/captures` records for a fixed time. `POST /api/captures/start`
+and `/stop` record a span: SIGTERM ends the program within 100 ms with a complete file and summary,
+and the program creates its file only once the network adapter is open, which is how the start
+knows the capture runs. Linux and macOS only, because Windows has no signal for a program without
+a console. The bench records one capture per test that asks for it (`--packet-captures`).
+**A packet tap sits at the driver boundary on both sides**, so a capture covers the NIC, the wire
+and the device, and not the host's queues and scheduling between that boundary and SOEM. `netem` is
+such a queue: under `delay 150ms` the server logs writes with no frame back while the capture beside
+it reads 0.6 ms. So the capture and the server's warnings are read together: late frames in the
+capture put the delay on the wire or in the device, a clean capture beside the warnings puts it
+inside the host. `EC_TIMEOUTLATE` is set from those two together and from nothing else. See
+`NEXTGEN.md`, Session 2026-10-22.
 
 **Per-device:** FoE, CoE object dictionary and SDO, PDO mapping read and write
 (`GET`/`PUT /api/devices/:slavePosition/pdo-mapping`; the write reconfigures 0x1C12/0x1C13
@@ -1280,7 +1280,7 @@ budget causes overruns on a given kernel. The CSV has `cycle`, `elapsed_ms`, `ji
 Shows on a SOMANET drive that its bootloader stays stuck after the master gives up on an FoE
 read, and that `abortFoeTransfer` frees it. It puts the drive into BOOT, reads a file with a
 timeout of 0, expects mailbox error `0x0008` on the next read, aborts, and reads again. It leaves
-the drive in INIT. It needs raw socket access, and no other master may use the adapter.
+the drive in INIT. It needs raw socket access, and no other master may use the network adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--slave 1] \
@@ -1293,7 +1293,7 @@ Writes one mailbox request twice with the same counter and reports whether the d
 receive mailbox (LOCKED), answers the copy (HANDLED), or discards it (DISCARDED). A Circulo locks,
 and INIT followed by PREOP frees it. An Integro discards the copy. The request is an SDO upload in PREOP.
 With `--boot` it is an FoE read in BOOT, which tests the bootloader. The bootloader of a Jasper-based C021 discards the copy (one run, BOOT only; PREOP not measured). A drive that restarts on its way out of BOOT gets its station address back. It leaves the drive in PREOP.
-It needs raw socket access, and no other master may use the adapter.
+It needs raw socket access, and no other master may use the network adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/mailbox_duplicate/mailbox_duplicate --ifname <interface> [--slave 1] \
@@ -1310,7 +1310,7 @@ frame back; `double` sends 0 twice; `first` sends 0 as the first request after I
 `init` repeats two counters after INIT and PREOP; `skip` leaves one counter out. A Circulo answers
 every pattern. An Integro drops every counter that is not the one after the last accepted, and
 `skip` shows that in one round. It leaves the drive in PREOP. It needs raw socket access, and no
-other master may use the adapter.
+other master may use the network adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/mailbox_counter0/mailbox_counter0 --ifname <interface> [--slave 1] \
@@ -1319,7 +1319,7 @@ sudo ./build/x64-linux-debug/hil/mailbox_counter0/mailbox_counter0 --ifname <int
 
 ### foe_read_busy
 
-Shows what a drive does when it answers an FoE read request with BUSY, and what each reply of the master does then. Each round puts the drive into INIT, then into `--state` (BOOT or PREOP); `--via-preop` goes through PREOP and INIT first, because an Integro answers BUSY only on the first read after it enters BOOT from PREOP. It sends one read request after `--delay` ms and prints every mailbox message with the time since the request. `--after-busy` picks the reply to a BUSY: `wait`, `abort`, `reread`, `abort-reread` (the reply of the driver before #175), or `ack0`. `--until-file` sends the request again 200 ms after an FoE error. `--gap` pauses after each round, between the last ACK and the next state request. After the rounds it says whether the drive still reaches INIT. On an Integro, `wait` and `abort` hang the drive in BOOT until a power cycle. A drive that restarts on its way out of BOOT, as a Jasper-based drive does on the step to PREOP, gets its station address back. It leaves the drive in PREOP. It needs raw socket access, and no other master may use the adapter.
+Shows what a drive does when it answers an FoE read request with BUSY, and what each reply of the master does then. Each round puts the drive into INIT, then into `--state` (BOOT or PREOP); `--via-preop` goes through PREOP and INIT first, because an Integro answers BUSY only on the first read after it enters BOOT from PREOP. It sends one read request after `--delay` ms and prints every mailbox message with the time since the request. `--after-busy` picks the reply to a BUSY: `wait`, `abort`, `reread`, `abort-reread` (the reply of the driver before #175), or `ack0`. `--until-file` sends the request again 200 ms after an FoE error. `--gap` pauses after each round, between the last ACK and the next state request. After the rounds it says whether the drive still reaches INIT. On an Integro, `wait` and `abort` hang the drive in BOOT until a power cycle. A drive that restarts on its way out of BOOT, as a Jasper-based drive does on the step to PREOP, gets its station address back. It leaves the drive in PREOP. It needs raw socket access, and no other master may use the network adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_read_busy/foe_read_busy --ifname <interface> [--slave 1] \
@@ -1329,7 +1329,7 @@ sudo ./build/x64-linux-debug/hil/foe_read_busy/foe_read_busy --ifname <interface
 
 ### foe_read_abort
 
-Wedges the file system of a Circulo on purpose, which is the reproduction of synapticon/somanet_software#5820. It reads a file in PREOP, reads it again and acknowledges `--packets` data packets, stops with the next one unacknowledged, sends the FoE abort (not with `--no-abort`), and reads the file twice more, comparing bytes with the first read. With the last packet of the file unacknowledged the drive answers "Illegal" and then "File System is busy" until a power cycle (WEDGED); with a packet in the middle unacknowledged it serves every file with its first packet as zeros (WRONG BYTES). A mid-file abort on other firmware ends OK. It leaves the drive in PREOP. It needs raw socket access, and no other master may use the adapter.
+Wedges the file system of a Circulo on purpose, which is the reproduction of synapticon/somanet_software#5820. It reads a file in PREOP, reads it again and acknowledges `--packets` data packets, stops with the next one unacknowledged, sends the FoE abort (not with `--no-abort`), and reads the file twice more, comparing bytes with the first read. With the last packet of the file unacknowledged the drive answers "Illegal" and then "File System is busy" until a power cycle (WEDGED); with a packet in the middle unacknowledged it serves every file with its first packet as zeros (WRONG BYTES). A mid-file abort on other firmware ends OK. It leaves the drive in PREOP. It needs raw socket access, and no other master may use the network adapter.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interface> [--slave 1]   [--file config.csv] [--packets 2] [--pause 200] [--no-abort]
@@ -1337,7 +1337,7 @@ sudo ./build/x64-linux-debug/hil/foe_read_abort/foe_read_abort --ifname <interfa
 
 ### ethernet_discovery
 
-Shows which discovery methods find a drive with EtherNet/IP or PROFINET firmware, for #58. On one adapter it sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity broadcast, and listens for LLDP. It prints every answer with its arrival time, MAC address, IP address and name, and then a summary per IP address that says which method found it. It marks an address on another subnet than the adapter. Every frame goes through a raw socket, so it also sees an answer that the kernel drops. It never opens a TCP connection, so it does not disturb a SPoE client. ListIdentity needs an IPv4 source address: the adapter's own, or `--source-ip`. LLDP needs a listen window longer than the interval at which a drive sends it. Linux only. It needs raw socket access.
+Shows which discovery methods find a drive with EtherNet/IP or PROFINET firmware, for #58. On one network adapter it sends a PROFINET DCP Identify All and an EtherNet/IP ListIdentity broadcast, and listens for LLDP. It prints every answer with its arrival time, MAC address, IP address and name, and then a summary per IP address that says which method found it. It marks an address on another subnet than the network adapter. Every frame goes through a raw socket, so it also sees an answer that the kernel drops. It never opens a TCP connection, so it does not disturb a SPoE client. ListIdentity needs an IPv4 source address: the network adapter's own, or `--source-ip`. LLDP needs a listen window longer than the interval at which a drive sends it. Linux only. It needs raw socket access.
 
 ```bash
 sudo ./build/x64-linux-debug/hil/ethernet_discovery/ethernet_discovery --ifname <interface> [--duration 35] \
@@ -1371,7 +1371,7 @@ Python reference client in `clients/python`. A run starts with a power cycle thr
 then records what each drive says it is, and where it differs from its folder. That goes into
 `report.xml`, the JUnit report, as test-suite properties, and into the job summary.
 
-`hil/bench/bench.description.toml` describes the bench: the adapter, the P 1535 and the devices in bus order. There is one `bench` fixture for the whole run. Each test brings the bench to the start it needs in its first lines, because a reset of the server commands no AL state.
+`hil/bench/bench.description.toml` describes the bench: the network adapter, the P 1535 and the devices in bus order. There is one `bench` fixture for the whole run. Each test brings the bench to the start it needs in its first lines, because a reset of the server commands no AL state.
 Each folder in `hil/bench/devices/` holds the known-good files of one drive, with the names they
 have on the drive (`.hardware_description`, `config.csv`, …).
 
@@ -1407,7 +1407,7 @@ namespace such as `std::string_view_literals`, which a suffix like `"..."sv` nee
 | --- | --- | --- |
 | Classes, structs, enums, aliases | `PascalCase` | `NetworkAdapter`, `GameLoop` |
 | Functions, free and member | `camelCase` | `isMacAddress()`, `addTask()` |
-| Variables, parameters, members | `camelCase` | `macLinux`, `adapterName` |
+| Variables, parameters, members | `camelCase` | `macLinux`, `networkAdapter` |
 | Private data members | `camelCase_` | `period_`, `running_`, `tasks_` |
 | Files | `snake_case` | `game_loop.cc` |
 | Namespaces | `snake_case` | `mm::comm`, `mm::core` |

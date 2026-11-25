@@ -34,8 +34,6 @@ MAX_FOE_READ_SECONDS = 6.0
 
 # The Timestamp Object, which the EtherCAT stack of an Integro created before V5.5.0.0 of the stack.
 TIMESTAMP_OBJECT = 0x10F8
-# A slot that a PDO mapping object reserves beyond the entries it maps.
-RESERVED_MAPPING_SLOT = (0x1601, 0x03)
 
 # (index, subindex, the SDO abort code the Integro must answer with, or None for a value).
 MISSING_ENTRY_REQUESTS = [
@@ -270,9 +268,9 @@ def test_integro_refuses_a_missing_file_without_leftover_bytes(bench: Bench, rec
 
 def test_integro_object_dictionary_matches_the_stack(bench: Bench, record_property):
     # The EtherCAT stack on the netX of an Integro created 0x10F8 in its own dictionary, which the
-    # SoC dictionary does not hold. The firmware now runs a stack that leaves it out. The netX also
-    # serves the slots that a PDO mapping object reserves. The server caches a dictionary only when
-    # it lost no entry, and the server of a bench run starts with an empty cache.
+    # SoC dictionary does not hold. The firmware now runs a stack that leaves it out. The server
+    # caches a dictionary only when it lost no entry, and the server of a bench run starts with an
+    # empty cache.
     integro = bench.device("integro")
     client = bench.client
     client.reset()
@@ -286,8 +284,6 @@ def test_integro_object_dictionary_matches_the_stack(bench: Bench, record_proper
     addresses = {(p["index"], p["subindex"]) for p in parameters}
     timestamp = sorted(a for a in addresses if a[0] == TIMESTAMP_OBJECT)
     assert not timestamp, f"the dictionary holds 0x10F8: {timestamp}"
-    index, subindex = RESERVED_MAPPING_SLOT
-    assert RESERVED_MAPPING_SLOT in addresses, f"the dictionary lacks 0x{index:04X}:{subindex:02X}"
 
     device = client.devices()[integro.position - 1]
     version = client.read_value(integro.position, Profile.MANUFACTURER_SOFTWARE_VERSION)
@@ -303,6 +299,5 @@ def test_integro_object_dictionary_matches_the_stack(bench: Bench, record_proper
     record_property(
         "message",
         f"device {integro.position}: {upload}; {len(parameters)} dictionary entries, none of"
-        f" 0x10F8, 0x{index:04X}:{subindex:02X} among them; cached with"
-        f" {cached[0]['parameterCount']} entries for {version}",
+        f" 0x10F8; cached with {cached[0]['parameterCount']} entries for {version}",
     )

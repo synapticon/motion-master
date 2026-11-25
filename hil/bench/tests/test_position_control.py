@@ -70,7 +70,9 @@ def test_position_control_near_the_rollover(bench: Bench, record_property, folde
     device = bench.device(folder)
     position = device.position
     client = bench.client
-    _to_operation_enabled_in(bench, position, OperationMode.CYCLIC_SYNC_POSITION)
+    client.reset()
+    client.init()
+    client.restart(AlState.PREOP)
     saved = {
         obj: client.read_value(position, obj)
         for obj in (Cia402.FOLLOWING_ERROR_WINDOW, Cia402.POSITION_WINDOW, Cia402.HOME_OFFSET)
@@ -78,11 +80,15 @@ def test_position_control_near_the_rollover(bench: Bench, record_property, folde
     log.info("device %d: saved %s", position, saved)
     phase = "setup"
     try:
+        # Written at PREOP, because a write of the home offset in OP does not move 0x6064. The
+        # drive then goes up to OP without INIT, so that it keeps the written values.
         client.write_value(position, Cia402.FOLLOWING_ERROR_WINDOW, WINDOW)
         client.write_value(position, Cia402.POSITION_WINDOW, WINDOW)
         actual = client.read_value(position, Cia402.POSITION_ACTUAL_VALUE)
         home_offset = _int32(NEAR_ROLLOVER - actual + saved[Cia402.HOME_OFFSET])
         client.write_value(position, Cia402.HOME_OFFSET, home_offset)
+        client.ensure_state(AlState.OP, positions=[position])
+        client.set_operation_mode(position, OperationMode.CYCLIC_SYNC_POSITION)
         time.sleep(0.2)
         moved = client.read_value(position, Cia402.POSITION_ACTUAL_VALUE)
         assert abs(moved - NEAR_ROLLOVER) < WINDOW // 4, (

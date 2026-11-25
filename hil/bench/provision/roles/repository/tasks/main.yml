@@ -1,0 +1,31 @@
+---
+# gh runs as the bench user over the SSH login, with no sudo. gh reads its token from the user's
+# session, and sudo would start it without that session.
+- name: Refuse to run gh as another user than the bench user
+  ansible.builtin.assert:
+    that: ansible_user == bench_user
+    fail_msg: >-
+      The repository role logs in as the bench user. Set ansible_user to {{ bench_user }} in
+      the inventory.
+
+- name: Create the parent folder of the clone
+  become: false
+  ansible.builtin.file:
+    path: "{{ repository_dir | dirname }}"
+    state: directory
+    mode: "0755"
+
+# The role clones once and never pulls, so a later run leaves the branch and the changes in the
+# clone as they are.
+- name: Clone {{ repository_name }}
+  become: false
+  ansible.builtin.command:
+    argv:
+      - gh
+      - repo
+      - clone
+      - "{{ repository_name }}"
+      - "{{ repository_dir }}"
+      - --
+      - --recurse-submodules
+    creates: "{{ repository_dir }}/.git"

@@ -12,3 +12,4 @@
     - { role: tools, tags: tools }
     - { role: tailscale, tags: tailscale }
     - { role: scripts, tags: scripts }
+    - { role: repository, tags: repository }

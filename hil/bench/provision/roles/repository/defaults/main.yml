@@ -1,0 +1,4 @@
+---
+# The clone for builds and tests on the bench machine itself.
+repository_name: synapticon/motion-master
+repository_dir: /home/{{ bench_user }}/github/synapticon/motion-master

@@ -5,12 +5,14 @@ from __future__ import annotations
 import time
 
 import pytest
-from motion_master_client import AlState, Profile, Somanet
+from motion_master_client import AlState, Cia402, Profile, Somanet
 
-from bench import Bench
+from bench import Bench, BenchDevice
 
 # The drives of the bench with an XMOS EtherCAT service: the Circulo and the Node.
 XMOS_DRIVES = ["circulo", "node"]
+# The drives whose firmware this release changes at SAFEOP: the XMOS drives and the Integro.
+SAFE_OP_DRIVES = ["integro", *XMOS_DRIVES]
 
 READS = 50
 # A refused or lost request ends at the mailbox timeout of the server, about 700 ms. An answer
@@ -25,16 +27,64 @@ WKC_WINDOW_SECONDS = 1.0
 SDO_READS_AT_PRE_OP = 20
 
 
-@pytest.mark.parametrize("folder", XMOS_DRIVES)
-def test_sdo_reads_at_safe_op_answer(bench: Bench, record_property, folder: str):
-    # At SAFEOP the server writes the outputs of every drive in each cycle. A drive whose EtherCAT
-    # service reads those outputs only at OP finds a process data exchange due on every pass, and
-    # then serves no mailbox request.
+def _change_state(bench: Bench, state: AlState, position: int) -> None:
+    result = bench.client.call(
+        "changeState", body={"state": state, "positions": [position]}
+    ).json()
+    assert result["ok"], result
+
+
+def _assert_timestamp_is_an_input(bench: Bench, device: BenchDevice) -> None:
+    mapped = {
+        (o["index"], o["subindex"])
+        for o in bench.client.call("getProcessImage").json()["inputs"]
+        if o["slavePosition"] == device.position
+    }
+    timestamp = (Somanet.TIMESTAMP.index, Somanet.TIMESTAMP.subindex)
+    assert timestamp in mapped, f"0x20F0:00 is not an input of device {device.position}"
+
+
+def _check_inputs_and_working_counter(bench: Bench, device: BenchDevice) -> str:
+    """Check for WKC_WINDOW_SECONDS that the bus has a complete working counter and that the
+    inputs of device change. Return what the check saw.
+    """
+    time.sleep(SETTLE_SECONDS)
+    first = bench.client.call("getProcessImage").json()
+    before = bench.client.read_value(device.position, Somanet.TIMESTAMP)
+    time.sleep(WKC_WINDOW_SECONDS)
+    after = bench.client.read_value(device.position, Somanet.TIMESTAMP)
+    second = bench.client.call("getProcessImage").json()
+
+    assert second["lastWkc"] == second["expectedWkc"], (
+        f"working counter {second['lastWkc']}, expected {second['expectedWkc']}"
+    )
+    assert second["shortWkcCycles"] == first["shortWkcCycles"], (
+        f"{second['shortWkcCycles'] - first['shortWkcCycles']} cycles with a short working"
+        f" counter in {WKC_WINDOW_SECONDS} s"
+    )
+    # 0x20F0 wraps, so the test checks that it changed, not that it grew.
+    assert after != before, f"0x20F0:00 of device {device.position} stayed at {before}"
+    return (
+        f"working counter {second['lastWkc']} of {second['expectedWkc']}, no short cycle in"
+        f" {WKC_WINDOW_SECONDS} s, 0x20F0 {before} -> {after}"
+    )
+
+
+@pytest.mark.parametrize("folder", SAFE_OP_DRIVES)
+def test_safe_op_from_pre_op_sends_inputs_and_answers_sdo(
+    bench: Bench, record_property, folder: str
+):
+    # A drive at SAFEOP must send its inputs and serve its mailbox. At SAFEOP the server writes
+    # the outputs of every drive in each cycle. An XMOS drive that read those outputs only at OP
+    # found a process data exchange due on every pass, and served no mailbox request. An Integro
+    # wrote its inputs only at OP, so the working counter was short.
     device = bench.device(folder)
     bench.client.reset()
     bench.client.init()
     bench.client.restart(AlState.SAFEOP)
+    _assert_timestamp_is_an_input(bench, device)
 
+    inputs = _check_inputs_and_working_counter(bench, device)
     times = []
     for _ in range(READS):
         start = time.monotonic()
@@ -47,69 +97,44 @@ def test_sdo_reads_at_safe_op_answer(bench: Bench, record_property, folder: str)
     assert not slow, f"{len(slow)} of {READS} reads took longer than {MAX_READ_SECONDS} s: {slow}"
     record_property(
         "message",
-        f"device {device.position}: {READS} reads of 0x1000:00 at SAFEOP, the slowest in"
-        f" {max(times) * 1000:.1f} ms",
+        f"device {device.position} at SAFEOP: {inputs}; {READS} reads of 0x1000:00, the slowest"
+        f" in {max(times) * 1000:.1f} ms",
     )
 
 
-def _change_state(bench: Bench, state: AlState, position: int) -> None:
-    result = bench.client.call(
-        "changeState", body={"state": state, "positions": [position]}
-    ).json()
-    assert result["ok"], result
-
-
-@pytest.mark.parametrize("folder", XMOS_DRIVES)
+@pytest.mark.parametrize("folder", SAFE_OP_DRIVES)
 def test_inputs_stay_live_after_a_drop_from_op_to_safe_op(
     bench: Bench, record_property, folder: str
 ):
-    # The drop from OP to SAFEOP switched off SM2 in a drive, and that also stopped its inputs.
-    # The master then saw frozen inputs and a short working counter, although a drive at SAFEOP
-    # must send its inputs.
+    # A drop from OP to SAFEOP must keep the inputs of a drive live and end with no fault. An XMOS
+    # drive switched off SM2 at the drop, and that also stopped its inputs. An Integro did not
+    # tell its SoC of the drop, so the SoC waited for outputs and latched CyclicHb.
     device = bench.device(folder)
     bench.client.reset()
     bench.client.init()
     bench.client.restart(AlState.SAFEOP)
-
-    mapped = {
-        (o["index"], o["subindex"])
-        for o in bench.client.call("getProcessImage").json()["inputs"]
-        if o["slavePosition"] == device.position
-    }
-    timestamp = (Somanet.TIMESTAMP.index, Somanet.TIMESTAMP.subindex)
-    assert timestamp in mapped, f"0x20F0:00 is not an input of device {device.position}"
+    _assert_timestamp_is_an_input(bench, device)
 
     _change_state(bench, AlState.OP, device.position)
     _change_state(bench, AlState.SAFEOP, device.position)
-    time.sleep(SETTLE_SECONDS)
 
-    first = bench.client.call("getProcessImage").json()
-    before = bench.client.read_value(device.position, Somanet.TIMESTAMP)
-    time.sleep(WKC_WINDOW_SECONDS)
-    after = bench.client.read_value(device.position, Somanet.TIMESTAMP)
-    second = bench.client.call("getProcessImage").json()
+    inputs = _check_inputs_and_working_counter(bench, device)
     start = time.monotonic()
     bench.client.read_value(device.position, Profile.DEVICE_TYPE)
     sdo_seconds = time.monotonic() - start
+    statusword = bench.client.read_value(device.position, Cia402.STATUSWORD)
+    error_code = bench.client.read_value(device.position, Cia402.ERROR_CODE)
 
     states = bench.client.call("getDeviceStates").json()
     assert states[device.position - 1]["alState"] == AlState.SAFEOP, states
-    assert second["lastWkc"] == second["expectedWkc"], (
-        f"working counter {second['lastWkc']}, expected {second['expectedWkc']}"
-    )
-    assert second["shortWkcCycles"] == first["shortWkcCycles"], (
-        f"{second['shortWkcCycles'] - first['shortWkcCycles']} cycles with a short working"
-        f" counter in {WKC_WINDOW_SECONDS} s"
-    )
-    # 0x20F0 wraps, so the test checks that it changed, not that it grew.
-    assert after != before, f"0x20F0:00 of device {device.position} stayed at {before}"
     assert sdo_seconds <= MAX_READ_SECONDS, f"the SDO read took {sdo_seconds:.3f} s"
+    cia402_state = Cia402.state(statusword)
+    assert cia402_state != "Fault", f"the drive is in Fault, 0x603F is 0x{error_code:04X}"
+    assert error_code == 0, f"0x603F is 0x{error_code:04X}"
     record_property(
         "message",
-        f"device {device.position} after OP to SAFEOP: working counter"
-        f" {second['lastWkc']} of {second['expectedWkc']}, no short cycle in"
-        f" {WKC_WINDOW_SECONDS} s, 0x20F0 {before} -> {after}, SDO read in"
-        f" {sdo_seconds * 1000:.1f} ms",
+        f"device {device.position} after OP to SAFEOP: {inputs}; SDO read in"
+        f" {sdo_seconds * 1000:.1f} ms; {cia402_state}, 0x603F 0x{error_code:04X}",
     )
 
 

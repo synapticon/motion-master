@@ -22,6 +22,9 @@ class BenchDevice:
     position: int
     product_name: str
     folder: Path
+    # The descriptor in the name of the firmware package of the device, such as 9501-02 or
+    # 9010-05-2423-1. None for a device whose firmware the bench does not install.
+    firmware_descriptor: str | None = None
 
     @property
     def path(self) -> dict[str, int]:
@@ -57,7 +60,12 @@ class BenchDescription:
             psu_off_seconds=data["psu"]["off_seconds"],
             boot_timeout_seconds=data["psu"]["boot_timeout_seconds"],
             devices=[
-                BenchDevice(position, d["productName"], _HERE / "devices" / d["folder"])
+                BenchDevice(
+                    position,
+                    d["productName"],
+                    _HERE / "devices" / d["folder"],
+                    d.get("firmwareDescriptor"),
+                )
                 for position, d in enumerate(data["devices"], start=1)
             ],
         )

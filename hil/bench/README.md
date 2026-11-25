@@ -28,7 +28,8 @@ This folder describes one bench: the bench of the self-hosted runner `ci-belgrad
   time the drives get to boot.
 - `[[devices]]` lists the devices in bus order. `productName` is the value that
   `GET /api/devices` reports. `folder` is the name of the device's subfolder in `devices/`, for
-  example `circulo`.
+  example `circulo`. `firmwareDescriptor` is optional. It is the descriptor in the name of the
+  firmware package of the device, for example `9501-02`. See *Install firmware before the tests*.
 
 The folder of a device holds the files of that device, with the names they have on the device:
 `config.csv`, `.hardware_description`, `.factory_config` and others. A file is a known-good copy.
@@ -106,6 +107,25 @@ the test with the server's reason.
 
 The motion test asks for a capture. In GitHub Actions, the input `packet-captures` of the workflow
 turns the option on, and the workflow uploads every capture with `report.xml`.
+
+## Install firmware before the tests
+
+With `pytest --firmware <version>`, the run installs firmware before the first test. The version is
+the one in the package name, such as `5.6.11+15.g482835090`. For each device with a
+`firmwareDescriptor`, the run takes the package whose name holds that descriptor between the
+product name and `motion-drive`, and that version. It installs the packages one after the other
+with the procedure `firmware-installation`, and cycles the power. Each device must then report the
+version in object `0x100A`.
+
+When a package is missing, an install fails, or a device reports another version, every test fails.
+The tests would otherwise run on the wrong firmware. A device without a `firmwareDescriptor` keeps
+its firmware.
+
+The packages are not in this repository, because the repository is public. They are in one folder,
+`~/firmware-packages` by default, which collects the packages of every release.
+`--firmware-packages <folder>` names another folder. On `ci-belgrade-linux`, copy the packages of a
+new release into `~/firmware-packages` with `scp`. Copy only the packages of the devices of the
+bench.
 
 ## The bench report
 
@@ -190,7 +210,7 @@ somebody else uses.
 ## Run the tests in GitHub Actions
 
 The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the tests on
-`ci-belgrade-linux`. Start it by hand from the Actions tab. It has four inputs:
+`ci-belgrade-linux`. Start it by hand from the Actions tab. It has five inputs:
 
 | Input | Empty | Set |
 | --- | --- | --- |
@@ -198,6 +218,7 @@ The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the test
 | `tests` | Run every test. | Run the tests that a pytest `-k` expression selects, for example `scan and not power`. |
 | `process-data-dumps` | Off, the default: save no dump. | On: save a process-data dump of each test that asks for one, and upload it. |
 | `packet-captures` | Off, the default: save no capture. | On: save a packet capture of each test that asks for one, and upload it. |
+| `firmware` | Keep the firmware of the devices. | Install this firmware version from `~/firmware-packages` of the bench machine before the tests, for example `5.6.11+15.g482835090`. |
 
 To start the workflow from a terminal, use the GitHub CLI. `--ref` selects the branch that the
 tests come from, and the image is built from that branch too when `version` is empty.

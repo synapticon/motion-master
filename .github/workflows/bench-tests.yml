@@ -27,6 +27,12 @@ on:
         type: boolean
         required: false
         default: false
+      # The packages are not in the repository, because it is public. They stay on the bench
+      # machine, in ~/firmware-packages.
+      firmware:
+        description: "Firmware version in the package names, e.g. 5.6.11+15.g482835090. Installed before the tests. Empty: keep the firmware."
+        required: false
+        default: ""
 
 # One bench, one run. A second run waits until the first one ends.
 concurrency:
@@ -110,6 +116,7 @@ jobs:
           TESTS: ${{ inputs.tests }}
           DUMPS: ${{ inputs.process-data-dumps }}
           CAPTURES: ${{ inputs.packet-captures }}
+          FIRMWARE: ${{ inputs.firmware }}
         run: |
           args=(--junitxml=report.xml)
           if [[ -n "$TESTS" ]]; then
@@ -120,6 +127,14 @@ jobs:
           fi
           if [[ "$CAPTURES" == "true" ]]; then
             args+=(--packet-captures)
+          fi
+          if [[ -n "$FIRMWARE" ]]; then
+            if [[ ! "$FIRMWARE" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]]; then
+              echo "::error::'$FIRMWARE' is not a version."
+              exit 1
+            fi
+            args+=(--firmware "$FIRMWARE")
+            echo "Firmware: \`$FIRMWARE\`, installed before the tests." >> "$GITHUB_STEP_SUMMARY"
           fi
           pytest "${args[@]}"
 

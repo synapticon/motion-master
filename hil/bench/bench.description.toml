@@ -26,17 +26,25 @@ boot_timeout_seconds = 60
 #   must be unique. The folder holds the files of the device, with the names they have on the
 #   device.
 # productName: the value that GET /api/devices reports for the device.
+# firmwareDescriptor: optional. The descriptor in the name of the firmware package of the device,
+#   between the product name and "motion-drive". pytest --firmware <version> installs the
+#   package with this descriptor and that version. A device without it keeps its firmware.
 [[devices]]
 folder = "integro"
 productName = "SOMANET Integro"
+# The encrypted package. The last field is the fieldbus, and 1 is EtherCAT.
+firmwareDescriptor = "9010-05-2423-1"
 
 [[devices]]
 folder = "circulo"
 productName = "SOMANET Circulo SMM"
+# There is no encrypted package for 8602-01.
+firmwareDescriptor = "8602-01"
 
 [[devices]]
 folder = "node"
 productName = "SOMANET Node"
+firmwareDescriptor = "9501-02"
 
 [[devices]]
 folder = "ngc"

@@ -9,6 +9,7 @@ import pytest
 from motion_master_client import MMPD_FLAG_INCOMPLETE_START, AlState, mmpd_flags
 
 from bench import Bench
+from firmware import DEFAULT_FOLDER, install_firmware
 from report import append_to_job_summary, test_results_markdown, write_bench_report
 
 # (test, outcome, message) for each test, in the order they ran.
@@ -32,15 +33,31 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         help="save a packet capture of each test that asks for one, in captures/",
     )
+    parser.addoption(
+        "--firmware",
+        metavar="VERSION",
+        help="install firmware VERSION on each device with a firmwareDescriptor",
+    )
+    parser.addoption(
+        "--firmware-packages",
+        type=Path,
+        default=DEFAULT_FOLDER,
+        metavar="FOLDER",
+        help=f"the folder of the firmware packages (default: {DEFAULT_FOLDER})",
+    )
 
 
 @pytest.fixture(scope="session")
-def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[Bench]:
+def bench(
+    record_testsuite_property: Callable[[str, object], None], pytestconfig: pytest.Config
+) -> Iterator[Bench]:
     """The bench after a cold start, so that every run starts from drives that just booted.
 
     The cold start resets the server, cycles the power of the drives, opens the driver, and waits
     until every device is on the wire. The P 1535 cannot report whether its output is on, so only
-    a power cycle gives the same start on every run. Before the first test, the fixture writes the
+    a power cycle gives the same start on every run. With --firmware, the fixture then installs the
+    firmware of each device and cold-starts the bench again. A failed install fails every test,
+    because the tests would run on the wrong firmware. Before the first test, the fixture writes the
     bench report to the test-suite properties of report.xml and to the job summary. After the
     last test, passed or failed, it switches the drives off.
     """
@@ -52,6 +69,12 @@ def bench(record_testsuite_property: Callable[[str, object], None]) -> Iterator[
     try:
         bench.cold_start()
         record("setup.seconds", _seconds_since(start))
+        firmware = pytestconfig.getoption("--firmware")
+        if firmware:
+            start = time.monotonic()
+            folder = pytestconfig.getoption("--firmware-packages")
+            install_firmware(bench, firmware, folder, record)
+            record("firmware.seconds", _seconds_since(start))
         start = time.monotonic()
         # The report describes the run, and the tests decide its result. So a report that fails
         # is logged and named in report.xml and the job summary, and the tests still run. The

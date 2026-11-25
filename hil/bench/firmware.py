@@ -25,18 +25,21 @@ PROCEDURE = "firmware-installation"
 DEFAULT_FOLDER = Path.home() / "firmware-packages"
 
 
-def find_package(folder: Path, device: BenchDevice, version: str) -> Path:
+def find_package(folder: Path, device: BenchDevice, version: str) -> Path | None:
     """Return the package in folder for the firmwareDescriptor of device and version.
 
     version is the version in the package name, with or without its leading v, such as
-    5.6.11+15.g482835090. Raise FileNotFoundError when the package is not in folder.
+    5.6.11+15.g482835090. Return None when folder holds no such package, and raise
+    FileNotFoundError when it holds more than one.
     """
     name_version = f"v{version.removeprefix('v')}"
     matches = sorted(
         folder.glob(f"package_*_{device.firmware_descriptor}_motion-drive_{name_version}.zip")
     )
-    if len(matches) != 1:
-        found = ", ".join(p.name for p in matches) or "none"
+    if not matches:
+        return None
+    if len(matches) > 1:
+        found = ", ".join(p.name for p in matches)
         raise FileNotFoundError(
             f"{folder} needs exactly one package for {device.firmware_descriptor}"
             f" {name_version}, found {found}"
@@ -47,7 +50,8 @@ def find_package(folder: Path, device: BenchDevice, version: str) -> Path:
 def install_firmware(
     bench: Bench, version: str, folder: Path, record: Callable[[str, object], None]
 ) -> None:
-    """Install version on each device that has a firmwareDescriptor, then cold-start the bench.
+    """Install version on each device that has a firmwareDescriptor and a package of version, then
+    cold-start the bench.
 
     The devices are installed one after the other, in bus order. After the installs, a power cycle
     starts every drive from the new firmware, and each device must then report the version of its
@@ -56,8 +60,20 @@ def install_firmware(
     Raise RuntimeError when an install fails or a device reports another version. The tests after
     it would test the wrong firmware.
     """
-    devices = [d for d in bench.description.devices if d.firmware_descriptor]
-    packages = {d.position: find_package(folder, d, version) for d in devices}
+    candidates = [d for d in bench.description.devices if d.firmware_descriptor]
+    packages = {d.position: find_package(folder, d, version) for d in candidates}
+    # A release can have packages for some devices only, as an older release kept for a
+    # comparison does. Such a device keeps its firmware. A version with no package at all is a
+    # mistake, because then nothing would be installed.
+    devices = [d for d in candidates if packages[d.position] is not None]
+    for device in candidates:
+        if packages[device.position] is None:
+            log.info(
+                "device %d: no package for %s, it keeps its firmware", device.position, version
+            )
+            record(f"firmware.{device.position}.package", "none, the firmware was kept")
+    if not devices:
+        raise FileNotFoundError(f"{folder} holds no package for {version}")
 
     bench.client.ensure_scanned()
     for device in devices:

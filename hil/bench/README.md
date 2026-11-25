@@ -117,9 +117,11 @@ product name and `motion-drive`, and that version. It installs the packages one 
 with the procedure `firmware-installation`, and cycles the power. Each device must then report the
 version in object `0x100A`.
 
-When a package is missing, an install fails, or a device reports another version, every test fails.
-The tests would otherwise run on the wrong firmware. A device without a `firmwareDescriptor` keeps
-its firmware.
+When an install fails, a device reports another version, or the folder holds no package of the
+version for any device, every test fails. The tests would otherwise run on the wrong firmware. A
+device without a `firmwareDescriptor`, or without a package of the version, keeps its firmware. The
+run records that in `report.xml`, so an older release can be kept for one device only, to compare
+it with a new one.
 
 The packages are not in this repository, because the repository is public. They are in one folder,
 `~/firmware-packages` by default, which collects the packages of every release.

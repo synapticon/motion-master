@@ -11,7 +11,7 @@ import logging
 import time
 
 import pytest
-from motion_master_client import AlState, Cia402, OperationMode
+from motion_master_client import AlState, Cia402, OperationMode, Somanet
 
 from bench import Bench
 
@@ -130,6 +130,8 @@ def test_position_control_near_the_rollover(bench: Bench, record_property, folde
             crossed_to = client.read_value(position, Cia402.POSITION_ACTUAL_VALUE)
             phase = "end"
         error_code = client.read_value(position, Cia402.ERROR_CODE)
+        # 0x603F names a class of error only. The drive names the error itself in 0x203F:01.
+        error_report = client.read_value(position, Somanet.ERROR_REPORT_DESCRIPTION)
     finally:
         log.info("device %d: the test ended in phase %s", position, phase)
         # A failed step here must not hide the error of the test.
@@ -146,9 +148,12 @@ def test_position_control_near_the_rollover(bench: Bench, record_property, folde
     ]
     faults = [t for t, sw in m.column(position, Cia402.STATUSWORD) if Cia402.state(sw) == "Fault"]
     assert not following_errors, (
-        f"0x6041 bit 13 in {len(following_errors)} cycle(s); 0x603F 0x{error_code:04X}"
+        f"0x6041 bit 13 in {len(following_errors)} cycle(s); 0x603F 0x{error_code:04X},"
+        f" 0x203F:01 {error_report!r}"
     )
-    assert not faults, f"Fault in {len(faults)} cycle(s); 0x603F 0x{error_code:04X}"
+    assert not faults, (
+        f"Fault in {len(faults)} cycle(s); 0x603F 0x{error_code:04X}, 0x203F:01 {error_report!r}"
+    )
     assert crossed_to < 0, f"0x6064 is {crossed_to} after the crossing, so it did not cross"
     assert reached, f"target reached never set for 0x607A = {PP_TARGET}"
     record_property(

@@ -105,7 +105,12 @@ def test_position_control_near_the_rollover(bench: Bench, record_property, folde
             # Profile Position to a target closer to the rollover, on the same side of it, so the
             # move is short.
             phase = "target reached"
+            # The new setpoint bit is set before the change to Profile Position, while the target
+            # is the position the drive holds. A drive that enters Profile Position without it
+            # raises AxNoStl when it does not count the axis as at standstill.
+            client.write_value(position, Cia402.CONTROLWORD, CONTROLWORD_NEW_SETPOINT)
             client.set_operation_mode(position, OperationMode.PROFILE_POSITION)
+            client.write_value(position, Cia402.CONTROLWORD, CONTROLWORD_ENABLE_OPERATION)
             client.set_target(position, "position", PP_TARGET)
             client.write_value(position, Cia402.CONTROLWORD, CONTROLWORD_NEW_SETPOINT)
             time.sleep(0.1)

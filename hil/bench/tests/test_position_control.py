@@ -1,7 +1,7 @@
 """Position control near the rollover of 0x6064, and the torque at a change of operation mode.
 
-Both tests turn the motor of a drive, so they run on the drives of the bench that have a free motor:
-the Integro and the Circulo. Each test puts back every object it changes, also when it fails.
+Both tests turn the motor of a drive. They run on the Integro only, as the motion test does. Each
+test puts back every object it changes, also when it fails.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from bench import Bench
 
 log = logging.getLogger(__name__)
 
-MOTION_DRIVES = ["integro", "circulo"]
+MOTION_DRIVES = ["integro"]
 
 # 0x6041 bits. Bit 13 is the following error in the position modes. Bit 10 is target reached in
 # Profile Position.

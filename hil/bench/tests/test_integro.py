@@ -9,6 +9,7 @@ import pytest
 from motion_master_client import AlState, Cia402, OperationMode
 
 from bench import Bench
+from ethercat_pcap import foe_errors
 
 # The target velocity of the drop test, in rpm. Low, because the motor coasts down after the drop.
 DROP_RPM = 200
@@ -24,6 +25,12 @@ AFTER_DROP_SECONDS = 1.0
 MAX_ANSWER_SECONDS = 0.1
 # The Integro answered no SDO request after about 150 requests that got no answer.
 REPEATED_REQUESTS = 200
+
+# A file that no SOMANET drive holds.
+MISSING_FILE = "bench-missing-file.txt"
+FOE_NOT_FOUND = 0x8001
+# The read timeout of the server for FoE, so the refusal of a read must come sooner.
+MAX_FOE_READ_SECONDS = 6.0
 
 # (index, subindex, the SDO abort code the Integro must answer with, or None for a value).
 MISSING_ENTRY_REQUESTS = [
@@ -204,4 +211,47 @@ def test_integro_answers_requests_for_missing_entries(bench: Bench, record_prope
         f"device {integro.position}: {'; '.join(answers)}; {REPEATED_REQUESTS} requests for"
         f" 0x{index:04X}:{subindex:02X} each aborted, the slowest in {slowest * 1000:.1f} ms;"
         f" then {after}",
+    )
+
+
+def test_integro_refuses_a_missing_file_with_an_empty_text(bench: Bench, record_property):
+    # The netX of an Integro answered an FoE read of a missing file with error 0x8001, and with up
+    # to about 115 bytes of an earlier packet as the error text, the password and the file name of
+    # the request among them. The server keeps only the code, so the test records the frames and
+    # reads the text from them.
+    integro = bench.device("integro")
+    client = bench.client
+    client.reset()
+    client.init()
+    client.restart(AlState.PREOP)
+
+    client.start_capture(network_adapter=bench.description.network_adapter)
+    try:
+        start = time.monotonic()
+        response = client.call(
+            "foeReadFile",
+            path={"slavePosition": integro.position, "filename": MISSING_FILE},
+            check=False,
+        )
+        seconds = time.monotonic() - start
+    finally:
+        stopped = client.stop_capture()
+        pcap = client.read_user_cache_file(stopped["path"])
+        client.remove_user_cache_file(stopped["path"])
+
+    assert response.status_code == 404, response.text
+    assert f"0x{FOE_NOT_FOUND:04X}" in response.json()["error"], response.text
+    assert seconds <= MAX_FOE_READ_SECONDS, f"the refusal took {seconds:.1f} s"
+    errors = [e for e in foe_errors(pcap) if e.code == FOE_NOT_FOUND]
+    assert errors, "the capture holds no FoE error 0x8001 from a slave"
+    texts = [e.text for e in errors if e.text]
+    assert not texts, f"{len(texts)} of {len(errors)} FoE error packets carry a text: {texts}"
+    hardware_description = client.read_file(integro.position, ".hardware_description")
+    assert hardware_description, "the drive sent an empty .hardware_description"
+
+    record_property(
+        "message",
+        f"device {integro.position}: FoE read of {MISSING_FILE} answered 404 in"
+        f" {seconds * 1000:.0f} ms; {len(errors)} FoE error 0x8001 packet(s) in the capture, each"
+        f" with an empty text; then .hardware_description read {len(hardware_description)} bytes",
     )

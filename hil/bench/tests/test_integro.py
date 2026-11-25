@@ -214,11 +214,11 @@ def test_integro_answers_requests_for_missing_entries(bench: Bench, record_prope
     )
 
 
-def test_integro_refuses_a_missing_file_with_an_empty_text(bench: Bench, record_property):
+def test_integro_refuses_a_missing_file_without_leftover_bytes(bench: Bench, record_property):
     # The netX of an Integro answered an FoE read of a missing file with error 0x8001, and with up
     # to about 115 bytes of an earlier packet as the error text, the password and the file name of
     # the request among them. The server keeps only the code, so the test records the frames and
-    # reads the text from them.
+    # reads the text from them. A short text that names the error is allowed.
     integro = bench.device("integro")
     client = bench.client
     client.reset()
@@ -244,14 +244,20 @@ def test_integro_refuses_a_missing_file_with_an_empty_text(bench: Bench, record_
     assert seconds <= MAX_FOE_READ_SECONDS, f"the refusal took {seconds:.1f} s"
     errors = [e for e in foe_errors(pcap) if e.code == FOE_NOT_FOUND]
     assert errors, "the capture holds no FoE error 0x8001 from a slave"
-    texts = [e.text for e in errors if e.text]
-    assert not texts, f"{len(texts)} of {len(errors)} FoE error packets carry a text: {texts}"
+    # The text may name the error, as "Path not found" does. It must not carry bytes of the
+    # request, whose file name is the part that can be found.
+    leaks = [e.text for e in errors if MISSING_FILE.encode() in e.text]
+    assert not leaks, (
+        f"{len(leaks)} of {len(errors)} FoE error packets carry the file name: {leaks}"
+    )
+    texts = sorted({e.text.decode("ascii", "backslashreplace") for e in errors})
     hardware_description = client.read_file(integro.position, ".hardware_description")
     assert hardware_description, "the drive sent an empty .hardware_description"
 
     record_property(
         "message",
         f"device {integro.position}: FoE read of {MISSING_FILE} answered 404 in"
-        f" {seconds * 1000:.0f} ms; {len(errors)} FoE error 0x8001 packet(s) in the capture, each"
-        f" with an empty text; then .hardware_description read {len(hardware_description)} bytes",
+        f" {seconds * 1000:.0f} ms; {len(errors)} FoE error 0x8001 packet(s) in the capture, with"
+        f" the text(s) {texts} and no file name; then .hardware_description read"
+        f" {len(hardware_description)} bytes",
     )

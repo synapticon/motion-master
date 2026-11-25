@@ -1,0 +1,11 @@
+---
+# The scripts in files/bin go to ~/bin of the bench user. The ~/.profile of Debian puts ~/bin on
+# the PATH when the folder exists at login, so a session that started before the first run needs
+# a new login.
+- name: Install the scripts of the bench user
+  ansible.builtin.copy:
+    src: bin/
+    dest: /home/{{ bench_user }}/bin/
+    owner: "{{ bench_user }}"
+    group: "{{ bench_user }}"
+    mode: "0755"

@@ -49,6 +49,7 @@ ansible-playbook bench-machine.yml --tags base      # one role
 | `desktop` | Starts GDM and GNOME on X11, so that RustDesk reaches the login screen and the session with nobody at the desk. Installs RustDesk and shows its ID. Selects the dark GNOME theme as the default. |
 | `tools` | Installs VHS with `ttyd`, `ffmpeg` and Chromium, to record `hil/bench/demo.gif`, and Claude Code for the bench user. |
 | `tailscale` | Installs Tailscale and starts it at boot, for SSH access to the bench machine from outside the office. |
+| `scripts` | Copies the scripts in `roles/scripts/files/bin` to `~/bin` of the bench user. `runner-logs` prints the log of the Actions runner and passes its arguments to `journalctl`, so `runner-logs -f` follows it. |
 
 The `actions_runner` role needs `gh` on the bench machine, signed in as the bench user with the `admin:org` scope:
 

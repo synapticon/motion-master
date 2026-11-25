@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Print the log of the GitHub Actions runner service.
+#
+# Usage: runner-logs [journalctl args...]
+#   runner-logs -f              follow the log
+#   runner-logs --since today   the log of today
+#
+# The pattern matches the service whatever name the runner has.
+set -euo pipefail
+
+exec journalctl --unit 'actions.runner.*' "$@"

@@ -11,3 +11,4 @@
     - { role: desktop, tags: desktop }
     - { role: tools, tags: tools }
     - { role: tailscale, tags: tailscale }
+    - { role: scripts, tags: scripts }

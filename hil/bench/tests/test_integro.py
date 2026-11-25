@@ -6,7 +6,7 @@ import contextlib
 import time
 
 import pytest
-from motion_master_client import AlState, Cia402, OperationMode
+from motion_master_client import AlState, Cia402, OperationMode, Profile
 
 from bench import Bench
 from ethercat_pcap import foe_errors
@@ -31,6 +31,11 @@ MISSING_FILE = "bench-missing-file.txt"
 FOE_NOT_FOUND = 0x8001
 # The read timeout of the server for FoE, so the refusal of a read must come sooner.
 MAX_FOE_READ_SECONDS = 6.0
+
+# The Timestamp Object, which the EtherCAT stack of an Integro created before V5.5.0.0 of the stack.
+TIMESTAMP_OBJECT = 0x10F8
+# A slot that a PDO mapping object reserves beyond the entries it maps.
+RESERVED_MAPPING_SLOT = (0x1601, 0x03)
 
 # (index, subindex, the SDO abort code the Integro must answer with, or None for a value).
 MISSING_ENTRY_REQUESTS = [
@@ -260,4 +265,44 @@ def test_integro_refuses_a_missing_file_without_leftover_bytes(bench: Bench, rec
         f" {seconds * 1000:.0f} ms; {len(errors)} FoE error 0x8001 packet(s) in the capture, with"
         f" the text(s) {texts} and no file name; then .hardware_description read"
         f" {len(hardware_description)} bytes",
+    )
+
+
+def test_integro_object_dictionary_matches_the_stack(bench: Bench, record_property):
+    # The EtherCAT stack on the netX of an Integro created 0x10F8 in its own dictionary, which the
+    # SoC dictionary does not hold. The firmware now runs a stack that leaves it out. The netX also
+    # serves the slots that a PDO mapping object reserves. The server caches a dictionary only when
+    # it lost no entry, and the server of a bench run starts with an empty cache.
+    integro = bench.device("integro")
+    client = bench.client
+    client.reset()
+    client.init()
+    client.restart(AlState.PREOP)
+
+    response, seconds = _sdo_upload(bench, integro.position, TIMESTAMP_OBJECT, 0x00)
+    upload = _check_answer(response, seconds, TIMESTAMP_OBJECT, 0x00, 0x06020000)
+
+    parameters = client.parameters(integro.position)
+    addresses = {(p["index"], p["subindex"]) for p in parameters}
+    timestamp = sorted(a for a in addresses if a[0] == TIMESTAMP_OBJECT)
+    assert not timestamp, f"the dictionary holds 0x10F8: {timestamp}"
+    index, subindex = RESERVED_MAPPING_SLOT
+    assert RESERVED_MAPPING_SLOT in addresses, f"the dictionary lacks 0x{index:04X}:{subindex:02X}"
+
+    device = client.devices()[integro.position - 1]
+    version = client.read_value(integro.position, Profile.MANUFACTURER_SOFTWARE_VERSION)
+    cached = [
+        e
+        for e in client.call("listParameterCacheEntries").json()
+        if e["vendorId"] == device["vendorId"]
+        and e["productCode"] == device["productCode"]
+        and e["firmwareVersion"] == version
+    ]
+    assert cached, f"no parameter cache for the Integro with {version}, so an entry was lost"
+
+    record_property(
+        "message",
+        f"device {integro.position}: {upload}; {len(parameters)} dictionary entries, none of"
+        f" 0x10F8, 0x{index:04X}:{subindex:02X} among them; cached with"
+        f" {cached[0]['parameterCount']} entries for {version}",
     )

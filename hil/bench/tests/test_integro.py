@@ -19,6 +19,20 @@ RUN_SECONDS = 1.0
 # latches a fault does so within it.
 AFTER_DROP_SECONDS = 1.0
 
+# A refused or lost request ends at the mailbox timeout of the server, about 700 ms. An answer
+# comes much sooner.
+MAX_ANSWER_SECONDS = 0.1
+# The Integro answered no SDO request after about 150 requests that got no answer.
+REPEATED_REQUESTS = 200
+
+# (index, subindex, the SDO abort code the Integro must answer with, or None for a value).
+MISSING_ENTRY_REQUESTS = [
+    (0x5555, 0x00, 0x06020000),  # an index the drive does not have
+    (0xF050, 0x02, 0x06020000),  # an index the dictionary does not list
+    (0x6041, 0x05, 0x06090011),  # a subindex the object does not have
+    (0x1601, 0x03, None),  # a slot that a PDO mapping object reserves
+]
+
 
 def _mapping_request(mapping: dict) -> dict:
     """Return a PDO mapping as read (getDevicePdoMapping) in the shape of a write request.
@@ -132,4 +146,62 @@ def test_integro_ends_without_fault_after_a_drop_while_turning(
         "message",
         f"device {integro.position}: {velocity} rpm in CSV, OP to {drop_to.name}: {state},"
         f" 0x603F 0x{error_code:04X}",
+    )
+
+
+def _sdo_upload(bench: Bench, position: int, index: int, subindex: int):
+    """Upload index:subindex, and return the response and the time it took in seconds."""
+    start = time.monotonic()
+    response = bench.client.call(
+        "sdoUpload",
+        path={"slavePosition": position, "index": index, "subindex": subindex},
+        check=False,
+    )
+    return response, time.monotonic() - start
+
+
+def _check_answer(response, seconds: float, index: int, subindex: int, abort: int | None) -> str:
+    """Check one answer against the expected abort code, or a value, and return what it was."""
+    name = f"0x{index:04X}:{subindex:02X}"
+    assert seconds <= MAX_ANSWER_SECONDS, f"{name} took {seconds:.3f} s: {response.text}"
+    if abort is None:
+        assert response.status_code == 200, f"{name}: {response.text}"
+        return f"{name} value {response.json()['data']}"
+    assert response.status_code != 200, f"{name} answered a value: {response.text}"
+    code = f"0x{abort:08X}"
+    assert f"SDO abort {code}" in response.json()["error"], f"{name}: {response.text}"
+    return f"{name} abort {code}"
+
+
+def test_integro_answers_requests_for_missing_entries(bench: Bench, record_property):
+    # The netX of an Integro sent no answer, or a wrong one, to a request for an object or subindex
+    # it does not have. Each such request waited for the mailbox timeout, and after about 150 of
+    # them the drive answered no SDO request until a power cycle.
+    integro = bench.device("integro")
+    bench.client.reset()
+    bench.client.init()
+    bench.client.restart(AlState.PREOP)
+
+    answers = []
+    for index, subindex, abort in MISSING_ENTRY_REQUESTS:
+        response, seconds = _sdo_upload(bench, integro.position, index, subindex)
+        answers.append(_check_answer(response, seconds, index, subindex, abort))
+
+    index, subindex, abort = MISSING_ENTRY_REQUESTS[1]
+    slowest = 0.0
+    for n in range(REPEATED_REQUESTS):
+        response, seconds = _sdo_upload(bench, integro.position, index, subindex)
+        try:
+            _check_answer(response, seconds, index, subindex, abort)
+        except AssertionError as error:
+            raise AssertionError(f"request {n + 1} of {REPEATED_REQUESTS}: {error}") from None
+        slowest = max(slowest, seconds)
+    response, seconds = _sdo_upload(bench, integro.position, 0x1000, 0x00)
+    after = _check_answer(response, seconds, 0x1000, 0x00, None)
+
+    record_property(
+        "message",
+        f"device {integro.position}: {'; '.join(answers)}; {REPEATED_REQUESTS} requests for"
+        f" 0x{index:04X}:{subindex:02X} each aborted, the slowest in {slowest * 1000:.1f} ms;"
+        f" then {after}",
     )

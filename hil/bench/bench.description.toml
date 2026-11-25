@@ -27,8 +27,8 @@ boot_timeout_seconds = 60
 #   device.
 # productName: the value that GET /api/devices reports for the device.
 # firmwareDescriptor: optional. The descriptor in the name of the firmware package of the device,
-#   between the product name and "motion-drive". pytest --firmware <version> installs the
-#   package with this descriptor and that version. A device without it keeps its firmware.
+#   between the product name and "motion-drive". pytest --firmware-version <version> installs
+#   the package with this descriptor and that version. A device without it keeps its firmware.
 [[devices]]
 folder = "integro"
 productName = "SOMANET Integro"

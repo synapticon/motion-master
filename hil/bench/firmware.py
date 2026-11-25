@@ -2,7 +2,7 @@
 
 The packages are not in this repository, because the repository is public. They stay in one folder
 on the machine of the bench, which collects the packages of every release. pytest gets the version
-to install with --firmware, and the folder with --firmware-packages.
+to install with --firmware-version, and the folder with --firmware-packages.
 """
 
 from __future__ import annotations

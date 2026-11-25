@@ -110,8 +110,8 @@ turns the option on, and the workflow uploads every capture with `report.xml`.
 
 ## Install firmware before the tests
 
-With `pytest --firmware <version>`, the run installs firmware before the first test. The version is
-the one in the package name, such as `5.6.11+15.g482835090`. For each device with a
+With `pytest --firmware-version <version>`, the run installs firmware before the first test. The
+version is the one in the package name, such as `5.6.11+15.g482835090`. For each device with a
 `firmwareDescriptor`, the run takes the package whose name holds that descriptor between the
 product name and `motion-drive`, and that version. It installs the packages one after the other
 with the procedure `firmware-installation`, and cycles the power. Each device must then report the
@@ -218,7 +218,7 @@ The workflow **Bench Tests** (`.github/workflows/bench-tests.yml`) runs the test
 | `tests` | Run every test. | Run the tests that a pytest `-k` expression selects, for example `scan and not power`. |
 | `process-data-dumps` | Off, the default: save no dump. | On: save a process-data dump of each test that asks for one, and upload it. |
 | `packet-captures` | Off, the default: save no capture. | On: save a packet capture of each test that asks for one, and upload it. |
-| `firmware` | Keep the firmware of the devices. | Install this firmware version from `~/firmware-packages` of the bench machine before the tests, for example `5.6.11+15.g482835090`. |
+| `firmware-version` | Keep the firmware of the devices. | Install this firmware version from `~/firmware-packages` of the bench machine before the tests, for example `5.6.11+15.g482835090`. |
 
 To start the workflow from a terminal, use the GitHub CLI. `--ref` selects the branch that the
 tests come from, and the image is built from that branch too when `version` is empty.

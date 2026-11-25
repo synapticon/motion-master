@@ -34,7 +34,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="save a packet capture of each test that asks for one, in captures/",
     )
     parser.addoption(
-        "--firmware",
+        "--firmware-version",
         metavar="VERSION",
         help="install firmware VERSION on each device with a firmwareDescriptor",
     )
@@ -55,11 +55,11 @@ def bench(
 
     The cold start resets the server, cycles the power of the drives, opens the driver, and waits
     until every device is on the wire. The P 1535 cannot report whether its output is on, so only
-    a power cycle gives the same start on every run. With --firmware, the fixture then installs the
-    firmware of each device and cold-starts the bench again. A failed install fails every test,
-    because the tests would run on the wrong firmware. Before the first test, the fixture writes the
-    bench report to the test-suite properties of report.xml and to the job summary. After the
-    last test, passed or failed, it switches the drives off.
+    a power cycle gives the same start on every run. With --firmware-version, the fixture then
+    installs the firmware of each device and cold-starts the bench again. A failed install fails
+    every test, because the tests would run on the wrong firmware. Before the first test, the
+    fixture writes the bench report to the test-suite properties of report.xml and to the job
+    summary. After the last test, passed or failed, it switches the drives off.
     """
     record = record_testsuite_property
     # JUnit counts the setup and the report in the time of the first test, so each one is also
@@ -69,11 +69,11 @@ def bench(
     try:
         bench.cold_start()
         record("setup.seconds", _seconds_since(start))
-        firmware = pytestconfig.getoption("--firmware")
-        if firmware:
+        version = pytestconfig.getoption("--firmware-version")
+        if version:
             start = time.monotonic()
             folder = pytestconfig.getoption("--firmware-packages")
-            install_firmware(bench, firmware, folder, record)
+            install_firmware(bench, version, folder, record)
             record("firmware.seconds", _seconds_since(start))
         start = time.monotonic()
         # The report describes the run, and the tests decide its result. So a report that fails

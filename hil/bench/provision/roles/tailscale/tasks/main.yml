@@ -1,0 +1,41 @@
+---
+# Tailscale gives SSH access to the bench machine from outside the office. The co-working space
+# gives the machine no public address, so the machine connects out and nothing listens on the
+# network of the office.
+- name: Add Tailscale's apt repository
+  ansible.builtin.deb822_repository:
+    name: tailscale
+    types: deb
+    uris: https://pkgs.tailscale.com/stable/debian
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: main
+    signed_by: >-
+      https://pkgs.tailscale.com/stable/debian/{{ ansible_facts.distribution_release }}.noarmor.gpg
+    state: present
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+
+- name: Start Tailscale at boot
+  ansible.builtin.systemd_service:
+    name: tailscaled
+    enabled: true
+    state: started
+
+# The login opens a page in a browser, so the playbook cannot do it. The README gives the command.
+- name: Read the Tailscale login state
+  when: not ansible_check_mode
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_status
+  changed_when: false
+  failed_when: false
+
+- name: Report that Tailscale needs a login
+  when:
+    - not ansible_check_mode
+    - (tailscale_status.stdout | default('{}') | from_json).BackendState | default('') != 'Running'
+  ansible.builtin.debug:
+    msg: "Tailscale is not logged in. Run: sudo tailscale up --hostname {{ inventory_hostname }}"

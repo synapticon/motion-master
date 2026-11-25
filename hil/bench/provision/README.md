@@ -48,6 +48,7 @@ ansible-playbook bench-machine.yml --tags base      # one role
 | `actions_runner` | Registers the GitHub Actions runner `ci-belgrade-linux` in the runner group `Belgrade` of the organisation, and runs it as a service under the bench user. |
 | `desktop` | Starts GDM and GNOME on X11, so that RustDesk reaches the login screen and the session with nobody at the desk. Installs RustDesk and shows its ID. Selects the dark GNOME theme as the default. |
 | `tools` | Installs VHS with `ttyd`, `ffmpeg` and Chromium, to record `hil/bench/demo.gif`, and Claude Code for the bench user. |
+| `tailscale` | Installs Tailscale and starts it at boot, for SSH access to the bench machine from outside the office. |
 
 The `actions_runner` role needs `gh` on the bench machine, signed in as the bench user with the `admin:org` scope:
 
@@ -60,6 +61,14 @@ gh auth login --scopes admin:org
 GDM starts on X11 after the next reboot. There is no automatic login: after a boot, log in once over RustDesk at the login screen. That also opens the GNOME keyring.
 
 To set the permanent RustDesk password, put `desktop_rustdesk_password` in `inventory.yml`. The role sets it only when it installs RustDesk.
+
+After the first run, log in to Tailscale on the bench machine. The command prints a link. Open it and log in with the Tailscale account that you use on your own computer:
+
+```bash
+sudo tailscale up --hostname ci-belgrade-linux
+```
+
+Then turn off key expiry for `ci-belgrade-linux` in the Tailscale admin console. Otherwise the machine leaves the network after 180 days and needs a new login at the desk. From outside the office, connect with `ssh <user>@ci-belgrade-linux`.
 
 After the first run, sign in to Claude Code on the bench machine: run `claude` and follow the login.
 

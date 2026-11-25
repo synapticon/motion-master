@@ -10,3 +10,4 @@
     - { role: actions_runner, tags: actions_runner }
     - { role: desktop, tags: desktop }
     - { role: tools, tags: tools }
+    - { role: tailscale, tags: tailscale }

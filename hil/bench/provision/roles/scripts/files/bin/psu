@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Switch the output of the P 1535, which supplies the drives of the bench, through the HTTP API
+# of its ESP32 (hil/p1535).
+#
+# Usage: psu on|off
+#
+# The ESP32 has no endpoint that reports the state of the output, so there is no status command.
+# Set P1535_HOST to reach a board with an address other than the default.
+set -euo pipefail
+
+host="${P1535_HOST:-10.10.1.250}"
+
+case "${1:-}" in
+  on | off)
+    curl -fsS -m 5 "http://$host/output-$1" > /dev/null
+    echo "Output: $1"
+    ;;
+  *)
+    echo "Usage: psu on|off" >&2
+    exit 2
+    ;;
+esac

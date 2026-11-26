@@ -95,6 +95,7 @@ Motion Master works around each item below, and the changelogs record it. None o
 | Firmware older than v5.6.0 | The mailbox counter survives INIT. Firmware v5.6.0 resets it, so this is fixed in the firmware. | Workaround, alpha.88 and alpha.99: send counter 0 on each INIT to PREOP. | Workaround, 5.8.5: send counter 0 after each scan. |
 | Unknown firmware | SDO traffic to non-PDO objects starves the process data. The cause is not stated. | Not checked. | Workaround, 5.5.10: `--no-sdo-polling`. |
 | SPoE | One firmware installation stopped while it wrote the application, and the drive refused every connection until a power cycle. The drive keeps one packet state for file reads, file writes and the parameter list. | Partial, alpha.89: file transfers to one drive run one after the other. The installation stop is not fixed. | Not checked. |
+| Integro over SPoE | A state request that skips states of the EtherCAT state machine, such as BOOT to OP or PREOP to OP, is accepted, and the reply reports the requested state. ETG.1000.6 requires a refusal with AL status code 0x0011. After BOOT to OP the process data replies carry no data, file reads are refused, the next INIT request gets no reply, and port 8080 refuses connections until a power cycle. Seen on firmware v5.6.11+15.g482835090. | No action needed: the master walks one state at a time and enters and leaves BOOT only through INIT. | Workaround, unreleased (`synapticon/motion_master#139`): the master walks one state at a time and enters and leaves BOOT only through INIT. |
 
 ## 3. Motion Master 6 changes
 

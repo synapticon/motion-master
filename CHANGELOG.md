@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.132] - 2026-11-27
+
 ### Fixed
 
 - **Over SPoE, the connection to a drive stays open while nothing else talks to it.** The firmware
@@ -1471,7 +1473,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.131...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.132...HEAD
+[6.0.0-alpha.132]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.131...v6.0.0-alpha.132
 [6.0.0-alpha.131]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.130...v6.0.0-alpha.131
 [6.0.0-alpha.130]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.129...v6.0.0-alpha.130
 [6.0.0-alpha.129]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.128...v6.0.0-alpha.129

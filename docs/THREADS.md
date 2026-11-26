@@ -22,6 +22,10 @@ driver threads sit beside those seven, and all of them matter when you reason ab
   while that driver has process data configured. Each one sends a process-data request to its
   drive as soon as the previous one has its answer, so the real-time loop never waits on the
   network. See [The SPoE exchange threads](#the-spoe-exchange-threads).
+- **One keepalive `std::jthread` for each connected SPoE drive**, owned by `SpoeFieldbusDriver`
+  from a scan to the next scan or stop. Every 250 ms it checks how long the drive's connection is
+  idle. At 2 s it sends a state read, because the firmware closes a connection that gets no
+  request for 5 s. It takes no lock of the driver, only the connection's mutex for that request.
 
 One **child process** also belongs in this picture. The auto-tuning executable
 (`libs/auto_tuning/process.h`) is a separate program that serves an HTTP API on loopback. It runs
@@ -229,6 +233,11 @@ The exchange thread shares its drive's `SpoeConnection` with the control plane. 
 own mutex makes their requests take turns, one request at a time, which is also all the drive
 accepts. The exchange thread never takes the driver's bus lock or a sequence mutex.
 
+The keepalive thread uses the connection the same way. While the exchange thread or the state
+follower sends requests, the connection is never idle for 2 s, so the keepalive sends nothing. It
+covers the time between a scan and the first SAFEOP, a re-map that failed, and a drive with no
+mapped bytes.
+
 ## Control plane against the PDO path
 
 The single most important rule is this: **the real-time loop never takes a lock.** It touches only
@@ -293,7 +302,7 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
     and 2.
 15. `autoTuning.stop()` — stops the child. It is stopped here rather than by its destructor, so
     the outcome is logged while the log is still written.
-16. The destructors run. The SPoE driver's destructor stops its exchange threads and clears each
+16. The destructors run. The SPoE driver's destructor stops its keepalive and exchange threads and clears each
     drive's PDO mode, so a clean shutdown does not trip a Control-mode drive's watchdog.
 
 Every `CyclicTask` is registered with `gameLoop.addTask()` **before** step 9. Membership is fixed

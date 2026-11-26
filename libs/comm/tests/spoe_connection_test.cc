@@ -218,4 +218,28 @@ TEST(SpoeConnection, AnswersEveryRequestFromSeveralThreads) {
   EXPECT_EQ(connection.discardedReplies(), 0U);
 }
 
+TEST(SpoeConnection, IdleTimeCountsFromTheEndOfTheLastRequest) {
+  FakeSpoeServer server;
+  SpoeConnection connection;
+  connectTo(connection, server);
+  std::this_thread::sleep_for(milliseconds{100});
+  EXPECT_GE(connection.idleTime(), milliseconds{100});
+  ASSERT_TRUE(connection.request(MessageType::kStateRead, 0, {}, kTimeout).has_value());
+  EXPECT_LT(connection.idleTime(), milliseconds{100});
+}
+
+TEST(SpoeConnection, IdleTimeIsZeroWhileARequestIsInProgress) {
+  FakeSpoeServer server;
+  server.setReplyDelay(milliseconds{300});
+  SpoeConnection connection;
+  connectTo(connection, server);
+  std::this_thread::sleep_for(milliseconds{50});
+  std::thread requester(
+      [&connection] { (void)connection.request(MessageType::kStateRead, 0, {}, kTimeout); });
+  std::this_thread::sleep_for(milliseconds{150});
+  EXPECT_EQ(connection.idleTime(), std::chrono::steady_clock::duration::zero());
+  requester.join();
+  EXPECT_LT(connection.idleTime(), milliseconds{100});
+}
+
 }  // namespace

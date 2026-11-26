@@ -57,6 +57,10 @@ class SpoeConnection {
 
   bool isOpen() const;
 
+  /// The time since the last request ended, or since the connection opened. Zero while a request
+  /// is in progress, because the drive has the request and the connection is busy, not idle.
+  std::chrono::steady_clock::duration idleTime() const;
+
   /// Sends one request and waits up to @p timeout for its reply.
   std::expected<Frame, ConnectionError> request(MessageType type, uint16_t status,
                                                 std::span<const uint8_t> data,
@@ -67,6 +71,11 @@ class SpoeConnection {
 
  private:
   struct Impl;
+
+  std::expected<Frame, ConnectionError> requestLocked(MessageType type, uint16_t status,
+                                                      std::span<const uint8_t> data,
+                                                      std::chrono::milliseconds timeout);
+
   std::unique_ptr<Impl> impl_;
 };
 

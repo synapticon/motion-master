@@ -40,8 +40,9 @@
 // The input buffer fills in OP only. `sqi_cyclic_rx_handler` pushes a frame only when the device
 // is in OP, so in any other state a process-data reply carries no inputs.
 //
-// The idle timeout is not modelled. `AppSockIf_AcyclicHandler` aborts a connection that has no
-// request for 5000 of its ticks, and how long a tick is was not found.
+// The idle timeout is off by default. `AppSockIf_AcyclicHandler` aborts a connection that has no
+// request for 5000 of its ticks, which is 5 s at its 1 kHz rate. `setIdleTimeout` turns it on with
+// a shorter time for tests.
 //
 // Thread-safety: the server runs its own I/O thread. Every public method is safe to call from the
 // test thread while a client is connected.
@@ -225,6 +226,13 @@ class FakeSpoeServer {
 
   /// Holds every later reply back by @p delay before it is sent.
   void setReplyDelay(std::chrono::milliseconds delay);
+
+  /// Closes the client's connection when it sends no request for @p timeout, as the firmware does
+  /// after 5 s. Zero, the default, keeps an idle connection open. Applies from the next request.
+  void setIdleTimeout(std::chrono::milliseconds timeout);
+
+  /// The connections closed because they were idle.
+  int idleCloseCount() const;
 
   int connectionCount() const;
 

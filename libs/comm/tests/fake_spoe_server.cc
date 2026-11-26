@@ -140,6 +140,8 @@ struct FakeSpoeServer::Impl {
   std::optional<SpoeFault> nextFault;
   int requestsBeforeFault = 0;
   std::chrono::milliseconds replyDelay{0};
+  std::chrono::milliseconds idleTimeout{0};
+  int idleCloses = 0;
   int connections = 0;
   int ignoredConnections = 0;
   int requests = 0;
@@ -206,11 +208,38 @@ asio::awaitable<void> FakeSpoeServer::Impl::acceptLoop() {
 
 asio::awaitable<void> FakeSpoeServer::Impl::serve(std::shared_ptr<tcp::socket> socket) {
   std::vector<uint8_t> held;
+  // The firmware counts its ticks since the last request and aborts the connection at the limit.
+  // The timer restarts on every request, and closing the socket ends the read below.
+  asio::steady_timer idle(io);
+  const auto armIdle = [this, &idle, socket] {
+    std::chrono::milliseconds timeout{0};
+    {
+      const std::scoped_lock lock(mutex);
+      timeout = idleTimeout;
+    }
+    idle.cancel();
+    if (timeout.count() <= 0) {
+      return;
+    }
+    idle.expires_after(timeout);
+    idle.async_wait([this, socket](const asio::error_code& ec) {
+      if (ec) {
+        return;
+      }
+      {
+        const std::scoped_lock lock(mutex);
+        ++idleCloses;
+      }
+      closeSocket(*socket);
+    });
+  };
+  armIdle();
   for (;;) {
     std::array<uint8_t, kSpoeHeaderSize> header{};
     if (auto [ec, n] = co_await asio::async_read(*socket, asio::buffer(header), kNoThrow); ec) {
       break;
     }
+    armIdle();
     Request request;
     request.type = header[0];
     request.sequenceId = readU16(header, 1);
@@ -321,6 +350,7 @@ asio::awaitable<void> FakeSpoeServer::Impl::serve(std::shared_ptr<tcp::socket> s
       break;
     }
   }
+  idle.cancel();
   closeSocket(*socket);
   if (client == socket) {
     client.reset();
@@ -795,6 +825,16 @@ void FakeSpoeServer::injectFaultAfter(int skip, SpoeFault fault) {
 void FakeSpoeServer::setReplyDelay(std::chrono::milliseconds delay) {
   const std::scoped_lock lock(impl_->mutex);
   impl_->replyDelay = delay;
+}
+
+void FakeSpoeServer::setIdleTimeout(std::chrono::milliseconds timeout) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->idleTimeout = timeout;
+}
+
+int FakeSpoeServer::idleCloseCount() const {
+  const std::scoped_lock lock(impl_->mutex);
+  return impl_->idleCloses;
 }
 
 int FakeSpoeServer::connectionCount() const {

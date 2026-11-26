@@ -23,6 +23,9 @@ base_packages:
   - automake
   - libtool
   - perl
+  # Fortran and OpenSSL headers, for vcpkg ports that build with them.
+  - gfortran
+  - libssl-dev
   # tools/check.sh and tools/tidy.sh.
   - clang
   - clang-format

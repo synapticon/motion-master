@@ -643,4 +643,21 @@ TEST(FakeSpoeServer, DropClientClosesTheConnectionAndAcceptsAReconnect) {
   EXPECT_EQ(server.connectionCount(), 2);
 }
 
+TEST(FakeSpoeServer, IdleTimeoutClosesAQuietConnection) {
+  FakeSpoeServer server;
+  server.setIdleTimeout(milliseconds{200});
+  Client client(server.port());
+  // Each request restarts the time, so requests closer together than the timeout keep it open.
+  for (uint16_t id = 1; id <= 4; ++id) {
+    std::this_thread::sleep_for(milliseconds{100});
+    EXPECT_EQ(client.request(SpoeMessage::kStateRead, id).sequenceId, id);
+  }
+  EXPECT_EQ(server.idleCloseCount(), 0);
+  std::this_thread::sleep_for(milliseconds{400});
+  EXPECT_TRUE(client.closed());
+  EXPECT_EQ(server.idleCloseCount(), 1);
+  Client second(server.port());
+  EXPECT_EQ(second.request(SpoeMessage::kStateRead, 1).status, 0);
+}
+
 }  // namespace

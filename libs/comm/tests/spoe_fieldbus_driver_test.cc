@@ -237,6 +237,41 @@ TEST(SpoeFieldbusDriver, AClosedConnectionClearsTheState) {
   EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::PreOp));
 }
 
+TEST(SpoeFieldbusDriver, KeepsAnIdleConnectionOpen) {
+  // The drive closes a connection that has no request for a while. In BOOT nothing else talks to
+  // it, so only the keepalive holds the connection.
+  FakeSpoeServer server;
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  server.setIdleTimeout(milliseconds{300});
+  SpoeFieldbusDriverConfig config = configFor(server);
+  config.keepaliveAfter = milliseconds{100};
+  SpoeFieldbusDriver driver(config);
+  ASSERT_TRUE(driver.scan().has_value());
+  std::this_thread::sleep_for(milliseconds{1000});
+  const auto states = driver.readStates({1});
+  ASSERT_TRUE(states.has_value());
+  EXPECT_EQ(states->front().alStatus, static_cast<uint16_t>(AlState::Boot));
+  EXPECT_EQ(server.idleCloseCount(), 0);
+  EXPECT_EQ(server.connectionCount(), 1);
+}
+
+TEST(SpoeFieldbusDriver, LosesAConnectionThatIdlesLongerThanTheKeepalive) {
+  // The same drive with a keepalive slower than the drive's limit: the drive closes the connection,
+  // and the state is no longer known until a rescan.
+  FakeSpoeServer server;
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  server.setIdleTimeout(milliseconds{300});
+  SpoeFieldbusDriverConfig config = configFor(server);
+  config.keepaliveAfter = milliseconds{10000};
+  SpoeFieldbusDriver driver(config);
+  ASSERT_TRUE(driver.scan().has_value());
+  std::this_thread::sleep_for(milliseconds{600});
+  const auto states = driver.readStates({1});
+  ASSERT_TRUE(states.has_value());
+  EXPECT_EQ(states->front().alStatus, 0);
+  EXPECT_EQ(server.idleCloseCount(), 1);
+}
+
 TEST(SpoeFieldbusDriver, ReadsTheObjectDictionary) {
   FakeSpoeServer server;
   server.describeEntry(0x1000, 0, entry(0x07, 32, "Device type"));
@@ -645,6 +680,26 @@ TEST(SpoeFieldbusDriver, ActivatingFirmwareWaitsForTheRestart) {
   EXPECT_GE(std::chrono::steady_clock::now() - started, milliseconds{1300});
   EXPECT_EQ(server.firmwareUpdates(), 1);
   EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(AlState::PreOp));
+}
+
+TEST(SpoeFieldbusDriver, KeepsTheConnectionOpenAfterAFirmwareActivation) {
+  // The activation connects again without a scan, so the keepalive must carry on across the
+  // restart.
+  FakeSpoeServer server;
+  server.setRestartTiming(milliseconds{300}, milliseconds{500});
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  server.setIdleTimeout(milliseconds{400});
+  SpoeFieldbusDriverConfig config = configFor(server);
+  config.keepaliveAfter = milliseconds{100};
+  SpoeFieldbusDriver driver(config);
+  ASSERT_TRUE(driver.scan().has_value());
+  const auto activation = driver.activateFirmware(1, std::chrono::seconds(10));
+  ASSERT_TRUE(activation.has_value()) << activation.error();
+  std::this_thread::sleep_for(milliseconds{1500});
+  const auto states = driver.readStates({1});
+  ASSERT_TRUE(states.has_value());
+  EXPECT_EQ(states->front().alStatus, static_cast<uint16_t>(AlState::PreOp));
+  EXPECT_EQ(server.idleCloseCount(), 0);
 }
 
 TEST(SpoeParameterEntries, DecodesTheFirmwareLayout) {

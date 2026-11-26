@@ -62,6 +62,9 @@ struct SpoeConnection::Impl {
   std::mutex mutex;
   std::atomic<bool> open{false};
   std::atomic<uint64_t> discarded{0};
+  // Read without the mutex by idleTime. The time is a count of Clock ticks.
+  std::atomic<bool> busy{false};
+  std::atomic<Clock::rep> lastActivity{0};
   std::string peer;
   uint16_t nextSequenceId = 1;
   std::vector<uint8_t> received;
@@ -139,6 +142,7 @@ std::expected<void, std::string> SpoeConnection::connect(const std::string& host
   // The firmware reads one TCP receive as one request, so a request must leave in one segment
   // and leave at once. Nagle's algorithm would hold it back.
   (void)impl_->socket.set_option(tcp::no_delay(true), error);
+  impl_->lastActivity.store(Clock::now().time_since_epoch().count());
   impl_->open.store(true);
   return {};
 }
@@ -152,10 +156,28 @@ bool SpoeConnection::isOpen() const { return impl_->open.load(); }
 
 uint64_t SpoeConnection::discardedReplies() const { return impl_->discarded.load(); }
 
+std::chrono::steady_clock::duration SpoeConnection::idleTime() const {
+  if (impl_->busy.load()) {
+    return Clock::duration::zero();
+  }
+  const Clock::time_point last{Clock::duration{impl_->lastActivity.load()}};
+  return Clock::now() - last;
+}
+
 std::expected<Frame, ConnectionError> SpoeConnection::request(MessageType type, uint16_t status,
                                                               std::span<const uint8_t> data,
                                                               std::chrono::milliseconds timeout) {
   const std::scoped_lock lock(impl_->mutex);
+  impl_->busy.store(true);
+  auto reply = requestLocked(type, status, data, timeout);
+  impl_->lastActivity.store(Clock::now().time_since_epoch().count());
+  impl_->busy.store(false);
+  return reply;
+}
+
+std::expected<Frame, ConnectionError> SpoeConnection::requestLocked(
+    MessageType type, uint16_t status, std::span<const uint8_t> data,
+    std::chrono::milliseconds timeout) {
   Impl& impl = *impl_;
   if (!impl.open.load()) {
     return std::unexpected(

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <format>
 #include <map>
 #include <memory>
@@ -166,6 +167,12 @@ struct SpoeFieldbusDriver::Drive {
   std::atomic<bool> exchanging{false};
   std::atomic<uint64_t> droppedFrames{0};
   std::jthread exchange;
+  // Started by scan for a connected drive, and stopped before a scan reconnects or stop closes.
+  // It takes no bus_ lock, like the exchange thread, so a scan that holds bus_ can join it.
+  std::jthread keepalive;
+  // Only for the keepalive thread's wait, which a stop request ends early. It guards nothing.
+  std::mutex keepaliveWakeMutex;
+  std::condition_variable_any keepaliveWake;
 };
 
 SpoeFieldbusDriver::SpoeFieldbusDriver(SpoeFieldbusDriverConfig config)
@@ -191,7 +198,46 @@ void SpoeFieldbusDriver::stopExchanges() {
   }
 }
 
+void SpoeFieldbusDriver::stopKeepalives() {
+  for (const auto& drive : drives_) {
+    if (drive->keepalive.joinable()) {
+      drive->keepalive.request_stop();
+      drive->keepalive.join();
+    }
+  }
+}
+
+void SpoeFieldbusDriver::runKeepalive(Drive& drive, const std::stop_token& stopToken) {
+  const auto after = config_.keepaliveAfter;
+  const auto check = after / 8;
+  std::unique_lock lock(drive.keepaliveWakeMutex);
+  while (!stopToken.stop_requested()) {
+    // Wakes early only for a stop request.
+    if (drive.keepaliveWake.wait_for(lock, stopToken, check,
+                                     [&stopToken] { return stopToken.stop_requested(); })) {
+      return;
+    }
+    // A closed connection opens again by a scan, which restarts this thread, or by a firmware
+    // activation, which does not. So the thread waits for it instead of ending.
+    if (!drive.connection.isOpen() || drive.connection.idleTime() < after) {
+      continue;
+    }
+    auto reply = drive.connection.request(MessageType::kStateRead, 0, {}, config_.requestTimeout);
+    if (reply) {
+      if (!reply->data.empty()) {
+        drive.state.store(reply->data[0]);
+      }
+      continue;
+    }
+    if (reply.error().kind == ConnectionError::Kind::kClosed) {
+      drive.state.store(0);
+    }
+    spdlog::warn("SPoE {}: the keepalive state read failed: {}", drive.host, reply.error().message);
+  }
+}
+
 void SpoeFieldbusDriver::closeAll() {
+  stopKeepalives();
   stopExchanges();
   for (const auto& drive : drives_) {
     drive->connection.close();
@@ -294,9 +340,15 @@ std::expected<int, std::string> SpoeFieldbusDriver::scan() {
   const std::unique_lock lock(bus_);
   // A scan rebuilds every connection, so no exchange may run across it.
   stopExchanges();
+  stopKeepalives();
   layout_ = PdoLayout{};
   for (const auto& drive : drives_) {
     connectAndIdentify(*drive);
+    if (drive->connection.isOpen()) {
+      Drive& target = *drive;
+      drive->keepalive = std::jthread(
+          [this, &target](const std::stop_token& stopToken) { runKeepalive(target, stopToken); });
+    }
   }
   return static_cast<int>(drives_.size());
 }

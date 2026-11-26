@@ -10,6 +10,12 @@
 // they are.
 //
 // There is no ESC, so SII, ESC registers, DC and the ESC diagnostics answer "not supported".
+//
+// The firmware closes a connection that has no request for 5 s (`AppSockIf_AcyclicHandler`, 5000
+// ticks at 1 kHz). A keepalive thread for each connected drive
+// sends a state read when the connection is idle for `keepaliveAfter`. The exchange thread and the
+// control plane keep the connection busy most of the time, so the keepalive covers the gaps: the
+// time between a scan and the first SAFEOP, a failed re-map, and a drive with no mapped bytes.
 
 #include <chrono>
 #include <cstdint>
@@ -59,6 +65,9 @@ struct SpoeFieldbusDriverConfig {
   /// The shortest time between the starts of two process-data exchanges with one drive. The
   /// exchanges otherwise run back to back, which keeps the drive's input buffer small.
   std::chrono::microseconds exchangePeriod{1000};
+  /// The idle time after which the driver sends a state read to keep a connection open. The
+  /// firmware closes a connection that has no request for 5 s.
+  std::chrono::milliseconds keepaliveAfter{2000};
 };
 
 /// The most input frames one drive's queue holds for the RT thread. Older frames are dropped, so
@@ -154,6 +163,8 @@ class SpoeFieldbusDriver : public FieldbusDriver {
   void releaseDrives();
   void stopExchanges();
   void runExchange(Drive& drive, const std::stop_token& stopToken);
+  void stopKeepalives();
+  void runKeepalive(Drive& drive, const std::stop_token& stopToken);
   std::expected<uint32_t, std::string> assignedBits(Drive& drive, uint16_t assignIndex);
   // request, readSdoFrom and connectAndIdentify take no lock. The caller holds bus_, shared or
   // exclusive. filePacket takes bus_ shared itself, for one packet.

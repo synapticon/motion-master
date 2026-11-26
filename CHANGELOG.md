@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Over SPoE, the connection to a drive stays open while nothing else talks to it.** The firmware
+  closes a connection that gets no request for 5 s, and only a scan connects again. That happened
+  in Control mode in INIT, PREOP or BOOT before the first SAFEOP, so a firmware installation that
+  started more than 5 s after a scan failed at its first file request. Motion Master now sends a
+  state read to a drive whose connection is idle for 2 s (#256).
+
 ## [6.0.0-alpha.131] - 2026-11-24
 
 ### Fixed

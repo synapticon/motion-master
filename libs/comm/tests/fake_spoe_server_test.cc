@@ -645,16 +645,17 @@ TEST(FakeSpoeServer, DropClientClosesTheConnectionAndAcceptsAReconnect) {
 
 TEST(FakeSpoeServer, IdleTimeoutClosesAQuietConnection) {
   FakeSpoeServer server;
-  server.setIdleTimeout(milliseconds{200});
+  // The gaps are a tenth of the timeout, because a sleep on a loaded CI runner can take several
+  // times as long as asked.
+  server.setIdleTimeout(milliseconds{500});
   Client client(server.port());
   // Each request restarts the time, so requests closer together than the timeout keep it open.
   for (uint16_t id = 1; id <= 4; ++id) {
-    std::this_thread::sleep_for(milliseconds{100});
+    std::this_thread::sleep_for(milliseconds{50});
     EXPECT_EQ(client.request(SpoeMessage::kStateRead, id).sequenceId, id);
   }
   EXPECT_EQ(server.idleCloseCount(), 0);
-  std::this_thread::sleep_for(milliseconds{400});
-  EXPECT_TRUE(client.closed());
+  EXPECT_TRUE(client.closed(milliseconds{3000}));
   EXPECT_EQ(server.idleCloseCount(), 1);
   Client second(server.port());
   EXPECT_EQ(second.request(SpoeMessage::kStateRead, 1).status, 0);
